@@ -1,0 +1,36 @@
+<?php
+if (!defined('ABSPATH')) exit;
+add_action('admin_menu', function() { add_submenu_page('sitepulse-dashboard', 'Uptime Tracker', 'Uptime', 'manage_options', 'sitepulse-uptime', 'uptime_tracker_page'); });
+add_action('init', function() { if (!wp_next_scheduled('sitepulse_uptime_tracker_cron')) { wp_schedule_event(time(), 'hourly', 'sitepulse_uptime_tracker_cron'); } });
+add_action('sitepulse_uptime_tracker_cron', 'sitepulse_run_uptime_check');
+function uptime_tracker_page() {
+    $uptime_log = get_option('sitepulse_uptime_log', []);
+    $total_checks = count($uptime_log);
+    $up_checks = count(array_filter($uptime_log));
+    $uptime_percentage = $total_checks > 0 ? ($up_checks / $total_checks) * 100 : 100;
+    ?>
+    <style> .uptime-chart { display: flex; gap: 2px; height: 60px; align-items: flex-end; } .uptime-bar { flex-grow: 1; } .uptime-bar.up { background-color: #4CAF50; } .uptime-bar.down { background-color: #F44336; } </style>
+    <div class="wrap">
+        <h1><span class="dashicons-before dashicons-chart-bar"></span> Suivi de Disponibilité</h1>
+        <p>Cet outil vérifie la disponibilité de votre site toutes les heures. Voici le statut des <?php echo $total_checks; ?> dernières vérifications.</p>
+        <h2>Disponibilité (<?php echo $total_checks; ?> dernières heures): <strong style="font-size: 1.4em;"><?php echo round($uptime_percentage, 2); ?>%</strong></h2>
+        <div class="uptime-chart">
+            <?php if (empty($uptime_log)): ?><p>Aucune donnée de disponibilité. La première vérification aura lieu dans l'heure.</p><?php else: ?>
+                <?php foreach ($uptime_log as $index => $status): ?><div class="uptime-bar <?php echo $status ? 'up' : 'down'; ?>" title="<?php echo $status ? 'Site OK' : 'Site KO'; ?> lors du check #<?php echo $index + 1; ?>"></div><?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #555;"><span>Il y a <?php echo $total_checks; ?> heures</span><span>Maintenant</span></div>
+        <div class="notice notice-info" style="margin-top: 20px;"><p><strong>Comment ça marche :</strong> Une barre verte indique que votre site était en ligne. Une barre rouge indique un possible incident où votre site était inaccessible.</p></div>
+    </div>
+    <?php
+}
+function sitepulse_run_uptime_check() {
+    $response = wp_remote_get(home_url(), ['timeout' => 10]);
+    $is_up = !is_wp_error($response) && wp_remote_retrieve_response_code($response) >= 200 && wp_remote_retrieve_response_code($response) < 300;
+    $log = get_option('sitepulse_uptime_log', []);
+    $log[] = (int)$is_up;
+    if (count($log) > 30) { array_shift($log); }
+    update_option('sitepulse_uptime_log', $log);
+    if (!$is_up) { sitepulse_log('Uptime check: Down', 'ALERT'); } 
+    else { sitepulse_log('Uptime check: Up'); }
+}
