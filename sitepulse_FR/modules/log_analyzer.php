@@ -23,7 +23,13 @@ function sitepulse_log_analyzer_page() {
 
     $log_file = WP_CONTENT_DIR . '/debug.log';
     $log_file_exists = file_exists($log_file) && is_readable($log_file);
+    $log_file_size = $log_file_exists ? filesize($log_file) : 0;
     $debug_log_enabled = defined('WP_DEBUG_LOG') && WP_DEBUG_LOG;
+    $recent_log_lines = null;
+
+    if ($debug_log_enabled && $log_file_exists) {
+        $recent_log_lines = sitepulse_get_recent_log_lines($log_file, 100, 131072);
+    }
     ?>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-hammer"></span> Analyseur de Logs</h1>
@@ -36,16 +42,14 @@ function sitepulse_log_analyzer_page() {
         if ($debug_log_enabled) {
 
             // Subcase 1.1: The log file exists and has content
-            if ($log_file_exists && filesize($log_file) > 0) {
-                $logs = file_get_contents($log_file);
-                $lines = explode("\n", $logs);
+            if ($log_file_exists && $log_file_size > 0 && is_array($recent_log_lines) && !empty($recent_log_lines)) {
                 $categorized = ['fatal_errors' => [], 'errors' => [], 'warnings' => [], 'notices' => []];
 
-                foreach ($lines as $line) {
+                foreach ($recent_log_lines as $line) {
                     if (empty(trim($line))) continue;
-                    if (stripos($line, 'PHP Fatal error') !== false) { $categorized['fatal_errors'][] = $line; } 
-                    elseif (stripos($line, 'PHP Parse error') !== false || stripos($line, 'PHP Error') !== false) { $categorized['errors'][] = $line; } 
-                    elseif (stripos($line, 'PHP Warning') !== false) { $categorized['warnings'][] = $line; } 
+                    if (stripos($line, 'PHP Fatal error') !== false) { $categorized['fatal_errors'][] = $line; }
+                    elseif (stripos($line, 'PHP Parse error') !== false || stripos($line, 'PHP Error') !== false) { $categorized['errors'][] = $line; }
+                    elseif (stripos($line, 'PHP Warning') !== false) { $categorized['warnings'][] = $line; }
                     elseif (stripos($line, 'PHP Notice') !== false || stripos($line, 'PHP Deprecated') !== false) { $categorized['notices'][] = $line; }
                 }
 
@@ -98,10 +102,17 @@ function sitepulse_log_analyzer_page() {
 
             }
             // Subcase 1.2: The log file exists but is empty
-            elseif ($log_file_exists && filesize($log_file) === 0) {
+            elseif ($log_file_exists && $log_file_size === 0) {
             ?>
                 <div class="notice notice-success">
                     <p><strong>Votre journal de débogage est actif et vide.</strong> Excellent travail, aucune erreur à signaler !</p>
+                </div>
+            <?php
+            }
+            elseif ($log_file_exists && $recent_log_lines === null) {
+            ?>
+                <div class="notice notice-error">
+                    <p><strong>Impossible de lire les dernières lignes du journal.</strong> Veuillez vérifier les permissions du fichier <code>debug.log</code>.</p>
                 </div>
             <?php
             }
