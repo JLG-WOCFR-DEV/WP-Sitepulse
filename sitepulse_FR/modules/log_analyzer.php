@@ -49,10 +49,52 @@ function sitepulse_log_analyzer_page() {
                     elseif (stripos($line, 'PHP Notice') !== false || stripos($line, 'PHP Deprecated') !== false) { $categorized['notices'][] = $line; }
                 }
 
-                if (!empty($categorized['fatal_errors'])) { echo '<div class="notice notice-error"><h2><span class="dashicons dashicons-dismiss"></span> Erreurs Fatales (' . count($categorized['fatal_errors']) . ')</h2><p><strong>Ce que c\'est :</strong> Une erreur critique qui casse votre site. Elle empêche votre site de se charger et doit être corrigée immédiatement.</p><pre>' . esc_html(implode("\n", array_slice($categorized['fatal_errors'], -10))) . '</pre></div>'; }
-                if (!empty($categorized['errors'])) { echo '<div class="notice notice-error"><h2><span class="dashicons dashicons-dismiss"></span> Erreurs (' . count($categorized['errors']) . ')</h2><p><strong>Ce que c\'est :</strong> Une erreur significative qui peut empêcher une fonctionnalité de marcher. Doit être traitée en priorité.</p><pre>' . esc_html(implode("\n", array_slice($categorized['errors'], -10))) . '</pre></div>'; }
-                if (!empty($categorized['warnings'])) { echo '<div class="notice notice-warning"><h2><span class="dashicons dashicons-warning"></span> Avertissements (' . count($categorized['warnings']) . ')</h2><p><strong>Ce que c\'est :</strong> Un problème non-critique. Votre site fonctionnera, mais cela indique un problème potentiel qui devrait être corrigé.</p><pre>' . esc_html(implode("\n", array_slice($categorized['warnings'], -10))) . '</pre></div>'; }
-                if (!empty($categorized['notices'])) { echo '<div class="notice notice-info"><h2><span class="dashicons dashicons-info"></span> Notices (' . count($categorized['notices']) . ')</h2><p><strong>Ce que c\'est :</strong> Un message d\'information pour les développeurs. C\'est la plus basse priorité et généralement pas un sujet d\'inquiétude.</p><pre>' . esc_html(implode("\n", array_slice($categorized['notices'], -10))) . '</pre></div>'; }
+                $log_sections = [
+                    'fatal_errors' => [
+                        'class'       => 'notice notice-error',
+                        'icon'        => 'dashicons-dismiss',
+                        'title'       => esc_html__('Erreurs Fatales', 'sitepulse'),
+                        'description' => esc_html__("Une erreur critique qui casse votre site. Elle empêche votre site de se charger et doit être corrigée immédiatement.", 'sitepulse'),
+                    ],
+                    'errors' => [
+                        'class'       => 'notice notice-error',
+                        'icon'        => 'dashicons-dismiss',
+                        'title'       => esc_html__('Erreurs', 'sitepulse'),
+                        'description' => esc_html__("Une erreur significative qui peut empêcher une fonctionnalité de marcher. Doit être traitée en priorité.", 'sitepulse'),
+                    ],
+                    'warnings' => [
+                        'class'       => 'notice notice-warning',
+                        'icon'        => 'dashicons-warning',
+                        'title'       => esc_html__('Avertissements', 'sitepulse'),
+                        'description' => esc_html__("Un problème non-critique. Votre site fonctionnera, mais cela indique un problème potentiel qui devrait être corrigé.", 'sitepulse'),
+                    ],
+                    'notices' => [
+                        'class'       => 'notice notice-info',
+                        'icon'        => 'dashicons-info',
+                        'title'       => esc_html__('Notices', 'sitepulse'),
+                        'description' => esc_html__("Un message d'information pour les développeurs. C'est la plus basse priorité et généralement pas un sujet d'inquiétude.", 'sitepulse'),
+                    ],
+                ];
+
+                foreach ($log_sections as $key => $section) {
+                    if (empty($categorized[$key])) {
+                        continue;
+                    }
+
+                    $count        = esc_html((string) count($categorized[$key]));
+                    $recent_lines = esc_html(implode("\n", array_slice($categorized[$key], -10)));
+
+                    printf(
+                        '<div class="%1$s"><h2><span class="dashicons %2$s"></span> %3$s (%4$s)</h2><p><strong>%5$s</strong> %6$s</p><pre>%7$s</pre></div>',
+                        esc_attr($section['class']),
+                        esc_attr($section['icon']),
+                        $section['title'],
+                        $count,
+                        esc_html__("Ce que c'est :", 'sitepulse'),
+                        $section['description'],
+                        $recent_lines
+                    );
+                }
 
             }
             // Subcase 1.2: The log file exists but is empty

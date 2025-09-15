@@ -10,22 +10,30 @@ function database_optimizer_page() {
     if (isset($_POST['db_cleanup_nonce']) && wp_verify_nonce($_POST['db_cleanup_nonce'], 'db_cleanup')) {
         if (isset($_POST['clean_revisions'])) {
             // Requête statique : aucun paramètre dynamique n'est interpolé dans la suppression.
-            $cleaned = $wpdb->delete(
+            $cleaned = (int) $wpdb->delete(
                 $wpdb->posts,
                 array('post_type' => 'revision')
             );
-            echo '<div class="notice notice-success is-dismissible"><p>' . (int)$cleaned . ' révisions d\'articles ont été supprimées.</p></div>';
+
+            printf(
+                '<div class="notice notice-success is-dismissible"><p>%s révisions d\'articles ont été supprimées.</p></div>',
+                esc_html((string) $cleaned)
+            );
         }
         if (isset($_POST['clean_transients'])) {
             // Requête statique : les motifs LIKE sont définis en dur sans donnée externe.
-            $cleaned = $wpdb->query(
+            $cleaned = (int) $wpdb->query(
                 $wpdb->prepare(
                     "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
                     $wpdb->esc_like('_transient_') . '%',
                     $wpdb->esc_like('_site_transient_') . '%'
                 )
             );
-            echo '<div class="notice notice-success is-dismissible"><p>' . (int)$cleaned . ' transients expirés ont été supprimés.</p></div>';
+
+            printf(
+                '<div class="notice notice-success is-dismissible"><p>%s transients expirés ont été supprimés.</p></div>',
+                esc_html((string) $cleaned)
+            );
         }
     }
     $revisions = $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->posts WHERE post_type = 'revision'");
