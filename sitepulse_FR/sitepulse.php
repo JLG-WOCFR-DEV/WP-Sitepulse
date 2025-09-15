@@ -101,7 +101,11 @@ register_activation_hook(__FILE__, function() {
  * Deactivation hook. Cleans up scheduled tasks.
  */
 register_deactivation_hook(__FILE__, function() {
-    $cron_hooks = ['sitepulse_cleanup_cron', 'log_analyzer_cron', 'resource_monitor_cron', 'speed_analyzer_cron', 'database_optimizer_cron', 'maintenance_advisor_cron', 'uptime_tracker_cron', 'ai_insights_cron'];
+    $cron_hooks = [
+        'sitepulse_uptime_tracker_cron',
+        'sitepulse_resource_monitor_cron',
+        'sitepulse_log_analyzer_cron',
+    ];
     foreach($cron_hooks as $hook) {
         wp_clear_scheduled_hook($hook);
     }
