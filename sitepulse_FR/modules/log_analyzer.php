@@ -17,6 +17,10 @@ add_action('admin_menu', function() {
  * Renders the Log Analyzer page with improved logic and explanations.
  */
 function sitepulse_log_analyzer_page() {
+    if (!current_user_can('manage_options')) {
+        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
+    }
+
     $log_file = WP_CONTENT_DIR . '/debug.log';
     $log_file_exists = file_exists($log_file) && is_readable($log_file);
     $debug_log_enabled = defined('WP_DEBUG_LOG') && WP_DEBUG_LOG;

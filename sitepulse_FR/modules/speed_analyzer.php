@@ -18,6 +18,10 @@ add_action('admin_menu', function() {
  * The analysis is now based on internal WordPress timers for better reliability.
  */
 function sitepulse_speed_analyzer_page() {
+    if (!current_user_can('manage_options')) {
+        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
+    }
+
     global $wpdb;
 
     // --- Server Performance Metrics ---

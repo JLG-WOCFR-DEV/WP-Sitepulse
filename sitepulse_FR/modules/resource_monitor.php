@@ -2,6 +2,10 @@
 if (!defined('ABSPATH')) exit;
 add_action('admin_menu', function() { add_submenu_page('sitepulse-dashboard', 'Resource Monitor', 'Resources', 'manage_options', 'sitepulse-resources', 'resource_monitor_page'); });
 function resource_monitor_page() {
+    if (!current_user_can('manage_options')) {
+        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
+    }
+
     if (function_exists('sys_getloadavg')) { $load = sys_getloadavg(); } else { $load = ['N/A', 'N/A', 'N/A']; }
     $load_display = implode(' / ', array_map('strval', $load));
     $memory_usage = size_format(memory_get_usage());
