@@ -25,15 +25,20 @@ define('SITEPULSE_DEBUG_LOG', WP_CONTENT_DIR . '/sitepulse-debug.log');
  * @param string $level   The log level (e.g., INFO, WARNING, ERROR).
  */
 function sitepulse_log($message, $level = 'INFO') {
-    if (!SITEPULSE_DEBUG) return;
-    $timestamp = date('Y-m-d H:i:s');
-    $log_entry = "[$timestamp] [$level] $message\n";
-    $max_size = 5 * 1024 * 1024; // 5 MB
-    if (file_exists(SITEPULSE_DEBUG_LOG) && filesize(SITEPULSE_DEBUG_LOG) > $max_size) {
-        file_put_contents(SITEPULSE_DEBUG_LOG, $log_entry);
-    } else {
-        file_put_contents(SITEPULSE_DEBUG_LOG, $log_entry, FILE_APPEND);
+    if (!SITEPULSE_DEBUG) {
+        return;
     }
+
+    $timestamp  = date('Y-m-d H:i:s');
+    $log_entry  = "[$timestamp] [$level] $message\n";
+    $max_size   = 5 * 1024 * 1024; // 5 MB
+
+    if (file_exists(SITEPULSE_DEBUG_LOG) && filesize(SITEPULSE_DEBUG_LOG) > $max_size) {
+        $archive = SITEPULSE_DEBUG_LOG . '.' . time();
+        @rename(SITEPULSE_DEBUG_LOG, $archive);
+    }
+
+    file_put_contents(SITEPULSE_DEBUG_LOG, $log_entry, FILE_APPEND | LOCK_EX);
 }
 sitepulse_log('SitePulse loaded. Version: ' . SITEPULSE_VERSION);
 
