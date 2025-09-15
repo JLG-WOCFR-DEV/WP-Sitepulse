@@ -20,6 +20,38 @@ define('SITEPULSE_DEBUG', (bool) $debug_mode);
 define('SITEPULSE_DEBUG_LOG', WP_CONTENT_DIR . '/sitepulse-debug.log');
 
 /**
+ * Returns the list of cron hook identifiers used across SitePulse modules.
+ *
+ * @return array<string, string> Associative array of module keys to cron hook names.
+ */
+function sitepulse_get_cron_hooks() {
+    static $cron_hooks = null;
+
+    if ($cron_hooks === null) {
+        $cron_hooks = require SITEPULSE_PATH . 'includes/cron-hooks.php';
+
+        if (!is_array($cron_hooks)) {
+            $cron_hooks = [];
+        }
+    }
+
+    return $cron_hooks;
+}
+
+/**
+ * Retrieves the cron hook name for a specific module.
+ *
+ * @param string $module_key Identifier of the module (e.g. uptime_tracker).
+ *
+ * @return string|null The cron hook name or null if none exists.
+ */
+function sitepulse_get_cron_hook($module_key) {
+    $cron_hooks = sitepulse_get_cron_hooks();
+
+    return isset($cron_hooks[$module_key]) ? $cron_hooks[$module_key] : null;
+}
+
+/**
  * Logging function for debugging purposes.
  *
  * @param string $message The message to log.
@@ -101,12 +133,7 @@ register_activation_hook(__FILE__, function() {
  * Deactivation hook. Cleans up scheduled tasks.
  */
 register_deactivation_hook(__FILE__, function() {
-    $cron_hooks = [
-        'sitepulse_uptime_tracker_cron',
-        'sitepulse_resource_monitor_cron',
-        'sitepulse_log_analyzer_cron',
-    ];
-    foreach($cron_hooks as $hook) {
+    foreach (sitepulse_get_cron_hooks() as $hook) {
         wp_clear_scheduled_hook($hook);
     }
 });

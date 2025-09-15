@@ -3,6 +3,9 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+$sitepulse_resource_monitor_cron_hook = function_exists('sitepulse_get_cron_hook') ? sitepulse_get_cron_hook('resource_monitor') : 'sitepulse_resource_monitor_cron';
+$sitepulse_log_analyzer_cron_hook    = function_exists('sitepulse_get_cron_hook') ? sitepulse_get_cron_hook('log_analyzer') : 'sitepulse_log_analyzer_cron';
+
 /**
  * Returns the configured CPU load threshold for alerting.
  *
@@ -75,42 +78,46 @@ function sitepulse_error_alert_send($type, $subject, $message) {
     return $sent;
 }
 
-add_action('sitepulse_resource_monitor_cron', function() {
-    if (!function_exists('sys_getloadavg')) {
-        if (function_exists('sitepulse_log')) {
-            sitepulse_log('sys_getloadavg is unavailable; CPU alert skipped.', 'WARNING');
+if (!empty($sitepulse_resource_monitor_cron_hook)) {
+    add_action($sitepulse_resource_monitor_cron_hook, function() {
+        if (!function_exists('sys_getloadavg')) {
+            if (function_exists('sitepulse_log')) {
+                sitepulse_log('sys_getloadavg is unavailable; CPU alert skipped.', 'WARNING');
+            }
+            return;
         }
-        return;
-    }
 
-    $load = sys_getloadavg();
-    if (!is_array($load) || !isset($load[0])) {
-        return;
-    }
-
-    $threshold = sitepulse_error_alert_get_cpu_threshold();
-
-    if ((float) $load[0] > $threshold) {
-        $message  = "La charge actuelle est de : " . $load[0] . " (seuil : " . $threshold . ")";
-        sitepulse_error_alert_send('cpu', 'Alerte SitePulse: Charge Serveur Élevée', $message);
-    }
-});
-
-add_action('sitepulse_log_analyzer_cron', function() {
-    $log_file = WP_CONTENT_DIR . '/debug.log';
-    if (!file_exists($log_file) || !is_readable($log_file)) {
-        return;
-    }
-
-    $contents = file_get_contents($log_file);
-    if ($contents === false) {
-        if (function_exists('sitepulse_log')) {
-            sitepulse_log('Impossible de lire debug.log pour l’analyse des erreurs.', 'ERROR');
+        $load = sys_getloadavg();
+        if (!is_array($load) || !isset($load[0])) {
+            return;
         }
-        return;
-    }
 
-    if (stripos($contents, 'PHP Fatal error') !== false) {
-        sitepulse_error_alert_send('php_fatal', 'Alerte SitePulse: Erreur Fatale Détectée', 'Vérifiez le fichier debug.log pour les détails.');
-    }
-});
+        $threshold = sitepulse_error_alert_get_cpu_threshold();
+
+        if ((float) $load[0] > $threshold) {
+            $message  = "La charge actuelle est de : " . $load[0] . " (seuil : " . $threshold . ")";
+            sitepulse_error_alert_send('cpu', 'Alerte SitePulse: Charge Serveur Élevée', $message);
+        }
+    });
+}
+
+if (!empty($sitepulse_log_analyzer_cron_hook)) {
+    add_action($sitepulse_log_analyzer_cron_hook, function() {
+        $log_file = WP_CONTENT_DIR . '/debug.log';
+        if (!file_exists($log_file) || !is_readable($log_file)) {
+            return;
+        }
+
+        $contents = file_get_contents($log_file);
+        if ($contents === false) {
+            if (function_exists('sitepulse_log')) {
+                sitepulse_log('Impossible de lire debug.log pour l’analyse des erreurs.', 'ERROR');
+            }
+            return;
+        }
+
+        if (stripos($contents, 'PHP Fatal error') !== false) {
+            sitepulse_error_alert_send('php_fatal', 'Alerte SitePulse: Erreur Fatale Détectée', 'Vérifiez le fichier debug.log pour les détails.');
+        }
+    });
+}

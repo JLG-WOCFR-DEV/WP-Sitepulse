@@ -236,12 +236,10 @@ function sitepulse_settings_page() {
             delete_option('sitepulse_uptime_log');
             delete_transient('sitepulse_speed_scan_results');
             if (defined('SITEPULSE_DEBUG_LOG') && file_exists(SITEPULSE_DEBUG_LOG)) { unlink(SITEPULSE_DEBUG_LOG); }
-            $cron_hooks = [
-                'sitepulse_uptime_tracker_cron',
-                'sitepulse_resource_monitor_cron',
-                'sitepulse_log_analyzer_cron',
-            ];
-            foreach($cron_hooks as $hook) { wp_clear_scheduled_hook($hook); }
+            $cron_hooks = function_exists('sitepulse_get_cron_hooks') ? sitepulse_get_cron_hooks() : [];
+            foreach ($cron_hooks as $hook) {
+                wp_clear_scheduled_hook($hook);
+            }
             echo '<div class="notice notice-success is-dismissible"><p>SitePulse a été réinitialisé.</p></div>';
         }
     }
