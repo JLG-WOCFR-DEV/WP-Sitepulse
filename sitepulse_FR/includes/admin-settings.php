@@ -78,6 +78,76 @@ function sitepulse_sanitize_modules($input) {
 }
 
 /**
+ * Reads the last lines of a file without loading it entirely into memory.
+ *
+ * @param string $file_path  Absolute path to the log file.
+ * @param int    $line_limit Number of lines to retrieve from the end of the file.
+ * @param int    $max_bytes  Maximum amount of data to read when parsing the log.
+ *
+ * @return array<string> The last lines of the file, ordered from oldest to newest.
+ */
+function sitepulse_read_log_tail($file_path, $line_limit = 100, $max_bytes = 1048576) {
+    if (!is_readable($file_path) || $line_limit < 1 || $max_bytes < 1) {
+        return [];
+    }
+
+    $handle = fopen($file_path, 'rb');
+    if ($handle === false) {
+        return [];
+    }
+
+    if (fseek($handle, 0, SEEK_END) !== 0) {
+        fclose($handle);
+        return [];
+    }
+
+    $position = ftell($handle);
+    if ($position === false) {
+        fclose($handle);
+        return [];
+    }
+
+    $buffer = '';
+    $line_count = 0;
+    $chunk_size = 4096;
+    $bytes_remaining = $max_bytes;
+    $line_target = $line_limit + 1;
+
+    while ($position > 0 && $bytes_remaining > 0 && $line_count < $line_target) {
+        $read_size = min($chunk_size, $position, $bytes_remaining);
+        $position -= $read_size;
+
+        if (fseek($handle, $position, SEEK_SET) !== 0) {
+            break;
+        }
+
+        $chunk = fread($handle, $read_size);
+        if ($chunk === false) {
+            break;
+        }
+
+        $buffer = $chunk . $buffer;
+        $line_count = substr_count($buffer, "\n");
+        $bytes_remaining -= $read_size;
+    }
+
+    fclose($handle);
+
+    $buffer = rtrim($buffer, "\r\n");
+    if ($buffer === '') {
+        return [];
+    }
+
+    $lines = array_values(array_filter(preg_split('/\r\n|\n|\r/', $buffer), 'strlen'));
+
+    if (count($lines) > $line_limit) {
+        $lines = array_slice($lines, -$line_limit);
+    }
+
+    return $lines;
+}
+
+/**
  * Renders the settings page.
  */
 function sitepulse_settings_page() {
@@ -186,6 +256,9 @@ function sitepulse_debug_page() {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
+    $log_line_limit = 100;
+    $log_max_bytes = 1024 * 1024; // 1 MB safety cap to avoid memory overuse when loading the log.
+
     ?>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-bug"></span> Debug Dashboard</h1>
@@ -235,12 +308,22 @@ function sitepulse_debug_page() {
         </div>
         <h2>Logs de Débogage Récents</h2>
         <div style="background: #fff; border: 1px solid #ccc; padding: 10px; max-height: 400px; overflow-y: scroll; font-family: monospace; font-size: 13px;">
+            <p class="description">
+                <?php
+                echo esc_html(
+                    sprintf(
+                        'Affichage des %1$s dernières lignes du journal (lecture limitée à %2$s pour éviter une utilisation excessive de la mémoire).',
+                        number_format_i18n($log_line_limit),
+                        size_format($log_max_bytes)
+                    )
+                );
+                ?>
+            </p>
             <?php
             if (defined('SITEPULSE_DEBUG_LOG') && file_exists(SITEPULSE_DEBUG_LOG)) {
-                $log_contents = file_get_contents(SITEPULSE_DEBUG_LOG);
-                if (!empty(trim($log_contents))) {
-                    $log_lines = file(SITEPULSE_DEBUG_LOG, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-                    $recent_logs = array_slice(array_reverse($log_lines), 0, 100);
+                $recent_logs = sitepulse_read_log_tail(SITEPULSE_DEBUG_LOG, $log_line_limit, $log_max_bytes);
+
+                if (!empty($recent_logs)) {
                     echo '<pre>' . esc_html(implode("\n", $recent_logs)) . '</pre>';
                 } else {
                     echo '<p>Le journal de débogage est actuellement vide.</p>';
