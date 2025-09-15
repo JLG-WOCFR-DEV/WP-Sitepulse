@@ -42,9 +42,10 @@ function custom_dashboards_page() {
                 $ttfb = get_transient('sitepulse_speed_scan_results')['ttfb'] ?? 0;
                 $ttfb_status = $ttfb > 500 ? 'status-bad' : ($ttfb > 200 ? 'status-warn' : 'status-ok');
                 ?>
+                <?php $ttfb_display = $ttfb ? round($ttfb) . ' ms' : 'N/A'; ?>
                 <h2><span class="dashicons dashicons-performance"></span> Speed</h2>
-                <a href="<?php echo admin_url('admin.php?page=sitepulse-speed'); ?>" class="button">Details</a>
-                <p>Server Response (TTFB): <span class="metric <?php echo $ttfb_status; ?>"><?php echo $ttfb ? round($ttfb) . ' ms' : 'N/A'; ?></span></p>
+                <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-speed')); ?>" class="button">Details</a>
+                <p>Server Response (TTFB): <span class="metric <?php echo esc_attr($ttfb_status); ?>"><?php echo esc_html($ttfb_display); ?></span></p>
                 <p class="description">Time to First Byte measures how quickly your server responds. Under 200ms is excellent.</p>
             </div>
 
@@ -58,8 +59,8 @@ function custom_dashboards_page() {
                 $uptime_status = $uptime_percentage < 99 ? 'status-bad' : ($uptime_percentage < 100 ? 'status-warn' : 'status-ok');
                 ?>
                 <h2><span class="dashicons dashicons-chart-bar"></span> Uptime</h2>
-                 <a href="<?php echo admin_url('admin.php?page=sitepulse-uptime'); ?>" class="button">Details</a>
-                <p>Last 30 Checks: <span class="metric <?php echo $uptime_status; ?>"><?php echo round($uptime_percentage, 2); ?>%</span></p>
+                 <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-uptime')); ?>" class="button">Details</a>
+                <p>Last 30 Checks: <span class="metric <?php echo esc_attr($uptime_status); ?>"><?php echo esc_html(round($uptime_percentage, 2)); ?>%</span></p>
                  <p class="description">Represents your site's availability over the last 30 hours.</p>
             </div>
 
@@ -70,8 +71,8 @@ function custom_dashboards_page() {
                 $db_status = $revisions > 100 ? 'status-bad' : ($revisions > 50 ? 'status-warn' : 'status-ok');
                 ?>
                 <h2><span class="dashicons dashicons-database"></span> Database Health</h2>
-                <a href="<?php echo admin_url('admin.php?page=sitepulse-db'); ?>" class="button">Optimize</a>
-                <p>Post Revisions: <span class="metric <?php echo $db_status; ?>"><?php echo (int)$revisions; ?></span></p>
+                <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-db')); ?>" class="button">Optimize</a>
+                <p>Post Revisions: <span class="metric <?php echo esc_attr($db_status); ?>"><?php echo esc_html((int)$revisions); ?></span></p>
                 <p class="description">Excessive revisions can slow down your database. It's safe to clean them.</p>
             </div>
 
@@ -93,8 +94,8 @@ function custom_dashboards_page() {
                 }
                 ?>
                 <h2><span class="dashicons dashicons-hammer"></span> Error Log</h2>
-                <a href="<?php echo admin_url('admin.php?page=sitepulse-logs'); ?>" class="button">Analyze</a>
-                <p>Status: <span class="metric <?php echo $log_status_class; ?>"><?php echo $log_summary; ?></span></p>
+                <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-logs')); ?>" class="button">Analyze</a>
+                <p>Status: <span class="metric <?php echo esc_attr($log_status_class); ?>"><?php echo esc_html($log_summary); ?></span></p>
                 <p class="description">Checks for critical errors in your WordPress debug log.</p>
             </div>
         </div>

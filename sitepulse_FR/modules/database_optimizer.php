@@ -22,13 +22,13 @@ function database_optimizer_page() {
         <form method="post">
             <?php wp_nonce_field('db_cleanup', 'db_cleanup_nonce'); ?>
             <div class="card" style="background:#fff; padding:1px 20px 20px; margin-top:20px;">
-                <h2>Nettoyer les révisions d'articles (<?php echo (int)$revisions; ?> trouvées)</h2>
+                <h2>Nettoyer les révisions d'articles (<?php echo esc_html((int)$revisions); ?> trouvées)</h2>
                 <p><strong>Qu'est-ce que c'est ?</strong> WordPress sauvegarde une copie de vos articles à chaque modification. Ce sont les révisions. Bien qu'utiles, elles peuvent alourdir votre base de données.</p>
                 <p><strong>Est-ce dangereux ?</strong> Généralement, non. Cette action supprime les anciennes versions mais conserve la version publiée. C'est une tâche de maintenance courante et sûre.</p>
                 <p><input type="submit" name="clean_revisions" value="Nettoyer toutes les révisions" class="button" <?php disabled($revisions, 0); ?>></p>
             </div>
             <div class="card" style="background:#fff; padding:1px 20px 20px; margin-top:20px;">
-                <h2>Nettoyer les Transients (<?php echo (int)$transients; ?> trouvés)</h2>
+                <h2>Nettoyer les Transients (<?php echo esc_html((int)$transients); ?> trouvés)</h2>
                 <p><strong>Qu'est-ce que c'est ?</strong> Les transients sont une forme de cache temporaire utilisé par les plugins et thèmes. Parfois, les transients expirés ne sont pas supprimés correctement.</p>
                 <p><strong>Est-ce dangereux ?</strong> Non, c'est une opération très sûre. Cet outil ne supprime que les transients expirés. Votre site les régénérera automatiquement si besoin.</p>
                 <p><input type="submit" name="clean_transients" value="Nettoyer les Transients Expirés" class="button" <?php disabled($transients, 0); ?>></p>

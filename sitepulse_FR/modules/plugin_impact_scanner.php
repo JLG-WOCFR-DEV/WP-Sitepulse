@@ -21,12 +21,12 @@ function plugin_impact_scanner_page() {
             <thead><tr><th scope="col" style="width: 25%;">Plugin</th><th scope="col">Impact (Simulé)</th><th scope="col">Espace Disque</th><th scope="col" style="width: 35%;">Poids Relatif</th></tr></thead>
             <tbody>
                 <?php if (empty($impacts)): ?><tr><td colspan="4">Aucun plugin actif à scanner.</td></tr><?php else: ?>
-                    <?php foreach ($impacts as $data): $weight = $total_impact > 0 ? ($data['impact'] / $total_impact) * 100 : 0; ?>
+                    <?php foreach ($impacts as $data): $weight = $total_impact > 0 ? ($data['impact'] / $total_impact) * 100 : 0; $weight_color = $weight > 20 ? '#F44336' : ($weight > 10 ? '#FFC107' : '#4CAF50'); ?>
                     <tr>
                         <td><strong><?php echo esc_html($data['name']); ?></strong></td>
                         <td><?php echo esc_html($data['impact']); ?> ms</td>
-                        <td><?php echo size_format($data['disk_space'], 2); ?></td>
-                        <td><div class="impact-bar-bg"><div class="impact-bar" style="width: <?php echo $weight; ?>%; background-color: <?php echo $weight > 20 ? '#F44336' : ($weight > 10 ? '#FFC107' : '#4CAF50'); ?>;"><?php echo round($weight, 1); ?>%</div></div></td>
+                        <td><?php echo esc_html(size_format($data['disk_space'], 2)); ?></td>
+                        <td><div class="impact-bar-bg"><div class="impact-bar" style="width: <?php echo esc_attr($weight); ?>%; background-color: <?php echo esc_attr($weight_color); ?>;"><?php echo esc_html(round($weight, 1)); ?>%</div></div></td>
                     </tr>
                     <?php endforeach; ?>
                 <?php endif; ?>

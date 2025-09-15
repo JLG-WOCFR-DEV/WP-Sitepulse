@@ -16,7 +16,7 @@ function ai_insights_page() {
         <h1><span class="dashicons-before dashicons-superhero"></span> Analyses par IA</h1>
         <p>Obtenez des recommandations personnalisées pour votre site en analysant ses données de performance avec l'IA Gemini de Google.</p>
         <?php if (empty($api_key)): ?>
-            <div class="notice notice-warning"><p>Veuillez <a href="<?php echo admin_url('admin.php?page=sitepulse-settings'); ?>">entrer votre clé API Google Gemini</a> pour utiliser cette fonctionnalité.</p></div>
+            <div class="notice notice-warning"><p>Veuillez <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-settings')); ?>">entrer votre clé API Google Gemini</a> pour utiliser cette fonctionnalité.</p></div>
         <?php else: ?>
             <form method="post" action=""><button type="submit" name="get_ai_insight" class="button button-primary">Générer une Analyse</button></form>
         <?php endif; ?>
