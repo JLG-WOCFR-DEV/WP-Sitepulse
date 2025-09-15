@@ -6,6 +6,7 @@
  * Version: 1.0
  * Author: Jérôme Le Gousse
  * License: GPL-2.0+
+ * Uninstall: uninstall.php
  */
 
 if (!defined('ABSPATH')) exit;
