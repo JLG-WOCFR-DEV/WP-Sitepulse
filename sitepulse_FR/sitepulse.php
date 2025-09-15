@@ -38,7 +38,11 @@ function sitepulse_log($message, $level = 'INFO') {
         @rename(SITEPULSE_DEBUG_LOG, $archive);
     }
 
-    file_put_contents(SITEPULSE_DEBUG_LOG, $log_entry, FILE_APPEND | LOCK_EX);
+    $result = @file_put_contents(SITEPULSE_DEBUG_LOG, $log_entry, FILE_APPEND | LOCK_EX);
+
+    if ($result === false) {
+        error_log(sprintf('SitePulse: unable to write to debug log file (%s).', SITEPULSE_DEBUG_LOG));
+    }
 }
 sitepulse_log('SitePulse loaded. Version: ' . SITEPULSE_VERSION);
 

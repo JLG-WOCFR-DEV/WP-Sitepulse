@@ -90,8 +90,14 @@ function sitepulse_settings_page() {
 
     if (isset($_POST['sitepulse_cleanup_nonce']) && wp_verify_nonce($_POST['sitepulse_cleanup_nonce'], 'sitepulse_cleanup')) {
         if (isset($_POST['sitepulse_clear_log']) && defined('SITEPULSE_DEBUG_LOG') && file_exists(SITEPULSE_DEBUG_LOG)) {
-            file_put_contents(SITEPULSE_DEBUG_LOG, '');
-            echo '<div class="notice notice-success is-dismissible"><p>Journal de débogage vidé.</p></div>';
+            $cleared = @file_put_contents(SITEPULSE_DEBUG_LOG, '');
+
+            if ($cleared === false) {
+                error_log(sprintf('SitePulse: unable to clear debug log file (%s).', SITEPULSE_DEBUG_LOG));
+                echo '<div class="notice notice-error is-dismissible"><p>Impossible de vider le journal de débogage. Vérifiez les permissions du fichier.</p></div>';
+            } else {
+                echo '<div class="notice notice-success is-dismissible"><p>Journal de débogage vidé.</p></div>';
+            }
         }
         if (isset($_POST['sitepulse_clear_data'])) {
             delete_option('sitepulse_uptime_log');
