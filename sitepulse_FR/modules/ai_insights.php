@@ -22,7 +22,10 @@ function ai_insights_page() {
         <?php if (empty($api_key)): ?>
             <div class="notice notice-warning"><p>Veuillez <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-settings')); ?>">entrer votre clé API Google Gemini</a> pour utiliser cette fonctionnalité.</p></div>
         <?php else: ?>
-            <form method="post" action=""><button type="submit" name="get_ai_insight" class="button button-primary">Générer une Analyse</button></form>
+            <form method="post" action="">
+                <?php wp_nonce_field('sitepulse_get_ai_insight'); ?>
+                <button type="submit" name="get_ai_insight" class="button button-primary">Générer une Analyse</button>
+            </form>
         <?php endif; ?>
         <?php if ($insight_result): ?>
             <div id="ai-insight-response" style="background: #fff; border: 1px solid #ccc; padding: 15px; margin-top: 20px;"><h2>Votre Recommandation par IA</h2><p><?php echo nl2br(esc_html($insight_result)); ?></p></div>
