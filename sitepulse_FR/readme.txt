@@ -33,6 +33,7 @@ Toggle modules in the admin panel to keep it lightweight. Includes debug mode an
 
 = 1.0 =
 * Initial release with all core modules.
+* Removed the call to `flush_rewrite_rules()` on activation to avoid an unnecessary and costly permalink flush.
 
 == Upgrade Notice ==
 
