@@ -25,14 +25,6 @@ $transients = [
 ];
 
 $cron_hooks = [
-    'sitepulse_cleanup_cron',
-    'log_analyzer_cron',
-    'resource_monitor_cron',
-    'speed_analyzer_cron',
-    'database_optimizer_cron',
-    'maintenance_advisor_cron',
-    'uptime_tracker_cron',
-    'ai_insights_cron',
     'sitepulse_uptime_tracker_cron',
     'sitepulse_resource_monitor_cron',
     'sitepulse_log_analyzer_cron',

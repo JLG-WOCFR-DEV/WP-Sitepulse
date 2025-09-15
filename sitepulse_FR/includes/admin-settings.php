@@ -115,7 +115,11 @@ function sitepulse_settings_page() {
             delete_option('sitepulse_uptime_log');
             delete_transient('sitepulse_speed_scan_results');
             if (defined('SITEPULSE_DEBUG_LOG') && file_exists(SITEPULSE_DEBUG_LOG)) { unlink(SITEPULSE_DEBUG_LOG); }
-            $cron_hooks = ['log_analyzer_cron', 'resource_monitor_cron', 'speed_analyzer_cron', 'database_optimizer_cron', 'maintenance_advisor_cron', 'uptime_tracker_cron', 'ai_insights_cron'];
+            $cron_hooks = [
+                'sitepulse_uptime_tracker_cron',
+                'sitepulse_resource_monitor_cron',
+                'sitepulse_log_analyzer_cron',
+            ];
             foreach($cron_hooks as $hook) { wp_clear_scheduled_hook($hook); }
             echo '<div class="notice notice-success is-dismissible"><p>SitePulse a été réinitialisé.</p></div>';
         }
