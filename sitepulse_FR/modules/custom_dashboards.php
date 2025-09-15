@@ -87,14 +87,28 @@ function custom_dashboards_page() {
                 $log_file = WP_CONTENT_DIR . '/debug.log';
                 $log_status_class = 'status-ok';
                 $log_summary = 'Log is clean.';
-                if (file_exists($log_file) && filesize($log_file) > 0) {
-                    $logs = file_get_contents($log_file);
-                    if (stripos($logs, 'PHP Fatal error') !== false) {
-                        $log_status_class = 'status-bad';
-                        $log_summary = 'Fatal Errors found!';
-                    } elseif (stripos($logs, 'PHP Warning') !== false) {
-                         $log_status_class = 'status-warn';
-                         $log_summary = 'Warnings present.';
+
+                if (!file_exists($log_file)) {
+                    $log_status_class = 'status-warn';
+                    $log_summary = 'Log file not found.';
+                } else {
+                    $recent_logs = sitepulse_get_recent_log_lines($log_file, 200, 131072);
+
+                    if ($recent_logs === null) {
+                        $log_status_class = 'status-warn';
+                        $log_summary = 'Unable to read log file.';
+                    } elseif (empty($recent_logs)) {
+                        $log_summary = 'No recent log entries.';
+                    } else {
+                        $log_content = implode("\n", $recent_logs);
+
+                        if (stripos($log_content, 'PHP Fatal error') !== false) {
+                            $log_status_class = 'status-bad';
+                            $log_summary = 'Fatal Errors found!';
+                        } elseif (stripos($log_content, 'PHP Warning') !== false) {
+                            $log_status_class = 'status-warn';
+                            $log_summary = 'Warnings present.';
+                        }
                     }
                 }
                 ?>
