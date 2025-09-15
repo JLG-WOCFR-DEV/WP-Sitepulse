@@ -58,6 +58,12 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', 'sitepulse_gemini_api_key', [
         'type' => 'string', 'sanitize_callback' => 'sanitize_text_field', 'default' => ''
     ]);
+    register_setting('sitepulse_settings', 'sitepulse_cpu_alert_threshold', [
+        'type' => 'number', 'sanitize_callback' => 'sitepulse_sanitize_cpu_threshold', 'default' => 5
+    ]);
+    register_setting('sitepulse_settings', 'sitepulse_alert_cooldown_minutes', [
+        'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_cooldown_minutes', 'default' => 60
+    ]);
 }
 add_action('admin_init', 'sitepulse_register_settings');
 
@@ -75,6 +81,34 @@ function sitepulse_sanitize_modules($input) {
         }
     }
     return $sanitized;
+}
+
+/**
+ * Sanitizes the CPU threshold value for alerts.
+ *
+ * @param mixed $value Raw user input value.
+ * @return float Sanitized CPU threshold.
+ */
+function sitepulse_sanitize_cpu_threshold($value) {
+    $value = is_scalar($value) ? (float) $value : 0.0;
+    if ($value <= 0) {
+        $value = 5.0;
+    }
+    return $value;
+}
+
+/**
+ * Sanitizes the cooldown window (in minutes) used for alert throttling.
+ *
+ * @param mixed $value Raw user input value.
+ * @return int Sanitized cooldown length in minutes.
+ */
+function sitepulse_sanitize_cooldown_minutes($value) {
+    $value = is_scalar($value) ? absint($value) : 0;
+    if ($value < 1) {
+        $value = 60;
+    }
+    return $value;
 }
 
 /**
@@ -149,6 +183,23 @@ function sitepulse_settings_page() {
                     <td>
                         <input type="checkbox" id="sitepulse_debug_mode" name="sitepulse_debug_mode" value="1" <?php checked(get_option('sitepulse_debug_mode')); ?>>
                         <p class="description">Active la journalisation détaillée et le tableau de bord de débogage. À n'utiliser que pour le dépannage.</p>
+                    </td>
+                </tr>
+            </table>
+            <h2>Alertes</h2>
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><label for="sitepulse_cpu_alert_threshold">Seuil d'alerte de charge CPU</label></th>
+                    <td>
+                        <input type="number" step="0.1" min="0" id="sitepulse_cpu_alert_threshold" name="sitepulse_cpu_alert_threshold" value="<?php echo esc_attr(get_option('sitepulse_cpu_alert_threshold', 5)); ?>" class="small-text">
+                        <p class="description">Une alerte e-mail est envoyée lorsque la charge moyenne sur 1 minute dépasse ce seuil.</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="sitepulse_alert_cooldown_minutes">Fenêtre anti-spam (minutes)</label></th>
+                    <td>
+                        <input type="number" min="1" id="sitepulse_alert_cooldown_minutes" name="sitepulse_alert_cooldown_minutes" value="<?php echo esc_attr(get_option('sitepulse_alert_cooldown_minutes', 60)); ?>" class="small-text">
+                        <p class="description">Empêche l'envoi de plusieurs e-mails identiques pendant la durée spécifiée.</p>
                     </td>
                 </tr>
             </table>
