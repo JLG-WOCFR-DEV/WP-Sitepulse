@@ -112,6 +112,93 @@ function sitepulse_sanitize_cooldown_minutes($value) {
 }
 
 /**
+ * Reads the last lines from a log file without loading it entirely in memory.
+ *
+ * The maximum number of bytes read is deliberately capped to avoid memory pressure
+ * with very large log files.
+ *
+ * @param string $file_path  Path to the log file.
+ * @param int    $max_lines  Number of lines to return.
+ * @param int    $max_bytes  Maximum number of bytes to read from the end of the file.
+ * @return array|null Array of recent log lines on success, empty array if the file is empty,
+ *                    or null on failure to read the file.
+ */
+function sitepulse_get_recent_log_lines($file_path, $max_lines = 100, $max_bytes = 131072) {
+    $max_lines = max(1, (int) $max_lines);
+    $max_bytes = max(1024, (int) $max_bytes);
+
+    if (!is_readable($file_path)) {
+        return null;
+    }
+
+    $handle = @fopen($file_path, 'rb');
+    if (!$handle) {
+        return null;
+    }
+
+    $buffer = '';
+    $chunk_size = 4096;
+    $stats = fstat($handle);
+    $file_size = isset($stats['size']) ? (int) $stats['size'] : 0;
+    $bytes_to_read = min($file_size, $max_bytes);
+    $position = $file_size;
+
+    while ($bytes_to_read > 0 && $position > 0) {
+        $read_size = (int) min($chunk_size, $bytes_to_read, $position);
+        if ($read_size <= 0) {
+            break;
+        }
+
+        $position -= $read_size;
+        $bytes_to_read -= $read_size;
+
+        if (fseek($handle, $position, SEEK_SET) !== 0) {
+            break;
+        }
+
+        $chunk = fread($handle, $read_size);
+        if ($chunk === false) {
+            break;
+        }
+
+        $buffer = $chunk . $buffer;
+
+        if (substr_count($buffer, "\n") >= ($max_lines + 1)) {
+            break;
+        }
+    }
+
+    fclose($handle);
+
+    if ($buffer === '') {
+        return [];
+    }
+
+    $buffer = str_replace(["\r\n", "\r"], "\n", $buffer);
+    $buffer = rtrim($buffer, "\n");
+
+    if ($buffer === '') {
+        return [];
+    }
+
+    $lines = explode("\n", $buffer);
+    $filtered = [];
+
+    foreach ($lines as $line) {
+        if (trim($line) === '') {
+            continue;
+        }
+        $filtered[] = $line;
+    }
+
+    if (count($filtered) > $max_lines) {
+        $filtered = array_slice($filtered, -$max_lines);
+    }
+
+    return $filtered;
+}
+
+/**
  * Renders the settings page.
  */
 function sitepulse_settings_page() {
@@ -241,6 +328,9 @@ function sitepulse_debug_page() {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
+    $log_max_lines = 100;
+    $log_max_bytes = 131072;
+
     ?>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-bug"></span> Debug Dashboard</h1>
@@ -289,16 +379,26 @@ function sitepulse_debug_page() {
             </div>
         </div>
         <h2>Logs de Débogage Récents</h2>
+        <p class="description">
+            <?php
+            printf(
+                esc_html__('Seules les %1$d dernières lignes du journal (limitées à %2$s) sont chargées pour éviter toute surcharge mémoire.', 'sitepulse'),
+                (int) $log_max_lines,
+                esc_html(size_format($log_max_bytes))
+            );
+            ?>
+        </p>
         <div style="background: #fff; border: 1px solid #ccc; padding: 10px; max-height: 400px; overflow-y: scroll; font-family: monospace; font-size: 13px;">
             <?php
-            if (defined('SITEPULSE_DEBUG_LOG') && file_exists(SITEPULSE_DEBUG_LOG)) {
-                $log_contents = file_get_contents(SITEPULSE_DEBUG_LOG);
-                if (!empty(trim($log_contents))) {
-                    $log_lines = file(SITEPULSE_DEBUG_LOG, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-                    $recent_logs = array_slice(array_reverse($log_lines), 0, 100);
+            if (defined('SITEPULSE_DEBUG_LOG') && is_readable(SITEPULSE_DEBUG_LOG)) {
+                $recent_logs = sitepulse_get_recent_log_lines(SITEPULSE_DEBUG_LOG, $log_max_lines, $log_max_bytes);
+
+                if (is_array($recent_logs) && !empty($recent_logs)) {
                     echo '<pre>' . esc_html(implode("\n", $recent_logs)) . '</pre>';
-                } else {
+                } elseif (is_array($recent_logs)) {
                     echo '<p>Le journal de débogage est actuellement vide.</p>';
+                } else {
+                    echo '<p>Fichier de log non trouvé ou illisible.</p>';
                 }
             } else {
                 echo '<p>Fichier de log non trouvé ou illisible.</p>';
