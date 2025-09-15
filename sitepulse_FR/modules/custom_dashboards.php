@@ -43,7 +43,8 @@ function custom_dashboards_page() {
             <!-- Speed Card -->
             <div class="sitepulse-card">
                 <?php
-                $ttfb = get_transient('sitepulse_speed_scan_results')['ttfb'] ?? 0;
+                $results = get_transient('sitepulse_speed_scan_results');
+                $ttfb = (is_array($results) && isset($results['ttfb'])) ? $results['ttfb'] : 0;
                 $ttfb_status = $ttfb > 500 ? 'status-bad' : ($ttfb > 200 ? 'status-warn' : 'status-ok');
                 ?>
                 <?php $ttfb_display = $ttfb ? round($ttfb) . ' ms' : 'N/A'; ?>
