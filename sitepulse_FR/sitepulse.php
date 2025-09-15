@@ -93,6 +93,8 @@ register_activation_hook(__FILE__, function() {
     add_option('sitepulse_active_modules', ['custom_dashboards']);
     add_option('sitepulse_debug_mode', false);
     add_option('sitepulse_gemini_api_key', '');
+    add_option('sitepulse_cpu_alert_threshold', 5);
+    add_option('sitepulse_alert_cooldown_minutes', 60);
 });
 
 /**

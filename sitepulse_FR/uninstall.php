@@ -17,11 +17,15 @@ $options = [
     'sitepulse_gemini_api_key',
     'sitepulse_uptime_log',
     'sitepulse_last_load_time',
+    'sitepulse_cpu_alert_threshold',
+    'sitepulse_alert_cooldown_minutes',
 ];
 
 $transients = [
     'sitepulse_speed_scan_results',
     'sitepulse_ai_insight',
+    'sitepulse_error_alert_cpu_lock',
+    'sitepulse_error_alert_php_fatal_lock',
 ];
 
 $cron_hooks = [
