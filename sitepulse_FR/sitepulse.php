@@ -104,14 +104,22 @@ function sitepulse_load_modules() {
     sitepulse_log('Loading active modules: ' . implode(', ', $active_modules));
     
     foreach ($active_modules as $module_key) {
-        if (array_key_exists($module_key, $modules) && file_exists(SITEPULSE_PATH . 'modules/' . $module_key . '.php')) {
-            try {
-                require_once SITEPULSE_PATH . 'modules/' . $module_key . '.php';
-            } catch (Exception $e) {
-                sitepulse_log("Error loading module $module_key: " . $e->getMessage(), 'ERROR');
-            }
-        } else {
+        if (!array_key_exists($module_key, $modules)) {
             sitepulse_log("Module $module_key not found or invalid", 'WARNING');
+            continue;
+        }
+
+        $module_path = SITEPULSE_PATH . 'modules/' . $module_key . '.php';
+
+        if (!is_readable($module_path)) {
+            sitepulse_log("Module file for $module_key is not readable: $module_path", 'ERROR');
+            continue;
+        }
+
+        $include_result = include_once $module_path;
+
+        if ($include_result === false) {
+            sitepulse_log("Failed to load module $module_key from $module_path", 'ERROR');
         }
     }
 }
