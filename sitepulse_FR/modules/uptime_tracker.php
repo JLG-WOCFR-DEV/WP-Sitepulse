@@ -12,14 +12,20 @@ function uptime_tracker_page() {
     <style> .uptime-chart { display: flex; gap: 2px; height: 60px; align-items: flex-end; } .uptime-bar { flex-grow: 1; } .uptime-bar.up { background-color: #4CAF50; } .uptime-bar.down { background-color: #F44336; } </style>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-chart-bar"></span> Suivi de Disponibilité</h1>
-        <p>Cet outil vérifie la disponibilité de votre site toutes les heures. Voici le statut des <?php echo $total_checks; ?> dernières vérifications.</p>
-        <h2>Disponibilité (<?php echo $total_checks; ?> dernières heures): <strong style="font-size: 1.4em;"><?php echo round($uptime_percentage, 2); ?>%</strong></h2>
+        <p>Cet outil vérifie la disponibilité de votre site toutes les heures. Voici le statut des <?php echo esc_html($total_checks); ?> dernières vérifications.</p>
+        <h2>Disponibilité (<?php echo esc_html($total_checks); ?> dernières heures): <strong style="font-size: 1.4em;"><?php echo esc_html(round($uptime_percentage, 2)); ?>%</strong></h2>
         <div class="uptime-chart">
             <?php if (empty($uptime_log)): ?><p>Aucune donnée de disponibilité. La première vérification aura lieu dans l'heure.</p><?php else: ?>
-                <?php foreach ($uptime_log as $index => $status): ?><div class="uptime-bar <?php echo $status ? 'up' : 'down'; ?>" title="<?php echo $status ? 'Site OK' : 'Site KO'; ?> lors du check #<?php echo $index + 1; ?>"></div><?php endforeach; ?>
+                <?php foreach ($uptime_log as $index => $status): ?>
+                    <?php
+                    $bar_class = $status ? 'up' : 'down';
+                    $bar_title = ($status ? 'Site OK' : 'Site KO') . ' lors du check #' . ($index + 1);
+                    ?>
+                    <div class="uptime-bar <?php echo esc_attr($bar_class); ?>" title="<?php echo esc_attr($bar_title); ?>"></div>
+                <?php endforeach; ?>
             <?php endif; ?>
         </div>
-        <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #555;"><span>Il y a <?php echo $total_checks; ?> heures</span><span>Maintenant</span></div>
+        <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #555;"><span>Il y a <?php echo esc_html($total_checks); ?> heures</span><span>Maintenant</span></div>
         <div class="notice notice-info" style="margin-top: 20px;"><p><strong>Comment ça marche :</strong> Une barre verte indique que votre site était en ligne. Une barre rouge indique un possible incident où votre site était inaccessible.</p></div>
     </div>
     <?php

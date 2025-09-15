@@ -182,13 +182,14 @@ function sitepulse_debug_page() {
                     <div class="postbox">
                         <h2 class="hndle"><span>Détails de l'Environnement</span></h2>
                         <div class="inside">
+                            <?php $active_modules_list = implode(', ', get_option('sitepulse_active_modules', [])); ?>
                             <ul>
-                                <li><strong>Version de SitePulse:</strong> <?php echo SITEPULSE_VERSION; ?></li>
-                                <li><strong>Version de WordPress:</strong> <?php echo get_bloginfo('version'); ?></li>
-                                <li><strong>Version de PHP:</strong> <?php echo PHP_VERSION; ?></li>
-                                <li><strong>Modules Actifs:</strong> <?php echo esc_html(implode(', ', get_option('sitepulse_active_modules', []))) ?: 'Aucun'; ?></li>
-                                <li><strong>WP Memory Limit:</strong> <?php echo WP_MEMORY_LIMIT; ?></li>
-                                <li><strong>Pic d'utilisation mémoire:</strong> <?php echo size_format(memory_get_peak_usage(true)); ?></li>
+                                <li><strong>Version de SitePulse:</strong> <?php echo esc_html(SITEPULSE_VERSION); ?></li>
+                                <li><strong>Version de WordPress:</strong> <?php echo esc_html(get_bloginfo('version')); ?></li>
+                                <li><strong>Version de PHP:</strong> <?php echo esc_html(PHP_VERSION); ?></li>
+                                <li><strong>Modules Actifs:</strong> <?php echo $active_modules_list ? esc_html($active_modules_list) : esc_html('Aucun'); ?></li>
+                                <li><strong>WP Memory Limit:</strong> <?php echo esc_html(WP_MEMORY_LIMIT); ?></li>
+                                <li><strong>Pic d'utilisation mémoire:</strong> <?php echo esc_html(size_format(memory_get_peak_usage(true))); ?></li>
                             </ul>
                         </div>
                     </div>
@@ -204,7 +205,8 @@ function sitepulse_debug_page() {
                                         foreach ($cron as $hook => $events) {
                                             if (strpos($hook, 'sitepulse') !== false) {
                                                 $has_sitepulse_cron = true;
-                                                echo '<li><strong>' . esc_html($hook) . '</strong> - Prochaine exécution: ' . get_date_from_gmt(date('Y-m-d H:i:s', $timestamp)) . '</li>';
+                                                $next_run = get_date_from_gmt(date('Y-m-d H:i:s', $timestamp));
+                                                echo '<li><strong>' . esc_html($hook) . '</strong> - Prochaine exécution: ' . esc_html($next_run) . '</li>';
                                             }
                                         }
                                     }

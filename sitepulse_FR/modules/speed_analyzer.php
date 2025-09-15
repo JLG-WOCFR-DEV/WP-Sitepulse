@@ -71,13 +71,13 @@ function sitepulse_speed_analyzer_page() {
                 <p>Ces métriques mesurent la vitesse à laquelle votre serveur exécute le code PHP et génère la page actuelle.</p>
                 <ul class="health-list">
                     <?php
-                        $gen_time_status = $page_generation_time < 1000 ? 'status-ok' : ($page_generation_time < 2000 ? 'status-warn' : 'status-bad');
-                        echo "<li>
-                                <span class='metric-name'>Temps de Génération de la Page</span>
-                                <span class='metric-value $gen_time_status'>" . round($page_generation_time) . " ms</span>
-                                <p class='description'>C'est le temps total que met votre serveur pour préparer cette page. Un temps élevé (>1s) peut indiquer un hébergement lent ou un plugin qui consomme beaucoup de ressources.</p>
-                              </li>";
+                    $gen_time_status = $page_generation_time < 1000 ? 'status-ok' : ($page_generation_time < 2000 ? 'status-warn' : 'status-bad');
                     ?>
+                    <li>
+                        <span class="metric-name">Temps de Génération de la Page</span>
+                        <span class="metric-value <?php echo esc_attr($gen_time_status); ?>"><?php echo esc_html(round($page_generation_time) . ' ms'); ?></span>
+                        <p class="description">C'est le temps total que met votre serveur pour préparer cette page. Un temps élevé (&gt;1s) peut indiquer un hébergement lent ou un plugin qui consomme beaucoup de ressources.</p>
+                    </li>
                 </ul>
             </div>
 
@@ -87,30 +87,34 @@ function sitepulse_speed_analyzer_page() {
                 <p>Analyse la communication entre WordPress et votre base de données pour cette page.</p>
                 <ul class="health-list">
                     <?php
-                        // Database Query Time Analysis
-                        if ($savequeries_enabled) {
-                            $db_time_status = $db_query_total_time < 500 ? 'status-ok' : 'status-bad';
-                            echo "<li>
-                                    <span class='metric-name'>Temps Total des Requêtes BDD</span>
-                                    <span class='metric-value $db_time_status'>" . round($db_query_total_time) . " ms</span>
-                                    <p class='description'>Le temps total passé à attendre la base de données. S'il est élevé, cela peut indiquer des requêtes complexes ou une base de données surchargée.</p>
-                                  </li>";
-                        } else {
-                            echo "<li>
-                                    <span class='metric-name'>Temps Total des Requêtes BDD</span>
-                                    <span class='metric-value status-warn'>N/A</span>
-                                    <p class='description'>Pour activer cette mesure, ajoutez <code>define('SAVEQUERIES', true);</code> à votre fichier <code>wp-config.php</code>. <strong>Note:</strong> N'utilisez ceci que pour le débogage, car cela peut ralentir votre site.</p>
-                                  </li>";
-                        }
+                    // Database Query Time Analysis
+                    if ($savequeries_enabled) {
+                        $db_time_status = $db_query_total_time < 500 ? 'status-ok' : 'status-bad';
+                        ?>
+                        <li>
+                            <span class="metric-name">Temps Total des Requêtes BDD</span>
+                            <span class="metric-value <?php echo esc_attr($db_time_status); ?>"><?php echo esc_html(round($db_query_total_time) . ' ms'); ?></span>
+                            <p class="description">Le temps total passé à attendre la base de données. S'il est élevé, cela peut indiquer des requêtes complexes ou une base de données surchargée.</p>
+                        </li>
+                        <?php
+                    } else {
+                        ?>
+                        <li>
+                            <span class="metric-name">Temps Total des Requêtes BDD</span>
+                            <span class="metric-value status-warn">N/A</span>
+                            <p class="description">Pour activer cette mesure, ajoutez <code>define('SAVEQUERIES', true);</code> à votre fichier <code>wp-config.php</code>. <strong>Note:</strong> N'utilisez ceci que pour le débogage, car cela peut ralentir votre site.</p>
+                        </li>
+                        <?php
+                    }
 
-                        // Database Query Count Analysis
-                        $db_count_status = $db_query_count < 100 ? 'status-ok' : ($db_query_count < 200 ? 'status-warn' : 'status-bad');
-                        echo "<li>
-                                <span class='metric-name'>Nombre de Requêtes BDD</span>
-                                <span class='metric-value $db_count_status'>$db_query_count</span>
-                                <p class='description'>Le nombre de fois que WordPress a interrogé la base de données. Un nombre élevé (>100) peut être le signe d'un plugin ou d'un thème mal optimisé.</p>
-                              </li>";
+                    // Database Query Count Analysis
+                    $db_count_status = $db_query_count < 100 ? 'status-ok' : ($db_query_count < 200 ? 'status-warn' : 'status-bad');
                     ?>
+                    <li>
+                        <span class="metric-name">Nombre de Requêtes BDD</span>
+                        <span class="metric-value <?php echo esc_attr($db_count_status); ?>"><?php echo esc_html($db_query_count); ?></span>
+                        <p class="description">Le nombre de fois que WordPress a interrogé la base de données. Un nombre élevé (&gt;100) peut être le signe d'un plugin ou d'un thème mal optimisé.</p>
+                    </li>
                 </ul>
             </div>
              <!-- Server Configuration Card -->
@@ -119,23 +123,24 @@ function sitepulse_speed_analyzer_page() {
                 <p>Des réglages serveur optimaux sont essentiels pour la performance.</p>
                 <ul class="health-list">
                     <?php
-                        // Object Cache Check
-                        $cache_status_class = $object_cache_active ? 'status-ok' : 'status-warn';
-                        $cache_text = $object_cache_active ? 'Actif' : 'Non Détecté';
-                        echo "<li>
-                                <span class='metric-name'>Object Cache</span>
-                                <span class='metric-value $cache_status_class'>$cache_text</span>
-                                <p class='description'>Un cache d'objets persistant (ex: Redis, Memcached) accélère énormément les requêtes répétitives. Fortement recommandé.</p>
-                              </li>";
-
-                        // PHP Version Check
-                        $php_status = version_compare($php_version, '8.0', '>=') ? 'status-ok' : 'status-warn';
-                        echo "<li>
-                                <span class='metric-name'>Version de PHP</span>
-                                <span class='metric-value $php_status'>$php_version</span>
-                                <p class='description'>Les versions modernes de PHP (8.0+) sont beaucoup plus rapides et sécurisées. Demandez à votre hébergeur de mettre à jour si nécessaire.</p>
-                              </li>";
+                    // Object Cache Check
+                    $cache_status_class = $object_cache_active ? 'status-ok' : 'status-warn';
+                    $cache_text = $object_cache_active ? 'Actif' : 'Non Détecté';
                     ?>
+                    <li>
+                        <span class="metric-name">Object Cache</span>
+                        <span class="metric-value <?php echo esc_attr($cache_status_class); ?>"><?php echo esc_html($cache_text); ?></span>
+                        <p class="description">Un cache d'objets persistant (ex: Redis, Memcached) accélère énormément les requêtes répétitives. Fortement recommandé.</p>
+                    </li>
+                    <?php
+                    // PHP Version Check
+                    $php_status = version_compare($php_version, '8.0', '>=') ? 'status-ok' : 'status-warn';
+                    ?>
+                    <li>
+                        <span class="metric-name">Version de PHP</span>
+                        <span class="metric-value <?php echo esc_attr($php_status); ?>"><?php echo esc_html($php_version); ?></span>
+                        <p class="description">Les versions modernes de PHP (8.0+) sont beaucoup plus rapides et sécurisées. Demandez à votre hébergeur de mettre à jour si nécessaire.</p>
+                    </li>
                 </ul>
             </div>
         </div>
