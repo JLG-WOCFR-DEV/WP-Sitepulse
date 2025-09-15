@@ -81,6 +81,10 @@ function sitepulse_sanitize_modules($input) {
  * Renders the settings page.
  */
 function sitepulse_settings_page() {
+    if (!current_user_can('manage_options')) {
+        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
+    }
+
     $modules = [
         'log_analyzer' => 'Log Analyzer', 'resource_monitor' => 'Resource Monitor', 'plugin_impact_scanner' => 'Plugin Impact Scanner',
         'speed_analyzer' => 'Speed Analyzer', 'database_optimizer' => 'Database Optimizer', 'maintenance_advisor' => 'Maintenance Advisor',
@@ -172,6 +176,10 @@ function sitepulse_settings_page() {
  * Renders the debug page.
  */
 function sitepulse_debug_page() {
+    if (!current_user_can('manage_options')) {
+        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
+    }
+
     ?>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-bug"></span> Debug Dashboard</h1>

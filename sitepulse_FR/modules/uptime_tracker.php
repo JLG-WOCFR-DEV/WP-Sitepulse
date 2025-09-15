@@ -4,6 +4,10 @@ add_action('admin_menu', function() { add_submenu_page('sitepulse-dashboard', 'U
 add_action('init', function() { if (!wp_next_scheduled('sitepulse_uptime_tracker_cron')) { wp_schedule_event(time(), 'hourly', 'sitepulse_uptime_tracker_cron'); } });
 add_action('sitepulse_uptime_tracker_cron', 'sitepulse_run_uptime_check');
 function uptime_tracker_page() {
+    if (!current_user_can('manage_options')) {
+        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
+    }
+
     $uptime_log = get_option('sitepulse_uptime_log', []);
     $total_checks = count($uptime_log);
     $up_checks = count(array_filter($uptime_log));
