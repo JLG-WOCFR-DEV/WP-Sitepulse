@@ -1,8 +1,18 @@
 <?php
 if (!defined('ABSPATH')) exit;
+
+$sitepulse_uptime_cron_hook = function_exists('sitepulse_get_cron_hook') ? sitepulse_get_cron_hook('uptime_tracker') : 'sitepulse_uptime_tracker_cron';
+
 add_action('admin_menu', function() { add_submenu_page('sitepulse-dashboard', 'Uptime Tracker', 'Uptime', 'manage_options', 'sitepulse-uptime', 'uptime_tracker_page'); });
-add_action('init', function() { if (!wp_next_scheduled('sitepulse_uptime_tracker_cron')) { wp_schedule_event(time(), 'hourly', 'sitepulse_uptime_tracker_cron'); } });
-add_action('sitepulse_uptime_tracker_cron', 'sitepulse_run_uptime_check');
+
+if (!empty($sitepulse_uptime_cron_hook)) {
+    add_action('init', function() use ($sitepulse_uptime_cron_hook) {
+        if (!wp_next_scheduled($sitepulse_uptime_cron_hook)) {
+            wp_schedule_event(time(), 'hourly', $sitepulse_uptime_cron_hook);
+        }
+    });
+    add_action($sitepulse_uptime_cron_hook, 'sitepulse_run_uptime_check');
+}
 function uptime_tracker_page() {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));

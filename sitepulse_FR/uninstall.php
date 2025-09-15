@@ -28,11 +28,10 @@ $transients = [
     'sitepulse_error_alert_php_fatal_lock',
 ];
 
-$cron_hooks = [
-    'sitepulse_uptime_tracker_cron',
-    'sitepulse_resource_monitor_cron',
-    'sitepulse_log_analyzer_cron',
-];
+$cron_hooks = require __DIR__ . '/includes/cron-hooks.php';
+if (!is_array($cron_hooks)) {
+    $cron_hooks = [];
+}
 
 /**
  * Removes plugin data for a single site.
