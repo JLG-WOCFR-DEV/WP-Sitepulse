@@ -5,11 +5,22 @@ function database_optimizer_page() {
     global $wpdb;
     if (isset($_POST['db_cleanup_nonce']) && wp_verify_nonce($_POST['db_cleanup_nonce'], 'db_cleanup')) {
         if (isset($_POST['clean_revisions'])) {
-            $cleaned = $wpdb->query("DELETE FROM $wpdb->posts WHERE post_type = 'revision'");
+            // Requête statique : aucun paramètre dynamique n'est interpolé dans la suppression.
+            $cleaned = $wpdb->delete(
+                $wpdb->posts,
+                array('post_type' => 'revision')
+            );
             echo '<div class="notice notice-success is-dismissible"><p>' . (int)$cleaned . ' révisions d\'articles ont été supprimées.</p></div>';
         }
         if (isset($_POST['clean_transients'])) {
-            $cleaned = $wpdb->query("DELETE FROM $wpdb->options WHERE option_name LIKE '_transient_%' OR option_name LIKE '_site_transient_%'");
+            // Requête statique : les motifs LIKE sont définis en dur sans donnée externe.
+            $cleaned = $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
+                    $wpdb->esc_like('_transient_') . '%',
+                    $wpdb->esc_like('_site_transient_') . '%'
+                )
+            );
             echo '<div class="notice notice-success is-dismissible"><p>' . (int)$cleaned . ' transients expirés ont été supprimés.</p></div>';
         }
     }
