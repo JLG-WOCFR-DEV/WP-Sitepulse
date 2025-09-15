@@ -108,16 +108,20 @@ if (!empty($sitepulse_log_analyzer_cron_hook)) {
             return;
         }
 
-        $contents = file_get_contents($log_file);
-        if ($contents === false) {
+        $recent_log_lines = sitepulse_get_recent_log_lines($log_file, 250, 65536);
+
+        if ($recent_log_lines === null) {
             if (function_exists('sitepulse_log')) {
                 sitepulse_log('Impossible de lire debug.log pour l’analyse des erreurs.', 'ERROR');
             }
             return;
         }
 
-        if (stripos($contents, 'PHP Fatal error') !== false) {
-            sitepulse_error_alert_send('php_fatal', 'Alerte SitePulse: Erreur Fatale Détectée', 'Vérifiez le fichier debug.log pour les détails.');
+        foreach ($recent_log_lines as $log_line) {
+            if (stripos($log_line, 'PHP Fatal error') !== false) {
+                sitepulse_error_alert_send('php_fatal', 'Alerte SitePulse: Erreur Fatale Détectée', 'Vérifiez le fichier debug.log pour les détails.');
+                break;
+            }
         }
     });
 }
