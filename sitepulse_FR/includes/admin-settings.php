@@ -10,6 +10,43 @@
 if (!defined('ABSPATH')) exit;
 
 /**
+ * Wrapper for the main SitePulse dashboard page.
+ *
+ * Ensures that the menu callback registered via {@see add_menu_page()} is always
+ * available, even when the Custom Dashboards module is disabled. When the module
+ * is active the actual module output is rendered, otherwise an informative
+ * notice is displayed with guidance on how to enable the feature.
+ */
+function sitepulse_render_dashboard_page() {
+    if (!current_user_can('manage_options')) {
+        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
+    }
+
+    if (function_exists('sitepulse_custom_dashboards_page')) {
+        sitepulse_custom_dashboards_page();
+        return;
+    }
+
+    $active_modules = (array) get_option('sitepulse_active_modules', []);
+    $is_dashboard_enabled = in_array('custom_dashboards', $active_modules, true);
+    $settings_url = admin_url('admin.php?page=sitepulse-settings');
+
+    if ($is_dashboard_enabled) {
+        $notice = __('Le module de tableau de bord est activé mais son rendu est indisponible. Vérifiez les fichiers du plugin ou les journaux d’erreurs.', 'sitepulse');
+    } else {
+        $notice = sprintf(
+            __('Le module de tableau de bord est désactivé. Activez-le depuis les <a href="%s">réglages de SitePulse</a>.', 'sitepulse'),
+            esc_url($settings_url)
+        );
+    }
+
+    echo '<div class="wrap">';
+    echo '<h1>' . esc_html__('SitePulse Dashboard', 'sitepulse') . '</h1>';
+    echo '<div class="notice notice-warning"><p>' . wp_kses_post($notice) . '</p></div>';
+    echo '</div>';
+}
+
+/**
  * Registers all the SitePulse admin menu and submenu pages.
  */
 function sitepulse_admin_menu() {
@@ -18,7 +55,7 @@ function sitepulse_admin_menu() {
         'Sitepulse - JLG',
         'manage_options',
         'sitepulse-dashboard',
-        'sitepulse_custom_dashboards_page',
+        'sitepulse_render_dashboard_page',
         'dashicons-chart-area',
         30
     );
