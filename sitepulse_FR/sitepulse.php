@@ -19,6 +19,156 @@ $debug_mode = get_option('sitepulse_debug_mode', false);
 define('SITEPULSE_DEBUG', (bool) $debug_mode);
 define('SITEPULSE_DEBUG_LOG', WP_CONTENT_DIR . '/sitepulse-debug.log');
 
+define('SITEPULSE_PLUGIN_IMPACT_OPTION', 'sitepulse_plugin_impact_stats');
+define('SITEPULSE_PLUGIN_IMPACT_REFRESH_INTERVAL', 15 * MINUTE_IN_SECONDS);
+
+$sitepulse_plugin_impact_tracker_last_tick = microtime(true);
+$sitepulse_plugin_impact_tracker_samples = [];
+$sitepulse_plugin_impact_tracker_force_persist = false;
+
+add_action('plugin_loaded', 'sitepulse_plugin_impact_tracker_on_plugin_loaded', PHP_INT_MAX, 1);
+add_action('shutdown', 'sitepulse_plugin_impact_tracker_persist', PHP_INT_MAX);
+
+/**
+ * Records the elapsed time between plugin loading operations.
+ *
+ * The measurement is taken when the {@see 'plugin_loaded'} action fires for
+ * each plugin. The recorded value represents the time elapsed since the last
+ * plugin finished loading, which approximates the cost of loading the current
+ * plugin.
+ *
+ * @param string $plugin_file Relative path to the plugin file.
+ *
+ * @return void
+ */
+function sitepulse_plugin_impact_tracker_on_plugin_loaded($plugin_file) {
+    global $sitepulse_plugin_impact_tracker_last_tick, $sitepulse_plugin_impact_tracker_samples;
+
+    if (!is_string($plugin_file) || $plugin_file === '') {
+        return;
+    }
+
+    $now = microtime(true);
+
+    if (!is_float($sitepulse_plugin_impact_tracker_last_tick)) {
+        $sitepulse_plugin_impact_tracker_last_tick = isset($_SERVER['REQUEST_TIME_FLOAT'])
+            ? (float) $_SERVER['REQUEST_TIME_FLOAT']
+            : $now;
+    }
+
+    $elapsed = max(0.0, $now - $sitepulse_plugin_impact_tracker_last_tick);
+    $sitepulse_plugin_impact_tracker_samples[$plugin_file] = $elapsed;
+    $sitepulse_plugin_impact_tracker_last_tick = $now;
+}
+
+/**
+ * Persists the collected plugin load measurements when appropriate.
+ *
+ * Data is stored at most once per {@see SITEPULSE_PLUGIN_IMPACT_REFRESH_INTERVAL}
+ * unless a manual refresh is requested. A moving average is kept for each
+ * plugin so that transient spikes have less impact on the reported duration.
+ *
+ * @return void
+ */
+function sitepulse_plugin_impact_tracker_persist() {
+    global $sitepulse_plugin_impact_tracker_samples, $sitepulse_plugin_impact_tracker_force_persist;
+
+    if (empty($sitepulse_plugin_impact_tracker_samples) || !is_array($sitepulse_plugin_impact_tracker_samples)) {
+        return;
+    }
+
+    $option_key = SITEPULSE_PLUGIN_IMPACT_OPTION;
+    $existing = get_option($option_key, []);
+    $now = time();
+
+    if (!is_array($existing)) {
+        $existing = [];
+    }
+
+    $interval = apply_filters('sitepulse_plugin_impact_refresh_interval', SITEPULSE_PLUGIN_IMPACT_REFRESH_INTERVAL);
+    $last_updated = isset($existing['last_updated']) ? (int) $existing['last_updated'] : 0;
+
+    if (!$sitepulse_plugin_impact_tracker_force_persist && ($now - $last_updated) < $interval) {
+        return;
+    }
+
+    if (!function_exists('get_plugins')) {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+
+    $all_plugins = function_exists('get_plugins') ? get_plugins() : [];
+    $samples = isset($existing['samples']) && is_array($existing['samples']) ? $existing['samples'] : [];
+
+    foreach ($sitepulse_plugin_impact_tracker_samples as $plugin_file => $duration) {
+        if (!is_string($plugin_file) || $plugin_file === '') {
+            continue;
+        }
+
+        $milliseconds = max(0.0, (float) $duration * 1000);
+        $plugin_name = isset($all_plugins[$plugin_file]['Name']) ? $all_plugins[$plugin_file]['Name'] : $plugin_file;
+
+        if (isset($samples[$plugin_file]) && is_array($samples[$plugin_file])) {
+            $count = isset($samples[$plugin_file]['samples']) ? max(1, (int) $samples[$plugin_file]['samples']) : 1;
+            $average = isset($samples[$plugin_file]['avg_ms']) ? (float) $samples[$plugin_file]['avg_ms'] : $milliseconds;
+            $new_count = $count + 1;
+            $samples[$plugin_file]['avg_ms'] = ($average * $count + $milliseconds) / $new_count;
+            $samples[$plugin_file]['samples'] = $new_count;
+            $samples[$plugin_file]['last_ms'] = $milliseconds;
+            $samples[$plugin_file]['name'] = $plugin_name;
+            $samples[$plugin_file]['last_recorded'] = $now;
+        } else {
+            $samples[$plugin_file] = [
+                'file'          => $plugin_file,
+                'name'          => $plugin_name,
+                'avg_ms'        => $milliseconds,
+                'last_ms'       => $milliseconds,
+                'samples'       => 1,
+                'last_recorded' => $now,
+            ];
+        }
+    }
+
+    $active_plugins = get_option('active_plugins');
+
+    if (is_array($active_plugins)) {
+        $active_plugins = array_map('strval', $active_plugins);
+
+        foreach ($samples as $plugin_file => $data) {
+            if (!in_array($plugin_file, $active_plugins, true)) {
+                unset($samples[$plugin_file]);
+            }
+        }
+    }
+
+    $payload = [
+        'last_updated' => $now,
+        'interval'     => $interval,
+        'samples'      => $samples,
+    ];
+
+    update_option($option_key, $payload, false);
+}
+
+/**
+ * Forces the persistence of fresh measurements at the end of the current request.
+ *
+ * When $reset_existing is true the stored aggregate is cleared so that the next
+ * persistence cycle starts with a clean slate.
+ *
+ * @param bool $reset_existing Whether to remove previous measurements.
+ *
+ * @return void
+ */
+function sitepulse_plugin_impact_force_next_persist($reset_existing = false) {
+    global $sitepulse_plugin_impact_tracker_force_persist;
+
+    $sitepulse_plugin_impact_tracker_force_persist = true;
+
+    if ($reset_existing) {
+        delete_option(SITEPULSE_PLUGIN_IMPACT_OPTION);
+    }
+}
+
 /**
  * Returns the list of cron hook identifiers used across SitePulse modules.
  *
