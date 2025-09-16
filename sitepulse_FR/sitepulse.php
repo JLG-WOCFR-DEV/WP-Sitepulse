@@ -202,6 +202,40 @@ function sitepulse_get_cron_hook($module_key) {
 }
 
 /**
+ * Handles module activation option changes by removing orphaned cron events.
+ *
+ * The {@see 'update_option_sitepulse_active_modules'} action provides both the
+ * old and new module lists. By comparing them we can detect which modules were
+ * deactivated and clean up any scheduled events tied to those modules.
+ *
+ * @param mixed       $old_value Previous option value.
+ * @param mixed       $value     New option value.
+ * @param string|null $option    Option name (unused).
+ *
+ * @return void
+ */
+function sitepulse_handle_module_changes($old_value, $value, $option = null) {
+    $old_modules = is_array($old_value) ? array_values(array_unique(array_map('strval', $old_value))) : [];
+    $new_modules = is_array($value) ? array_values(array_unique(array_map('strval', $value))) : [];
+
+    if (empty($old_modules)) {
+        return;
+    }
+
+    $removed_modules = array_diff($old_modules, $new_modules);
+
+    foreach ($removed_modules as $module) {
+        $hook = sitepulse_get_cron_hook($module);
+
+        if (is_string($hook) && $hook !== '') {
+            wp_clear_scheduled_hook($hook);
+        }
+    }
+}
+
+add_action('update_option_sitepulse_active_modules', 'sitepulse_handle_module_changes', 10, 3);
+
+/**
  * Schedules an admin notice to report SitePulse debug errors.
  *
  * @param string $message The notice body.
