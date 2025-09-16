@@ -10,8 +10,21 @@ function resource_monitor_page() {
     $load_display = implode(' / ', array_map('strval', $load));
     $memory_usage = size_format(memory_get_usage());
     $memory_limit = ini_get('memory_limit');
-    $disk_free = size_format(disk_free_space(ABSPATH));
-    $disk_total = size_format(disk_total_space(ABSPATH));
+    $disk_free = 'N/A';
+    if (function_exists('disk_free_space')) {
+        $free_space = @disk_free_space(ABSPATH);
+        if ($free_space !== false) {
+            $disk_free = size_format($free_space);
+        }
+    }
+
+    $disk_total = 'N/A';
+    if (function_exists('disk_total_space')) {
+        $total_space = @disk_total_space(ABSPATH);
+        if ($total_space !== false) {
+            $disk_total = size_format($total_space);
+        }
+    }
     ?>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-performance"></span> Moniteur de Ressources</h1>
