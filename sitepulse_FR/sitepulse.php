@@ -17,7 +17,25 @@ define('SITEPULSE_PATH', plugin_dir_path(__FILE__));
 define('SITEPULSE_URL', plugin_dir_url(__FILE__));
 $debug_mode = get_option('sitepulse_debug_mode', false);
 define('SITEPULSE_DEBUG', (bool) $debug_mode);
-define('SITEPULSE_DEBUG_LOG', WP_CONTENT_DIR . '/sitepulse-debug.log');
+
+if (!function_exists('wp_mkdir_p')) {
+    require_once ABSPATH . 'wp-admin/includes/file.php';
+}
+
+$sitepulse_upload_dir    = wp_upload_dir();
+$sitepulse_debug_basedir = WP_CONTENT_DIR;
+
+if (is_array($sitepulse_upload_dir) && empty($sitepulse_upload_dir['error']) && !empty($sitepulse_upload_dir['basedir'])) {
+    $sitepulse_debug_basedir = $sitepulse_upload_dir['basedir'];
+}
+
+$sitepulse_debug_directory = rtrim($sitepulse_debug_basedir, '/\\') . '/sitepulse';
+
+if (function_exists('wp_mkdir_p') && !is_dir($sitepulse_debug_directory)) {
+    wp_mkdir_p($sitepulse_debug_directory);
+}
+
+define('SITEPULSE_DEBUG_LOG', rtrim($sitepulse_debug_directory, '/\\') . '/sitepulse-debug.log');
 
 define('SITEPULSE_PLUGIN_IMPACT_OPTION', 'sitepulse_plugin_impact_stats');
 define('SITEPULSE_PLUGIN_IMPACT_REFRESH_INTERVAL', 15 * MINUTE_IN_SECONDS);
@@ -302,6 +320,31 @@ function sitepulse_log($message, $level = 'INFO') {
         sitepulse_schedule_debug_admin_notice($error_message);
 
         return;
+    }
+
+    static $sitepulse_log_protection_initialized = false;
+
+    if (!$sitepulse_log_protection_initialized) {
+        $sitepulse_log_protection_initialized = true;
+        $normalized_log_dir = rtrim($log_dir, '/\\');
+        $protection_targets = [
+            $normalized_log_dir . '/.htaccess' => "# Protect SitePulse debug logs\n<IfModule mod_authz_core.c>\n    Require all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n    Order deny,allow\n    Deny from all\n</IfModule>\n",
+            $normalized_log_dir . '/web.config'  => "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<configuration>\n    <system.webServer>\n        <security>\n            <authorization>\n                <deny users=\"*\" />\n            </authorization>\n        </security>\n    </system.webServer>\n</configuration>\n",
+        ];
+
+        foreach ($protection_targets as $path => $contents) {
+            if (file_exists($path)) {
+                continue;
+            }
+
+            $written = file_put_contents($path, $contents, LOCK_EX);
+
+            if ($written === false) {
+                $error_message = sprintf('SitePulse: unable to write protection file (%s).', $path);
+                error_log($error_message);
+                sitepulse_schedule_debug_admin_notice($error_message);
+            }
+        }
     }
 
     $timestamp  = date('Y-m-d H:i:s');
