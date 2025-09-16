@@ -1,7 +1,7 @@
 <?php
 if (!defined('ABSPATH')) exit;
-add_action('admin_menu', function() { add_submenu_page('sitepulse-dashboard', 'Maintenance Advisor', 'Maintenance', 'manage_options', 'sitepulse-maintenance', 'maintenance_advisor_page'); });
-function maintenance_advisor_page() {
+add_action('admin_menu', function() { add_submenu_page('sitepulse-dashboard', 'Maintenance Advisor', 'Maintenance', 'manage_options', 'sitepulse-maintenance', 'sitepulse_maintenance_advisor_page'); });
+function sitepulse_maintenance_advisor_page() {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }

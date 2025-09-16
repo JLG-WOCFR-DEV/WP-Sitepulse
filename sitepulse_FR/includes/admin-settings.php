@@ -18,7 +18,7 @@ function sitepulse_admin_menu() {
         'Sitepulse - JLG',
         'manage_options',
         'sitepulse-dashboard',
-        'custom_dashboards_page',
+        'sitepulse_custom_dashboards_page',
         'dashicons-chart-area',
         30
     );

@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) exit; // Exit if accessed directly.
  * Note: The menu registration for this page is now handled in 'admin-settings.php'
  * to prevent conflicts and duplicate menus.
  */
-function custom_dashboards_page() {
+function sitepulse_custom_dashboards_page() {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
