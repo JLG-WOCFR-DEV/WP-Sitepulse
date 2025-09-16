@@ -310,7 +310,10 @@ function sitepulse_settings_page() {
                 </tr>
                 <tr>
                     <th scope="row"><label>Réinitialiser le plugin</label></th>
-                    <td><input type="submit" name="sitepulse_reset_all" value="Tout réinitialiser" class="button button-danger" onclick="return confirm('Êtes-vous sûr ?');"><p class="description">Réinitialise SitePulse à son état d'installation initial.</p></td>
+                    <td>
+                        <input type="submit" name="sitepulse_reset_all" value="Tout réinitialiser" class="button button-danger" onclick="return confirm('Êtes-vous sûr ?');">
+                        <p class="description">Réinitialise SitePulse à son état d'installation initial.</p>
+                    </td>
                 </tr>
             </table>
         </form>
