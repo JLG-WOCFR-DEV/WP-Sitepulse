@@ -1,7 +1,7 @@
 <?php
 if (!defined('ABSPATH')) exit;
-add_action('admin_menu', function() { add_submenu_page('sitepulse-dashboard', 'AI Insights', 'AI Insights', 'manage_options', 'sitepulse-ai', 'ai_insights_page'); });
-function ai_insights_page() {
+add_action('admin_menu', function() { add_submenu_page('sitepulse-dashboard', 'AI Insights', 'AI Insights', 'manage_options', 'sitepulse-ai', 'sitepulse_ai_insights_page'); });
+function sitepulse_ai_insights_page() {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
