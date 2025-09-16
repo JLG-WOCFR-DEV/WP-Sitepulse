@@ -202,7 +202,47 @@ function sitepulse_get_cron_hook($module_key) {
 }
 
 /**
+ * Schedules an admin notice to report SitePulse debug errors.
+ *
+ * @param string $message The notice body.
+ * @param string $type    The notice type (error, warning, info, success).
+ *
+ * @return void
+ */
+function sitepulse_schedule_debug_admin_notice($message, $type = 'error') {
+    if (!SITEPULSE_DEBUG || !function_exists('add_action') || !function_exists('is_admin') || !is_admin()) {
+        return;
+    }
+
+    static $displayed_messages = [];
+
+    if (isset($displayed_messages[$message])) {
+        return;
+    }
+
+    $displayed_messages[$message] = true;
+
+    $allowed_types = ['error', 'warning', 'info', 'success'];
+    $type          = in_array($type, $allowed_types, true) ? $type : 'error';
+    $class         = 'notice notice-' . $type;
+
+    add_action('admin_notices', function () use ($message, $class) {
+        if (!function_exists('esc_attr') || !function_exists('esc_html')) {
+            return;
+        }
+
+        printf('<div class="%s"><p>%s</p></div>', esc_attr($class), esc_html($message));
+    });
+}
+
+/**
  * Logging function for debugging purposes.
+ *
+ * Writes SitePulse debug entries to a dedicated log file when debug mode is enabled.
+ *
+ * Failure cases:
+ * - Returns without writing when the log directory does not exist or lacks write permissions.
+ * - Emits a PHP error log entry and schedules an admin notice when rotation or file writes fail.
  *
  * @param string $message The message to log.
  * @param string $level   The log level (e.g., INFO, WARNING, ERROR).
@@ -212,19 +252,53 @@ function sitepulse_log($message, $level = 'INFO') {
         return;
     }
 
+    $log_dir = dirname(SITEPULSE_DEBUG_LOG);
+
+    if (!is_dir($log_dir)) {
+        $error_message = sprintf('SitePulse: debug log directory does not exist (%s).', $log_dir);
+        error_log($error_message);
+        sitepulse_schedule_debug_admin_notice($error_message);
+
+        return;
+    }
+
+    if (!is_writable($log_dir)) {
+        $error_message = sprintf('SitePulse: debug log directory is not writable (%s).', $log_dir);
+        error_log($error_message);
+        sitepulse_schedule_debug_admin_notice($error_message);
+
+        return;
+    }
+
     $timestamp  = date('Y-m-d H:i:s');
     $log_entry  = "[$timestamp] [$level] $message\n";
     $max_size   = 5 * 1024 * 1024; // 5 MB
 
-    if (file_exists(SITEPULSE_DEBUG_LOG) && filesize(SITEPULSE_DEBUG_LOG) > $max_size) {
-        $archive = SITEPULSE_DEBUG_LOG . '.' . time();
-        @rename(SITEPULSE_DEBUG_LOG, $archive);
+    if (file_exists(SITEPULSE_DEBUG_LOG)) {
+        if (!is_writable(SITEPULSE_DEBUG_LOG)) {
+            $error_message = sprintf('SitePulse: debug log file is not writable (%s).', SITEPULSE_DEBUG_LOG);
+            error_log($error_message);
+            sitepulse_schedule_debug_admin_notice($error_message);
+
+            return;
+        }
+
+        if (filesize(SITEPULSE_DEBUG_LOG) > $max_size) {
+            $archive = SITEPULSE_DEBUG_LOG . '.' . time();
+            if (!rename(SITEPULSE_DEBUG_LOG, $archive)) {
+                $error_message = sprintf('SitePulse: unable to rotate debug log file (%s).', SITEPULSE_DEBUG_LOG);
+                error_log($error_message);
+                sitepulse_schedule_debug_admin_notice($error_message);
+            }
+        }
     }
 
-    $result = @file_put_contents(SITEPULSE_DEBUG_LOG, $log_entry, FILE_APPEND | LOCK_EX);
+    $result = file_put_contents(SITEPULSE_DEBUG_LOG, $log_entry, FILE_APPEND | LOCK_EX);
 
     if ($result === false) {
-        error_log(sprintf('SitePulse: unable to write to debug log file (%s).', SITEPULSE_DEBUG_LOG));
+        $error_message = sprintf('SitePulse: unable to write to debug log file (%s).', SITEPULSE_DEBUG_LOG);
+        error_log($error_message);
+        sitepulse_schedule_debug_admin_notice($error_message);
     }
 }
 sitepulse_log('SitePulse loaded. Version: ' . SITEPULSE_VERSION);
