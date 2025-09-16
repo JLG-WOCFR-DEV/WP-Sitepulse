@@ -3,8 +3,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-$sitepulse_resource_monitor_cron_hook = function_exists('sitepulse_get_cron_hook') ? sitepulse_get_cron_hook('resource_monitor') : 'sitepulse_resource_monitor_cron';
-$sitepulse_log_analyzer_cron_hook    = function_exists('sitepulse_get_cron_hook') ? sitepulse_get_cron_hook('log_analyzer') : 'sitepulse_log_analyzer_cron';
+$sitepulse_error_alerts_cron_hook = function_exists('sitepulse_get_cron_hook') ? sitepulse_get_cron_hook('error_alerts') : 'sitepulse_error_alerts_cron';
+$sitepulse_error_alerts_schedule   = 'sitepulse_error_alerts_five_minutes';
 
 /**
  * Returns the configured CPU load threshold for alerting.
@@ -78,50 +78,120 @@ function sitepulse_error_alert_send($type, $subject, $message) {
     return $sent;
 }
 
-if (!empty($sitepulse_resource_monitor_cron_hook)) {
-    add_action($sitepulse_resource_monitor_cron_hook, function() {
-        if (!function_exists('sys_getloadavg')) {
-            if (function_exists('sitepulse_log')) {
-                sitepulse_log('sys_getloadavg is unavailable; CPU alert skipped.', 'WARNING');
-            }
-            return;
+/**
+ * Registers the cron schedule used by the error alerts module.
+ *
+ * @param array $schedules Existing cron schedules.
+ *
+ * @return array Modified cron schedules.
+ */
+function sitepulse_error_alerts_register_cron_schedule($schedules) {
+    global $sitepulse_error_alerts_schedule;
+
+    $schedule_slug = is_string($sitepulse_error_alerts_schedule) && $sitepulse_error_alerts_schedule !== ''
+        ? $sitepulse_error_alerts_schedule
+        : 'sitepulse_error_alerts_five_minutes';
+
+    if (!isset($schedules[$schedule_slug])) {
+        $minute_in_seconds = defined('MINUTE_IN_SECONDS') ? MINUTE_IN_SECONDS : 60;
+        $default_interval  = 5 * $minute_in_seconds;
+        $interval          = (int) apply_filters('sitepulse_error_alerts_cron_interval_seconds', $default_interval);
+
+        if ($interval < $minute_in_seconds) {
+            $interval = $default_interval;
         }
 
-        $load = sys_getloadavg();
-        if (!is_array($load) || !isset($load[0])) {
-            return;
-        }
+        $schedules[$schedule_slug] = [
+            'interval' => $interval,
+            'display'  => __('SitePulse Error Alerts (Every Five Minutes)', 'sitepulse'),
+        ];
+    }
 
-        $threshold = sitepulse_error_alert_get_cpu_threshold();
-
-        if ((float) $load[0] > $threshold) {
-            $message  = "La charge actuelle est de : " . $load[0] . " (seuil : " . $threshold . ")";
-            sitepulse_error_alert_send('cpu', 'Alerte SitePulse: Charge Serveur Élevée', $message);
-        }
-    });
+    return $schedules;
 }
 
-if (!empty($sitepulse_log_analyzer_cron_hook)) {
-    add_action($sitepulse_log_analyzer_cron_hook, function() {
-        $log_file = WP_CONTENT_DIR . '/debug.log';
-        if (!file_exists($log_file) || !is_readable($log_file)) {
-            return;
+/**
+ * Triggers all error alert checks when the cron event runs.
+ *
+ * @return void
+ */
+function sitepulse_error_alerts_run_checks() {
+    sitepulse_error_alerts_check_cpu_load();
+    sitepulse_error_alerts_check_debug_log();
+}
+
+/**
+ * Evaluates the server load and sends an alert when the threshold is exceeded.
+ *
+ * @return void
+ */
+function sitepulse_error_alerts_check_cpu_load() {
+    if (!function_exists('sys_getloadavg')) {
+        if (function_exists('sitepulse_log')) {
+            sitepulse_log('sys_getloadavg is unavailable; CPU alert skipped.', 'WARNING');
         }
 
-        $recent_log_lines = sitepulse_get_recent_log_lines($log_file, 250, 65536);
+        return;
+    }
 
-        if ($recent_log_lines === null) {
-            if (function_exists('sitepulse_log')) {
-                sitepulse_log('Impossible de lire debug.log pour l’analyse des erreurs.', 'ERROR');
-            }
-            return;
+    $load = sys_getloadavg();
+    if (!is_array($load) || !isset($load[0])) {
+        return;
+    }
+
+    $threshold = sitepulse_error_alert_get_cpu_threshold();
+
+    if ((float) $load[0] > $threshold) {
+        $message = "La charge actuelle est de : " . $load[0] . " (seuil : " . $threshold . ")";
+        sitepulse_error_alert_send('cpu', 'Alerte SitePulse: Charge Serveur Élevée', $message);
+    }
+}
+
+/**
+ * Scans the WordPress debug log to detect fatal errors.
+ *
+ * @return void
+ */
+function sitepulse_error_alerts_check_debug_log() {
+    $log_file = WP_CONTENT_DIR . '/debug.log';
+    if (!file_exists($log_file) || !is_readable($log_file)) {
+        return;
+    }
+
+    if (!function_exists('sitepulse_get_recent_log_lines')) {
+        if (function_exists('sitepulse_log')) {
+            sitepulse_log('sitepulse_get_recent_log_lines() is unavailable; log scan skipped.', 'ERROR');
         }
 
-        foreach ($recent_log_lines as $log_line) {
-            if (stripos($log_line, 'PHP Fatal error') !== false) {
-                sitepulse_error_alert_send('php_fatal', 'Alerte SitePulse: Erreur Fatale Détectée', 'Vérifiez le fichier debug.log pour les détails.');
-                break;
-            }
+        return;
+    }
+
+    $recent_log_lines = sitepulse_get_recent_log_lines($log_file, 250, 65536);
+
+    if ($recent_log_lines === null) {
+        if (function_exists('sitepulse_log')) {
+            sitepulse_log('Impossible de lire debug.log pour l’analyse des erreurs.', 'ERROR');
+        }
+
+        return;
+    }
+
+    foreach ($recent_log_lines as $log_line) {
+        if (stripos($log_line, 'PHP Fatal error') !== false) {
+            sitepulse_error_alert_send('php_fatal', 'Alerte SitePulse: Erreur Fatale Détectée', 'Vérifiez le fichier debug.log pour les détails.');
+            break;
+        }
+    }
+}
+
+if (!empty($sitepulse_error_alerts_cron_hook)) {
+    add_filter('cron_schedules', 'sitepulse_error_alerts_register_cron_schedule');
+
+    add_action('init', function () use ($sitepulse_error_alerts_cron_hook, $sitepulse_error_alerts_schedule) {
+        if (!wp_next_scheduled($sitepulse_error_alerts_cron_hook)) {
+            wp_schedule_event(time(), $sitepulse_error_alerts_schedule, $sitepulse_error_alerts_cron_hook);
         }
     });
+
+    add_action($sitepulse_error_alerts_cron_hook, 'sitepulse_error_alerts_run_checks');
 }
