@@ -131,8 +131,33 @@ function sitepulse_get_recent_log_lines($file_path, $max_lines = 100, $max_bytes
         return null;
     }
 
-    $handle = @fopen($file_path, 'rb');
+    $fopen_error = null;
+    set_error_handler(function ($errno, $errstr) use (&$fopen_error) {
+        $fopen_error = $errstr;
+
+        return true;
+    });
+
+    try {
+        $handle = fopen($file_path, 'rb');
+    } catch (\Throwable $exception) {
+        $fopen_error = $exception->getMessage();
+        $handle = false;
+    } finally {
+        restore_error_handler();
+    }
+
     if (!$handle) {
+        if (function_exists('sitepulse_log')) {
+            $message = sprintf('Failed to open log file for reading: %s', $file_path);
+
+            if (is_string($fopen_error) && $fopen_error !== '') {
+                $message .= ' | Error: ' . $fopen_error;
+            }
+
+            sitepulse_log($message, 'ERROR');
+        }
+
         return null;
     }
 
