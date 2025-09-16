@@ -75,7 +75,7 @@ function sitepulse_sanitize_modules($input) {
     $sanitized = [];
     if (is_array($input)) {
         foreach ($input as $key) {
-            if (in_array($key, $valid_keys)) {
+            if (in_array($key, $valid_keys, true)) {
                 $sanitized[] = $key;
             }
         }
