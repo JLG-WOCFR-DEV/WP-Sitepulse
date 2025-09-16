@@ -28,7 +28,8 @@ function sitepulse_speed_analyzer_page() {
 
     // 1. Page Generation Time (Backend processing)
     // **FIX:** Replaced timer_stop() with a direct microtime calculation to prevent non-numeric value warnings in specific environments.
-    $page_generation_time = (microtime(true) - $GLOBALS['timestart']) * 1000; // in milliseconds
+    $timestart = isset($GLOBALS['timestart']) ? $GLOBALS['timestart'] : microtime(true);
+    $page_generation_time = (microtime(true) - $timestart) * 1000; // in milliseconds
 
     // 2. Database Query Time & Count
     $db_query_total_time = 0;
