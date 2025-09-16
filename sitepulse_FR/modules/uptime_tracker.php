@@ -46,7 +46,8 @@ function sitepulse_uptime_tracker_page() {
 }
 function sitepulse_run_uptime_check() {
     $response = wp_remote_get(home_url(), ['timeout' => 10]);
-    $is_up = !is_wp_error($response) && wp_remote_retrieve_response_code($response) >= 200 && wp_remote_retrieve_response_code($response) < 300;
+    $response_code = wp_remote_retrieve_response_code($response);
+    $is_up = !is_wp_error($response) && $response_code >= 200 && $response_code < 300;
     $log = get_option('sitepulse_uptime_log', []);
     $log[] = (int)$is_up;
     if (count($log) > 30) { array_shift($log); }
