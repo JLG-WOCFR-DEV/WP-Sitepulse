@@ -101,7 +101,7 @@ function sitepulse_plugin_impact_scanner_page() {
             $plugin_path = WP_PLUGIN_DIR . '/' . $plugin_file;
             $disk_space = is_file($plugin_path) && is_readable($plugin_path) ? filesize($plugin_path) : 0;
         } else {
-            $disk_space = sitepulse_get_dir_size_recursive(WP_PLUGIN_DIR . '/' . $plugin_dir);
+            $disk_space = sitepulse_get_dir_size_with_cache(WP_PLUGIN_DIR . '/' . $plugin_dir);
         }
 
         $impact_data = [
@@ -411,6 +411,27 @@ function sitepulse_plugin_impact_format_interval($seconds) {
         _n('%s jour', '%s jours', $days, 'sitepulse'),
         number_format_i18n($days)
     );
+}
+
+function sitepulse_get_dir_size_with_cache($dir) {
+    $dir = (string) $dir;
+
+    if ($dir === '') {
+        return 0;
+    }
+
+    $transient_key = 'sitepulse_plugin_dir_size_' . md5($dir);
+    $cached_size = get_transient($transient_key);
+
+    if ($cached_size !== false && is_numeric($cached_size)) {
+        return (int) $cached_size;
+    }
+
+    $size = sitepulse_get_dir_size_recursive($dir);
+
+    set_transient($transient_key, (int) $size, 6 * HOUR_IN_SECONDS);
+
+    return (int) $size;
 }
 
 function sitepulse_get_dir_size_recursive($dir) {
