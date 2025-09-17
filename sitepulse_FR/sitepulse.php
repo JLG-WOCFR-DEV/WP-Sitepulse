@@ -7,6 +7,8 @@
  * Author: Jérôme Le Gousse
  * License: GPL-2.0+
  * Uninstall: uninstall.php
+ * Text Domain: sitepulse
+ * Domain Path: /languages
  */
 
 if (!defined('ABSPATH')) exit;
@@ -17,6 +19,12 @@ define('SITEPULSE_PATH', plugin_dir_path(__FILE__));
 define('SITEPULSE_URL', plugin_dir_url(__FILE__));
 $debug_mode = get_option('sitepulse_debug_mode', false);
 define('SITEPULSE_DEBUG', (bool) $debug_mode);
+
+add_action('plugins_loaded', 'sitepulse_load_textdomain');
+
+function sitepulse_load_textdomain() {
+    load_plugin_textdomain('sitepulse', false, dirname(plugin_basename(__FILE__)) . '/languages');
+}
 
 if (!function_exists('wp_mkdir_p')) {
     require_once ABSPATH . 'wp-admin/includes/file.php';
