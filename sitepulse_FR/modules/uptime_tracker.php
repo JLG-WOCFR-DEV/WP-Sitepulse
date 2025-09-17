@@ -18,7 +18,7 @@ function sitepulse_uptime_tracker_page() {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
-    $uptime_log = get_option('sitepulse_uptime_log', []);
+    $uptime_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
     $total_checks = count($uptime_log);
     $up_checks = count(array_filter($uptime_log));
     $uptime_percentage = $total_checks > 0 ? ($up_checks / $total_checks) * 100 : 100;
@@ -48,10 +48,10 @@ function sitepulse_run_uptime_check() {
     $response = wp_remote_get(home_url(), ['timeout' => 10]);
     $response_code = wp_remote_retrieve_response_code($response);
     $is_up = !is_wp_error($response) && $response_code >= 200 && $response_code < 300;
-    $log = get_option('sitepulse_uptime_log', []);
+    $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
     $log[] = (int)$is_up;
     if (count($log) > 30) { array_shift($log); }
-    update_option('sitepulse_uptime_log', $log);
+    update_option(SITEPULSE_OPTION_UPTIME_LOG, $log);
     if (!$is_up) { sitepulse_log('Uptime check: Down', 'ALERT'); } 
     else { sitepulse_log('Uptime check: Up'); }
 }

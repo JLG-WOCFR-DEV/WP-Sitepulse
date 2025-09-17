@@ -14,8 +14,8 @@ add_action('plugins_loaded', function () {
             public function name() { return 'SitePulse'; }
 
             public function process() {
-                $this->data['load_time'] = get_option('sitepulse_last_load_time', 'N/A');
-                $this->data['uptime'] = get_option('sitepulse_uptime_log', []);
+                $this->data['load_time'] = get_option(SITEPULSE_OPTION_LAST_LOAD_TIME, 'N/A');
+                $this->data['uptime'] = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
             }
         }
     }

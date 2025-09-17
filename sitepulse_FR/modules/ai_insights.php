@@ -15,8 +15,8 @@ function sitepulse_ai_insights_page() {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
-    $api_key = get_option('sitepulse_gemini_api_key');
-    $stored_insight = get_transient('sitepulse_ai_insight');
+    $api_key = get_option(SITEPULSE_OPTION_GEMINI_API_KEY);
+    $stored_insight = get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
     $insight_result = '';
     if (is_string($stored_insight) && '' !== $stored_insight) {
         $insight_result = sanitize_textarea_field($stored_insight);
@@ -100,7 +100,7 @@ function sitepulse_ai_insights_page() {
                         $generated_text = trim($generated_text);
                         if ('' !== $generated_text) {
                             $generated_text = sanitize_textarea_field($generated_text);
-                            set_transient('sitepulse_ai_insight', $generated_text, HOUR_IN_SECONDS);
+                            set_transient(SITEPULSE_TRANSIENT_AI_INSIGHT, $generated_text, HOUR_IN_SECONDS);
                             $insight_result = $generated_text;
                         } else {
                             $error_notice = __('La réponse de Gemini ne contient aucun texte exploitable.', 'sitepulse');

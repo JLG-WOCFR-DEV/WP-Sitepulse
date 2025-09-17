@@ -11,22 +11,50 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
     exit;
 }
 
+$sitepulse_constants = [
+    'SITEPULSE_OPTION_ACTIVE_MODULES'             => 'sitepulse_active_modules',
+    'SITEPULSE_OPTION_DEBUG_MODE'                 => 'sitepulse_debug_mode',
+    'SITEPULSE_OPTION_GEMINI_API_KEY'             => 'sitepulse_gemini_api_key',
+    'SITEPULSE_OPTION_UPTIME_LOG'                 => 'sitepulse_uptime_log',
+    'SITEPULSE_OPTION_LAST_LOAD_TIME'             => 'sitepulse_last_load_time',
+    'SITEPULSE_OPTION_CPU_ALERT_THRESHOLD'        => 'sitepulse_cpu_alert_threshold',
+    'SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES'     => 'sitepulse_alert_cooldown_minutes',
+    'SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS'      => 'sitepulse_speed_scan_results',
+    'SITEPULSE_TRANSIENT_AI_INSIGHT'              => 'sitepulse_ai_insight',
+    'SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX' => 'sitepulse_error_alert_',
+    'SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX' => '_lock',
+];
+
+foreach ($sitepulse_constants as $constant => $value) {
+    if (!defined($constant)) {
+        define($constant, $value);
+    }
+}
+
+if (!defined('SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK')) {
+    define('SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK', SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX . 'cpu' . SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX);
+}
+
+if (!defined('SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK')) {
+    define('SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK', SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX . 'php_fatal' . SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX);
+}
+
 $options = [
-    'sitepulse_active_modules',
-    'sitepulse_debug_mode',
-    'sitepulse_gemini_api_key',
-    'sitepulse_uptime_log',
-    'sitepulse_last_load_time',
-    'sitepulse_cpu_alert_threshold',
-    'sitepulse_alert_cooldown_minutes',
+    SITEPULSE_OPTION_ACTIVE_MODULES,
+    SITEPULSE_OPTION_DEBUG_MODE,
+    SITEPULSE_OPTION_GEMINI_API_KEY,
+    SITEPULSE_OPTION_UPTIME_LOG,
+    SITEPULSE_OPTION_LAST_LOAD_TIME,
+    SITEPULSE_OPTION_CPU_ALERT_THRESHOLD,
+    SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES,
     defined('SITEPULSE_PLUGIN_IMPACT_OPTION') ? SITEPULSE_PLUGIN_IMPACT_OPTION : 'sitepulse_plugin_impact_stats',
 ];
 
 $transients = [
-    'sitepulse_speed_scan_results',
-    'sitepulse_ai_insight',
-    'sitepulse_error_alert_cpu_lock',
-    'sitepulse_error_alert_php_fatal_lock',
+    SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS,
+    SITEPULSE_TRANSIENT_AI_INSIGHT,
+    SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK,
+    SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK,
 ];
 
 $transient_prefixes = [

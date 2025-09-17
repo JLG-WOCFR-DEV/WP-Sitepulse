@@ -12,7 +12,7 @@ $sitepulse_error_alerts_schedule   = 'sitepulse_error_alerts_five_minutes';
  * @return float
  */
 function sitepulse_error_alert_get_cpu_threshold() {
-    $threshold = get_option('sitepulse_cpu_alert_threshold', 5);
+    $threshold = get_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 5);
     if (!is_numeric($threshold)) {
         $threshold = 5;
     }
@@ -31,7 +31,7 @@ function sitepulse_error_alert_get_cpu_threshold() {
  * @return int
  */
 function sitepulse_error_alert_get_cooldown() {
-    $cooldown_minutes = get_option('sitepulse_alert_cooldown_minutes', 60);
+    $cooldown_minutes = get_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60);
     if (!is_numeric($cooldown_minutes)) {
         $cooldown_minutes = 60;
     }
@@ -55,7 +55,7 @@ function sitepulse_error_alert_get_cooldown() {
  * @return bool True if the e-mail was dispatched, false otherwise.
  */
 function sitepulse_error_alert_send($type, $subject, $message) {
-    $lock_key = 'sitepulse_error_alert_' . sanitize_key($type) . '_lock';
+    $lock_key = SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX . sanitize_key($type) . SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX;
 
     if (false !== get_transient($lock_key)) {
         if (function_exists('sitepulse_log')) {
