@@ -27,7 +27,7 @@ function sitepulse_render_dashboard_page() {
         return;
     }
 
-    $active_modules = (array) get_option('sitepulse_active_modules', []);
+    $active_modules = (array) get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
     $is_dashboard_enabled = in_array('custom_dashboards', $active_modules, true);
     $settings_url = admin_url('admin.php?page=sitepulse-settings');
 
@@ -86,19 +86,19 @@ add_action('admin_menu', 'sitepulse_admin_menu');
  * Registers the settings fields.
  */
 function sitepulse_register_settings() {
-    register_setting('sitepulse_settings', 'sitepulse_active_modules', [
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_ACTIVE_MODULES, [
         'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_modules', 'default' => []
     ]);
-    register_setting('sitepulse_settings', 'sitepulse_debug_mode', [
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_DEBUG_MODE, [
         'type' => 'boolean', 'sanitize_callback' => 'rest_sanitize_boolean', 'default' => false
     ]);
-    register_setting('sitepulse_settings', 'sitepulse_gemini_api_key', [
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_GEMINI_API_KEY, [
         'type' => 'string', 'sanitize_callback' => 'sanitize_text_field', 'default' => ''
     ]);
-    register_setting('sitepulse_settings', 'sitepulse_cpu_alert_threshold', [
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, [
         'type' => 'number', 'sanitize_callback' => 'sitepulse_sanitize_cpu_threshold', 'default' => 5
     ]);
-    register_setting('sitepulse_settings', 'sitepulse_alert_cooldown_minutes', [
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, [
         'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_cooldown_minutes', 'default' => 60
     ]);
 }
@@ -273,8 +273,8 @@ function sitepulse_settings_page() {
         'speed_analyzer' => 'Speed Analyzer', 'database_optimizer' => 'Database Optimizer', 'maintenance_advisor' => 'Maintenance Advisor',
         'uptime_tracker' => 'Uptime Tracker', 'ai_insights' => 'AI-Powered Insights', 'custom_dashboards' => 'Custom Dashboards', 'error_alerts' => 'Error Alerts',
     ];
-    $active_modules = get_option('sitepulse_active_modules', []);
-    $debug_mode_option = get_option('sitepulse_debug_mode');
+    $active_modules = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
+    $debug_mode_option = get_option(SITEPULSE_OPTION_DEBUG_MODE);
     $is_debug_mode_enabled = rest_sanitize_boolean($debug_mode_option);
 
     if (isset($_POST['sitepulse_cleanup_nonce']) && wp_verify_nonce($_POST['sitepulse_cleanup_nonce'], 'sitepulse_cleanup')) {
@@ -289,8 +289,8 @@ function sitepulse_settings_page() {
             }
         }
         if (isset($_POST['sitepulse_clear_data'])) {
-            delete_option('sitepulse_uptime_log');
-            delete_transient('sitepulse_speed_scan_results');
+            delete_option(SITEPULSE_OPTION_UPTIME_LOG);
+            delete_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
             echo '<div class="notice notice-success is-dismissible"><p>Données stockées effacées.</p></div>';
         }
         if (isset($_POST['sitepulse_reset_all'])) {
@@ -299,13 +299,13 @@ function sitepulse_settings_page() {
                 : 'sitepulse_plugin_impact_stats';
 
             $options_to_delete = [
-                'sitepulse_active_modules',
-                'sitepulse_debug_mode',
-                'sitepulse_gemini_api_key',
-                'sitepulse_uptime_log',
-                'sitepulse_last_load_time',
-                'sitepulse_cpu_alert_threshold',
-                'sitepulse_alert_cooldown_minutes',
+                SITEPULSE_OPTION_ACTIVE_MODULES,
+                SITEPULSE_OPTION_DEBUG_MODE,
+                SITEPULSE_OPTION_GEMINI_API_KEY,
+                SITEPULSE_OPTION_UPTIME_LOG,
+                SITEPULSE_OPTION_LAST_LOAD_TIME,
+                SITEPULSE_OPTION_CPU_ALERT_THRESHOLD,
+                SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES,
                 $plugin_impact_option,
             ];
 
@@ -314,10 +314,10 @@ function sitepulse_settings_page() {
             }
 
             $transients_to_delete = [
-                'sitepulse_speed_scan_results',
-                'sitepulse_ai_insight',
-                'sitepulse_error_alert_cpu_lock',
-                'sitepulse_error_alert_php_fatal_lock',
+                SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS,
+                SITEPULSE_TRANSIENT_AI_INSIGHT,
+                SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK,
+                SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK,
             ];
 
             foreach ($transients_to_delete as $transient_key) {
@@ -343,9 +343,9 @@ function sitepulse_settings_page() {
             <h2>Paramètres de l'API</h2>
             <table class="form-table">
                 <tr valign="top">
-                    <th scope="row"><label for="sitepulse_gemini_api_key">Clé API Google Gemini</label></th>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>">Clé API Google Gemini</label></th>
                     <td>
-                        <input type="password" id="sitepulse_gemini_api_key" name="sitepulse_gemini_api_key" value="<?php echo esc_attr(get_option('sitepulse_gemini_api_key')); ?>" class="regular-text" />
+                        <input type="password" id="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>" value="<?php echo esc_attr(get_option(SITEPULSE_OPTION_GEMINI_API_KEY)); ?>" class="regular-text" />
                         <p class="description">Entrez votre clé API pour activer les analyses par IA. Obtenez une clé sur <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a>.</p>
                     </td>
                 </tr>
@@ -356,14 +356,14 @@ function sitepulse_settings_page() {
                 <?php foreach ($modules as $key => $name): ?>
                 <tr>
                     <th scope="row"><label for="<?php echo esc_attr($key); ?>"><?php echo esc_html($name); ?></label></th>
-                    <td><input type="checkbox" id="<?php echo esc_attr($key); ?>" name="sitepulse_active_modules[]" value="<?php echo esc_attr($key); ?>" <?php checked(in_array($key, $active_modules, true)); ?>></td>
+                    <td><input type="checkbox" id="<?php echo esc_attr($key); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ACTIVE_MODULES); ?>[]" value="<?php echo esc_attr($key); ?>" <?php checked(in_array($key, $active_modules, true)); ?>></td>
                 </tr>
                 <?php endforeach; ?>
                 <tr>
-                    <th scope="row"><label for="sitepulse_debug_mode">Activer le Mode Debug</label></th>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>">Activer le Mode Debug</label></th>
                     <td>
-                        <input type="hidden" name="sitepulse_debug_mode" value="0">
-                        <input type="checkbox" id="sitepulse_debug_mode" name="sitepulse_debug_mode" value="1" <?php checked($is_debug_mode_enabled); ?>>
+                        <input type="hidden" name="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>" value="0">
+                        <input type="checkbox" id="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>" value="1" <?php checked($is_debug_mode_enabled); ?>>
                         <p class="description">Active la journalisation détaillée et le tableau de bord de débogage. À n'utiliser que pour le dépannage.</p>
                     </td>
                 </tr>
@@ -371,16 +371,16 @@ function sitepulse_settings_page() {
             <h2>Alertes</h2>
             <table class="form-table">
                 <tr>
-                    <th scope="row"><label for="sitepulse_cpu_alert_threshold">Seuil d'alerte de charge CPU</label></th>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>">Seuil d'alerte de charge CPU</label></th>
                     <td>
-                        <input type="number" step="0.1" min="0" id="sitepulse_cpu_alert_threshold" name="sitepulse_cpu_alert_threshold" value="<?php echo esc_attr(get_option('sitepulse_cpu_alert_threshold', 5)); ?>" class="small-text">
+                        <input type="number" step="0.1" min="0" id="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>" value="<?php echo esc_attr(get_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 5)); ?>" class="small-text">
                         <p class="description">Une alerte e-mail est envoyée lorsque la charge moyenne sur 1 minute dépasse ce seuil.</p>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="sitepulse_alert_cooldown_minutes">Fenêtre anti-spam (minutes)</label></th>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES); ?>">Fenêtre anti-spam (minutes)</label></th>
                     <td>
-                        <input type="number" min="1" id="sitepulse_alert_cooldown_minutes" name="sitepulse_alert_cooldown_minutes" value="<?php echo esc_attr(get_option('sitepulse_alert_cooldown_minutes', 60)); ?>" class="small-text">
+                        <input type="number" min="1" id="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES); ?>" value="<?php echo esc_attr(get_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60)); ?>" class="small-text">
                         <p class="description">Empêche l'envoi de plusieurs e-mails identiques pendant la durée spécifiée.</p>
                     </td>
                 </tr>
@@ -435,7 +435,7 @@ function sitepulse_debug_page() {
                     <div class="postbox">
                         <h2 class="hndle"><span>Détails de l'Environnement</span></h2>
                         <div class="inside">
-                            <?php $active_modules_list = implode(', ', get_option('sitepulse_active_modules', [])); ?>
+                            <?php $active_modules_list = implode(', ', get_option(SITEPULSE_OPTION_ACTIVE_MODULES, [])); ?>
                             <ul>
                                 <li><strong>Version de SitePulse:</strong> <?php echo esc_html(SITEPULSE_VERSION); ?></li>
                                 <li><strong>Version de WordPress:</strong> <?php echo esc_html(get_bloginfo('version')); ?></li>
