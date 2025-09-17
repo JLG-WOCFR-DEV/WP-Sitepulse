@@ -356,9 +356,28 @@ function sitepulse_get_dir_size_recursive($dir) {
         return $size;
     }
 
-    $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS));
+    try {
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)
+        );
+    } catch (\UnexpectedValueException | \RuntimeException $e) {
+        if (function_exists('sitepulse_log')) {
+            sitepulse_log(
+                sprintf(
+                    'Failed to scan directory "%s": %s',
+                    $dir,
+                    $e->getMessage()
+                )
+            );
+        }
+
+        return 0;
+    }
 
     foreach ($iterator as $file) {
+        if (!$file->isReadable()) {
+            continue;
+        }
         $size += $file->getSize();
     }
 
