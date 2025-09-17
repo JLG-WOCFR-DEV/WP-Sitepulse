@@ -28,10 +28,23 @@ function sitepulse_plugin_impact_scanner_page() {
 
     $all_plugins = get_plugins();
     $active_plugin_files = get_option('active_plugins', []);
+    $network_active_plugins = get_site_option('active_sitewide_plugins', []);
 
     if (!is_array($active_plugin_files)) {
         $active_plugin_files = [];
     }
+
+    if (!is_array($network_active_plugins)) {
+        $network_active_plugins = [];
+    }
+
+    $network_plugin_files = array_keys($network_active_plugins);
+
+    $active_plugin_files = array_values(
+        array_unique(
+            array_merge($active_plugin_files, $network_plugin_files)
+        )
+    );
 
     $measurements = sitepulse_plugin_impact_get_measurements();
 
@@ -66,7 +79,21 @@ function sitepulse_plugin_impact_scanner_page() {
     $measured_count = 0;
 
     foreach ($active_plugin_files as $plugin_file) {
-        $plugin_name = isset($all_plugins[$plugin_file]['Name']) ? $all_plugins[$plugin_file]['Name'] : $plugin_file;
+        $plugin_data = isset($all_plugins[$plugin_file]) && is_array($all_plugins[$plugin_file])
+            ? $all_plugins[$plugin_file]
+            : null;
+
+        if ($plugin_data === null) {
+            $plugin_path = WP_PLUGIN_DIR . '/' . $plugin_file;
+
+            if (is_readable($plugin_path)) {
+                $plugin_data = get_plugin_data($plugin_path, false, false);
+            } else {
+                $plugin_data = [];
+            }
+        }
+
+        $plugin_name = isset($plugin_data['Name']) && $plugin_data['Name'] !== '' ? $plugin_data['Name'] : $plugin_file;
 
         $plugin_dir = dirname($plugin_file);
 
