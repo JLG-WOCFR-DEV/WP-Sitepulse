@@ -19,6 +19,7 @@ $options = [
     'sitepulse_last_load_time',
     'sitepulse_cpu_alert_threshold',
     'sitepulse_alert_cooldown_minutes',
+    defined('SITEPULSE_PLUGIN_IMPACT_OPTION') ? SITEPULSE_PLUGIN_IMPACT_OPTION : 'sitepulse_plugin_impact_stats',
 ];
 
 $transients = [
