@@ -113,7 +113,20 @@ foreach ($sitepulse_directories as $sitepulse_directory) {
     }
 
     if (is_dir($sitepulse_directory)) {
-        $remaining_files = glob(rtrim($sitepulse_directory, '/\\') . '/*');
+        $sitepulse_directory_trimmed = rtrim($sitepulse_directory, '/\\');
+        $remaining_files = glob($sitepulse_directory_trimmed . '/*');
+
+        if (!empty($remaining_files)) {
+            foreach (['.htaccess', 'web.config'] as $protection_file) {
+                $protection_file_path = $sitepulse_directory_trimmed . '/' . $protection_file;
+
+                if (is_file($protection_file_path)) {
+                    @unlink($protection_file_path);
+                }
+            }
+
+            $remaining_files = glob($sitepulse_directory_trimmed . '/*');
+        }
 
         if (empty($remaining_files)) {
             @rmdir($sitepulse_directory);
