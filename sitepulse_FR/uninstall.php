@@ -83,11 +83,49 @@ if (is_multisite()) {
     }
 }
 
-$log_files = glob(WP_CONTENT_DIR . '/sitepulse-debug.log*');
-if (!empty($log_files)) {
-    foreach ($log_files as $log_file) {
-        if (is_file($log_file)) {
-            @unlink($log_file);
+$sitepulse_directories = [];
+
+if (function_exists('wp_upload_dir')) {
+    $sitepulse_upload_dir = wp_upload_dir();
+
+    if (
+        is_array($sitepulse_upload_dir)
+        && empty($sitepulse_upload_dir['error'])
+        && !empty($sitepulse_upload_dir['basedir'])
+    ) {
+        $sitepulse_directories[] = rtrim((string) $sitepulse_upload_dir['basedir'], '/\\') . '/sitepulse';
+    }
+}
+
+$sitepulse_directories[] = rtrim(WP_CONTENT_DIR, '/\\') . '/sitepulse';
+$sitepulse_directories = array_values(array_unique(array_filter($sitepulse_directories)));
+
+foreach ($sitepulse_directories as $sitepulse_directory) {
+    $log_files = glob(rtrim($sitepulse_directory, '/\\') . '/sitepulse-debug.log*');
+
+    if (!empty($log_files)) {
+        foreach ($log_files as $log_file) {
+            if (is_file($log_file)) {
+                @unlink($log_file);
+            }
+        }
+    }
+
+    if (is_dir($sitepulse_directory)) {
+        $remaining_files = glob(rtrim($sitepulse_directory, '/\\') . '/*');
+
+        if (empty($remaining_files)) {
+            @rmdir($sitepulse_directory);
+        }
+    }
+}
+
+$legacy_log_files = glob(rtrim(WP_CONTENT_DIR, '/\\') . '/sitepulse-debug.log*');
+
+if (!empty($legacy_log_files)) {
+    foreach ($legacy_log_files as $legacy_log_file) {
+        if (is_file($legacy_log_file)) {
+            @unlink($legacy_log_file);
         }
     }
 }
