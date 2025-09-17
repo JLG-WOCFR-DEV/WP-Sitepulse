@@ -333,7 +333,7 @@ function sitepulse_settings_page() {
                     <th scope="row"><label for="sitepulse_debug_mode">Activer le Mode Debug</label></th>
                     <td>
                         <input type="hidden" name="sitepulse_debug_mode" value="0">
-                        <input type="checkbox" id="sitepulse_debug_mode" name="sitepulse_debug_mode" value="1" <?php checked(get_option('sitepulse_debug_mode')); ?>>
+                        <input type="checkbox" id="sitepulse_debug_mode" name="sitepulse_debug_mode" value="1" <?php checked(get_option('sitepulse_debug_mode'), '1'); ?>>
                         <p class="description">Active la journalisation détaillée et le tableau de bord de débogage. À n'utiliser que pour le dépannage.</p>
                     </td>
                 </tr>
