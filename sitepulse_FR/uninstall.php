@@ -29,6 +29,92 @@ $transients = [
     'sitepulse_error_alert_php_fatal_lock',
 ];
 
+$transient_prefixes = [
+    'sitepulse_plugin_dir_size_',
+];
+
+$transient_prefixes = array_values(array_unique(array_filter($transient_prefixes, 'strlen')));
+
+if (!function_exists('sitepulse_delete_transients_with_prefix')) {
+    /**
+     * Removes all transients matching a specific prefix.
+     *
+     * @param string $prefix Transient key prefix.
+     * @return void
+     */
+    function sitepulse_delete_transients_with_prefix($prefix) {
+        global $wpdb;
+
+        if (!is_string($prefix) || $prefix === '' || !($wpdb instanceof wpdb)) {
+            return;
+        }
+
+        $like = $wpdb->esc_like($prefix) . '%';
+        $option_names = $wpdb->get_col(
+            $wpdb->prepare(
+                "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s",
+                '_transient_' . $like
+            )
+        );
+
+        if (empty($option_names)) {
+            return;
+        }
+
+        $transient_prefix_length = strlen('_transient_');
+
+        foreach ($option_names as $option_name) {
+            $transient_key = substr($option_name, $transient_prefix_length);
+
+            if ($transient_key !== '') {
+                delete_transient($transient_key);
+            }
+        }
+    }
+}
+
+if (!function_exists('sitepulse_delete_site_transients_with_prefix')) {
+    /**
+     * Removes all site transients matching a specific prefix.
+     *
+     * @param string $prefix Site transient key prefix.
+     * @return void
+     */
+    function sitepulse_delete_site_transients_with_prefix($prefix) {
+        if (!is_multisite() || !function_exists('delete_site_transient')) {
+            return;
+        }
+
+        global $wpdb;
+
+        if (!is_string($prefix) || $prefix === '' || !($wpdb instanceof wpdb)) {
+            return;
+        }
+
+        $like = $wpdb->esc_like($prefix) . '%';
+        $meta_keys = $wpdb->get_col(
+            $wpdb->prepare(
+                "SELECT meta_key FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s",
+                '_site_transient_' . $like
+            )
+        );
+
+        if (empty($meta_keys)) {
+            return;
+        }
+
+        $site_transient_prefix_length = strlen('_site_transient_');
+
+        foreach ($meta_keys as $meta_key) {
+            $transient_key = substr($meta_key, $site_transient_prefix_length);
+
+            if ($transient_key !== '') {
+                delete_site_transient($transient_key);
+            }
+        }
+    }
+}
+
 $cron_hooks = require __DIR__ . '/includes/cron-hooks.php';
 if (!is_array($cron_hooks)) {
     $cron_hooks = [];
@@ -40,16 +126,21 @@ if (!is_array($cron_hooks)) {
  * @param array $options   List of option names to delete.
  * @param array $transients List of transient names to delete.
  * @param array $cron_hooks List of cron hooks to clear.
+ * @param array $transient_prefixes List of transient prefixes to delete.
  *
  * @return void
  */
-function sitepulse_uninstall_cleanup_blog($options, $transients, $cron_hooks) {
+function sitepulse_uninstall_cleanup_blog($options, $transients, $cron_hooks, $transient_prefixes) {
     foreach ($options as $option) {
         delete_option($option);
     }
 
     foreach ($transients as $transient) {
         delete_transient($transient);
+    }
+
+    foreach ($transient_prefixes as $transient_prefix) {
+        sitepulse_delete_transients_with_prefix($transient_prefix);
     }
 
     foreach ($cron_hooks as $hook) {
@@ -64,12 +155,12 @@ if (is_multisite()) {
 
     foreach ($blog_ids as $blog_id) {
         if (switch_to_blog((int) $blog_id)) {
-            sitepulse_uninstall_cleanup_blog($options, $transients, $cron_hooks);
+            sitepulse_uninstall_cleanup_blog($options, $transients, $cron_hooks, $transient_prefixes);
             restore_current_blog();
         }
     }
 } else {
-    sitepulse_uninstall_cleanup_blog($options, $transients, $cron_hooks);
+    sitepulse_uninstall_cleanup_blog($options, $transients, $cron_hooks, $transient_prefixes);
 }
 
 if (is_multisite()) {
@@ -81,6 +172,10 @@ if (is_multisite()) {
         if (function_exists('delete_site_transient')) {
             delete_site_transient($transient);
         }
+    }
+
+    foreach ($transient_prefixes as $transient_prefix) {
+        sitepulse_delete_site_transients_with_prefix($transient_prefix);
     }
 }
 

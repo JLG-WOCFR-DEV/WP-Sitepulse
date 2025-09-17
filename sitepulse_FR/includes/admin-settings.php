@@ -148,6 +148,86 @@ function sitepulse_sanitize_cooldown_minutes($value) {
     return $value;
 }
 
+if (!function_exists('sitepulse_delete_transients_by_prefix')) {
+    /**
+     * Deletes all transients whose names start with the provided prefix.
+     *
+     * @param string $prefix Transient prefix to match.
+     * @return void
+     */
+    function sitepulse_delete_transients_by_prefix($prefix) {
+        global $wpdb;
+
+        if (!is_string($prefix) || $prefix === '' || !($wpdb instanceof wpdb)) {
+            return;
+        }
+
+        $like = $wpdb->esc_like($prefix) . '%';
+        $option_names = $wpdb->get_col(
+            $wpdb->prepare(
+                "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s",
+                '_transient_' . $like
+            )
+        );
+
+        if (empty($option_names)) {
+            return;
+        }
+
+        $transient_prefix = strlen('_transient_');
+
+        foreach ($option_names as $option_name) {
+            $transient_key = substr($option_name, $transient_prefix);
+
+            if ($transient_key !== '') {
+                delete_transient($transient_key);
+            }
+        }
+    }
+}
+
+if (!function_exists('sitepulse_delete_site_transients_by_prefix')) {
+    /**
+     * Deletes all site transients whose names start with the provided prefix.
+     *
+     * @param string $prefix Site transient prefix to match.
+     * @return void
+     */
+    function sitepulse_delete_site_transients_by_prefix($prefix) {
+        if (!is_multisite() || !function_exists('delete_site_transient')) {
+            return;
+        }
+
+        global $wpdb;
+
+        if (!is_string($prefix) || $prefix === '' || !($wpdb instanceof wpdb)) {
+            return;
+        }
+
+        $like = $wpdb->esc_like($prefix) . '%';
+        $meta_keys = $wpdb->get_col(
+            $wpdb->prepare(
+                "SELECT meta_key FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s",
+                '_site_transient_' . $like
+            )
+        );
+
+        if (empty($meta_keys)) {
+            return;
+        }
+
+        $site_transient_prefix = strlen('_site_transient_');
+
+        foreach ($meta_keys as $meta_key) {
+            $transient_key = substr($meta_key, $site_transient_prefix);
+
+            if ($transient_key !== '') {
+                delete_site_transient($transient_key);
+            }
+        }
+    }
+}
+
 /**
  * Reads the last lines from a log file without loading it entirely in memory.
  *
@@ -320,12 +400,21 @@ function sitepulse_settings_page() {
                 'sitepulse_error_alert_php_fatal_lock',
             ];
 
+            $transient_prefixes_to_delete = [
+                'sitepulse_plugin_dir_size_',
+            ];
+
             foreach ($transients_to_delete as $transient_key) {
                 delete_transient($transient_key);
 
                 if (function_exists('delete_site_transient')) {
                     delete_site_transient($transient_key);
                 }
+            }
+
+            foreach ($transient_prefixes_to_delete as $transient_prefix) {
+                sitepulse_delete_transients_by_prefix($transient_prefix);
+                sitepulse_delete_site_transients_by_prefix($transient_prefix);
             }
             if (defined('SITEPULSE_DEBUG_LOG') && file_exists(SITEPULSE_DEBUG_LOG)) { unlink(SITEPULSE_DEBUG_LOG); }
             $cron_hooks = function_exists('sitepulse_get_cron_hooks') ? sitepulse_get_cron_hooks() : [];
