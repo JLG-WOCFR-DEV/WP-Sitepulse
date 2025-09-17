@@ -3,8 +3,8 @@ if (!defined('ABSPATH')) exit;
 add_action('admin_menu', function() {
     add_submenu_page(
         'sitepulse-dashboard',
-        __('AI Insights', 'sitepulse'),
-        __('AI Insights', 'sitepulse'),
+        esc_html__('AI Insights', 'sitepulse'),
+        esc_html__('AI Insights', 'sitepulse'),
         'manage_options',
         'sitepulse-ai',
         'sitepulse_ai_insights_page'
@@ -78,7 +78,7 @@ function sitepulse_ai_insights_page() {
             if (is_wp_error($response)) {
                 $error_notice = sprintf(
                     /* translators: %s: error message */
-                    __('Erreur lors de la génération de l’analyse IA : %s', 'sitepulse'),
+                    esc_html__('Erreur lors de la génération de l’analyse IA : %s', 'sitepulse'),
                     sanitize_text_field($response->get_error_message())
                 );
             } else {
@@ -103,10 +103,10 @@ function sitepulse_ai_insights_page() {
                             set_transient(SITEPULSE_TRANSIENT_AI_INSIGHT, $generated_text, HOUR_IN_SECONDS);
                             $insight_result = $generated_text;
                         } else {
-                            $error_notice = __('La réponse de Gemini ne contient aucun texte exploitable.', 'sitepulse');
+                            $error_notice = esc_html__('La réponse de Gemini ne contient aucun texte exploitable.', 'sitepulse');
                         }
                     } else {
-                        $error_notice = __('Structure de réponse inattendue reçue depuis Gemini.', 'sitepulse');
+                        $error_notice = esc_html__('Structure de réponse inattendue reçue depuis Gemini.', 'sitepulse');
                     }
                 } else {
                     $error_detail = '';
@@ -119,11 +119,11 @@ function sitepulse_ai_insights_page() {
                         }
                     }
                     if ('' === $error_detail) {
-                        $error_detail = sprintf(__('HTTP %d', 'sitepulse'), $status_code);
+                        $error_detail = sprintf(esc_html__('HTTP %d', 'sitepulse'), $status_code);
                     }
                     $error_notice = sprintf(
                         /* translators: %s: error message */
-                        __('Erreur lors de la génération de l’analyse IA : %s', 'sitepulse'),
+                        esc_html__('Erreur lors de la génération de l’analyse IA : %s', 'sitepulse'),
                         sanitize_text_field($error_detail)
                     );
                 }
