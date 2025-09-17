@@ -47,7 +47,7 @@ function sitepulse_custom_dashboards_page() {
                 $ttfb = (is_array($results) && isset($results['ttfb'])) ? $results['ttfb'] : 0;
                 $ttfb_status = $ttfb > 500 ? 'status-bad' : ($ttfb > 200 ? 'status-warn' : 'status-ok');
                 ?>
-                <?php $ttfb_display = $ttfb ? round($ttfb) . ' ' . __('ms', 'sitepulse') : __('N/A', 'sitepulse'); ?>
+                <?php $ttfb_display = $ttfb ? round($ttfb) . ' ' . esc_html__('ms', 'sitepulse') : esc_html__('N/A', 'sitepulse'); ?>
                 <h2><span class="dashicons dashicons-performance"></span> <?php esc_html_e('Speed', 'sitepulse'); ?></h2>
                 <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-speed')); ?>" class="button"><?php esc_html_e('Details', 'sitepulse'); ?></a>
                 <p><?php esc_html_e('Server Response (TTFB):', 'sitepulse'); ?> <span class="metric <?php echo esc_attr($ttfb_status); ?>"><?php echo esc_html($ttfb_display); ?></span></p>
@@ -86,28 +86,28 @@ function sitepulse_custom_dashboards_page() {
                 <?php
                 $log_file = WP_CONTENT_DIR . '/debug.log';
                 $log_status_class = 'status-ok';
-                $log_summary = __('Log is clean.', 'sitepulse');
+                $log_summary = esc_html__('Log is clean.', 'sitepulse');
 
                 if (!file_exists($log_file)) {
                     $log_status_class = 'status-warn';
-                    $log_summary = __('Log file not found.', 'sitepulse');
+                    $log_summary = esc_html__('Log file not found.', 'sitepulse');
                 } else {
                     $recent_logs = sitepulse_get_recent_log_lines($log_file, 200, 131072);
 
                     if ($recent_logs === null) {
                         $log_status_class = 'status-warn';
-                        $log_summary = __('Unable to read log file.', 'sitepulse');
+                        $log_summary = esc_html__('Unable to read log file.', 'sitepulse');
                     } elseif (empty($recent_logs)) {
-                        $log_summary = __('No recent log entries.', 'sitepulse');
+                        $log_summary = esc_html__('No recent log entries.', 'sitepulse');
                     } else {
                         $log_content = implode("\n", $recent_logs);
 
                         if (stripos($log_content, 'PHP Fatal error') !== false) {
                             $log_status_class = 'status-bad';
-                            $log_summary = __('Fatal Errors found!', 'sitepulse');
+                            $log_summary = esc_html__('Fatal Errors found!', 'sitepulse');
                         } elseif (stripos($log_content, 'PHP Warning') !== false) {
                             $log_status_class = 'status-warn';
-                            $log_summary = __('Warnings present.', 'sitepulse');
+                            $log_summary = esc_html__('Warnings present.', 'sitepulse');
                         }
                     }
                 }
