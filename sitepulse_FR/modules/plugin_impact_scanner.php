@@ -420,7 +420,11 @@ function sitepulse_get_dir_size_with_cache($dir) {
         return 0;
     }
 
-    $transient_key = 'sitepulse_plugin_dir_size_' . md5($dir);
+    $transient_prefix = defined('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX')
+        ? SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX
+        : 'sitepulse_plugin_dir_size_';
+
+    $transient_key = $transient_prefix . md5($dir);
     $cached_size = get_transient($transient_key);
 
     if ($cached_size !== false && is_numeric($cached_size)) {
@@ -428,8 +432,13 @@ function sitepulse_get_dir_size_with_cache($dir) {
     }
 
     $size = sitepulse_get_dir_size_recursive($dir);
+    $expiration = (int) apply_filters('sitepulse_plugin_dir_size_cache_ttl', 6 * HOUR_IN_SECONDS, $dir);
 
-    set_transient($transient_key, (int) $size, 6 * HOUR_IN_SECONDS);
+    if ($expiration <= 0) {
+        $expiration = 6 * HOUR_IN_SECONDS;
+    }
+
+    set_transient($transient_key, (int) $size, $expiration);
 
     return (int) $size;
 }
