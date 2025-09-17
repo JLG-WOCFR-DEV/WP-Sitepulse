@@ -36,8 +36,8 @@ function sitepulse_custom_dashboards_page() {
         .sitepulse-card a.button { float: right; margin-top: -45px; }
     </style>
     <div class="wrap">
-        <h1><span class="dashicons-before dashicons-dashboard"></span> SitePulse Dashboard</h1>
-        <p>A real-time overview of your site's performance and health.</p>
+        <h1><span class="dashicons-before dashicons-dashboard"></span> <?php esc_html_e('SitePulse Dashboard', 'sitepulse'); ?></h1>
+        <p><?php esc_html_e("A real-time overview of your site's performance and health.", 'sitepulse'); ?></p>
 
         <div class="sitepulse-grid">
             <!-- Speed Card -->
@@ -47,11 +47,11 @@ function sitepulse_custom_dashboards_page() {
                 $ttfb = (is_array($results) && isset($results['ttfb'])) ? $results['ttfb'] : 0;
                 $ttfb_status = $ttfb > 500 ? 'status-bad' : ($ttfb > 200 ? 'status-warn' : 'status-ok');
                 ?>
-                <?php $ttfb_display = $ttfb ? round($ttfb) . ' ms' : 'N/A'; ?>
-                <h2><span class="dashicons dashicons-performance"></span> Speed</h2>
-                <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-speed')); ?>" class="button">Details</a>
-                <p>Server Response (TTFB): <span class="metric <?php echo esc_attr($ttfb_status); ?>"><?php echo esc_html($ttfb_display); ?></span></p>
-                <p class="description">Time to First Byte measures how quickly your server responds. Under 200ms is excellent.</p>
+                <?php $ttfb_display = $ttfb ? round($ttfb) . ' ' . __('ms', 'sitepulse') : __('N/A', 'sitepulse'); ?>
+                <h2><span class="dashicons dashicons-performance"></span> <?php esc_html_e('Speed', 'sitepulse'); ?></h2>
+                <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-speed')); ?>" class="button"><?php esc_html_e('Details', 'sitepulse'); ?></a>
+                <p><?php esc_html_e('Server Response (TTFB):', 'sitepulse'); ?> <span class="metric <?php echo esc_attr($ttfb_status); ?>"><?php echo esc_html($ttfb_display); ?></span></p>
+                <p class="description"><?php esc_html_e('Time to First Byte measures how quickly your server responds. Under 200ms is excellent.', 'sitepulse'); ?></p>
             </div>
 
             <!-- Uptime Card -->
@@ -63,10 +63,10 @@ function sitepulse_custom_dashboards_page() {
                 $uptime_percentage = $total_checks > 0 ? ($up_checks / $total_checks) * 100 : 100;
                 $uptime_status = $uptime_percentage < 99 ? 'status-bad' : ($uptime_percentage < 100 ? 'status-warn' : 'status-ok');
                 ?>
-                <h2><span class="dashicons dashicons-chart-bar"></span> Uptime</h2>
-                 <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-uptime')); ?>" class="button">Details</a>
-                <p>Last 30 Checks: <span class="metric <?php echo esc_attr($uptime_status); ?>"><?php echo esc_html(round($uptime_percentage, 2)); ?>%</span></p>
-                 <p class="description">Represents your site's availability over the last 30 hours.</p>
+                <h2><span class="dashicons dashicons-chart-bar"></span> <?php esc_html_e('Uptime', 'sitepulse'); ?></h2>
+                 <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-uptime')); ?>" class="button"><?php esc_html_e('Details', 'sitepulse'); ?></a>
+                <p><?php esc_html_e('Last 30 Checks:', 'sitepulse'); ?> <span class="metric <?php echo esc_attr($uptime_status); ?>"><?php echo esc_html(round($uptime_percentage, 2)); ?>%</span></p>
+                 <p class="description"><?php esc_html_e("Represents your site's availability over the last 30 hours.", 'sitepulse'); ?></p>
             </div>
 
             <!-- Database Card -->
@@ -75,10 +75,10 @@ function sitepulse_custom_dashboards_page() {
                 $revisions = $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->posts WHERE post_type = 'revision'");
                 $db_status = $revisions > 100 ? 'status-bad' : ($revisions > 50 ? 'status-warn' : 'status-ok');
                 ?>
-                <h2><span class="dashicons dashicons-database"></span> Database Health</h2>
-                <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-db')); ?>" class="button">Optimize</a>
-                <p>Post Revisions: <span class="metric <?php echo esc_attr($db_status); ?>"><?php echo esc_html((int)$revisions); ?></span></p>
-                <p class="description">Excessive revisions can slow down your database. It's safe to clean them.</p>
+                <h2><span class="dashicons dashicons-database"></span> <?php esc_html_e('Database Health', 'sitepulse'); ?></h2>
+                <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-db')); ?>" class="button"><?php esc_html_e('Optimize', 'sitepulse'); ?></a>
+                <p><?php esc_html_e('Post Revisions:', 'sitepulse'); ?> <span class="metric <?php echo esc_attr($db_status); ?>"><?php echo esc_html((int)$revisions); ?></span></p>
+                <p class="description"><?php esc_html_e("Excessive revisions can slow down your database. It's safe to clean them.", 'sitepulse'); ?></p>
             </div>
 
              <!-- Log Status Card -->
@@ -86,36 +86,36 @@ function sitepulse_custom_dashboards_page() {
                 <?php
                 $log_file = WP_CONTENT_DIR . '/debug.log';
                 $log_status_class = 'status-ok';
-                $log_summary = 'Log is clean.';
+                $log_summary = __('Log is clean.', 'sitepulse');
 
                 if (!file_exists($log_file)) {
                     $log_status_class = 'status-warn';
-                    $log_summary = 'Log file not found.';
+                    $log_summary = __('Log file not found.', 'sitepulse');
                 } else {
                     $recent_logs = sitepulse_get_recent_log_lines($log_file, 200, 131072);
 
                     if ($recent_logs === null) {
                         $log_status_class = 'status-warn';
-                        $log_summary = 'Unable to read log file.';
+                        $log_summary = __('Unable to read log file.', 'sitepulse');
                     } elseif (empty($recent_logs)) {
-                        $log_summary = 'No recent log entries.';
+                        $log_summary = __('No recent log entries.', 'sitepulse');
                     } else {
                         $log_content = implode("\n", $recent_logs);
 
                         if (stripos($log_content, 'PHP Fatal error') !== false) {
                             $log_status_class = 'status-bad';
-                            $log_summary = 'Fatal Errors found!';
+                            $log_summary = __('Fatal Errors found!', 'sitepulse');
                         } elseif (stripos($log_content, 'PHP Warning') !== false) {
                             $log_status_class = 'status-warn';
-                            $log_summary = 'Warnings present.';
+                            $log_summary = __('Warnings present.', 'sitepulse');
                         }
                     }
                 }
                 ?>
-                <h2><span class="dashicons dashicons-hammer"></span> Error Log</h2>
-                <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-logs')); ?>" class="button">Analyze</a>
-                <p>Status: <span class="metric <?php echo esc_attr($log_status_class); ?>"><?php echo esc_html($log_summary); ?></span></p>
-                <p class="description">Checks for critical errors in your WordPress debug log.</p>
+                <h2><span class="dashicons dashicons-hammer"></span> <?php esc_html_e('Error Log', 'sitepulse'); ?></h2>
+                <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-logs')); ?>" class="button"><?php esc_html_e('Analyze', 'sitepulse'); ?></a>
+                <p><?php esc_html_e('Status:', 'sitepulse'); ?> <span class="metric <?php echo esc_attr($log_status_class); ?>"><?php echo esc_html($log_summary); ?></span></p>
+                <p class="description"><?php esc_html_e('Checks for critical errors in your WordPress debug log.', 'sitepulse'); ?></p>
             </div>
         </div>
     </div>

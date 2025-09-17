@@ -1,6 +1,15 @@
 <?php
 if (!defined('ABSPATH')) exit;
-add_action('admin_menu', function() { add_submenu_page('sitepulse-dashboard', 'AI Insights', 'AI Insights', 'manage_options', 'sitepulse-ai', 'sitepulse_ai_insights_page'); });
+add_action('admin_menu', function() {
+    add_submenu_page(
+        'sitepulse-dashboard',
+        __('AI Insights', 'sitepulse'),
+        __('AI Insights', 'sitepulse'),
+        'manage_options',
+        'sitepulse-ai',
+        'sitepulse_ai_insights_page'
+    );
+});
 function sitepulse_ai_insights_page() {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
@@ -15,7 +24,10 @@ function sitepulse_ai_insights_page() {
     $error_notice = '';
     if (isset($_POST['get_ai_insight']) && check_admin_referer('sitepulse_get_ai_insight')) {
         if (empty($api_key)) {
-            echo '<div class="notice notice-error"><p>Veuillez entrer votre clé API Google Gemini dans les réglages de SitePulse.</p></div>';
+            printf(
+                '<div class="notice notice-error"><p>%s</p></div>',
+                esc_html__('Veuillez entrer votre clé API Google Gemini dans les réglages de SitePulse.', 'sitepulse')
+            );
         } else {
             $endpoint = add_query_arg(
                 'key',
@@ -120,21 +132,21 @@ function sitepulse_ai_insights_page() {
     }
     ?>
     <div class="wrap">
-        <h1><span class="dashicons-before dashicons-superhero"></span> Analyses par IA</h1>
-        <p>Obtenez des recommandations personnalisées pour votre site en analysant ses données de performance avec l'IA Gemini de Google.</p>
+        <h1><span class="dashicons-before dashicons-superhero"></span> <?php esc_html_e('Analyses par IA', 'sitepulse'); ?></h1>
+        <p><?php esc_html_e("Obtenez des recommandations personnalisées pour votre site en analysant ses données de performance avec l'IA Gemini de Google.", 'sitepulse'); ?></p>
         <?php if (empty($api_key)): ?>
-            <div class="notice notice-warning"><p>Veuillez <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-settings')); ?>">entrer votre clé API Google Gemini</a> pour utiliser cette fonctionnalité.</p></div>
+            <div class="notice notice-warning"><p><?php echo wp_kses_post(sprintf(__('Veuillez <a href="%s">entrer votre clé API Google Gemini</a> pour utiliser cette fonctionnalité.', 'sitepulse'), esc_url(admin_url('admin.php?page=sitepulse-settings')))); ?></p></div>
         <?php else: ?>
             <form method="post" action="">
                 <?php wp_nonce_field('sitepulse_get_ai_insight'); ?>
-                <button type="submit" name="get_ai_insight" class="button button-primary">Générer une Analyse</button>
+                <button type="submit" name="get_ai_insight" class="button button-primary"><?php esc_html_e('Générer une Analyse', 'sitepulse'); ?></button>
             </form>
         <?php endif; ?>
         <?php if (!empty($error_notice)): ?>
             <div class="notice notice-error"><p><?php echo esc_html($error_notice); ?></p></div>
         <?php endif; ?>
         <?php if ($insight_result): ?>
-            <div id="ai-insight-response" style="background: #fff; border: 1px solid #ccc; padding: 15px; margin-top: 20px;"><h2>Votre Recommandation par IA</h2><p><?php echo nl2br(esc_html($insight_result)); ?></p></div>
+            <div id="ai-insight-response" style="background: #fff; border: 1px solid #ccc; padding: 15px; margin-top: 20px;"><h2><?php esc_html_e('Votre Recommandation par IA', 'sitepulse'); ?></h2><p><?php echo nl2br(esc_html($insight_result)); ?></p></div>
         <?php endif; ?>
     </div>
     <?php
