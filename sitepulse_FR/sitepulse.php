@@ -105,7 +105,7 @@ function sitepulse_plugin_impact_tracker_persist() {
 
     $option_key = SITEPULSE_PLUGIN_IMPACT_OPTION;
     $existing = get_option($option_key, []);
-    $now = time();
+    $now = current_time('timestamp');
 
     if (!is_array($existing)) {
         $existing = [];
