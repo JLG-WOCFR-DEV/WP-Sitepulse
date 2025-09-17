@@ -22,7 +22,7 @@ function sitepulse_ai_insights_page() {
         $insight_result = sanitize_textarea_field($stored_insight);
     }
     $error_notice = '';
-    if (isset($_POST['get_ai_insight']) && check_admin_referer('sitepulse_get_ai_insight')) {
+    if (isset($_POST['get_ai_insight']) && check_admin_referer(SITEPULSE_NONCE_ACTION_AI_INSIGHT)) {
         if (empty($api_key)) {
             printf(
                 '<div class="notice notice-error"><p>%s</p></div>',
@@ -138,7 +138,7 @@ function sitepulse_ai_insights_page() {
             <div class="notice notice-warning"><p><?php echo wp_kses_post(sprintf(__('Veuillez <a href="%s">entrer votre clé API Google Gemini</a> pour utiliser cette fonctionnalité.', 'sitepulse'), esc_url(admin_url('admin.php?page=sitepulse-settings')))); ?></p></div>
         <?php else: ?>
             <form method="post" action="">
-                <?php wp_nonce_field('sitepulse_get_ai_insight'); ?>
+                <?php wp_nonce_field(SITEPULSE_NONCE_ACTION_AI_INSIGHT); ?>
                 <button type="submit" name="get_ai_insight" class="button button-primary"><?php esc_html_e('Générer une Analyse', 'sitepulse'); ?></button>
             </form>
         <?php endif; ?>

@@ -23,6 +23,8 @@ $sitepulse_constants = [
     'SITEPULSE_TRANSIENT_AI_INSIGHT'              => 'sitepulse_ai_insight',
     'SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX' => 'sitepulse_error_alert_',
     'SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX' => '_lock',
+    'SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX'  => 'sitepulse_plugin_dir_size_',
+    'SITEPULSE_PLUGIN_IMPACT_OPTION'              => 'sitepulse_plugin_impact_stats',
 ];
 
 foreach ($sitepulse_constants as $constant => $value) {
@@ -47,7 +49,7 @@ $options = [
     SITEPULSE_OPTION_LAST_LOAD_TIME,
     SITEPULSE_OPTION_CPU_ALERT_THRESHOLD,
     SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES,
-    defined('SITEPULSE_PLUGIN_IMPACT_OPTION') ? SITEPULSE_PLUGIN_IMPACT_OPTION : 'sitepulse_plugin_impact_stats',
+    SITEPULSE_PLUGIN_IMPACT_OPTION,
 ];
 
 $transients = [
@@ -57,11 +59,7 @@ $transients = [
     SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK,
 ];
 
-$transient_prefixes = [
-    defined('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX')
-        ? SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX
-        : 'sitepulse_plugin_dir_size_',
-];
+$transient_prefixes = [SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX];
 
 $transient_prefixes = array_values(array_unique(array_filter($transient_prefixes, 'strlen')));
 

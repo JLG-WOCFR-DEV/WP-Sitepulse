@@ -357,7 +357,7 @@ function sitepulse_settings_page() {
     $debug_mode_option = get_option(SITEPULSE_OPTION_DEBUG_MODE);
     $is_debug_mode_enabled = rest_sanitize_boolean($debug_mode_option);
 
-    if (isset($_POST['sitepulse_cleanup_nonce']) && wp_verify_nonce($_POST['sitepulse_cleanup_nonce'], 'sitepulse_cleanup')) {
+    if (isset($_POST[SITEPULSE_NONCE_FIELD_CLEANUP]) && wp_verify_nonce($_POST[SITEPULSE_NONCE_FIELD_CLEANUP], SITEPULSE_NONCE_ACTION_CLEANUP)) {
         if (isset($_POST['sitepulse_clear_log']) && defined('SITEPULSE_DEBUG_LOG') && file_exists(SITEPULSE_DEBUG_LOG)) {
             $cleared = @file_put_contents(SITEPULSE_DEBUG_LOG, '');
 
@@ -374,10 +374,6 @@ function sitepulse_settings_page() {
             echo '<div class="notice notice-success is-dismissible"><p>Données stockées effacées.</p></div>';
         }
         if (isset($_POST['sitepulse_reset_all'])) {
-            $plugin_impact_option = defined('SITEPULSE_PLUGIN_IMPACT_OPTION')
-                ? SITEPULSE_PLUGIN_IMPACT_OPTION
-                : 'sitepulse_plugin_impact_stats';
-
             $options_to_delete = [
                 SITEPULSE_OPTION_ACTIVE_MODULES,
                 SITEPULSE_OPTION_DEBUG_MODE,
@@ -386,7 +382,7 @@ function sitepulse_settings_page() {
                 SITEPULSE_OPTION_LAST_LOAD_TIME,
                 SITEPULSE_OPTION_CPU_ALERT_THRESHOLD,
                 SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES,
-                $plugin_impact_option,
+                SITEPULSE_PLUGIN_IMPACT_OPTION,
             ];
 
             foreach ($options_to_delete as $option_key) {
@@ -400,11 +396,7 @@ function sitepulse_settings_page() {
                 SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK,
             ];
 
-            $transient_prefixes_to_delete = [
-                defined('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX')
-                    ? SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX
-                    : 'sitepulse_plugin_dir_size_',
-            ];
+            $transient_prefixes_to_delete = [SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX];
 
             foreach ($transients_to_delete as $transient_key) {
                 delete_transient($transient_key);
@@ -482,7 +474,7 @@ function sitepulse_settings_page() {
         <h2>Nettoyage & Réinitialisation</h2>
         <p>Gérez les données du plugin.</p>
         <form method="post" action="">
-            <?php wp_nonce_field('sitepulse_cleanup', 'sitepulse_cleanup_nonce'); ?>
+            <?php wp_nonce_field(SITEPULSE_NONCE_ACTION_CLEANUP, SITEPULSE_NONCE_FIELD_CLEANUP); ?>
             <table class="form-table">
                 <tr>
                     <th scope="row"><label>Vider le journal de debug</label></th>
