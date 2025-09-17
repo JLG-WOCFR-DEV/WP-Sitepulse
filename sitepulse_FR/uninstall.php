@@ -11,22 +11,28 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
     exit;
 }
 
+$sitepulse_constants_loaded = defined('SITEPULSE_OPTION_ACTIVE_MODULES');
+
+if (!$sitepulse_constants_loaded && file_exists(__DIR__ . '/sitepulse.php')) {
+    require_once __DIR__ . '/sitepulse.php';
+}
+
 $options = [
-    'sitepulse_active_modules',
-    'sitepulse_debug_mode',
-    'sitepulse_gemini_api_key',
-    'sitepulse_uptime_log',
-    'sitepulse_last_load_time',
-    'sitepulse_cpu_alert_threshold',
-    'sitepulse_alert_cooldown_minutes',
+    defined('SITEPULSE_OPTION_ACTIVE_MODULES') ? SITEPULSE_OPTION_ACTIVE_MODULES : 'sitepulse_active_modules',
+    defined('SITEPULSE_OPTION_DEBUG_MODE') ? SITEPULSE_OPTION_DEBUG_MODE : 'sitepulse_debug_mode',
+    defined('SITEPULSE_OPTION_GEMINI_API_KEY') ? SITEPULSE_OPTION_GEMINI_API_KEY : 'sitepulse_gemini_api_key',
+    defined('SITEPULSE_OPTION_UPTIME_LOG') ? SITEPULSE_OPTION_UPTIME_LOG : 'sitepulse_uptime_log',
+    defined('SITEPULSE_OPTION_LAST_LOAD_TIME') ? SITEPULSE_OPTION_LAST_LOAD_TIME : 'sitepulse_last_load_time',
+    defined('SITEPULSE_OPTION_CPU_ALERT_THRESHOLD') ? SITEPULSE_OPTION_CPU_ALERT_THRESHOLD : 'sitepulse_cpu_alert_threshold',
+    defined('SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES') ? SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES : 'sitepulse_alert_cooldown_minutes',
     defined('SITEPULSE_PLUGIN_IMPACT_OPTION') ? SITEPULSE_PLUGIN_IMPACT_OPTION : 'sitepulse_plugin_impact_stats',
 ];
 
 $transients = [
-    'sitepulse_speed_scan_results',
-    'sitepulse_ai_insight',
-    'sitepulse_error_alert_cpu_lock',
-    'sitepulse_error_alert_php_fatal_lock',
+    defined('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS') ? SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS : 'sitepulse_speed_scan_results',
+    defined('SITEPULSE_TRANSIENT_AI_INSIGHT') ? SITEPULSE_TRANSIENT_AI_INSIGHT : 'sitepulse_ai_insight',
+    defined('SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK') ? SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK : 'sitepulse_error_alert_cpu_lock',
+    defined('SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK') ? SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK : 'sitepulse_error_alert_php_fatal_lock',
 ];
 
 $cron_hooks = require __DIR__ . '/includes/cron-hooks.php';

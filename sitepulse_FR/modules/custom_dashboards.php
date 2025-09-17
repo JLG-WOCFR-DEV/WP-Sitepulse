@@ -43,7 +43,7 @@ function sitepulse_custom_dashboards_page() {
             <!-- Speed Card -->
             <div class="sitepulse-card">
                 <?php
-                $results = get_transient('sitepulse_speed_scan_results');
+                $results = get_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
                 $ttfb = (is_array($results) && isset($results['ttfb'])) ? $results['ttfb'] : 0;
                 $ttfb_status = $ttfb > 500 ? 'status-bad' : ($ttfb > 200 ? 'status-warn' : 'status-ok');
                 ?>
@@ -57,7 +57,7 @@ function sitepulse_custom_dashboards_page() {
             <!-- Uptime Card -->
             <div class="sitepulse-card">
                  <?php
-                $uptime_log = get_option('sitepulse_uptime_log', []);
+                $uptime_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
                 $total_checks = count($uptime_log);
                 $up_checks = count(array_filter($uptime_log));
                 $uptime_percentage = $total_checks > 0 ? ($up_checks / $total_checks) * 100 : 100;

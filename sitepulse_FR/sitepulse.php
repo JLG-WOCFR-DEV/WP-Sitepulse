@@ -17,7 +17,23 @@ if (!defined('ABSPATH')) exit;
 define('SITEPULSE_VERSION', '1.0');
 define('SITEPULSE_PATH', plugin_dir_path(__FILE__));
 define('SITEPULSE_URL', plugin_dir_url(__FILE__));
-$debug_mode = get_option('sitepulse_debug_mode', false);
+
+// Reusable option keys
+define('SITEPULSE_OPTION_ACTIVE_MODULES', 'sitepulse_active_modules');
+define('SITEPULSE_OPTION_DEBUG_MODE', 'sitepulse_debug_mode');
+define('SITEPULSE_OPTION_GEMINI_API_KEY', 'sitepulse_gemini_api_key');
+define('SITEPULSE_OPTION_UPTIME_LOG', 'sitepulse_uptime_log');
+define('SITEPULSE_OPTION_LAST_LOAD_TIME', 'sitepulse_last_load_time');
+define('SITEPULSE_OPTION_CPU_ALERT_THRESHOLD', 'sitepulse_cpu_alert_threshold');
+define('SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES', 'sitepulse_alert_cooldown_minutes');
+
+// Reusable transient keys
+define('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS', 'sitepulse_speed_scan_results');
+define('SITEPULSE_TRANSIENT_AI_INSIGHT', 'sitepulse_ai_insight');
+define('SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK', 'sitepulse_error_alert_cpu_lock');
+define('SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK', 'sitepulse_error_alert_php_fatal_lock');
+
+$debug_mode = get_option(SITEPULSE_OPTION_DEBUG_MODE, false);
 define('SITEPULSE_DEBUG', (bool) $debug_mode);
 
 add_action('plugins_loaded', 'sitepulse_load_textdomain');
@@ -246,7 +262,7 @@ function sitepulse_get_cron_hook($module_key) {
 /**
  * Handles module activation option changes by removing orphaned cron events.
  *
- * The {@see 'update_option_sitepulse_active_modules'} action provides both the
+ * The {@see 'update_option_' . SITEPULSE_OPTION_ACTIVE_MODULES} action provides both the
  * old and new module lists. By comparing them we can detect which modules were
  * deactivated and clean up any scheduled events tied to those modules.
  *
@@ -275,7 +291,7 @@ function sitepulse_handle_module_changes($old_value, $value, $option = null) {
     }
 }
 
-add_action('update_option_sitepulse_active_modules', 'sitepulse_handle_module_changes', 10, 3);
+add_action('update_option_' . SITEPULSE_OPTION_ACTIVE_MODULES, 'sitepulse_handle_module_changes', 10, 3);
 
 /**
  * Schedules an admin notice to report SitePulse debug errors.
@@ -425,7 +441,7 @@ function sitepulse_load_modules() {
         'error_alerts'          => 'Error Alerts',
     ];
     
-    $active_modules = get_option('sitepulse_active_modules', []);
+    $active_modules = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
     sitepulse_log('Loading active modules: ' . implode(', ', $active_modules));
     
     foreach ($active_modules as $module_key) {
@@ -455,11 +471,11 @@ add_action('plugins_loaded', 'sitepulse_load_modules');
  */
 register_activation_hook(__FILE__, function() {
     // **FIX:** Activate the dashboard by default to prevent fatal errors on first load.
-    add_option('sitepulse_active_modules', ['custom_dashboards']);
-    add_option('sitepulse_debug_mode', false);
-    add_option('sitepulse_gemini_api_key', '');
-    add_option('sitepulse_cpu_alert_threshold', 5);
-    add_option('sitepulse_alert_cooldown_minutes', 60);
+    add_option(SITEPULSE_OPTION_ACTIVE_MODULES, ['custom_dashboards']);
+    add_option(SITEPULSE_OPTION_DEBUG_MODE, false);
+    add_option(SITEPULSE_OPTION_GEMINI_API_KEY, '');
+    add_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 5);
+    add_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60);
 });
 
 /**
