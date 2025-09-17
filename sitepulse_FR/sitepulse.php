@@ -122,6 +122,7 @@ function sitepulse_plugin_impact_tracker_persist() {
             continue;
         }
 
+        $plugin_file = (string) $plugin_file;
         $milliseconds = max(0.0, (float) $duration * 1000);
         $plugin_name = isset($all_plugins[$plugin_file]['Name']) ? $all_plugins[$plugin_file]['Name'] : $plugin_file;
 
@@ -146,16 +147,31 @@ function sitepulse_plugin_impact_tracker_persist() {
         }
     }
 
-    $active_plugins = get_option('active_plugins');
+    $active_plugins_option = get_option('active_plugins');
+    $active_plugins = is_array($active_plugins_option) ? array_map('strval', $active_plugins_option) : [];
+    $network_plugins_option = is_multisite() ? get_site_option('active_sitewide_plugins') : false;
+    $active_sitewide_plugins = is_array($network_plugins_option) ? array_map('strval', array_keys($network_plugins_option)) : [];
+    $all_active_plugins = array_unique(array_merge($active_plugins, $active_sitewide_plugins));
 
-    if (is_array($active_plugins)) {
-        $active_plugins = array_map('strval', $active_plugins);
+    if (is_array($active_plugins_option) || is_array($network_plugins_option)) {
+        $normalized_samples = [];
 
         foreach ($samples as $plugin_file => $data) {
-            if (!in_array($plugin_file, $active_plugins, true)) {
-                unset($samples[$plugin_file]);
+            $normalized_plugin_file = is_string($plugin_file) ? $plugin_file : (string) $plugin_file;
+
+            if (!in_array($normalized_plugin_file, $all_active_plugins, true)) {
+                continue;
             }
+
+            if (!is_array($data)) {
+                $data = [];
+            }
+
+            $data['file'] = isset($data['file']) ? (string) $data['file'] : $normalized_plugin_file;
+            $normalized_samples[$normalized_plugin_file] = $data;
         }
+
+        $samples = $normalized_samples;
     }
 
     $payload = [
