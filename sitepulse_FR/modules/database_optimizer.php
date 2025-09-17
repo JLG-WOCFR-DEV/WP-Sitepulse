@@ -21,14 +21,40 @@ function sitepulse_database_optimizer_page() {
             );
         }
         if (isset($_POST['clean_transients'])) {
-            // Requête statique : les motifs LIKE sont définis en dur sans donnée externe.
-            $cleaned = (int) $wpdb->query(
-                $wpdb->prepare(
-                    "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
-                    $wpdb->esc_like('_transient_') . '%',
-                    $wpdb->esc_like('_site_transient_') . '%'
-                )
-            );
+            if (function_exists('delete_expired_transients')) {
+                $cleaned = (int) delete_expired_transients();
+            } else {
+                $cleaned = 0;
+                $current_time = time();
+                $timeout_prefixes = array('_transient_timeout_', '_site_transient_timeout_');
+
+                foreach ($timeout_prefixes as $prefix) {
+                    $expired_timeouts = $wpdb->get_col(
+                        $wpdb->prepare(
+                            "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s AND option_value < %s",
+                            $wpdb->esc_like($prefix) . '%',
+                            $current_time
+                        )
+                    );
+
+                    foreach ($expired_timeouts as $timeout_option) {
+                        $deleted = false;
+
+                        if ($wpdb->delete($wpdb->options, array('option_name' => $timeout_option), array('%s'))) {
+                            $deleted = true;
+                        }
+
+                        $value_option = str_replace('_timeout_', '_', $timeout_option);
+                        if ($wpdb->delete($wpdb->options, array('option_name' => $value_option), array('%s'))) {
+                            $deleted = true;
+                        }
+
+                        if ($deleted) {
+                            $cleaned++;
+                        }
+                    }
+                }
+            }
 
             printf(
                 '<div class="notice notice-success is-dismissible"><p>%s transients expirés ont été supprimés.</p></div>',
