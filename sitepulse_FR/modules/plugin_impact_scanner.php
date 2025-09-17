@@ -178,9 +178,11 @@ function sitepulse_plugin_impact_scanner_page() {
     );
 
     if ($last_updated > 0) {
+        $display_timestamp = sitepulse_plugin_impact_normalize_timestamp_for_display($last_updated);
+        $format = get_option('date_format') . ' ' . get_option('time_format');
         $formatted_date = function_exists('wp_date')
-            ? wp_date(get_option('date_format') . ' ' . get_option('time_format'), $last_updated)
-            : date_i18n(get_option('date_format') . ' ' . get_option('time_format'), $last_updated);
+            ? wp_date($format, $display_timestamp)
+            : date_i18n($format, $display_timestamp, true);
 
         $relative_date = sprintf(
             /* translators: %s: human time diff. */
@@ -341,6 +343,32 @@ function sitepulse_plugin_impact_get_measurements() {
         'interval'     => isset($data['interval']) ? max(1, (int) $data['interval']) : $default_interval,
         'samples'      => isset($data['samples']) && is_array($data['samples']) ? $data['samples'] : [],
     ];
+}
+
+function sitepulse_plugin_impact_normalize_timestamp_for_display($timestamp) {
+    $timestamp = (int) $timestamp;
+
+    if ($timestamp <= 0) {
+        return 0;
+    }
+
+    $mysql_datetime = gmdate('Y-m-d H:i:s', $timestamp);
+
+    if (function_exists('wp_timezone')) {
+        $timezone = wp_timezone();
+
+        if ($timezone instanceof DateTimeZone) {
+            $date = date_create_from_format('Y-m-d H:i:s', $mysql_datetime, $timezone);
+
+            if ($date instanceof DateTimeInterface) {
+                return $date->getTimestamp();
+            }
+        }
+    }
+
+    $offset = (float) get_option('gmt_offset', 0);
+
+    return $timestamp - (int) ($offset * HOUR_IN_SECONDS);
 }
 
 function sitepulse_plugin_impact_format_interval($seconds) {
