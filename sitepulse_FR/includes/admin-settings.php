@@ -292,11 +292,39 @@ function sitepulse_settings_page() {
             echo '<div class="notice notice-success is-dismissible"><p>Données stockées effacées.</p></div>';
         }
         if (isset($_POST['sitepulse_reset_all'])) {
-            delete_option('sitepulse_active_modules');
-            delete_option('sitepulse_debug_mode');
-            delete_option('sitepulse_gemini_api_key');
-            delete_option('sitepulse_uptime_log');
-            delete_transient('sitepulse_speed_scan_results');
+            $plugin_impact_option = defined('SITEPULSE_PLUGIN_IMPACT_OPTION')
+                ? SITEPULSE_PLUGIN_IMPACT_OPTION
+                : 'sitepulse_plugin_impact_stats';
+
+            $options_to_delete = [
+                'sitepulse_active_modules',
+                'sitepulse_debug_mode',
+                'sitepulse_gemini_api_key',
+                'sitepulse_uptime_log',
+                'sitepulse_last_load_time',
+                'sitepulse_cpu_alert_threshold',
+                'sitepulse_alert_cooldown_minutes',
+                $plugin_impact_option,
+            ];
+
+            foreach ($options_to_delete as $option_key) {
+                delete_option($option_key);
+            }
+
+            $transients_to_delete = [
+                'sitepulse_speed_scan_results',
+                'sitepulse_ai_insight',
+                'sitepulse_error_alert_cpu_lock',
+                'sitepulse_error_alert_php_fatal_lock',
+            ];
+
+            foreach ($transients_to_delete as $transient_key) {
+                delete_transient($transient_key);
+
+                if (function_exists('delete_site_transient')) {
+                    delete_site_transient($transient_key);
+                }
+            }
             if (defined('SITEPULSE_DEBUG_LOG') && file_exists(SITEPULSE_DEBUG_LOG)) { unlink(SITEPULSE_DEBUG_LOG); }
             $cron_hooks = function_exists('sitepulse_get_cron_hooks') ? sitepulse_get_cron_hooks() : [];
             foreach ($cron_hooks as $hook) {
