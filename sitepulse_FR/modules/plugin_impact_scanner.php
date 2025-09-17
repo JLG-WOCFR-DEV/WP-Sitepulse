@@ -68,6 +68,15 @@ function sitepulse_plugin_impact_scanner_page() {
     foreach ($active_plugin_files as $plugin_file) {
         $plugin_name = isset($all_plugins[$plugin_file]['Name']) ? $all_plugins[$plugin_file]['Name'] : $plugin_file;
 
+        $plugin_dir = dirname($plugin_file);
+
+        if ($plugin_dir === '.' || $plugin_dir === '') {
+            $plugin_path = WP_PLUGIN_DIR . '/' . $plugin_file;
+            $disk_space = is_file($plugin_path) && is_readable($plugin_path) ? filesize($plugin_path) : 0;
+        } else {
+            $disk_space = sitepulse_get_dir_size_recursive(WP_PLUGIN_DIR . '/' . $plugin_dir);
+        }
+
         $impact_data = [
             'file'          => $plugin_file,
             'name'          => $plugin_name,
@@ -75,7 +84,7 @@ function sitepulse_plugin_impact_scanner_page() {
             'last_ms'       => null,
             'samples'       => 0,
             'last_recorded' => null,
-            'disk_space'    => sitepulse_get_dir_size_recursive(WP_PLUGIN_DIR . '/' . dirname($plugin_file)),
+            'disk_space'    => $disk_space,
         ];
 
         if (isset($samples[$plugin_file]) && is_array($samples[$plugin_file])) {
@@ -356,10 +365,16 @@ function sitepulse_get_dir_size_recursive($dir) {
         return $size;
     }
 
-    $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS));
+    try {
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)
+        );
 
-    foreach ($iterator as $file) {
-        $size += $file->getSize();
+        foreach ($iterator as $file) {
+            $size += $file->getSize();
+        }
+    } catch (UnexpectedValueException | RuntimeException $e) {
+        return $size;
     }
 
     return $size;
