@@ -420,7 +420,7 @@ function sitepulse_get_dir_size_with_cache($dir) {
         return 0;
     }
 
-    $transient_key = 'sitepulse_plugin_dir_size_' . md5($dir);
+    $transient_key = SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX . md5($dir);
     $cached_size = get_transient($transient_key);
 
     if ($cached_size !== false && is_numeric($cached_size)) {

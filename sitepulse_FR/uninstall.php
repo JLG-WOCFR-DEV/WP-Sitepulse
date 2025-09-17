@@ -23,6 +23,7 @@ $sitepulse_constants = [
     'SITEPULSE_TRANSIENT_AI_INSIGHT'              => 'sitepulse_ai_insight',
     'SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX' => 'sitepulse_error_alert_',
     'SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX' => '_lock',
+    'SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX'  => 'sitepulse_plugin_dir_size_',
 ];
 
 foreach ($sitepulse_constants as $constant => $value) {
@@ -58,7 +59,7 @@ $transients = [
 ];
 
 $transient_prefixes = [
-    'sitepulse_plugin_dir_size_',
+    SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX,
 ];
 
 $transient_prefixes = array_values(array_unique(array_filter($transient_prefixes, 'strlen')));

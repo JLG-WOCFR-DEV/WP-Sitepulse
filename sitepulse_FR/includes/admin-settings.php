@@ -401,7 +401,7 @@ function sitepulse_settings_page() {
             ];
 
             $transient_prefixes_to_delete = [
-                'sitepulse_plugin_dir_size_',
+                SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX,
             ];
 
             foreach ($transients_to_delete as $transient_key) {
