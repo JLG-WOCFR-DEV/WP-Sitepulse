@@ -274,6 +274,8 @@ function sitepulse_settings_page() {
         'uptime_tracker' => 'Uptime Tracker', 'ai_insights' => 'AI-Powered Insights', 'custom_dashboards' => 'Custom Dashboards', 'error_alerts' => 'Error Alerts',
     ];
     $active_modules = get_option('sitepulse_active_modules', []);
+    $debug_mode_option = get_option('sitepulse_debug_mode');
+    $is_debug_mode_enabled = rest_sanitize_boolean($debug_mode_option);
 
     if (isset($_POST['sitepulse_cleanup_nonce']) && wp_verify_nonce($_POST['sitepulse_cleanup_nonce'], 'sitepulse_cleanup')) {
         if (isset($_POST['sitepulse_clear_log']) && defined('SITEPULSE_DEBUG_LOG') && file_exists(SITEPULSE_DEBUG_LOG)) {
@@ -361,7 +363,7 @@ function sitepulse_settings_page() {
                     <th scope="row"><label for="sitepulse_debug_mode">Activer le Mode Debug</label></th>
                     <td>
                         <input type="hidden" name="sitepulse_debug_mode" value="0">
-                        <input type="checkbox" id="sitepulse_debug_mode" name="sitepulse_debug_mode" value="1" <?php checked(get_option('sitepulse_debug_mode'), '1'); ?>>
+                        <input type="checkbox" id="sitepulse_debug_mode" name="sitepulse_debug_mode" value="1" <?php checked($is_debug_mode_enabled); ?>>
                         <p class="description">Active la journalisation détaillée et le tableau de bord de débogage. À n'utiliser que pour le dépannage.</p>
                     </td>
                 </tr>
