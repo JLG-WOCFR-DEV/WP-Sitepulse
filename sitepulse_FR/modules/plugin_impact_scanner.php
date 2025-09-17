@@ -68,6 +68,19 @@ function sitepulse_plugin_impact_scanner_page() {
     foreach ($active_plugin_files as $plugin_file) {
         $plugin_name = isset($all_plugins[$plugin_file]['Name']) ? $all_plugins[$plugin_file]['Name'] : $plugin_file;
 
+        $plugin_directory = dirname($plugin_file);
+        $disk_space = 0;
+
+        if ('.' === $plugin_directory || '' === $plugin_directory) {
+            $plugin_path = WP_PLUGIN_DIR . '/' . ltrim($plugin_file, '/');
+
+            if (is_file($plugin_path)) {
+                $disk_space = filesize($plugin_path);
+            }
+        } else {
+            $disk_space = sitepulse_get_dir_size_recursive(WP_PLUGIN_DIR . '/' . $plugin_directory);
+        }
+
         $impact_data = [
             'file'          => $plugin_file,
             'name'          => $plugin_name,
@@ -75,7 +88,7 @@ function sitepulse_plugin_impact_scanner_page() {
             'last_ms'       => null,
             'samples'       => 0,
             'last_recorded' => null,
-            'disk_space'    => sitepulse_get_dir_size_recursive(WP_PLUGIN_DIR . '/' . dirname($plugin_file)),
+            'disk_space'    => $disk_space,
         ];
 
         if (isset($samples[$plugin_file]) && is_array($samples[$plugin_file])) {
