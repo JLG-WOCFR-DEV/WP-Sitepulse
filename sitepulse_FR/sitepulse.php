@@ -116,12 +116,34 @@ function sitepulse_plugin_impact_tracker_on_plugin_loaded($plugin_file) {
  * unless a manual refresh is requested. A moving average is kept for each
  * plugin so that transient spikes have less impact on the reported duration.
  *
+ * Request contexts can be skipped entirely by filtering the default behavior
+ * via {@see 'sitepulse_plugin_impact_should_measure_request'}.
+ *
  * @return void
  */
 function sitepulse_plugin_impact_tracker_persist() {
     global $sitepulse_plugin_impact_tracker_samples, $sitepulse_plugin_impact_tracker_force_persist;
 
     $request_start = null;
+
+    $non_representative_context = false;
+
+    if (function_exists('wp_doing_cron') && wp_doing_cron()) {
+        $non_representative_context = true;
+    } elseif (function_exists('wp_doing_ajax') && wp_doing_ajax()) {
+        $non_representative_context = true;
+    } elseif (defined('REST_REQUEST') && REST_REQUEST) {
+        $non_representative_context = true;
+    }
+
+    $should_measure_request = apply_filters(
+        'sitepulse_plugin_impact_should_measure_request',
+        !$non_representative_context && !is_admin()
+    );
+
+    if ($non_representative_context || !$should_measure_request) {
+        return;
+    }
 
     if (isset($GLOBALS['timestart']) && is_numeric($GLOBALS['timestart'])) {
         $request_start = (float) $GLOBALS['timestart'];
