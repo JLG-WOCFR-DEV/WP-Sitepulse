@@ -44,10 +44,23 @@ function sitepulse_custom_dashboards_page() {
             <div class="sitepulse-card">
                 <?php
                 $results = get_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
-                $ttfb = (is_array($results) && isset($results['ttfb'])) ? $results['ttfb'] : 0;
-                $ttfb_status = $ttfb > 500 ? 'status-bad' : ($ttfb > 200 ? 'status-warn' : 'status-ok');
+                $ttfb = null;
+
+                if (is_array($results) && isset($results['ttfb']) && is_numeric($results['ttfb'])) {
+                    $ttfb = (float) $results['ttfb'];
+                }
+
+                $ttfb_status = 'status-ok';
+
+                if ($ttfb === null) {
+                    $ttfb_status = 'status-warn';
+                } elseif ($ttfb > 500) {
+                    $ttfb_status = 'status-bad';
+                } elseif ($ttfb > 200) {
+                    $ttfb_status = 'status-warn';
+                }
                 ?>
-                <?php $ttfb_display = $ttfb ? round($ttfb) . ' ' . esc_html__('ms', 'sitepulse') : esc_html__('N/A', 'sitepulse'); ?>
+                <?php $ttfb_display = $ttfb !== null ? round($ttfb) . ' ' . esc_html__('ms', 'sitepulse') : esc_html__('N/A', 'sitepulse'); ?>
                 <h2><span class="dashicons dashicons-performance"></span> <?php esc_html_e('Speed', 'sitepulse'); ?></h2>
                 <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-speed')); ?>" class="button"><?php esc_html_e('Details', 'sitepulse'); ?></a>
                 <p><?php esc_html_e('Server Response (TTFB):', 'sitepulse'); ?> <span class="metric <?php echo esc_attr($ttfb_status); ?>"><?php echo esc_html($ttfb_display); ?></span></p>
