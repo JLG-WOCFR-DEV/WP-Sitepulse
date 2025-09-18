@@ -518,13 +518,25 @@ function sitepulse_clear_dir_size_cache($dir) {
 function sitepulse_get_dir_size_recursive($dir) {
     $size = 0;
 
-    if (!is_dir($dir)) {
+    $dir = (string) $dir;
+    $resolved_dir = $dir;
+
+    if (function_exists('realpath')) {
+        $realpath = realpath($dir);
+
+        if ($realpath !== false) {
+            // Resolve the directory to follow symlinks where possible.
+            $resolved_dir = $realpath;
+        }
+    }
+
+    if (!is_dir($resolved_dir)) {
         return $size;
     }
 
     try {
         $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)
+            new RecursiveDirectoryIterator($resolved_dir, FilesystemIterator::SKIP_DOTS)
         );
 
         foreach ($iterator as $file) {
