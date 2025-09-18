@@ -48,14 +48,15 @@ function sitepulse_plugin_impact_scanner_page() {
 
     $measurements = sitepulse_plugin_impact_get_measurements();
 
-    if (!empty($_POST['sitepulse_plugin_impact_refresh'])) {
-        check_admin_referer('sitepulse_plugin_impact_refresh');
+    if (!empty($_POST[SITEPULSE_ACTION_PLUGIN_IMPACT_REFRESH])) {
+        check_admin_referer(SITEPULSE_ACTION_PLUGIN_IMPACT_REFRESH);
 
         if (function_exists('sitepulse_plugin_impact_force_next_persist')) {
             sitepulse_plugin_impact_force_next_persist(true);
         } else {
-            $option_key = defined('SITEPULSE_PLUGIN_IMPACT_OPTION') ? SITEPULSE_PLUGIN_IMPACT_OPTION : 'sitepulse_plugin_impact_stats';
-            delete_option($option_key);
+            if (defined('SITEPULSE_PLUGIN_IMPACT_OPTION')) {
+                delete_option(SITEPULSE_PLUGIN_IMPACT_OPTION);
+            }
         }
 
         add_settings_error(
@@ -243,8 +244,8 @@ function sitepulse_plugin_impact_scanner_page() {
         </ul>
 
         <form method="post" class="sitepulse-impact-refresh">
-            <?php wp_nonce_field('sitepulse_plugin_impact_refresh'); ?>
-            <?php submit_button(__('Forcer un nouvel échantillon maintenant', 'sitepulse'), 'secondary', 'sitepulse_plugin_impact_refresh', false); ?>
+            <?php wp_nonce_field(SITEPULSE_ACTION_PLUGIN_IMPACT_REFRESH); ?>
+            <?php submit_button(__('Forcer un nouvel échantillon maintenant', 'sitepulse'), 'secondary', SITEPULSE_ACTION_PLUGIN_IMPACT_REFRESH, false); ?>
         </form>
 
         <table class="wp-list-table widefat striped">
@@ -329,8 +330,15 @@ function sitepulse_plugin_impact_scanner_page() {
 }
 
 function sitepulse_plugin_impact_get_measurements() {
-    $option_key = defined('SITEPULSE_PLUGIN_IMPACT_OPTION') ? SITEPULSE_PLUGIN_IMPACT_OPTION : 'sitepulse_plugin_impact_stats';
-    $data = get_option($option_key, []);
+    if (!defined('SITEPULSE_PLUGIN_IMPACT_OPTION')) {
+        return [
+            'last_updated' => 0,
+            'interval'     => defined('SITEPULSE_PLUGIN_IMPACT_REFRESH_INTERVAL') ? SITEPULSE_PLUGIN_IMPACT_REFRESH_INTERVAL : 15 * MINUTE_IN_SECONDS,
+            'samples'      => [],
+        ];
+    }
+
+    $data = get_option(SITEPULSE_PLUGIN_IMPACT_OPTION, []);
 
     if (!is_array($data)) {
         $data = [];
@@ -420,11 +428,11 @@ function sitepulse_get_dir_size_with_cache($dir) {
         return 0;
     }
 
-    $transient_prefix = defined('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX')
-        ? SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX
-        : 'sitepulse_plugin_dir_size_';
+    if (!defined('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX')) {
+        return sitepulse_get_dir_size_recursive($dir);
+    }
 
-    $transient_key = $transient_prefix . md5($dir);
+    $transient_key = SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX . md5($dir);
     $cached_size = get_transient($transient_key);
 
     if ($cached_size !== false && is_numeric($cached_size)) {
