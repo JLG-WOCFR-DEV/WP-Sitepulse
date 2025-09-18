@@ -136,6 +136,11 @@ function sitepulse_plugin_impact_tracker_persist() {
     }
 
     update_option(SITEPULSE_OPTION_LAST_LOAD_TIME, $request_duration_ms, false);
+    set_transient(
+        SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS,
+        ['ttfb' => $request_duration_ms],
+        MINUTE_IN_SECONDS * 10
+    );
 
     if (empty($sitepulse_plugin_impact_tracker_samples) || !is_array($sitepulse_plugin_impact_tracker_samples)) {
         return;
