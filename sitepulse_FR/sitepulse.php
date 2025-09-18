@@ -494,22 +494,68 @@ function sitepulse_load_modules() {
 add_action('plugins_loaded', 'sitepulse_load_modules');
 
 /**
- * Activation hook. Sets default options.
+ * Sets default options for a given site.
+ *
+ * @return void
  */
-register_activation_hook(__FILE__, function() {
+function sitepulse_activate_site() {
     // **FIX:** Activate the dashboard by default to prevent fatal errors on first load.
     add_option(SITEPULSE_OPTION_ACTIVE_MODULES, ['custom_dashboards']);
     add_option(SITEPULSE_OPTION_DEBUG_MODE, false);
     add_option(SITEPULSE_OPTION_GEMINI_API_KEY, '');
     add_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 5);
     add_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60);
+}
+
+/**
+ * Clears scheduled tasks for a given site.
+ *
+ * @return void
+ */
+function sitepulse_deactivate_site() {
+    foreach (sitepulse_get_cron_hooks() as $hook) {
+        wp_clear_scheduled_hook($hook);
+    }
+}
+
+/**
+ * Activation hook. Sets default options.
+ *
+ * @param bool $network_wide Whether the plugin is being activated network-wide.
+ */
+register_activation_hook(__FILE__, function($network_wide) {
+    if (is_multisite() && $network_wide) {
+        $sites = get_sites(['fields' => 'ids']);
+
+        foreach ($sites as $site_id) {
+            switch_to_blog($site_id);
+            sitepulse_activate_site();
+            restore_current_blog();
+        }
+
+        return;
+    }
+
+    sitepulse_activate_site();
 });
 
 /**
  * Deactivation hook. Cleans up scheduled tasks.
+ *
+ * @param bool $network_wide Whether the plugin is being deactivated network-wide.
  */
-register_deactivation_hook(__FILE__, function() {
-    foreach (sitepulse_get_cron_hooks() as $hook) {
-        wp_clear_scheduled_hook($hook);
+register_deactivation_hook(__FILE__, function($network_wide) {
+    if (is_multisite() && $network_wide) {
+        $sites = get_sites(['fields' => 'ids']);
+
+        foreach ($sites as $site_id) {
+            switch_to_blog($site_id);
+            sitepulse_deactivate_site();
+            restore_current_blog();
+        }
+
+        return;
     }
+
+    sitepulse_deactivate_site();
 });
