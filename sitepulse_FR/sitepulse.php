@@ -116,6 +116,22 @@ function sitepulse_plugin_impact_tracker_on_plugin_loaded($plugin_file) {
 function sitepulse_plugin_impact_tracker_persist() {
     global $sitepulse_plugin_impact_tracker_samples, $sitepulse_plugin_impact_tracker_force_persist;
 
+    $request_start = null;
+
+    if (isset($GLOBALS['timestart']) && is_numeric($GLOBALS['timestart'])) {
+        $request_start = (float) $GLOBALS['timestart'];
+    } elseif (isset($_SERVER['REQUEST_TIME_FLOAT']) && is_numeric($_SERVER['REQUEST_TIME_FLOAT'])) {
+        $request_start = (float) $_SERVER['REQUEST_TIME_FLOAT'];
+    }
+
+    $request_duration_ms = 0.0;
+
+    if ($request_start !== null) {
+        $request_duration_ms = max(0.0, (microtime(true) - $request_start) * 1000);
+    }
+
+    update_option(SITEPULSE_OPTION_LAST_LOAD_TIME, $request_duration_ms, false);
+
     if (empty($sitepulse_plugin_impact_tracker_samples) || !is_array($sitepulse_plugin_impact_tracker_samples)) {
         return;
     }
