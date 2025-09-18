@@ -17,6 +17,54 @@ add_action(
     }
 );
 
+add_action('upgrader_process_complete', 'sitepulse_plugin_impact_clear_dir_cache_on_upgrade', 10, 2);
+
+function sitepulse_plugin_impact_clear_dir_cache_on_upgrade($upgrader, $hook_extra) {
+    if (!is_array($hook_extra) || !isset($hook_extra['type']) || $hook_extra['type'] !== 'plugin') {
+        return;
+    }
+
+    if (!defined('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX')) {
+        return;
+    }
+
+    $plugin_files = [];
+
+    if (isset($hook_extra['plugins']) && is_array($hook_extra['plugins'])) {
+        foreach ($hook_extra['plugins'] as $plugin_file) {
+            if (is_string($plugin_file) && $plugin_file !== '') {
+                $plugin_files[] = $plugin_file;
+            }
+        }
+    } elseif (isset($hook_extra['plugin']) && is_string($hook_extra['plugin']) && $hook_extra['plugin'] !== '') {
+        $plugin_files[] = $hook_extra['plugin'];
+    }
+
+    if (empty($plugin_files)) {
+        if (function_exists('sitepulse_delete_transients_by_prefix')) {
+            sitepulse_delete_transients_by_prefix(SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX);
+        }
+
+        if (function_exists('sitepulse_delete_site_transients_by_prefix')) {
+            sitepulse_delete_site_transients_by_prefix(SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX);
+        }
+
+        return;
+    }
+
+    $plugin_files = array_unique($plugin_files);
+
+    foreach ($plugin_files as $plugin_file) {
+        $plugin_dir = dirname($plugin_file);
+
+        if ($plugin_dir === '.' || $plugin_dir === '' || $plugin_dir === DIRECTORY_SEPARATOR) {
+            continue;
+        }
+
+        sitepulse_clear_dir_size_cache(WP_PLUGIN_DIR . '/' . $plugin_dir);
+    }
+}
+
 function sitepulse_plugin_impact_scanner_page() {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
@@ -449,6 +497,22 @@ function sitepulse_get_dir_size_with_cache($dir) {
     set_transient($transient_key, (int) $size, $expiration);
 
     return (int) $size;
+}
+
+function sitepulse_clear_dir_size_cache($dir) {
+    $dir = (string) $dir;
+
+    if ($dir === '' || !defined('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX')) {
+        return;
+    }
+
+    $transient_key = SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX . md5($dir);
+
+    delete_transient($transient_key);
+
+    if (function_exists('delete_site_transient')) {
+        delete_site_transient($transient_key);
+    }
 }
 
 function sitepulse_get_dir_size_recursive($dir) {
