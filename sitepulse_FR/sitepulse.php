@@ -134,6 +134,10 @@ function sitepulse_plugin_impact_tracker_persist() {
         $non_representative_context = true;
     } elseif (defined('REST_REQUEST') && REST_REQUEST) {
         $non_representative_context = true;
+    } elseif (defined('WP_CLI') && WP_CLI) {
+        $non_representative_context = true;
+    } elseif (defined('XMLRPC_REQUEST') && XMLRPC_REQUEST) {
+        $non_representative_context = true;
     }
 
     $should_measure_request = apply_filters(
