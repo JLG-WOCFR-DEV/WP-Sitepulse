@@ -7,6 +7,60 @@ $sitepulse_error_alerts_cron_hook = function_exists('sitepulse_get_cron_hook') ?
 $sitepulse_error_alerts_schedule   = 'sitepulse_error_alerts_five_minutes';
 
 /**
+ * Normalizes the alert interval to one of the supported values.
+ *
+ * @param mixed $value Raw value to sanitize.
+ * @return int Sanitized interval in minutes.
+ */
+function sitepulse_error_alerts_sanitize_interval($value) {
+    $allowed = [5, 10, 15, 30];
+    $value   = is_scalar($value) ? absint($value) : 0;
+
+    if ($value < 5) {
+        $value = 5;
+    } elseif ($value > 30) {
+        $value = 30;
+    }
+
+    if (!in_array($value, $allowed, true)) {
+        $value = 5;
+    }
+
+    return $value;
+}
+
+/**
+ * Retrieves the interval (in minutes) configured for the alert checks.
+ *
+ * @return int
+ */
+function sitepulse_error_alerts_get_interval_minutes() {
+    $stored_value = get_option(SITEPULSE_OPTION_ALERT_INTERVAL, 5);
+
+    if (function_exists('sitepulse_sanitize_alert_interval')) {
+        return sitepulse_sanitize_alert_interval($stored_value);
+    }
+
+    return sitepulse_error_alerts_sanitize_interval($stored_value);
+}
+
+/**
+ * Builds the cron schedule slug based on the configured interval.
+ *
+ * @param int|null $minutes Interval override (optional).
+ * @return string
+ */
+function sitepulse_error_alerts_get_schedule_slug($minutes = null) {
+    $minutes = $minutes === null
+        ? sitepulse_error_alerts_get_interval_minutes()
+        : sitepulse_error_alerts_sanitize_interval($minutes);
+
+    return 'sitepulse_error_alerts_' . $minutes . '_minutes';
+}
+
+$sitepulse_error_alerts_schedule = sitepulse_error_alerts_get_schedule_slug();
+
+/**
  * Returns the configured CPU load threshold for alerting.
  *
  * @return float
@@ -88,22 +142,23 @@ function sitepulse_error_alert_send($type, $subject, $message) {
 function sitepulse_error_alerts_register_cron_schedule($schedules) {
     global $sitepulse_error_alerts_schedule;
 
-    $schedule_slug = is_string($sitepulse_error_alerts_schedule) && $sitepulse_error_alerts_schedule !== ''
-        ? $sitepulse_error_alerts_schedule
-        : 'sitepulse_error_alerts_five_minutes';
+    $interval_minutes = sitepulse_error_alerts_get_interval_minutes();
+    $schedule_slug    = sitepulse_error_alerts_get_schedule_slug($interval_minutes);
+    $sitepulse_error_alerts_schedule = $schedule_slug;
 
     if (!isset($schedules[$schedule_slug])) {
         $minute_in_seconds = defined('MINUTE_IN_SECONDS') ? MINUTE_IN_SECONDS : 60;
-        $default_interval  = 5 * $minute_in_seconds;
+        $default_interval  = $interval_minutes * $minute_in_seconds;
+        $minimum_interval  = 5 * $minute_in_seconds;
         $interval          = (int) apply_filters('sitepulse_error_alerts_cron_interval_seconds', $default_interval);
 
-        if ($interval < $minute_in_seconds) {
-            $interval = $default_interval;
+        if ($interval < $minimum_interval) {
+            $interval = $minimum_interval;
         }
 
         $schedules[$schedule_slug] = [
             'interval' => $interval,
-            'display'  => __('SitePulse Error Alerts (Every Five Minutes)', 'sitepulse'),
+            'display'  => sprintf(__('SitePulse Error Alerts (Every %d Minutes)', 'sitepulse'), $interval_minutes),
         ];
     }
 
@@ -184,14 +239,51 @@ function sitepulse_error_alerts_check_debug_log() {
     }
 }
 
+/**
+ * Handles rescheduling when the alert interval option is updated.
+ *
+ * @param mixed $old_value Previous value.
+ * @param mixed $value     New value.
+ * @return void
+ */
+function sitepulse_error_alerts_on_interval_update($old_value, $value) {
+    global $sitepulse_error_alerts_cron_hook, $sitepulse_error_alerts_schedule;
+
+    if (empty($sitepulse_error_alerts_cron_hook)) {
+        return;
+    }
+
+    $sitepulse_error_alerts_schedule = sitepulse_error_alerts_get_schedule_slug($value);
+
+    if (function_exists('wp_clear_scheduled_hook')) {
+        wp_clear_scheduled_hook($sitepulse_error_alerts_cron_hook);
+    } else {
+        $timestamp = wp_next_scheduled($sitepulse_error_alerts_cron_hook);
+
+        while ($timestamp) {
+            wp_unschedule_event($timestamp, $sitepulse_error_alerts_cron_hook);
+            $timestamp = wp_next_scheduled($sitepulse_error_alerts_cron_hook);
+        }
+    }
+
+    if (!wp_next_scheduled($sitepulse_error_alerts_cron_hook)) {
+        wp_schedule_event(time(), $sitepulse_error_alerts_schedule, $sitepulse_error_alerts_cron_hook);
+    }
+}
+
 if (!empty($sitepulse_error_alerts_cron_hook)) {
     add_filter('cron_schedules', 'sitepulse_error_alerts_register_cron_schedule');
 
-    add_action('init', function () use ($sitepulse_error_alerts_cron_hook, $sitepulse_error_alerts_schedule) {
+    add_action('init', function () use ($sitepulse_error_alerts_cron_hook) {
+        global $sitepulse_error_alerts_schedule;
+
+        $sitepulse_error_alerts_schedule = sitepulse_error_alerts_get_schedule_slug();
+
         if (!wp_next_scheduled($sitepulse_error_alerts_cron_hook)) {
             wp_schedule_event(time(), $sitepulse_error_alerts_schedule, $sitepulse_error_alerts_cron_hook);
         }
     });
 
     add_action($sitepulse_error_alerts_cron_hook, 'sitepulse_error_alerts_run_checks');
+    add_action('update_option_' . SITEPULSE_OPTION_ALERT_INTERVAL, 'sitepulse_error_alerts_on_interval_update', 10, 3);
 }
