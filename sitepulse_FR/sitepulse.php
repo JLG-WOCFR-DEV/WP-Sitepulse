@@ -131,7 +131,14 @@ function sitepulse_plugin_impact_tracker_persist() {
         return;
     }
 
-    if (function_exists('is_admin') && is_admin() && !apply_filters('sitepulse_track_admin_requests', false)) {
+    $track_admin_requests = apply_filters('sitepulse_track_admin_requests', false);
+
+    if (
+        function_exists('is_admin')
+        && is_admin()
+        && !$sitepulse_plugin_impact_tracker_force_persist
+        && !$track_admin_requests
+    ) {
         return;
     }
 
@@ -153,7 +160,12 @@ function sitepulse_plugin_impact_tracker_persist() {
 
     $should_measure_request = apply_filters(
         'sitepulse_plugin_impact_should_measure_request',
-        !$non_representative_context && !is_admin()
+        !$non_representative_context
+        && (
+            !function_exists('is_admin')
+            || !is_admin()
+            || $sitepulse_plugin_impact_tracker_force_persist
+        )
     );
 
     if ($non_representative_context || !$should_measure_request) {
