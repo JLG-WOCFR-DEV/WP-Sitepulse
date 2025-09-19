@@ -101,6 +101,9 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, [
         'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_cooldown_minutes', 'default' => 60
     ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_ALERT_INTERVAL, [
+        'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_alert_interval', 'default' => 5
+    ]);
 }
 add_action('admin_init', 'sitepulse_register_settings');
 
@@ -145,6 +148,29 @@ function sitepulse_sanitize_cooldown_minutes($value) {
     if ($value < 1) {
         $value = 60;
     }
+    return $value;
+}
+
+/**
+ * Sanitizes the alert interval (in minutes) used to schedule error checks.
+ *
+ * @param mixed $value Raw user input value.
+ * @return int Sanitized interval in minutes.
+ */
+function sitepulse_sanitize_alert_interval($value) {
+    $allowed_values = [5, 10, 15, 30];
+    $value = is_scalar($value) ? absint($value) : 0;
+
+    if ($value < 5) {
+        $value = 5;
+    } elseif ($value > 30) {
+        $value = 30;
+    }
+
+    if (!in_array($value, $allowed_values, true)) {
+        $value = 5;
+    }
+
     return $value;
 }
 
@@ -465,6 +491,26 @@ function sitepulse_settings_page() {
                     <td>
                         <input type="number" min="1" id="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES); ?>" value="<?php echo esc_attr(get_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60)); ?>" class="small-text">
                         <p class="description">Empêche l'envoi de plusieurs e-mails identiques pendant la durée spécifiée.</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_INTERVAL); ?>">Fréquence des vérifications</label></th>
+                    <td>
+                        <?php
+                        $interval_value   = (int) get_option(SITEPULSE_OPTION_ALERT_INTERVAL, 5);
+                        $interval_choices = [
+                            5  => __('Toutes les 5 minutes', 'sitepulse'),
+                            10 => __('Toutes les 10 minutes', 'sitepulse'),
+                            15 => __('Toutes les 15 minutes', 'sitepulse'),
+                            30 => __('Toutes les 30 minutes', 'sitepulse'),
+                        ];
+                        ?>
+                        <select id="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_INTERVAL); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_INTERVAL); ?>">
+                            <?php foreach ($interval_choices as $minutes => $label) : ?>
+                                <option value="<?php echo esc_attr($minutes); ?>" <?php selected($interval_value, $minutes); ?>><?php echo esc_html($label); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <p class="description">Détermine la fréquence des vérifications automatisées pour les alertes.</p>
                     </td>
                 </tr>
             </table>
