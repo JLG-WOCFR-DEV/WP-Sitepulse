@@ -9,11 +9,16 @@ function sitepulse_database_optimizer_page() {
     global $wpdb;
     if (isset($_POST['db_cleanup_nonce']) && wp_verify_nonce($_POST['db_cleanup_nonce'], 'db_cleanup')) {
         if (isset($_POST['clean_revisions'])) {
-            // Requête statique : aucun paramètre dynamique n'est interpolé dans la suppression.
-            $cleaned = (int) $wpdb->delete(
-                $wpdb->posts,
-                array('post_type' => 'revision')
-            );
+            $revision_ids = $wpdb->get_col("SELECT ID FROM {$wpdb->posts} WHERE post_type = 'revision'");
+            $cleaned = 0;
+
+            foreach ($revision_ids as $revision_id) {
+                $deleted_revision = wp_delete_post((int) $revision_id, true);
+
+                if (false !== $deleted_revision) {
+                    $cleaned++;
+                }
+            }
 
             printf(
                 '<div class="notice notice-success is-dismissible"><p>%s révisions d\'articles ont été supprimées.</p></div>',
