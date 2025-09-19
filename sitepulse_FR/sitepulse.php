@@ -184,12 +184,35 @@ function sitepulse_plugin_impact_tracker_persist() {
         $request_duration_ms = max(0.0, (microtime(true) - $request_start) * 1000);
     }
 
-    update_option(SITEPULSE_OPTION_LAST_LOAD_TIME, $request_duration_ms, false);
-    set_transient(
-        SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS,
-        ['ttfb' => $request_duration_ms],
-        MINUTE_IN_SECONDS * 10
-    );
+    $existing_results = get_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
+    $current_timestamp = current_time('timestamp');
+    $should_persist_speed_scan = true;
+
+    if (is_array($existing_results)) {
+        $existing_timestamp = isset($existing_results['timestamp'])
+            ? (int) $existing_results['timestamp']
+            : null;
+
+        if ($existing_timestamp !== null && $existing_timestamp > 0) {
+            $measurement_age = $current_timestamp - $existing_timestamp;
+
+            if ($measurement_age < 60) {
+                $should_persist_speed_scan = false;
+            }
+        }
+    }
+
+    if ($should_persist_speed_scan) {
+        update_option(SITEPULSE_OPTION_LAST_LOAD_TIME, $request_duration_ms, false);
+        set_transient(
+            SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS,
+            [
+                'ttfb'      => $request_duration_ms,
+                'timestamp' => $current_timestamp,
+            ],
+            MINUTE_IN_SECONDS * 10
+        );
+    }
 
     if (empty($sitepulse_plugin_impact_tracker_samples) || !is_array($sitepulse_plugin_impact_tracker_samples)) {
         return;

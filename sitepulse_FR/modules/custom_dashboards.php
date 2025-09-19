@@ -46,8 +46,12 @@ function sitepulse_custom_dashboards_page() {
                 $results = get_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
                 $ttfb = null;
 
-                if (is_array($results) && isset($results['ttfb']) && is_numeric($results['ttfb'])) {
-                    $ttfb = (float) $results['ttfb'];
+                if (is_array($results)) {
+                    if (isset($results['ttfb']) && is_numeric($results['ttfb'])) {
+                        $ttfb = (float) $results['ttfb'];
+                    } elseif (isset($results['data']['ttfb']) && is_numeric($results['data']['ttfb'])) {
+                        $ttfb = (float) $results['data']['ttfb'];
+                    }
                 }
 
                 $ttfb_status = 'status-ok';
