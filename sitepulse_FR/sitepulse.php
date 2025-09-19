@@ -124,6 +124,17 @@ function sitepulse_plugin_impact_tracker_on_plugin_loaded($plugin_file) {
 function sitepulse_plugin_impact_tracker_persist() {
     global $sitepulse_plugin_impact_tracker_samples, $sitepulse_plugin_impact_tracker_force_persist;
 
+    if ((function_exists('wp_doing_cron') && wp_doing_cron())
+        || (function_exists('wp_doing_ajax') && wp_doing_ajax())
+        || (defined('REST_REQUEST') && REST_REQUEST)
+    ) {
+        return;
+    }
+
+    if (function_exists('is_admin') && is_admin() && !apply_filters('sitepulse_track_admin_requests', false)) {
+        return;
+    }
+
     $request_start = null;
 
     $non_representative_context = false;
