@@ -6,11 +6,50 @@ function sitepulse_resource_monitor_page() {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
-    if (function_exists('sys_getloadavg')) { $load = sys_getloadavg(); } else { $load = ['N/A', 'N/A', 'N/A']; }
+    $resource_monitor_notices = [];
+
+    $load = ['N/A', 'N/A', 'N/A'];
     $load_display = implode(' / ', array_map('strval', $load));
+    if (function_exists('sys_getloadavg')) {
+        $load_values = sys_getloadavg();
+        $load_values_are_numeric = is_array($load_values) && !empty($load_values);
+
+        if ($load_values_are_numeric) {
+            foreach ($load_values as $value) {
+                if (!is_numeric($value)) {
+                    $load_values_are_numeric = false;
+                    break;
+                }
+            }
+        }
+
+        if ($load_values_are_numeric) {
+            $load = $load_values;
+            $load_display = implode(' / ', array_map('strval', $load));
+        } else {
+            $message = esc_html__('Indisponible – sys_getloadavg() désactivée par votre hébergeur', 'sitepulse');
+            $resource_monitor_notices[] = [
+                'type'    => 'warning',
+                'message' => $message,
+            ];
+
+            if (function_exists('sitepulse_log')) {
+                sitepulse_log('Resource Monitor: CPU load average unavailable because sys_getloadavg() is disabled by the hosting provider.', 'WARNING');
+            }
+        }
+    } else {
+        $message = esc_html__('Indisponible – sys_getloadavg() désactivée par votre hébergeur', 'sitepulse');
+        $resource_monitor_notices[] = [
+            'type'    => 'warning',
+            'message' => $message,
+        ];
+
+        if (function_exists('sitepulse_log')) {
+            sitepulse_log('Resource Monitor: sys_getloadavg() is not available on this server.', 'WARNING');
+        }
+    }
     $memory_usage = size_format(memory_get_usage());
     $memory_limit = ini_get('memory_limit');
-    $resource_monitor_notices = [];
     $disk_free = 'N/A';
     if (function_exists('disk_free_space')) {
         $disk_free_error = null;
