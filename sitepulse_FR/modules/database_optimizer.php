@@ -9,21 +9,66 @@ function sitepulse_database_optimizer_page() {
     global $wpdb;
     if (isset($_POST['db_cleanup_nonce']) && wp_verify_nonce($_POST['db_cleanup_nonce'], 'db_cleanup')) {
         if (isset($_POST['clean_revisions'])) {
-            $revision_ids = $wpdb->get_col("SELECT ID FROM {$wpdb->posts} WHERE post_type = 'revision'");
+            $revision_ids = array_map('intval', (array) $wpdb->get_col("SELECT ID FROM {$wpdb->posts} WHERE post_type = 'revision'"));
             $cleaned = 0;
+            $deleted_ids = array();
 
             foreach ($revision_ids as $revision_id) {
-                $deleted = wp_delete_post((int) $revision_id, true);
+                if ($revision_id <= 0) {
+                    continue;
+                }
 
-                if ($deleted) {
+                $deleted = wp_delete_post($revision_id, true);
+
+                if ($deleted && !is_wp_error($deleted)) {
                     $cleaned++;
+                    $deleted_ids[] = $revision_id;
                 }
             }
 
-            printf(
-                '<div class="notice notice-success is-dismissible"><p>%s révisions d\'articles ont été supprimées.</p></div>',
-                esc_html((string) $cleaned)
+            $remaining_meta = 0;
+
+            if (!empty($deleted_ids)) {
+                $placeholders = implode(',', array_fill(0, count($deleted_ids), '%d'));
+                $prepared = $wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE post_id IN ($placeholders)",
+                    $deleted_ids
+                );
+
+                if ($prepared !== null) {
+                    $remaining_meta = (int) $wpdb->get_var($prepared);
+                }
+            }
+
+            $notice_class = $cleaned > 0 ? 'notice-success' : 'notice-info';
+            $message = sprintf(
+                _n(
+                    '%s révision d\'article a été supprimée.',
+                    '%s révisions d\'articles ont été supprimées.',
+                    $cleaned,
+                    'sitepulse'
+                ),
+                number_format_i18n($cleaned)
             );
+
+            printf(
+                '<div class="notice %1$s is-dismissible"><p>%2$s</p></div>',
+                esc_attr($notice_class),
+                esc_html($message)
+            );
+
+            if ($remaining_meta > 0) {
+                printf(
+                    '<div class="notice notice-warning is-dismissible"><p>%s</p></div>',
+                    sprintf(
+                        esc_html__(
+                            '%s entrées de métadonnées associées aux révisions n\'ont pas pu être nettoyées automatiquement.',
+                            'sitepulse'
+                        ),
+                        esc_html(number_format_i18n($remaining_meta))
+                    )
+                );
+            }
         }
         if (isset($_POST['clean_transients'])) {
             if (function_exists('delete_expired_transients')) {
