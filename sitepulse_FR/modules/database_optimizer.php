@@ -76,26 +76,92 @@ function sitepulse_database_optimizer_page() {
             } else {
                 $cleaned = 0;
                 $current_time = time();
-                $timeout_prefixes = array('_transient_timeout_', '_site_transient_timeout_');
+                $is_multisite = function_exists('is_multisite') && is_multisite();
+                $network_id = null;
 
-                foreach ($timeout_prefixes as $prefix) {
-                    $expired_timeouts = $wpdb->get_col(
-                        $wpdb->prepare(
-                            "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s AND option_value < %s",
-                            $wpdb->esc_like($prefix) . '%',
-                            $current_time
-                        )
+                if ($is_multisite) {
+                    if (function_exists('get_current_network_id')) {
+                        $network_id = (int) get_current_network_id();
+                    } elseif (isset($wpdb->siteid)) {
+                        $network_id = (int) $wpdb->siteid;
+                    } elseif (defined('SITE_ID_CURRENT_SITE')) {
+                        $network_id = (int) SITE_ID_CURRENT_SITE;
+                    }
+                }
+
+                $timeout_sources = array(
+                    array(
+                        'prefix' => '_transient_timeout_',
+                        'table' => $wpdb->options,
+                        'key_column' => 'option_name',
+                        'value_column' => 'option_value',
+                    ),
+                );
+
+                if ($is_multisite) {
+                    $timeout_sources[] = array(
+                        'prefix' => '_site_transient_timeout_',
+                        'table' => $wpdb->sitemeta,
+                        'key_column' => 'meta_key',
+                        'value_column' => 'meta_value',
+                        'site_id' => $network_id,
                     );
+                } else {
+                    $timeout_sources[] = array(
+                        'prefix' => '_site_transient_timeout_',
+                        'table' => $wpdb->options,
+                        'key_column' => 'option_name',
+                        'value_column' => 'option_value',
+                    );
+                }
+
+                foreach ($timeout_sources as $source) {
+                    $prefix = $source['prefix'];
+                    $table = $source['table'];
+                    $key_column = $source['key_column'];
+                    $value_column = $source['value_column'];
+                    $site_id = isset($source['site_id']) ? $source['site_id'] : null;
+
+                    $sql = "SELECT {$key_column} FROM {$table} WHERE {$key_column} LIKE %s AND {$value_column} < %s";
+                    $params = array($wpdb->esc_like($prefix) . '%', $current_time);
+
+                    if ($table === $wpdb->sitemeta && $site_id !== null) {
+                        $sql .= ' AND site_id = %d';
+                        $params[] = $site_id;
+                    }
+
+                    $prepared = $wpdb->prepare($sql, $params);
+
+                    if ($prepared === false) {
+                        continue;
+                    }
+
+                    $expired_timeouts = $wpdb->get_col($prepared);
 
                     foreach ($expired_timeouts as $timeout_option) {
                         $deleted = false;
+                        $where = array($key_column => $timeout_option);
+                        $where_format = array('%s');
 
-                        if ($wpdb->delete($wpdb->options, array('option_name' => $timeout_option), array('%s'))) {
+                        if ($table === $wpdb->sitemeta && $site_id !== null) {
+                            $where['site_id'] = $site_id;
+                            $where_format[] = '%d';
+                        }
+
+                        if ($wpdb->delete($table, $where, $where_format)) {
                             $deleted = true;
                         }
 
                         $value_option = str_replace('_timeout_', '_', $timeout_option);
-                        if ($wpdb->delete($wpdb->options, array('option_name' => $value_option), array('%s'))) {
+                        $value_where = array($key_column => $value_option);
+                        $value_where_format = array('%s');
+
+                        if ($table === $wpdb->sitemeta && $site_id !== null) {
+                            $value_where['site_id'] = $site_id;
+                            $value_where_format[] = '%d';
+                        }
+
+                        if ($wpdb->delete($table, $value_where, $value_where_format)) {
                             $deleted = true;
                         }
 
