@@ -440,8 +440,14 @@ function sitepulse_settings_page() {
             }
 
             if (defined('SITEPULSE_DEBUG_LOG') && file_exists(SITEPULSE_DEBUG_LOG)) {
+                $log_deleted = false;
+
                 if (function_exists('wp_delete_file')) {
                     $log_deleted = wp_delete_file(SITEPULSE_DEBUG_LOG);
+
+                    if (function_exists('is_wp_error') && is_wp_error($log_deleted)) {
+                        $log_deleted = false;
+                    }
                 } else {
                     $log_deleted = @unlink(SITEPULSE_DEBUG_LOG);
                 }
