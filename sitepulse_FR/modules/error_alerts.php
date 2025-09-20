@@ -208,8 +208,29 @@ function sitepulse_error_alerts_check_cpu_load() {
  * @return void
  */
 function sitepulse_error_alerts_check_debug_log() {
-    $log_file = WP_CONTENT_DIR . '/debug.log';
-    if (!file_exists($log_file) || !is_readable($log_file)) {
+    if (!function_exists('sitepulse_get_wp_debug_log_path')) {
+        return;
+    }
+
+    $log_file = sitepulse_get_wp_debug_log_path();
+
+    if ($log_file === null) {
+        if (function_exists('sitepulse_log')) {
+            sitepulse_log('WP_DEBUG_LOG est désactivé; analyse du journal ignorée.', 'NOTICE');
+        }
+
+        return;
+    }
+
+    if (!file_exists($log_file)) {
+        return;
+    }
+
+    if (!is_readable($log_file)) {
+        if (function_exists('sitepulse_log')) {
+            sitepulse_log(sprintf('Impossible de lire %s pour l’analyse des erreurs.', $log_file), 'ERROR');
+        }
+
         return;
     }
 
@@ -225,7 +246,7 @@ function sitepulse_error_alerts_check_debug_log() {
 
     if ($recent_log_lines === null) {
         if (function_exists('sitepulse_log')) {
-            sitepulse_log('Impossible de lire debug.log pour l’analyse des erreurs.', 'ERROR');
+            sitepulse_log(sprintf('Impossible de lire %s pour l’analyse des erreurs.', $log_file), 'ERROR');
         }
 
         return;
@@ -233,7 +254,11 @@ function sitepulse_error_alerts_check_debug_log() {
 
     foreach ($recent_log_lines as $log_line) {
         if (stripos($log_line, 'PHP Fatal error') !== false) {
-            sitepulse_error_alert_send('php_fatal', 'Alerte SitePulse: Erreur Fatale Détectée', 'Vérifiez le fichier debug.log pour les détails.');
+            sitepulse_error_alert_send(
+                'php_fatal',
+                'Alerte SitePulse: Erreur Fatale Détectée',
+                sprintf('Vérifiez le fichier %s pour les détails.', $log_file)
+            );
             break;
         }
     }
