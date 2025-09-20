@@ -600,9 +600,18 @@ function sitepulse_deactivate_site() {
  */
 register_activation_hook(__FILE__, function($network_wide) {
     if (is_multisite() && $network_wide) {
-        $sites = get_sites(['fields' => 'ids']);
+        $site_ids = get_sites([
+            'fields' => 'ids',
+            'number' => 0,
+        ]);
 
-        foreach ($sites as $site_id) {
+        foreach ($site_ids as $site_id) {
+            $site_id = (int) $site_id;
+
+            if ($site_id <= 0) {
+                continue;
+            }
+
             switch_to_blog($site_id);
             sitepulse_activate_site();
             restore_current_blog();
@@ -621,9 +630,18 @@ register_activation_hook(__FILE__, function($network_wide) {
  */
 register_deactivation_hook(__FILE__, function($network_wide) {
     if (is_multisite() && $network_wide) {
-        $sites = get_sites(['fields' => 'ids']);
+        $site_ids = get_sites([
+            'fields' => 'ids',
+            'number' => 0,
+        ]);
 
-        foreach ($sites as $site_id) {
+        foreach ($site_ids as $site_id) {
+            $site_id = (int) $site_id;
+
+            if ($site_id <= 0) {
+                continue;
+            }
+
             switch_to_blog($site_id);
             sitepulse_deactivate_site();
             restore_current_blog();
