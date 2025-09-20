@@ -127,6 +127,30 @@ function sitepulse_generate_ai_insight() {
         wp_send_json_success($cached_payload);
     }
 
+    $cached_insight = get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
+
+    if (is_array($cached_insight) && isset($cached_insight['text'])) {
+        $cached_text = sanitize_textarea_field($cached_insight['text']);
+
+        if ('' !== $cached_text) {
+            $payload = ['text' => $cached_text];
+
+            if (isset($cached_insight['timestamp'])) {
+                $payload['timestamp'] = (int) $cached_insight['timestamp'];
+            }
+
+            wp_send_json_success($payload);
+        }
+    } elseif (is_string($cached_insight) && '' !== $cached_insight) {
+        $cached_text = sanitize_textarea_field($cached_insight);
+
+        if ('' !== $cached_text) {
+            wp_send_json_success([
+                'text' => $cached_text,
+            ]);
+        }
+    }
+
     $api_key = trim((string) get_option(SITEPULSE_OPTION_GEMINI_API_KEY));
 
     if ('' === $api_key) {
