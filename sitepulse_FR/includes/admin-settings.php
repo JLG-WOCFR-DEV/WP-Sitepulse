@@ -400,6 +400,8 @@ function sitepulse_settings_page() {
             echo '<div class="notice notice-success is-dismissible"><p>Données stockées effacées.</p></div>';
         }
         if (isset($_POST['sitepulse_reset_all'])) {
+            $reset_success = true;
+            $log_deletion_failed = false;
             $options_to_delete = [
                 SITEPULSE_OPTION_ACTIVE_MODULES,
                 SITEPULSE_OPTION_DEBUG_MODE,
@@ -436,12 +438,35 @@ function sitepulse_settings_page() {
                 sitepulse_delete_transients_by_prefix($transient_prefix);
                 sitepulse_delete_site_transients_by_prefix($transient_prefix);
             }
-            if (defined('SITEPULSE_DEBUG_LOG') && file_exists(SITEPULSE_DEBUG_LOG)) { unlink(SITEPULSE_DEBUG_LOG); }
+
+            if (defined('SITEPULSE_DEBUG_LOG') && file_exists(SITEPULSE_DEBUG_LOG)) {
+                if (function_exists('wp_delete_file')) {
+                    $log_deleted = wp_delete_file(SITEPULSE_DEBUG_LOG);
+                } else {
+                    $log_deleted = @unlink(SITEPULSE_DEBUG_LOG);
+                }
+
+                if (!$log_deleted) {
+                    $reset_success = false;
+                    $log_deletion_failed = true;
+                    $log_message = sprintf('SitePulse: impossible de supprimer le journal de débogage (%s).', SITEPULSE_DEBUG_LOG);
+
+                    if (function_exists('sitepulse_log')) {
+                        sitepulse_log($log_message, 'ERROR');
+                    } else {
+                        error_log($log_message);
+                    }
+                }
+            }
             $cron_hooks = function_exists('sitepulse_get_cron_hooks') ? sitepulse_get_cron_hooks() : [];
             foreach ($cron_hooks as $hook) {
                 wp_clear_scheduled_hook($hook);
             }
-            echo '<div class="notice notice-success is-dismissible"><p>SitePulse a été réinitialisé.</p></div>';
+            if ($reset_success) {
+                echo '<div class="notice notice-success is-dismissible"><p>SitePulse a été réinitialisé.</p></div>';
+            } elseif ($log_deletion_failed) {
+                echo '<div class="notice notice-error is-dismissible"><p>Impossible de supprimer le journal de débogage. Vérifiez les permissions du fichier.</p></div>';
+            }
         }
     }
     ?>
