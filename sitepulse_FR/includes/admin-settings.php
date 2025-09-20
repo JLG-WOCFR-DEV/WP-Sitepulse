@@ -443,10 +443,12 @@ function sitepulse_settings_page() {
                 $log_deleted = false;
 
                 if (function_exists('wp_delete_file')) {
-                    $log_deleted = wp_delete_file(SITEPULSE_DEBUG_LOG);
+                    $delete_result = wp_delete_file(SITEPULSE_DEBUG_LOG);
 
-                    if (function_exists('is_wp_error') && is_wp_error($log_deleted)) {
+                    if (function_exists('is_wp_error') && is_wp_error($delete_result)) {
                         $log_deleted = false;
+                    } else {
+                        $log_deleted = (bool) $delete_result;
                     }
                 } else {
                     $log_deleted = @unlink(SITEPULSE_DEBUG_LOG);
