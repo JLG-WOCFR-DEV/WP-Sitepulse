@@ -35,7 +35,7 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
         $insight_text = sanitize_textarea_field($stored_insight['text']);
 
         if (isset($stored_insight['timestamp'])) {
-            $insight_timestamp = (int) $stored_insight['timestamp'];
+            $insight_timestamp = absint($stored_insight['timestamp']);
         }
     } elseif (is_string($stored_insight) && '' !== $stored_insight) {
         $insight_text = sanitize_textarea_field($stored_insight);
@@ -48,7 +48,7 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
             'ajaxUrl'           => admin_url('admin-ajax.php'),
             'nonce'             => wp_create_nonce(SITEPULSE_NONCE_ACTION_AI_INSIGHT),
             'initialInsight'    => $insight_text,
-            'initialTimestamp'  => null !== $insight_timestamp ? $insight_timestamp : null,
+            'initialTimestamp'  => null !== $insight_timestamp ? absint($insight_timestamp) : null,
             'strings'           => [
                 'defaultError' => esc_html__('Une erreur inattendue est survenue. Veuillez réessayer.', 'sitepulse'),
                 'cachedPrefix' => esc_html__('Dernière mise à jour :', 'sitepulse'),
@@ -226,7 +226,7 @@ function sitepulse_generate_ai_insight() {
     }
 
     $generated_text = sanitize_textarea_field($generated_text);
-    $timestamp      = current_time('timestamp');
+    $timestamp      = absint(current_time('timestamp', true));
 
     set_transient(
         SITEPULSE_TRANSIENT_AI_INSIGHT,
