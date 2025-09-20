@@ -41,6 +41,44 @@ define('SITEPULSE_NONCE_ACTION_CLEANUP', 'sitepulse_cleanup');
 define('SITEPULSE_NONCE_FIELD_CLEANUP', 'sitepulse_cleanup_nonce');
 define('SITEPULSE_ACTION_PLUGIN_IMPACT_REFRESH', 'sitepulse_plugin_impact_refresh');
 
+/**
+ * Retrieves the absolute path to the WordPress debug log file.
+ *
+ * @param bool $require_readable Optional. When true, only returns the path if the
+ *                               file exists and is readable. Default false.
+ *
+ * @return string|null Normalized file path when available, null otherwise.
+ */
+function sitepulse_get_wp_debug_log_path($require_readable = false) {
+    if (!defined('WP_DEBUG_LOG') || !WP_DEBUG_LOG) {
+        return null;
+    }
+
+    $path = null;
+
+    if (is_string(WP_DEBUG_LOG) && WP_DEBUG_LOG !== '') {
+        $path = WP_DEBUG_LOG;
+    } elseif (true === WP_DEBUG_LOG) {
+        $path = WP_CONTENT_DIR . '/debug.log';
+    }
+
+    if ($path === null) {
+        return null;
+    }
+
+    if (function_exists('wp_normalize_path')) {
+        $path = wp_normalize_path($path);
+    } else {
+        $path = str_replace('\\', '/', $path);
+    }
+
+    if ($require_readable && (!file_exists($path) || !is_readable($path))) {
+        return null;
+    }
+
+    return $path;
+}
+
 $debug_mode = get_option(SITEPULSE_OPTION_DEBUG_MODE, false);
 define('SITEPULSE_DEBUG', (bool) $debug_mode);
 

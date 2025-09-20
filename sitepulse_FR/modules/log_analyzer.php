@@ -21,28 +21,40 @@ function sitepulse_log_analyzer_page() {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
-    $log_file = WP_CONTENT_DIR . '/debug.log';
-    $log_file_exists = file_exists($log_file) && is_readable($log_file);
-    $log_file_size = $log_file_exists ? filesize($log_file) : 0;
+    $log_file = function_exists('sitepulse_get_wp_debug_log_path') ? sitepulse_get_wp_debug_log_path() : null;
     $debug_log_enabled = defined('WP_DEBUG_LOG') && WP_DEBUG_LOG;
+    $log_file_exists = $log_file !== null && file_exists($log_file);
+    $log_file_readable = $log_file_exists && is_readable($log_file);
+    $log_file_size = $log_file_readable ? filesize($log_file) : 0;
     $recent_log_lines = null;
+    $log_file_display = $log_file !== null ? '<code>' . esc_html($log_file) . '</code>' : '<code>debug.log</code>';
+    if (function_exists('wp_kses_post')) {
+        $log_file_display = wp_kses_post($log_file_display);
+    }
 
-    if ($debug_log_enabled && $log_file_exists) {
+    if ($debug_log_enabled && $log_file_readable) {
         $recent_log_lines = sitepulse_get_recent_log_lines($log_file, 100, 131072);
     }
     ?>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-hammer"></span> Analyseur de Logs</h1>
-        <p>Cet outil scanne le fichier <code>debug.log</code> de WordPress pour vous aider à trouver et corriger les problèmes sur votre site.</p>
+        <p><?php printf(esc_html__('Cet outil scanne le fichier %s de WordPress pour vous aider à trouver et corriger les problèmes sur votre site.', 'sitepulse'), $log_file_display); ?></p>
 
         <?php
         // **FIX:** Rewrote the conditional logic using standard brace syntax to prevent parse errors.
-        
+
         // Case 1: Debug log is enabled in wp-config.php
         if ($debug_log_enabled) {
 
+            if ($log_file === null) {
+            ?>
+                <div class="notice notice-error">
+                    <p><strong><?php esc_html_e('Impossible de déterminer le fichier de journal.', 'sitepulse'); ?></strong> <?php esc_html_e('Vérifiez la valeur de la constante WP_DEBUG_LOG.', 'sitepulse'); ?></p>
+                </div>
+            <?php
+            }
             // Subcase 1.1: The log file exists and has content
-            if ($log_file_exists && $log_file_size > 0 && is_array($recent_log_lines) && !empty($recent_log_lines)) {
+            elseif ($log_file_readable && $log_file_size > 0 && is_array($recent_log_lines) && !empty($recent_log_lines)) {
                 $categorized = ['fatal_errors' => [], 'errors' => [], 'warnings' => [], 'notices' => []];
 
                 foreach ($recent_log_lines as $line) {
@@ -102,17 +114,24 @@ function sitepulse_log_analyzer_page() {
 
             }
             // Subcase 1.2: The log file exists but is empty
-            elseif ($log_file_exists && $log_file_size === 0) {
+            elseif ($log_file_readable && $log_file_size === 0) {
             ?>
                 <div class="notice notice-success">
-                    <p><strong>Votre journal de débogage est actif et vide.</strong> Excellent travail, aucune erreur à signaler !</p>
+                    <p><strong><?php esc_html_e('Votre journal de débogage est actif et vide.', 'sitepulse'); ?></strong> <?php esc_html_e('Excellent travail, aucune erreur à signaler !', 'sitepulse'); ?></p>
                 </div>
             <?php
             }
-            elseif ($log_file_exists && $recent_log_lines === null) {
+            elseif ($log_file_readable && $recent_log_lines === null) {
             ?>
                 <div class="notice notice-error">
-                    <p><strong>Impossible de lire les dernières lignes du journal.</strong> Veuillez vérifier les permissions du fichier <code>debug.log</code>.</p>
+                    <p><strong><?php esc_html_e('Impossible de lire les dernières lignes du journal.', 'sitepulse'); ?></strong> <?php printf(esc_html__('Veuillez vérifier les permissions du fichier %s.', 'sitepulse'), $log_file_display); ?></p>
+                </div>
+            <?php
+            }
+            elseif ($log_file_exists && !$log_file_readable) {
+            ?>
+                <div class="notice notice-error">
+                    <p><strong><?php esc_html_e('Le fichier de journal n’est pas lisible.', 'sitepulse'); ?></strong> <?php printf(esc_html__('Vérifiez les permissions de %s.', 'sitepulse'), $log_file_display); ?></p>
                 </div>
             <?php
             }
@@ -120,8 +139,8 @@ function sitepulse_log_analyzer_page() {
             else {
             ?>
                 <div class="notice notice-info">
-                    <p><strong>Votre configuration est correcte !</strong> Le journal de débogage est bien activé dans votre fichier <code>wp-config.php</code>.</p>
-                    <p>Le fichier <code>debug.log</code> n'a pas encore été créé car aucune erreur ne s'est encore produite. Il apparaîtra automatiquement dans le dossier <code>/wp-content/</code> dès que WordPress aura quelque chose à y écrire.</p>
+                    <p><strong><?php esc_html_e('Votre configuration est correcte !', 'sitepulse'); ?></strong> <?php esc_html_e('Le journal de débogage est bien activé dans votre fichier wp-config.php.', 'sitepulse'); ?></p>
+                    <p><?php printf(esc_html__('Le fichier %s n’a pas encore été créé car aucune erreur ne s’est produite. Il apparaîtra automatiquement dès que WordPress aura quelque chose à y écrire.', 'sitepulse'), $log_file_display); ?></p>
                 </div>
             <?php
             }
