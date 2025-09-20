@@ -15,6 +15,7 @@ SitePulse - JLG est un plugin WordPress développé par Jérôme Le Gousse. Il s
 - **Tableaux de bord personnalisés** : fournit une vue synthétique des indicateurs clés (TTFB, uptime, base de données, journal) et des raccourcis vers chaque module spécialisé.【F:sitepulse_FR/modules/custom_dashboards.php†L1-L121】
 
 ## Installation et configuration
+> ⚠️ **Prérequis PHP** : SitePulse requiert PHP 7.1 ou supérieur. Vérifiez la version disponible sur l'hébergement de vos environnements (production, préproduction, staging) avant d'activer l'extension pour éviter toute interruption.
 1. **Activation** : installez le plugin via l'administration WordPress puis activez-le depuis la page des extensions pour créer le menu « Sitepulse - JLG » dans le tableau de bord.【F:sitepulse_FR/includes/admin-settings.php†L40-L81】
 2. **Sélection des modules** : dans *Réglages > SitePulse*, cochez les modules à activer selon vos besoins de surveillance ; seuls les modules sélectionnés ajoutent leurs sous-menus et tâches programmées.【F:sitepulse_FR/includes/admin-settings.php†L233-L272】
 3. **Clé Gemini** : saisissez la clé API Google Gemini pour débloquer les analyses IA et profitez des recommandations personnalisées.【F:sitepulse_FR/includes/admin-settings.php†L252-L262】【F:sitepulse_FR/modules/ai_insights.php†L10-L69】

@@ -5,6 +5,7 @@
  * Description: Monitors website pulse: speed, database, maintenance, server, errors.
  * Version: 1.0
  * Author: Jérôme Le Gousse
+ * Requires PHP: 7.1
  * License: GPL-2.0+
  * Uninstall: uninstall.php
  * Text Domain: sitepulse
