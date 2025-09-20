@@ -441,21 +441,34 @@ function sitepulse_settings_page() {
 
             if (defined('SITEPULSE_DEBUG_LOG') && file_exists(SITEPULSE_DEBUG_LOG)) {
                 $log_deleted = false;
+                $delete_error_message = '';
 
                 if (function_exists('wp_delete_file')) {
-                    $log_deleted = wp_delete_file(SITEPULSE_DEBUG_LOG);
+                    $delete_result = wp_delete_file(SITEPULSE_DEBUG_LOG);
 
-                    if (function_exists('is_wp_error') && is_wp_error($log_deleted)) {
-                        $log_deleted = false;
+                    if (function_exists('is_wp_error') && is_wp_error($delete_result)) {
+                        $delete_error_message = $delete_result->get_error_message();
+                    } elseif ($delete_result === false) {
+                        $delete_error_message = 'wp_delete_file returned false.';
                     }
-                } else {
-                    $log_deleted = @unlink(SITEPULSE_DEBUG_LOG);
+
+                    if (!file_exists(SITEPULSE_DEBUG_LOG)) {
+                        $log_deleted = true;
+                    }
+                }
+
+                if (!$log_deleted) {
+                    if (@unlink(SITEPULSE_DEBUG_LOG)) {
+                        $log_deleted = true;
+                    } elseif ($delete_error_message === '') {
+                        $delete_error_message = 'unlink failed.';
+                    }
                 }
 
                 if (!$log_deleted) {
                     $reset_success = false;
                     $log_deletion_failed = true;
-                    $log_message = sprintf('SitePulse: impossible de supprimer le journal de débogage (%s).', SITEPULSE_DEBUG_LOG);
+                    $log_message = sprintf('SitePulse: impossible de supprimer le journal de débogage (%s). %s', SITEPULSE_DEBUG_LOG, $delete_error_message);
 
                     if (function_exists('sitepulse_log')) {
                         sitepulse_log($log_message, 'ERROR');
