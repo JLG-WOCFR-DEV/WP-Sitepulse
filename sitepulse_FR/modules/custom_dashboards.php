@@ -101,19 +101,25 @@ function sitepulse_custom_dashboards_page() {
              <!-- Log Status Card -->
             <div class="sitepulse-card">
                 <?php
-                $log_file = WP_CONTENT_DIR . '/debug.log';
+                $log_file = function_exists('sitepulse_get_wp_debug_log_path') ? sitepulse_get_wp_debug_log_path() : null;
                 $log_status_class = 'status-ok';
                 $log_summary = esc_html__('Log is clean.', 'sitepulse');
 
-                if (!file_exists($log_file)) {
+                if ($log_file === null) {
                     $log_status_class = 'status-warn';
-                    $log_summary = esc_html__('Log file not found.', 'sitepulse');
+                    $log_summary = esc_html__('Debug log not configured.', 'sitepulse');
+                } elseif (!file_exists($log_file)) {
+                    $log_status_class = 'status-warn';
+                    $log_summary = sprintf(esc_html__('Log file not found (%s).', 'sitepulse'), esc_html($log_file));
+                } elseif (!is_readable($log_file)) {
+                    $log_status_class = 'status-warn';
+                    $log_summary = sprintf(esc_html__('Unable to read log file (%s).', 'sitepulse'), esc_html($log_file));
                 } else {
                     $recent_logs = sitepulse_get_recent_log_lines($log_file, 200, 131072);
 
                     if ($recent_logs === null) {
                         $log_status_class = 'status-warn';
-                        $log_summary = esc_html__('Unable to read log file.', 'sitepulse');
+                        $log_summary = sprintf(esc_html__('Unable to read log file (%s).', 'sitepulse'), esc_html($log_file));
                     } elseif (empty($recent_logs)) {
                         $log_summary = esc_html__('No recent log entries.', 'sitepulse');
                     } else {
