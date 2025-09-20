@@ -526,7 +526,13 @@ function sitepulse_log($message, $level = 'INFO') {
         }
     }
 
-    $timestamp  = date('Y-m-d H:i:s');
+    if (function_exists('wp_date')) {
+        $timestamp = wp_date('Y-m-d H:i:s');
+    } elseif (function_exists('current_time')) {
+        $timestamp = current_time('mysql');
+    } else {
+        $timestamp = date('Y-m-d H:i:s');
+    }
     $log_entry  = "[$timestamp] [$level] $message\n";
     $max_size   = 5 * 1024 * 1024; // 5 MB
 
