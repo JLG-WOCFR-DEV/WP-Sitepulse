@@ -99,7 +99,7 @@ function sitepulse_generate_ai_insight() {
     if (!wp_verify_nonce($nonce, SITEPULSE_NONCE_ACTION_AI_INSIGHT)) {
         wp_send_json_error([
             'message' => esc_html__('Échec de la vérification de sécurité. Veuillez recharger la page et réessayer.', 'sitepulse'),
-        ], 403);
+        ], 400);
     }
 
     $api_key = trim((string) get_option(SITEPULSE_OPTION_GEMINI_API_KEY));
@@ -107,7 +107,7 @@ function sitepulse_generate_ai_insight() {
     if ('' === $api_key) {
         wp_send_json_error([
             'message' => esc_html__('Veuillez entrer votre clé API Google Gemini dans les réglages de SitePulse.', 'sitepulse'),
-        ]);
+        ], 400);
     }
 
     $endpoint = add_query_arg(
@@ -169,7 +169,7 @@ function sitepulse_generate_ai_insight() {
                 esc_html__('Erreur lors de la génération de l’analyse IA : %s', 'sitepulse'),
                 sanitize_text_field($response->get_error_message())
             ),
-        ]);
+        ], 500);
     }
 
     $status_code = (int) wp_remote_retrieve_response_code($response);
@@ -198,7 +198,7 @@ function sitepulse_generate_ai_insight() {
                 esc_html__('Erreur lors de la génération de l’analyse IA : %s', 'sitepulse'),
                 sanitize_text_field($error_detail)
             ),
-        ]);
+        ], 500);
     }
 
     $decoded_body = json_decode($body, true);
@@ -206,7 +206,7 @@ function sitepulse_generate_ai_insight() {
     if (!is_array($decoded_body) || !isset($decoded_body['candidates'][0]['content']['parts']) || !is_array($decoded_body['candidates'][0]['content']['parts'])) {
         wp_send_json_error([
             'message' => esc_html__('Structure de réponse inattendue reçue depuis Gemini.', 'sitepulse'),
-        ]);
+        ], 500);
     }
 
     $generated_text = '';
@@ -222,7 +222,7 @@ function sitepulse_generate_ai_insight() {
     if ('' === $generated_text) {
         wp_send_json_error([
             'message' => esc_html__('La réponse de Gemini ne contient aucun texte exploitable.', 'sitepulse'),
-        ]);
+        ], 500);
     }
 
     $generated_text = sanitize_textarea_field($generated_text);
