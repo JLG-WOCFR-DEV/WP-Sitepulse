@@ -50,9 +50,13 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
             'initialInsight'    => $insight_text,
             'initialTimestamp'  => null !== $insight_timestamp ? absint($insight_timestamp) : null,
             'strings'           => [
-                'defaultError' => esc_html__('Une erreur inattendue est survenue. Veuillez réessayer.', 'sitepulse'),
-                'cachedPrefix' => esc_html__('Dernière mise à jour :', 'sitepulse'),
+                'defaultError'    => esc_html__('Une erreur inattendue est survenue. Veuillez réessayer.', 'sitepulse'),
+                'cachedPrefix'    => esc_html__('Dernière mise à jour :', 'sitepulse'),
+                'statusCached'    => esc_html__('Résultat issu du cache.', 'sitepulse'),
+                'statusFresh'     => esc_html__('Nouvelle analyse générée.', 'sitepulse'),
+                'statusGenerating' => esc_html__('Génération en cours…', 'sitepulse'),
             ],
+            'initialCached'     => '' !== $insight_text,
         ]
     );
 
@@ -80,6 +84,7 @@ function sitepulse_ai_insights_page() {
         <div id="sitepulse-ai-insight-error" class="notice notice-error" style="display: none;"><p></p></div>
         <div id="sitepulse-ai-insight-result" style="display: none; background: #fff; border: 1px solid #ccc; padding: 15px; margin-top: 20px;">
             <h2><?php esc_html_e('Votre Recommandation par IA', 'sitepulse'); ?></h2>
+            <p class="sitepulse-ai-insight-status" style="display: none;"></p>
             <p class="sitepulse-ai-insight-text" style="white-space: pre-line;"></p>
             <p class="sitepulse-ai-insight-timestamp" style="display: none;"></p>
         </div>
@@ -123,31 +128,46 @@ function sitepulse_generate_ai_insight() {
         ], 400);
     }
 
-    if (!empty($cached_payload)) {
+    $force_refresh = false;
+
+    if (isset($_POST['force_refresh'])) {
+        $force_refresh = filter_var(wp_unslash($_POST['force_refresh']), FILTER_VALIDATE_BOOLEAN);
+    }
+
+    if ($force_refresh) {
+        delete_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
+        $cached_payload = [];
+    }
+
+    if (!$force_refresh && !empty($cached_payload)) {
+        $cached_payload['cached'] = true;
         wp_send_json_success($cached_payload);
     }
 
-    $cached_insight = get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
+    if (!$force_refresh) {
+        $cached_insight = get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
 
-    if (is_array($cached_insight) && isset($cached_insight['text'])) {
-        $cached_text = sanitize_textarea_field($cached_insight['text']);
+        if (is_array($cached_insight) && isset($cached_insight['text'])) {
+            $cached_text = sanitize_textarea_field($cached_insight['text']);
 
-        if ('' !== $cached_text) {
-            $payload = ['text' => $cached_text];
+            if ('' !== $cached_text) {
+                $payload = ['text' => $cached_text, 'cached' => true];
 
-            if (isset($cached_insight['timestamp'])) {
-                $payload['timestamp'] = (int) $cached_insight['timestamp'];
+                if (isset($cached_insight['timestamp'])) {
+                    $payload['timestamp'] = (int) $cached_insight['timestamp'];
+                }
+
+                wp_send_json_success($payload);
             }
+        } elseif (is_string($cached_insight) && '' !== $cached_insight) {
+            $cached_text = sanitize_textarea_field($cached_insight);
 
-            wp_send_json_success($payload);
-        }
-    } elseif (is_string($cached_insight) && '' !== $cached_insight) {
-        $cached_text = sanitize_textarea_field($cached_insight);
-
-        if ('' !== $cached_text) {
-            wp_send_json_success([
-                'text' => $cached_text,
-            ]);
+            if ('' !== $cached_text) {
+                wp_send_json_success([
+                    'text'   => $cached_text,
+                    'cached' => true,
+                ]);
+            }
         }
     }
 
@@ -289,5 +309,6 @@ function sitepulse_generate_ai_insight() {
     wp_send_json_success([
         'text'      => $generated_text,
         'timestamp' => $timestamp,
+        'cached'    => false,
     ]);
 }
