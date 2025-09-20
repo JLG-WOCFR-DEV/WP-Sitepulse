@@ -88,6 +88,27 @@ function sitepulse_ai_insights_page() {
 }
 
 function sitepulse_generate_ai_insight() {
+    $stored_insight = get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
+    $cached_payload = [];
+
+    if (is_array($stored_insight) && isset($stored_insight['text'])) {
+        $cached_text = sanitize_textarea_field($stored_insight['text']);
+
+        if ('' !== $cached_text) {
+            $cached_payload['text'] = $cached_text;
+
+            if (isset($stored_insight['timestamp'])) {
+                $cached_payload['timestamp'] = (int) $stored_insight['timestamp'];
+            }
+        }
+    } elseif (is_string($stored_insight) && '' !== $stored_insight) {
+        $cached_text = sanitize_textarea_field($stored_insight);
+
+        if ('' !== $cached_text) {
+            $cached_payload['text'] = $cached_text;
+        }
+    }
+
     if (!current_user_can('manage_options')) {
         wp_send_json_error([
             'message' => esc_html__("Vous n'avez pas les permissions nécessaires pour effectuer cette action.", 'sitepulse'),
@@ -100,6 +121,10 @@ function sitepulse_generate_ai_insight() {
         wp_send_json_error([
             'message' => esc_html__('Échec de la vérification de sécurité. Veuillez recharger la page et réessayer.', 'sitepulse'),
         ], 403);
+    }
+
+    if (!empty($cached_payload)) {
+        wp_send_json_success($cached_payload);
     }
 
     $api_key = trim((string) get_option(SITEPULSE_OPTION_GEMINI_API_KEY));
