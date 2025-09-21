@@ -168,8 +168,8 @@ function sitepulse_resource_monitor_page() {
             <?php endforeach; ?>
         <?php endif; ?>
         <p><strong>Charge CPU (1/5/15 min):</strong> <?php echo esc_html($load_display); ?></p>
-        <p><strong>Mémoire:</strong> Utilisation <?php echo esc_html($memory_usage); ?> / Limite <?php echo esc_html($memory_limit); ?></p>
-        <p><strong>Disque:</strong> Espace Libre <?php echo esc_html($disk_free); ?> / Total <?php echo esc_html($disk_total); ?></p>
+        <p><strong>Mémoire:</strong> Utilisation <?php echo wp_kses_post($memory_usage); ?> / Limite <?php echo esc_html($memory_limit); ?></p>
+        <p><strong>Disque:</strong> Espace Libre <?php echo wp_kses_post($disk_free); ?> / Total <?php echo wp_kses_post($disk_total); ?></p>
     </div>
     <?php
 }

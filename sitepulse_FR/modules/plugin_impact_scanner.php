@@ -356,7 +356,7 @@ function sitepulse_plugin_impact_scanner_page() {
                     <tr>
                         <td><strong><?php echo esc_html($data['name']); ?></strong></td>
                         <td><?php echo $impact_output; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></td>
-                        <td><?php echo esc_html(size_format($data['disk_space'], 2)); ?></td>
+                        <td><?php echo wp_kses_post(size_format($data['disk_space'], 2)); ?></td>
                         <td>
                             <?php if ($weight !== null) : ?>
                                 <div class="impact-bar-bg">
