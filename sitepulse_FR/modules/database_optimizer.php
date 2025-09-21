@@ -194,89 +194,136 @@ function sitepulse_delete_expired_transients_fallback($wpdb) {
         }
     }
 
-    $timeout_sources = array(
+    $sources = array(
         array(
-            'prefix' => '_transient_timeout_',
+            'timeout_prefix' => '_transient_timeout_',
+            'value_prefix' => '_transient_',
             'table' => $wpdb->options,
             'key_column' => 'option_name',
             'value_column' => 'option_value',
+            'cache_group' => 'options',
         ),
     );
 
     if ($is_multisite) {
-        $timeout_sources[] = array(
-            'prefix' => '_site_transient_timeout_',
+        $sources[] = array(
+            'timeout_prefix' => '_site_transient_timeout_',
+            'value_prefix' => '_site_transient_',
             'table' => $wpdb->sitemeta,
             'key_column' => 'meta_key',
             'value_column' => 'meta_value',
+            'cache_group' => 'site-options',
             'site_id' => $network_id,
         );
     } else {
-        $timeout_sources[] = array(
-            'prefix' => '_site_transient_timeout_',
+        $sources[] = array(
+            'timeout_prefix' => '_site_transient_timeout_',
+            'value_prefix' => '_site_transient_',
             'table' => $wpdb->options,
             'key_column' => 'option_name',
             'value_column' => 'option_value',
+            'cache_group' => 'options',
         );
     }
 
-    foreach ($timeout_sources as $source) {
-        $prefix = $source['prefix'];
-        $table = $source['table'];
-        $key_column = $source['key_column'];
-        $value_column = $source['value_column'];
-        $site_id = isset($source['site_id']) ? $source['site_id'] : null;
-
-        $sql = "SELECT {$key_column} FROM {$table} WHERE {$key_column} LIKE %s AND {$value_column} < %s";
-        $params = array($wpdb->esc_like($prefix) . '%', $current_time);
-
-        if ($table === $wpdb->sitemeta && $site_id !== null) {
-            $sql .= ' AND site_id = %d';
-            $params[] = $site_id;
-        }
-
-        $prepared = $wpdb->prepare($sql, $params);
-
-        if ($prepared === false) {
-            continue;
-        }
-
-        $expired_timeouts = $wpdb->get_col($prepared);
-
-        foreach ($expired_timeouts as $timeout_option) {
-            $deleted = false;
-            $where = array($key_column => $timeout_option);
-            $where_format = array('%s');
-
-            if ($table === $wpdb->sitemeta && $site_id !== null) {
-                $where['site_id'] = $site_id;
-                $where_format[] = '%d';
-            }
-
-            if ($wpdb->delete($table, $where, $where_format)) {
-                $deleted = true;
-            }
-
-            $value_option = str_replace('_timeout_', '_', $timeout_option);
-            $value_where = array($key_column => $value_option);
-            $value_where_format = array('%s');
-
-            if ($table === $wpdb->sitemeta && $site_id !== null) {
-                $value_where['site_id'] = $site_id;
-                $value_where_format[] = '%d';
-            }
-
-            if ($wpdb->delete($table, $value_where, $value_where_format)) {
-                $deleted = true;
-            }
-
-            if ($deleted) {
-                $cleaned++;
-            }
-        }
+    foreach ($sources as $source) {
+        $cleaned += sitepulse_cleanup_transient_source($wpdb, $source, $current_time);
     }
 
     return $cleaned;
+}
+
+function sitepulse_cleanup_transient_source($wpdb, $source, $current_time) {
+    $table = $source['table'];
+    $key_column = $source['key_column'];
+    $value_column = $source['value_column'];
+    $site_id = isset($source['site_id']) ? $source['site_id'] : null;
+    $timeout_prefix = $source['timeout_prefix'];
+    $value_prefix = $source['value_prefix'];
+
+    $sql = "SELECT {$key_column} FROM {$table} WHERE {$key_column} LIKE %s AND {$value_column} < %s";
+    $params = array($wpdb->esc_like($timeout_prefix) . '%', $current_time);
+
+    if ($table === $wpdb->sitemeta && $site_id !== null) {
+        $sql .= ' AND site_id = %d';
+        $params[] = $site_id;
+    }
+
+    $prepared = $wpdb->prepare($sql, $params);
+
+    if ($prepared === false) {
+        return 0;
+    }
+
+    $expired_timeouts = (array) $wpdb->get_col($prepared);
+
+    if (empty($expired_timeouts)) {
+        return 0;
+    }
+
+    $purged = 0;
+
+    foreach ($expired_timeouts as $timeout_option) {
+        if (!is_string($timeout_option) || $timeout_option === '') {
+            continue;
+        }
+
+        if (strpos($timeout_option, $timeout_prefix) !== 0) {
+            continue;
+        }
+
+        $transient_key = substr($timeout_option, strlen($timeout_prefix));
+
+        if ($transient_key === '') {
+            continue;
+        }
+
+        $value_option = $value_prefix . $transient_key;
+        $deleted_timeout = sitepulse_delete_transient_option($wpdb, $source, $timeout_option, $site_id);
+        $deleted_value = sitepulse_delete_transient_option($wpdb, $source, $value_option, $site_id);
+
+        if ($deleted_timeout || $deleted_value) {
+            $purged++;
+        }
+    }
+
+    return $purged;
+}
+
+function sitepulse_delete_transient_option($wpdb, $source, $option_name, $site_id) {
+    $table = $source['table'];
+    $key_column = $source['key_column'];
+    $where = array($key_column => $option_name);
+    $where_format = array('%s');
+
+    if ($table === $wpdb->sitemeta && $site_id !== null) {
+        $where['site_id'] = $site_id;
+        $where_format[] = '%d';
+    }
+
+    $deleted = (bool) $wpdb->delete($table, $where, $where_format);
+
+    if ($deleted) {
+        sitepulse_flush_transient_cache($source, $option_name, $site_id);
+    }
+
+    return $deleted;
+}
+
+function sitepulse_flush_transient_cache($source, $option_name, $site_id) {
+    if (!function_exists('wp_cache_delete')) {
+        return;
+    }
+
+    $group = isset($source['cache_group']) ? $source['cache_group'] : 'options';
+
+    if ($group === 'site-options' && $site_id !== null) {
+        $cache_key = $site_id . ':' . $option_name;
+    } else {
+        $cache_key = $option_name;
+    }
+
+    wp_cache_delete($cache_key, $group);
 }
 
 function sitepulse_get_transients_cleanup_message($count) {
