@@ -125,12 +125,20 @@ function sitepulse_database_optimizer_page() {
         }
     }
     $revisions = $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->posts WHERE post_type = 'revision'");
-    $transients_query = "SELECT COUNT(*) FROM {$wpdb->options} " .
-        "WHERE ((option_name LIKE '\_transient\_%' AND option_name NOT LIKE '\_transient\_timeout\_%') " .
-        "OR (option_name LIKE '\_site\_transient\_%' AND option_name NOT LIKE '\_site\_transient\_timeout\_%'))";
+    $is_multisite = function_exists('is_multisite') && is_multisite();
+
+    $transients_query = "SELECT COUNT(*) FROM {$wpdb->options} WHERE (" .
+        "option_name LIKE '\_transient\_%' AND option_name NOT LIKE '\_transient\_timeout\_%'";
+
+    if (!$is_multisite) {
+        $transients_query .= " OR (option_name LIKE '\_site\_transient\_%' AND option_name NOT LIKE '\_site\_transient\_timeout\_%')";
+    }
+
+    $transients_query .= ')';
+
     $transients = (int) $wpdb->get_var($transients_query);
 
-    if (function_exists('is_multisite') && is_multisite()) {
+    if ($is_multisite) {
         $network_transients_query = "SELECT COUNT(*) FROM {$wpdb->sitemeta} " .
             "WHERE meta_key LIKE '\_site\_transient\_%' " .
             "AND meta_key NOT LIKE '\_site\_transient\_timeout\_%'";
