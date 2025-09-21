@@ -125,16 +125,34 @@ function sitepulse_database_optimizer_page() {
         }
     }
     $revisions = $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->posts WHERE post_type = 'revision'");
-    $transients_query = "SELECT COUNT(*) FROM {$wpdb->options} " .
-        "WHERE ((option_name LIKE '\_transient\_%' AND option_name NOT LIKE '\_transient\_timeout\_%') " .
-        "OR (option_name LIKE '\_site\_transient\_%' AND option_name NOT LIKE '\_site\_transient\_timeout\_%'))";
-    $transients = (int) $wpdb->get_var($transients_query);
+    $transient_like = $wpdb->esc_like('_transient_') . '%';
+    $transient_timeout_like = $wpdb->esc_like('_transient_timeout_') . '%';
+    $site_transient_like = $wpdb->esc_like('_site_transient_') . '%';
+    $site_transient_timeout_like = $wpdb->esc_like('_site_transient_timeout_') . '%';
+
+    $transients = (int) $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT COUNT(*) FROM {$wpdb->options}
+             WHERE (
+                 (option_name LIKE %s AND option_name NOT LIKE %s)
+                 OR (option_name LIKE %s AND option_name NOT LIKE %s)
+             )",
+            $transient_like,
+            $transient_timeout_like,
+            $site_transient_like,
+            $site_transient_timeout_like
+        )
+    );
 
     if (function_exists('is_multisite') && is_multisite()) {
-        $network_transients_query = "SELECT COUNT(*) FROM {$wpdb->sitemeta} " .
-            "WHERE meta_key LIKE '\_site\_transient\_%' " .
-            "AND meta_key NOT LIKE '\_site\_transient\_timeout\_%'";
-        $network_transients = (int) $wpdb->get_var($network_transients_query);
+        $network_transients = (int) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->sitemeta}
+                 WHERE meta_key LIKE %s AND meta_key NOT LIKE %s",
+                $site_transient_like,
+                $site_transient_timeout_like
+            )
+        );
         $transients += $network_transients;
     }
   ?>
