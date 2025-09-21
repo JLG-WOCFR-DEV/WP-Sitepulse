@@ -47,7 +47,8 @@ function sitepulse_uptime_tracker_page() {
 function sitepulse_run_uptime_check() {
     $response = wp_remote_get(home_url(), ['timeout' => 10]);
     $response_code = wp_remote_retrieve_response_code($response);
-    $is_up = !is_wp_error($response) && $response_code >= 200 && $response_code < 300;
+    // Considère les réponses HTTP dans la plage 2xx ou 3xx comme un site "up"
+    $is_up = !is_wp_error($response) && $response_code >= 200 && $response_code < 400;
     $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
     $log[] = (int)$is_up;
     if (count($log) > 30) { array_shift($log); }
