@@ -9,36 +9,56 @@ function sitepulse_database_optimizer_page() {
     global $wpdb;
     if (isset($_POST['db_cleanup_nonce']) && wp_verify_nonce($_POST['db_cleanup_nonce'], 'db_cleanup')) {
         if (isset($_POST['clean_revisions'])) {
-            $revision_ids = array_map('intval', (array) $wpdb->get_col("SELECT ID FROM {$wpdb->posts} WHERE post_type = 'revision'"));
+            $batch_size = 500;
             $cleaned = 0;
-            $deleted_ids = array();
-
-            foreach ($revision_ids as $revision_id) {
-                if ($revision_id <= 0) {
-                    continue;
-                }
-
-                $deleted = wp_delete_post($revision_id, true);
-
-                if ($deleted && !is_wp_error($deleted)) {
-                    $cleaned++;
-                    $deleted_ids[] = $revision_id;
-                }
-            }
-
             $remaining_meta = 0;
+            $last_id = 0;
 
-            if (!empty($deleted_ids)) {
-                $placeholders = implode(',', array_fill(0, count($deleted_ids), '%d'));
-                $prepared = $wpdb->prepare(
-                    "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE post_id IN ($placeholders)",
-                    $deleted_ids
+            do {
+                $sql = $wpdb->prepare(
+                    "SELECT ID FROM {$wpdb->posts} WHERE post_type = 'revision' AND ID > %d ORDER BY ID ASC LIMIT %d",
+                    $last_id,
+                    $batch_size
                 );
 
-                if ($prepared !== null) {
-                    $remaining_meta = (int) $wpdb->get_var($prepared);
+                if ($sql === false) {
+                    break;
                 }
-            }
+
+                $revision_ids = array_map('intval', (array) $wpdb->get_col($sql));
+
+                if (empty($revision_ids)) {
+                    break;
+                }
+
+                $last_id = max($revision_ids);
+                $deleted_ids_chunk = array();
+
+                foreach ($revision_ids as $revision_id) {
+                    if ($revision_id <= 0) {
+                        continue;
+                    }
+
+                    $deleted = wp_delete_post($revision_id, true);
+
+                    if ($deleted && !is_wp_error($deleted)) {
+                        $cleaned++;
+                        $deleted_ids_chunk[] = $revision_id;
+                    }
+                }
+
+                if (!empty($deleted_ids_chunk)) {
+                    $placeholders = implode(',', array_fill(0, count($deleted_ids_chunk), '%d'));
+                    $meta_sql = $wpdb->prepare(
+                        "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE post_id IN ($placeholders)",
+                        $deleted_ids_chunk
+                    );
+
+                    if ($meta_sql !== false && $meta_sql !== null) {
+                        $remaining_meta += (int) $wpdb->get_var($meta_sql);
+                    }
+                }
+            } while (count($revision_ids) === $batch_size);
 
             $notice_class = $cleaned > 0 ? 'notice-success' : 'notice-info';
             $message = sprintf(
