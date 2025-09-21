@@ -61,7 +61,29 @@ function sitepulse_plugin_impact_clear_dir_cache_on_upgrade($upgrader, $hook_ext
             continue;
         }
 
-        sitepulse_clear_dir_size_cache(WP_PLUGIN_DIR . '/' . $plugin_dir);
+        $plugin_dir_path = WP_PLUGIN_DIR . '/' . $plugin_dir;
+
+        sitepulse_clear_dir_size_cache($plugin_dir_path);
+
+        if (is_multisite()) {
+            $site_ids = function_exists('get_sites') ? get_sites(['fields' => 'ids']) : [];
+
+            if (!empty($site_ids) && defined('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX')) {
+                $transient_key = SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX . md5($plugin_dir_path);
+
+                foreach ($site_ids as $site_id) {
+                    $site_id = (int) $site_id;
+
+                    if ($site_id <= 0) {
+                        continue;
+                    }
+
+                    switch_to_blog($site_id);
+                    delete_transient($transient_key);
+                    restore_current_blog();
+                }
+            }
+        }
     }
 }
 
