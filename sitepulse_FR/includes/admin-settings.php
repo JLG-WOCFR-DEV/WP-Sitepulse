@@ -481,6 +481,10 @@ function sitepulse_settings_page() {
             foreach ($cron_hooks as $hook) {
                 wp_clear_scheduled_hook($hook);
             }
+            if ($reset_success && function_exists('sitepulse_activate_site')) {
+                sitepulse_activate_site();
+            }
+
             if ($reset_success) {
                 echo '<div class="notice notice-success is-dismissible"><p>SitePulse a été réinitialisé.</p></div>';
             } elseif ($log_deletion_failed) {
