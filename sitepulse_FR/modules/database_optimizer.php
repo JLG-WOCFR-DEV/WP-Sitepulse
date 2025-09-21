@@ -125,7 +125,12 @@ function sitepulse_database_optimizer_page() {
         }
     }
     $revisions = $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->posts WHERE post_type = 'revision'");
-    $transients = $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->options WHERE option_name LIKE '\_transient\_%' OR option_name LIKE '\_site\_transient\_%'");
+    $transients = $wpdb->get_var(
+        "SELECT COUNT(*) FROM {$wpdb->options} " .
+        "WHERE (option_name LIKE '\_transient\_%' OR option_name LIKE '\_site\_transient\_%') " .
+        "AND option_name NOT LIKE '\_transient\_timeout\_%' " .
+        "AND option_name NOT LIKE '\_site\_transient\_timeout\_%'"
+    );
   ?>
       <div class="wrap">
         <h1><span class="dashicons-before dashicons-database"></span> Optimiseur de Base de Données</h1>
