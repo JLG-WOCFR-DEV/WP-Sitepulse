@@ -615,7 +615,7 @@ function sitepulse_debug_page() {
                                 <li><strong>Version de PHP:</strong> <?php echo esc_html(PHP_VERSION); ?></li>
                                 <li><strong>Modules Actifs:</strong> <?php echo $active_modules_list ? esc_html($active_modules_list) : esc_html('Aucun'); ?></li>
                                 <li><strong>WP Memory Limit:</strong> <?php echo esc_html(WP_MEMORY_LIMIT); ?></li>
-                                <li><strong>Pic d'utilisation mémoire:</strong> <?php echo esc_html(size_format(memory_get_peak_usage(true))); ?></li>
+                                <li><strong>Pic d'utilisation mémoire:</strong> <?php echo wp_kses_post(size_format(memory_get_peak_usage(true))); ?></li>
                             </ul>
                         </div>
                     </div>
@@ -651,7 +651,7 @@ function sitepulse_debug_page() {
             printf(
                 esc_html__('Seules les %1$d dernières lignes du journal (limitées à %2$s) sont chargées pour éviter toute surcharge mémoire.', 'sitepulse'),
                 (int) $log_max_lines,
-                esc_html(size_format($log_max_bytes))
+                wp_kses_post(size_format($log_max_bytes))
             );
             ?>
         </p>
