@@ -91,6 +91,7 @@
         var $statusEl = $resultContainer.find('.sitepulse-ai-insight-status');
         var $resultText = $resultContainer.find('.sitepulse-ai-insight-text');
         var $timestampEl = $resultContainer.find('.sitepulse-ai-insight-timestamp');
+        var $forceRefreshToggle = $('#sitepulse-ai-force-refresh');
         var lastResultData = null;
 
         $errorContainer.hide();
@@ -116,11 +117,18 @@
             $resultContainer.show();
             setStatus($statusEl, sitepulseAIInsights.strings.statusGenerating);
 
-            $.post(sitepulseAIInsights.ajaxUrl, {
+            var requestData = {
                 action: 'sitepulse_generate_ai_insight',
-                nonce: sitepulseAIInsights.nonce,
-                force_refresh: true
-            }).done(function (response) {
+                nonce: sitepulseAIInsights.nonce
+            };
+
+            var forceRefresh = $forceRefreshToggle.length > 0 && $forceRefreshToggle.is(':checked');
+
+            if (forceRefresh) {
+                requestData.force_refresh = true;
+            }
+
+            $.post(sitepulseAIInsights.ajaxUrl, requestData).done(function (response) {
                 if (response && response.success && response.data) {
                     lastResultData = renderResult($resultContainer, $resultText, $timestampEl, $statusEl, response.data);
                 } else if (response && response.data && response.data.message) {
