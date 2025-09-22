@@ -683,7 +683,7 @@ function sitepulse_debug_page() {
                                         foreach ($cron as $hook => $events) {
                                             if (strpos($hook, 'sitepulse') !== false) {
                                                 $has_sitepulse_cron = true;
-                                                $next_run = get_date_from_gmt(date('Y-m-d H:i:s', $timestamp));
+                                                $next_run = wp_date('Y-m-d H:i:s', $timestamp);
                                                 echo '<li><strong>' . esc_html($hook) . '</strong> - Prochaine exécution: ' . esc_html($next_run) . '</li>';
                                             }
                                         }
