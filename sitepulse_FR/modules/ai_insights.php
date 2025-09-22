@@ -78,6 +78,10 @@ function sitepulse_ai_insights_page() {
         <?php else : ?>
             <div class="sitepulse-ai-insight-actions">
                 <button type="button" id="sitepulse-ai-generate" class="button button-primary"><?php esc_html_e('Générer une Analyse', 'sitepulse'); ?></button>
+                <label for="sitepulse-ai-force-refresh" class="sitepulse-ai-force-refresh">
+                    <input type="checkbox" id="sitepulse-ai-force-refresh" />
+                    <?php esc_html_e('Forcer une nouvelle analyse', 'sitepulse'); ?>
+                </label>
                 <span class="spinner" id="sitepulse-ai-spinner" style="float: none; margin-top: 0;"></span>
             </div>
         <?php endif; ?>
