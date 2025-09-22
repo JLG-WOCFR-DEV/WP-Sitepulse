@@ -45,7 +45,34 @@ function sitepulse_uptime_tracker_page() {
     <?php
 }
 function sitepulse_run_uptime_check() {
-    $response = wp_remote_get(home_url(), ['timeout' => 10]);
+    $defaults = [
+        'timeout'   => 10,
+        'sslverify' => true,
+        'url'       => home_url(),
+    ];
+
+    /**
+     * Filtre les arguments passés à la requête de vérification d'uptime.
+     *
+     * Permet de désactiver la vérification SSL, d'ajuster le timeout ou de pointer
+     * vers une URL spécifique pour les environnements de test.
+     *
+     * @since 1.0
+     *
+     * @param array $request_args Arguments transmis à wp_remote_get(). Le paramètre
+     *                            "url" peut être fourni pour cibler une adresse
+     *                            différente.
+     */
+    $request_args = apply_filters('sitepulse_uptime_request_args', $defaults);
+
+    if (!is_array($request_args)) {
+        $request_args = $defaults;
+    }
+
+    $request_url = isset($request_args['url']) ? $request_args['url'] : $defaults['url'];
+    unset($request_args['url']);
+
+    $response = wp_remote_get($request_url, $request_args);
     $response_code = wp_remote_retrieve_response_code($response);
     // Considère les réponses HTTP dans la plage 2xx ou 3xx comme un site "up"
     $is_up = !is_wp_error($response) && $response_code >= 200 && $response_code < 400;

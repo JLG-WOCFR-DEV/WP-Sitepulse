@@ -31,3 +31,6 @@ SitePulse - JLG est un plugin WordPress développé par Jérôme Le Gousse. Il s
 - **Mode debug** : en plus du logging détaillé, un tableau de bord dédié récapitule l'environnement, les crons SitePulse et le journal actif pour faciliter le diagnostic.【F:sitepulse_FR/includes/admin-settings.php†L367-L420】【F:sitepulse_FR/sitepulse.php†L18-L394】
 - **Nettoyage et désinstallation** : les réglages permettent de purger journaux et données, tandis que la routine `uninstall.php` supprime options, transients, tâches planifiées et fichiers de log en toute sécurité lors de la suppression du plugin.【F:sitepulse_FR/includes/admin-settings.php†L333-L366】【F:sitepulse_FR/uninstall.php†L1-L126】
 - **Pour aller plus loin** : consultez chaque module dans `sitepulse_FR/modules/` pour comprendre les métriques collectées, les interfaces générées et adapter vos interventions si besoin.【F:sitepulse_FR/modules/custom_dashboards.php†L1-L121】
+
+## Filtres disponibles
+- `sitepulse_uptime_request_args` : ajuste les arguments passés à `wp_remote_get()` lors de la vérification d'uptime. Peut être utilisé pour désactiver `sslverify`, modifier le `timeout` ou définir une clé `url` pointant vers une adresse de test dédiée.
