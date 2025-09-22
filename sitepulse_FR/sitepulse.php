@@ -629,6 +629,60 @@ function sitepulse_activate_site() {
 }
 
 /**
+ * Ensures SitePulse defaults are applied to a newly created site.
+ *
+ * @param int $site_id Site identifier.
+ *
+ * @return void
+ */
+function sitepulse_initialize_new_site($site_id) {
+    static $initialized = [];
+
+    $site_id = (int) $site_id;
+
+    if ($site_id <= 0 || isset($initialized[$site_id])) {
+        return;
+    }
+
+    $initialized[$site_id] = true;
+
+    $switched = false;
+
+    if (is_multisite() && function_exists('switch_to_blog')) {
+        $switched = switch_to_blog($site_id);
+    }
+
+    sitepulse_activate_site();
+
+    $active_modules = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
+
+    if (!is_array($active_modules)) {
+        $active_modules = [];
+    }
+
+    if (!in_array('custom_dashboards', $active_modules, true)) {
+        $active_modules[] = 'custom_dashboards';
+        update_option(SITEPULSE_OPTION_ACTIVE_MODULES, $active_modules);
+    }
+
+    if ($switched && function_exists('restore_current_blog')) {
+        restore_current_blog();
+    }
+}
+
+add_action('wp_initialize_site', function($new_site) {
+    if (!($new_site instanceof \WP_Site)) {
+        return;
+    }
+
+    sitepulse_initialize_new_site($new_site->blog_id);
+}, 10, 2);
+
+add_action('wpmu_new_blog', function($site_id) {
+    sitepulse_initialize_new_site($site_id);
+}, 10, 6);
+
+/**
  * Clears scheduled tasks for a given site.
  *
  * @return void
