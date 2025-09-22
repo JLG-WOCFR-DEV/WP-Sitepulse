@@ -27,6 +27,7 @@ define('SITEPULSE_OPTION_LAST_LOAD_TIME', 'sitepulse_last_load_time');
 define('SITEPULSE_OPTION_CPU_ALERT_THRESHOLD', 'sitepulse_cpu_alert_threshold');
 define('SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES', 'sitepulse_alert_cooldown_minutes');
 define('SITEPULSE_OPTION_ALERT_INTERVAL', 'sitepulse_alert_interval');
+define('SITEPULSE_OPTION_ALERT_RECIPIENTS', 'sitepulse_alert_recipients');
 
 define('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS', 'sitepulse_speed_scan_results');
 define('SITEPULSE_TRANSIENT_AI_INSIGHT', 'sitepulse_ai_insight');
@@ -624,6 +625,7 @@ function sitepulse_activate_site() {
     add_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 5);
     add_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60);
     add_option(SITEPULSE_OPTION_ALERT_INTERVAL, 5);
+    add_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, []);
 }
 
 /**

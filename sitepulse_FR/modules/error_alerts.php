@@ -101,6 +101,75 @@ function sitepulse_error_alert_get_cooldown() {
 }
 
 /**
+ * Retrieves the list of e-mail recipients for error alerts.
+ *
+ * @return string[] Sanitized list of e-mail addresses.
+ */
+function sitepulse_error_alert_get_recipients() {
+    $stored_recipients = get_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, []);
+
+    if (!is_array($stored_recipients)) {
+        if (is_string($stored_recipients) && $stored_recipients !== '') {
+            $stored_recipients = preg_split('/[\r\n,]+/', $stored_recipients);
+        } else {
+            $stored_recipients = [];
+        }
+    }
+
+    $admin_email = get_option('admin_email');
+
+    if (is_email($admin_email)) {
+        $stored_recipients[] = $admin_email;
+    }
+
+    $normalized = [];
+
+    foreach ((array) $stored_recipients as $email) {
+        if (!is_string($email)) {
+            continue;
+        }
+
+        $email = trim($email);
+        if ($email === '') {
+            continue;
+        }
+
+        $sanitized = sanitize_email($email);
+        if ($sanitized !== '' && is_email($sanitized)) {
+            $normalized[] = $sanitized;
+        }
+    }
+
+    $normalized = array_values(array_unique($normalized));
+
+    $filtered = apply_filters('sitepulse_error_alert_recipients', $normalized);
+
+    if (!is_array($filtered)) {
+        $filtered = is_string($filtered) && $filtered !== '' ? [$filtered] : [];
+    }
+
+    $final_recipients = [];
+
+    foreach ($filtered as $email) {
+        if (!is_string($email)) {
+            continue;
+        }
+
+        $email = trim($email);
+        if ($email === '') {
+            continue;
+        }
+
+        $sanitized = sanitize_email($email);
+        if ($sanitized !== '' && is_email($sanitized)) {
+            $final_recipients[] = $sanitized;
+        }
+    }
+
+    return array_values(array_unique($final_recipients));
+}
+
+/**
  * Attempts to send an alert message while respecting the cooldown lock.
  *
  * @param string $type    Unique identifier of the alert type.
@@ -118,7 +187,17 @@ function sitepulse_error_alert_send($type, $subject, $message) {
         return false;
     }
 
-    $sent = wp_mail(get_option('admin_email'), $subject, $message);
+    $recipients = sitepulse_error_alert_get_recipients();
+
+    if (empty($recipients)) {
+        if (function_exists('sitepulse_log')) {
+            sitepulse_log("Alert '$type' skipped because no valid recipients were found.", 'ERROR');
+        }
+
+        return false;
+    }
+
+    $sent = wp_mail($recipients, $subject, $message);
 
     if ($sent) {
         set_transient($lock_key, time(), sitepulse_error_alert_get_cooldown());

@@ -20,6 +20,7 @@ $sitepulse_constants = [
     'SITEPULSE_OPTION_CPU_ALERT_THRESHOLD'        => 'sitepulse_cpu_alert_threshold',
     'SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES'     => 'sitepulse_alert_cooldown_minutes',
     'SITEPULSE_OPTION_ALERT_INTERVAL'             => 'sitepulse_alert_interval',
+    'SITEPULSE_OPTION_ALERT_RECIPIENTS'           => 'sitepulse_alert_recipients',
     'SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS'      => 'sitepulse_speed_scan_results',
     'SITEPULSE_TRANSIENT_AI_INSIGHT'              => 'sitepulse_ai_insight',
     'SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX' => 'sitepulse_error_alert_',
@@ -51,6 +52,7 @@ $options = [
     SITEPULSE_OPTION_CPU_ALERT_THRESHOLD,
     SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES,
     SITEPULSE_OPTION_ALERT_INTERVAL,
+    SITEPULSE_OPTION_ALERT_RECIPIENTS,
     SITEPULSE_PLUGIN_IMPACT_OPTION,
 ];
 

@@ -104,6 +104,9 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_ALERT_INTERVAL, [
         'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_alert_interval', 'default' => 5
     ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_ALERT_RECIPIENTS, [
+        'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_alert_recipients', 'default' => []
+    ]);
 }
 add_action('admin_init', 'sitepulse_register_settings');
 
@@ -172,6 +175,40 @@ function sitepulse_sanitize_alert_interval($value) {
     }
 
     return $value;
+}
+
+/**
+ * Sanitizes the list of e-mail recipients for alerts.
+ *
+ * @param mixed $value Raw user input value.
+ * @return array Sanitized list of e-mail addresses.
+ */
+function sitepulse_sanitize_alert_recipients($value) {
+    if (is_string($value)) {
+        $value = preg_split('/[\r\n,]+/', $value);
+    } elseif (!is_array($value)) {
+        $value = [];
+    }
+
+    $sanitized = [];
+
+    foreach ($value as $email) {
+        if (!is_string($email)) {
+            continue;
+        }
+
+        $email = trim($email);
+        if ($email === '') {
+            continue;
+        }
+
+        $normalized = sanitize_email($email);
+        if ($normalized !== '' && is_email($normalized)) {
+            $sanitized[] = $normalized;
+        }
+    }
+
+    return array_values(array_unique($sanitized));
 }
 
 if (!function_exists('sitepulse_delete_transients_by_prefix')) {
@@ -527,6 +564,17 @@ function sitepulse_settings_page() {
             </table>
             <h2>Alertes</h2>
             <table class="form-table">
+                <tr>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_RECIPIENTS); ?>">Destinataires des alertes</label></th>
+                    <td>
+                        <?php
+                        $alert_recipients = (array) get_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, []);
+                        $recipients_value = implode("\n", $alert_recipients);
+                        ?>
+                        <textarea id="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_RECIPIENTS); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_RECIPIENTS); ?>" rows="4" cols="50" class="large-text code"><?php echo esc_textarea($recipients_value); ?></textarea>
+                        <p class="description">Entrez une adresse par ligne (ou séparées par des virgules). L'adresse e-mail de l'administrateur sera toujours incluse si elle est valide.</p>
+                    </td>
+                </tr>
                 <tr>
                     <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>">Seuil d'alerte de charge CPU</label></th>
                     <td>
