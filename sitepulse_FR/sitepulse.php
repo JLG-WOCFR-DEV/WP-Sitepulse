@@ -670,7 +670,9 @@ function sitepulse_initialize_new_site($site_id) {
     }
 }
 
-add_action('wp_initialize_site', function($new_site) {
+add_action('wp_initialize_site', function($new_site, $args) {
+    unset($args);
+
     if (!($new_site instanceof \WP_Site)) {
         return;
     }
@@ -678,7 +680,9 @@ add_action('wp_initialize_site', function($new_site) {
     sitepulse_initialize_new_site($new_site->blog_id);
 }, 10, 2);
 
-add_action('wpmu_new_blog', function($site_id) {
+add_action('wpmu_new_blog', function($site_id, $user_id, $domain, $path, $network_id, $meta) {
+    unset($user_id, $domain, $path, $network_id, $meta);
+
     sitepulse_initialize_new_site($site_id);
 }, 10, 6);
 
