@@ -346,9 +346,9 @@ function sitepulse_error_alerts_check_debug_log() {
 /**
  * Handles rescheduling when the alert interval option is updated.
  *
- * @param mixed      $old_value Previous value.
- * @param mixed      $value     New value.
- * @param string|int $option    Option name. Unused.
+ * @param mixed            $old_value Previous value.
+ * @param mixed            $value     New value.
+ * @param string|int|null  $option    Option name. Unused.
  * @return void
  */
 function sitepulse_error_alerts_on_interval_update($old_value, $value, $option = null) {
