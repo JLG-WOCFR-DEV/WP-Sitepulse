@@ -447,6 +447,7 @@ function sitepulse_settings_page() {
                 SITEPULSE_OPTION_LAST_LOAD_TIME,
                 SITEPULSE_OPTION_CPU_ALERT_THRESHOLD,
                 SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES,
+                SITEPULSE_OPTION_ALERT_INTERVAL,
                 SITEPULSE_PLUGIN_IMPACT_OPTION,
             ];
 
