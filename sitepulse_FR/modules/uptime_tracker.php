@@ -13,15 +13,90 @@ if (!empty($sitepulse_uptime_cron_hook)) {
     });
     add_action($sitepulse_uptime_cron_hook, 'sitepulse_run_uptime_check');
 }
+function sitepulse_normalize_uptime_log($log) {
+    if (!is_array($log) || empty($log)) {
+        return [];
+    }
+
+    $normalized = [];
+    $count = count($log);
+    $approximate_start = time() - (($count - 1) * HOUR_IN_SECONDS);
+
+    foreach ($log as $index => $entry) {
+        $timestamp = $approximate_start + ($index * HOUR_IN_SECONDS);
+        $status = false;
+        $incident_start = null;
+
+        if (is_array($entry)) {
+            if (isset($entry['timestamp']) && is_numeric($entry['timestamp'])) {
+                $timestamp = (int) $entry['timestamp'];
+            }
+
+            if (isset($entry['status'])) {
+                $status = (bool) $entry['status'];
+            } else {
+                $status = !empty($entry);
+            }
+
+            if (isset($entry['incident_start']) && is_numeric($entry['incident_start'])) {
+                $incident_start = (int) $entry['incident_start'];
+            }
+        } else {
+            $status = (bool) $entry;
+        }
+
+        if (!$status) {
+            if (null === $incident_start) {
+                if (!empty($normalized)) {
+                    $previous = end($normalized);
+                    if (!$previous['status'] && isset($previous['incident_start'])) {
+                        $incident_start = $previous['incident_start'];
+                    }
+                }
+
+                if (null === $incident_start) {
+                    $incident_start = $timestamp;
+                }
+            }
+        } else {
+            $incident_start = null;
+        }
+
+        $normalized[] = array_filter([
+            'timestamp'      => $timestamp,
+            'status'         => $status,
+            'incident_start' => $incident_start,
+        ], function ($value) {
+            return null !== $value;
+        });
+    }
+
+    return $normalized;
+}
+
 function sitepulse_uptime_tracker_page() {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
-    $uptime_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+    $uptime_log = sitepulse_normalize_uptime_log(get_option(SITEPULSE_OPTION_UPTIME_LOG, []));
     $total_checks = count($uptime_log);
-    $up_checks = count(array_filter($uptime_log));
+    $up_checks = count(array_filter($uptime_log, function ($entry) {
+        return !empty($entry['status']);
+    }));
     $uptime_percentage = $total_checks > 0 ? ($up_checks / $total_checks) * 100 : 100;
+    $date_format = get_option('date_format');
+    $time_format = get_option('time_format');
+    $current_incident_duration = '';
+
+    if (!empty($uptime_log)) {
+        $last_entry = end($uptime_log);
+        if (!$last_entry['status']) {
+            $incident_start = isset($last_entry['incident_start']) ? $last_entry['incident_start'] : $last_entry['timestamp'];
+            $current_incident_duration = human_time_diff($incident_start, time());
+        }
+        reset($uptime_log);
+    }
     ?>
     <style> .uptime-chart { display: flex; gap: 2px; height: 60px; align-items: flex-end; } .uptime-bar { flex-grow: 1; } .uptime-bar.up { background-color: #4CAF50; } .uptime-bar.down { background-color: #F44336; } </style>
     <div class="wrap">
@@ -30,16 +105,37 @@ function sitepulse_uptime_tracker_page() {
         <h2>Disponibilité (<?php echo esc_html($total_checks); ?> dernières heures): <strong style="font-size: 1.4em;"><?php echo esc_html(round($uptime_percentage, 2)); ?>%</strong></h2>
         <div class="uptime-chart">
             <?php if (empty($uptime_log)): ?><p>Aucune donnée de disponibilité. La première vérification aura lieu dans l'heure.</p><?php else: ?>
-                <?php foreach ($uptime_log as $index => $status): ?>
+                <?php foreach ($uptime_log as $index => $entry): ?>
                     <?php
+                    $status = !empty($entry['status']);
                     $bar_class = $status ? 'up' : 'down';
-                    $bar_title = ($status ? 'Site OK' : 'Site KO') . ' lors du check #' . ($index + 1);
+                    $check_time = date_i18n($date_format . ' ' . $time_format, $entry['timestamp']);
+                    if ($status) {
+                        $bar_title = sprintf(__('Site OK lors du contrôle du %s.', 'sitepulse'), $check_time);
+                    } else {
+                        $incident_start = isset($entry['incident_start']) ? $entry['incident_start'] : $entry['timestamp'];
+                        $incident_start_formatted = date_i18n($date_format . ' ' . $time_format, $incident_start);
+                        $bar_title = sprintf(__('Site KO lors du contrôle du %1$s. Incident commencé le %2$s.', 'sitepulse'), $check_time, $incident_start_formatted);
+                        if ($index === $total_checks - 1 && !empty($current_incident_duration)) {
+                            $bar_title .= ' ' . sprintf(__('Incident en cours depuis %s.', 'sitepulse'), $current_incident_duration);
+                        } else {
+                            $duration = max(0, $entry['timestamp'] - $incident_start);
+                            if ($duration > 0) {
+                                $bar_title .= ' ' . sprintf(__('Durée estimée : %s.', 'sitepulse'), human_time_diff($incident_start, $entry['timestamp']));
+                            }
+                        }
+                    }
                     ?>
                     <div class="uptime-bar <?php echo esc_attr($bar_class); ?>" title="<?php echo esc_attr($bar_title); ?>"></div>
                 <?php endforeach; ?>
             <?php endif; ?>
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #555;"><span>Il y a <?php echo esc_html($total_checks); ?> heures</span><span>Maintenant</span></div>
+        <?php if (!empty($current_incident_duration)): ?>
+            <div class="notice notice-error" style="margin-top: 15px;">
+                <p><strong><?php esc_html_e('Incident en cours', 'sitepulse'); ?> :</strong> <?php echo esc_html(sprintf(__('Votre site est signalé comme indisponible depuis %s.', 'sitepulse'), $current_incident_duration)); ?></p>
+            </div>
+        <?php endif; ?>
         <div class="notice notice-info" style="margin-top: 20px;"><p><strong>Comment ça marche :</strong> Une barre verte indique que votre site était en ligne. Une barre rouge indique un possible incident où votre site était inaccessible.</p></div>
     </div>
     <?php
@@ -76,9 +172,31 @@ function sitepulse_run_uptime_check() {
     $response_code = wp_remote_retrieve_response_code($response);
     // Considère les réponses HTTP dans la plage 2xx ou 3xx comme un site "up"
     $is_up = !is_wp_error($response) && $response_code >= 200 && $response_code < 400;
-    $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
-    $log[] = (int)$is_up;
-    if (count($log) > 30) { array_shift($log); }
+    $log = sitepulse_normalize_uptime_log(get_option(SITEPULSE_OPTION_UPTIME_LOG, []));
+
+    $timestamp = time();
+    $entry = [
+        'timestamp' => $timestamp,
+        'status'    => $is_up,
+    ];
+
+    if (!$is_up) {
+        $incident_start = $timestamp;
+        if (!empty($log)) {
+            $previous = end($log);
+            if (!$previous['status'] && isset($previous['incident_start'])) {
+                $incident_start = $previous['incident_start'];
+            }
+        }
+        $entry['incident_start'] = $incident_start;
+    }
+
+    $log[] = $entry;
+
+    while (count($log) > 30) {
+        array_shift($log);
+    }
+
     update_option(SITEPULSE_OPTION_UPTIME_LOG, $log);
     if (!$is_up) { sitepulse_log('Uptime check: Down', 'ALERT'); } 
     else { sitepulse_log('Uptime check: Up'); }
