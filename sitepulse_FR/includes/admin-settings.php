@@ -412,9 +412,16 @@ function sitepulse_settings_page() {
     }
 
     $modules = [
-        'log_analyzer' => 'Log Analyzer', 'resource_monitor' => 'Resource Monitor', 'plugin_impact_scanner' => 'Plugin Impact Scanner',
-        'speed_analyzer' => 'Speed Analyzer', 'database_optimizer' => 'Database Optimizer', 'maintenance_advisor' => 'Maintenance Advisor',
-        'uptime_tracker' => 'Uptime Tracker', 'ai_insights' => 'AI-Powered Insights', 'custom_dashboards' => 'Custom Dashboards', 'error_alerts' => 'Error Alerts',
+        'log_analyzer'          => __('Log Analyzer', 'sitepulse'),
+        'resource_monitor'      => __('Resource Monitor', 'sitepulse'),
+        'plugin_impact_scanner' => __('Plugin Impact Scanner', 'sitepulse'),
+        'speed_analyzer'        => __('Speed Analyzer', 'sitepulse'),
+        'database_optimizer'    => __('Database Optimizer', 'sitepulse'),
+        'maintenance_advisor'   => __('Maintenance Advisor', 'sitepulse'),
+        'uptime_tracker'        => __('Uptime Tracker', 'sitepulse'),
+        'ai_insights'           => __('AI-Powered Insights', 'sitepulse'),
+        'custom_dashboards'     => __('Custom Dashboards', 'sitepulse'),
+        'error_alerts'          => __('Error Alerts', 'sitepulse'),
     ];
     $active_modules = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
     $debug_mode_option = get_option(SITEPULSE_OPTION_DEBUG_MODE);
@@ -426,15 +433,15 @@ function sitepulse_settings_page() {
 
             if ($cleared === false) {
                 error_log(sprintf('SitePulse: unable to clear debug log file (%s).', SITEPULSE_DEBUG_LOG));
-                echo '<div class="notice notice-error is-dismissible"><p>Impossible de vider le journal de débogage. Vérifiez les permissions du fichier.</p></div>';
+                echo '<div class="notice notice-error is-dismissible"><p>' . esc_html__('Impossible de vider le journal de débogage. Vérifiez les permissions du fichier.', 'sitepulse') . '</p></div>';
             } else {
-                echo '<div class="notice notice-success is-dismissible"><p>Journal de débogage vidé.</p></div>';
+                echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('Journal de débogage vidé.', 'sitepulse') . '</p></div>';
             }
         }
         if (isset($_POST['sitepulse_clear_data'])) {
             delete_option(SITEPULSE_OPTION_UPTIME_LOG);
             delete_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
-            echo '<div class="notice notice-success is-dismissible"><p>Données stockées effacées.</p></div>';
+            echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('Données stockées effacées.', 'sitepulse') . '</p></div>';
         }
         if (isset($_POST['sitepulse_reset_all'])) {
             $reset_success = true;
@@ -527,29 +534,36 @@ function sitepulse_settings_page() {
             }
 
             if ($reset_success) {
-                echo '<div class="notice notice-success is-dismissible"><p>SitePulse a été réinitialisé.</p></div>';
+                echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('SitePulse a été réinitialisé.', 'sitepulse') . '</p></div>';
             } elseif ($log_deletion_failed) {
-                echo '<div class="notice notice-error is-dismissible"><p>Impossible de supprimer le journal de débogage. Vérifiez les permissions du fichier.</p></div>';
+                echo '<div class="notice notice-error is-dismissible"><p>' . esc_html__('Impossible de supprimer le journal de débogage. Vérifiez les permissions du fichier.', 'sitepulse') . '</p></div>';
             }
         }
     }
     ?>
     <div class="wrap">
-        <h1>Réglages de SitePulse</h1>
+        <h1><?php esc_html_e('Réglages de SitePulse', 'sitepulse'); ?></h1>
         <form method="post" action="options.php">
             <?php settings_fields('sitepulse_settings'); do_settings_sections('sitepulse_settings'); ?>
-            <h2>Paramètres de l'API</h2>
+            <h2><?php esc_html_e("Paramètres de l'API", 'sitepulse'); ?></h2>
             <table class="form-table">
                 <tr valign="top">
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>">Clé API Google Gemini</label></th>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>"><?php esc_html_e('Clé API Google Gemini', 'sitepulse'); ?></label></th>
                     <td>
                         <input type="password" id="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>" value="<?php echo esc_attr(get_option(SITEPULSE_OPTION_GEMINI_API_KEY)); ?>" class="regular-text" />
-                        <p class="description">Entrez votre clé API pour activer les analyses par IA. Obtenez une clé sur <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a>.</p>
+                        <p class="description"><?php printf(
+                            wp_kses(
+                                /* translators: %s: URL to Google AI Studio. */
+                                __('Entrez votre clé API pour activer les analyses par IA. Obtenez une clé sur <a href="%s" target="_blank">Google AI Studio</a>.', 'sitepulse'),
+                                ['a' => ['href' => true, 'target' => true]]
+                            ),
+                            esc_url('https://aistudio.google.com/app/apikey')
+                        ); ?></p>
                     </td>
                 </tr>
             </table>
-            <h2>Activer les Modules</h2>
-            <p>Sélectionnez les modules de surveillance à activer.</p>
+            <h2><?php esc_html_e('Activer les Modules', 'sitepulse'); ?></h2>
+            <p><?php esc_html_e('Sélectionnez les modules de surveillance à activer.', 'sitepulse'); ?></p>
             <table class="form-table">
                 <?php foreach ($modules as $key => $name): ?>
                 <tr>
@@ -558,43 +572,43 @@ function sitepulse_settings_page() {
                 </tr>
                 <?php endforeach; ?>
                 <tr>
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>">Activer le Mode Debug</label></th>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>"><?php esc_html_e('Activer le Mode Debug', 'sitepulse'); ?></label></th>
                     <td>
                         <input type="hidden" name="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>" value="0">
                         <input type="checkbox" id="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>" value="1" <?php checked($is_debug_mode_enabled); ?>>
-                        <p class="description">Active la journalisation détaillée et le tableau de bord de débogage. À n'utiliser que pour le dépannage.</p>
+                        <p class="description"><?php esc_html_e("Active la journalisation détaillée et le tableau de bord de débogage. À n'utiliser que pour le dépannage.", 'sitepulse'); ?></p>
                     </td>
                 </tr>
             </table>
-            <h2>Alertes</h2>
+            <h2><?php esc_html_e('Alertes', 'sitepulse'); ?></h2>
             <table class="form-table">
                 <tr>
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_RECIPIENTS); ?>">Destinataires des alertes</label></th>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_RECIPIENTS); ?>"><?php esc_html_e('Destinataires des alertes', 'sitepulse'); ?></label></th>
                     <td>
                         <?php
                         $alert_recipients = (array) get_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, []);
                         $recipients_value = implode("\n", $alert_recipients);
                         ?>
                         <textarea id="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_RECIPIENTS); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_RECIPIENTS); ?>" rows="4" cols="50" class="large-text code"><?php echo esc_textarea($recipients_value); ?></textarea>
-                        <p class="description">Entrez une adresse par ligne (ou séparées par des virgules). L'adresse e-mail de l'administrateur sera toujours incluse si elle est valide.</p>
+                        <p class="description"><?php esc_html_e("Entrez une adresse par ligne (ou séparées par des virgules). L'adresse e-mail de l'administrateur sera toujours incluse si elle est valide.", 'sitepulse'); ?></p>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>">Seuil d'alerte de charge CPU</label></th>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>"><?php esc_html_e("Seuil d'alerte de charge CPU", 'sitepulse'); ?></label></th>
                     <td>
                         <input type="number" step="0.1" min="0" id="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>" value="<?php echo esc_attr(get_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 5)); ?>" class="small-text">
-                        <p class="description">Une alerte e-mail est envoyée lorsque la charge moyenne sur 1 minute dépasse ce seuil.</p>
+                        <p class="description"><?php esc_html_e('Une alerte e-mail est envoyée lorsque la charge moyenne sur 1 minute dépasse ce seuil.', 'sitepulse'); ?></p>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES); ?>">Fenêtre anti-spam (minutes)</label></th>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES); ?>"><?php esc_html_e('Fenêtre anti-spam (minutes)', 'sitepulse'); ?></label></th>
                     <td>
                         <input type="number" min="1" id="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES); ?>" value="<?php echo esc_attr(get_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60)); ?>" class="small-text">
-                        <p class="description">Empêche l'envoi de plusieurs e-mails identiques pendant la durée spécifiée.</p>
+                        <p class="description"><?php esc_html_e("Empêche l'envoi de plusieurs e-mails identiques pendant la durée spécifiée.", 'sitepulse'); ?></p>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_INTERVAL); ?>">Fréquence des vérifications</label></th>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_INTERVAL); ?>"><?php esc_html_e('Fréquence des vérifications', 'sitepulse'); ?></label></th>
                     <td>
                         <?php
                         $interval_value   = (int) get_option(SITEPULSE_OPTION_ALERT_INTERVAL, 5);
@@ -610,31 +624,31 @@ function sitepulse_settings_page() {
                                 <option value="<?php echo esc_attr($minutes); ?>" <?php selected($interval_value, $minutes); ?>><?php echo esc_html($label); ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <p class="description">Détermine la fréquence des vérifications automatisées pour les alertes.</p>
+                        <p class="description"><?php esc_html_e('Détermine la fréquence des vérifications automatisées pour les alertes.', 'sitepulse'); ?></p>
                     </td>
                 </tr>
             </table>
-            <?php submit_button('Enregistrer les modifications'); ?>
+            <?php submit_button(esc_html__('Enregistrer les modifications', 'sitepulse')); ?>
         </form>
         <hr>
-        <h2>Nettoyage & Réinitialisation</h2>
-        <p>Gérez les données du plugin.</p>
+        <h2><?php esc_html_e('Nettoyage & Réinitialisation', 'sitepulse'); ?></h2>
+        <p><?php esc_html_e('Gérez les données du plugin.', 'sitepulse'); ?></p>
         <form method="post" action="">
             <?php wp_nonce_field(SITEPULSE_NONCE_ACTION_CLEANUP, SITEPULSE_NONCE_FIELD_CLEANUP); ?>
             <table class="form-table">
                 <tr>
-                    <th scope="row"><label>Vider le journal de debug</label></th>
-                    <td><input type="submit" name="sitepulse_clear_log" value="Vider le journal" class="button"><p class="description">Supprime le contenu du fichier de log de débogage.</p></td>
+                    <th scope="row"><label><?php esc_html_e('Vider le journal de debug', 'sitepulse'); ?></label></th>
+                    <td><input type="submit" name="sitepulse_clear_log" value="<?php echo esc_attr__('Vider le journal', 'sitepulse'); ?>" class="button"><p class="description"><?php esc_html_e('Supprime le contenu du fichier de log de débogage.', 'sitepulse'); ?></p></td>
                 </tr>
                 <tr>
-                    <th scope="row"><label>Vider les données stockées</label></th>
-                    <td><input type="submit" name="sitepulse_clear_data" value="Vider les données" class="button"><p class="description">Supprime les données stockées comme les journaux de disponibilité et les résultats de scan.</p></td>
+                    <th scope="row"><label><?php esc_html_e('Vider les données stockées', 'sitepulse'); ?></label></th>
+                    <td><input type="submit" name="sitepulse_clear_data" value="<?php echo esc_attr__('Vider les données', 'sitepulse'); ?>" class="button"><p class="description"><?php esc_html_e('Supprime les données stockées comme les journaux de disponibilité et les résultats de scan.', 'sitepulse'); ?></p></td>
                 </tr>
                 <tr>
-                    <th scope="row"><label>Réinitialiser le plugin</label></th>
+                    <th scope="row"><label><?php esc_html_e('Réinitialiser le plugin', 'sitepulse'); ?></label></th>
                     <td>
-                        <input type="submit" name="sitepulse_reset_all" value="Tout réinitialiser" class="button button-danger" onclick="return confirm('Êtes-vous sûr ?');">
-                        <p class="description">Réinitialise SitePulse à son état d'installation initial.</p>
+                        <input type="submit" name="sitepulse_reset_all" value="<?php echo esc_attr__('Tout réinitialiser', 'sitepulse'); ?>" class="button button-danger" onclick="return confirm('<?php echo esc_js(__('Êtes-vous sûr ?', 'sitepulse')); ?>');">
+                        <p class="description"><?php esc_html_e("Réinitialise SitePulse à son état d'installation initial.", 'sitepulse'); ?></p>
                     </td>
                 </tr>
             </table>
