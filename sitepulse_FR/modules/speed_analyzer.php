@@ -28,8 +28,14 @@ function sitepulse_speed_analyzer_page() {
 
     // 1. Page Generation Time (Backend processing)
     // **FIX:** Replaced timer_stop() with a direct microtime calculation to prevent non-numeric value warnings in specific environments.
-    $timestart = isset($GLOBALS['timestart']) ? $GLOBALS['timestart'] : microtime(true);
-    $page_generation_time = (microtime(true) - $timestart) * 1000; // in milliseconds
+    if (isset($_SERVER['REQUEST_TIME_FLOAT']) && is_numeric($_SERVER['REQUEST_TIME_FLOAT'])) {
+        $timestart = (float) $_SERVER['REQUEST_TIME_FLOAT'];
+    } elseif (isset($GLOBALS['timestart']) && is_numeric($GLOBALS['timestart'])) {
+        $timestart = (float) $GLOBALS['timestart'];
+    } else {
+        $timestart = microtime(true);
+    }
+    $page_generation_time = (microtime(true) - $timestart) * 1000.0; // in milliseconds
 
     // 2. Database Query Time & Count
     $db_query_total_time = 0;
