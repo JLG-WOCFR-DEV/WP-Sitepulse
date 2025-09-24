@@ -78,7 +78,12 @@ function sitepulse_plugin_impact_clear_dir_cache_on_upgrade($upgrader, $hook_ext
                         continue;
                     }
 
-                    switch_to_blog($site_id);
+                    $switched = switch_to_blog($site_id);
+
+                    if (!$switched) {
+                        continue;
+                    }
+
                     delete_transient($transient_key);
                     restore_current_blog();
                 }
