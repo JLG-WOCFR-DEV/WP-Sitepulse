@@ -587,9 +587,12 @@ function sitepulse_load_modules() {
         'error_alerts'          => 'Error Alerts',
     ];
     
-    $active_modules = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
+    $active_modules_option = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
+    $active_modules = array_values(array_filter(array_map('strval', (array) $active_modules_option), static function ($module) {
+        return $module !== '';
+    }));
     sitepulse_log('Loading active modules: ' . implode(', ', $active_modules));
-    
+
     foreach ($active_modules as $module_key) {
         if (!array_key_exists($module_key, $modules)) {
             sitepulse_log("Module $module_key not found or invalid", 'WARNING');
