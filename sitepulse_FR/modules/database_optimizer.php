@@ -13,6 +13,11 @@ function sitepulse_database_optimizer_page() {
             $cleaned = 0;
             $remaining_meta = 0;
             $last_id = 0;
+            $previous_cache_invalidation = null;
+
+            if (function_exists('wp_suspend_cache_invalidation')) {
+                $previous_cache_invalidation = wp_suspend_cache_invalidation(true);
+            }
 
             do {
                 $sql = $wpdb->prepare(
@@ -32,33 +37,65 @@ function sitepulse_database_optimizer_page() {
                 }
 
                 $last_id = max($revision_ids);
-                $deleted_ids_chunk = array();
+                $placeholders = implode(',', array_fill(0, count($revision_ids), '%d'));
+                $delete_sql = $wpdb->prepare(
+                    "DELETE FROM {$wpdb->posts} WHERE ID IN ($placeholders)",
+                    $revision_ids
+                );
 
-                foreach ($revision_ids as $revision_id) {
-                    if ($revision_id <= 0) {
-                        continue;
-                    }
+                if ($delete_sql === false) {
+                    break;
+                }
 
-                    $deleted = wp_delete_post($revision_id, true);
+                $deleted_rows = $wpdb->query($delete_sql);
 
-                    if ($deleted && !is_wp_error($deleted)) {
-                        $cleaned++;
-                        $deleted_ids_chunk[] = $revision_id;
+                if ($deleted_rows === false) {
+                    break;
+                }
+
+                if ($deleted_rows > 0) {
+                    $cleaned += (int) $deleted_rows;
+
+                    if (function_exists('clean_post_cache')) {
+                        foreach ($revision_ids as $revision_id) {
+                            clean_post_cache((int) $revision_id);
+                        }
                     }
                 }
 
-                if (!empty($deleted_ids_chunk)) {
-                    $placeholders = implode(',', array_fill(0, count($deleted_ids_chunk), '%d'));
-                    $meta_sql = $wpdb->prepare(
+                $meta_sql = $wpdb->prepare(
+                    "DELETE FROM {$wpdb->postmeta} WHERE post_id IN ($placeholders)",
+                    $revision_ids
+                );
+
+                if ($meta_sql === false) {
+                    $count_sql = $wpdb->prepare(
                         "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE post_id IN ($placeholders)",
-                        $deleted_ids_chunk
+                        $revision_ids
                     );
 
-                    if ($meta_sql !== false && $meta_sql !== null) {
-                        $remaining_meta += (int) $wpdb->get_var($meta_sql);
+                    if ($count_sql !== false && $count_sql !== null) {
+                        $remaining_meta += (int) $wpdb->get_var($count_sql);
+                    }
+                } else {
+                    $meta_deleted = $wpdb->query($meta_sql);
+
+                    if ($meta_deleted === false) {
+                        $count_sql = $wpdb->prepare(
+                            "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE post_id IN ($placeholders)",
+                            $revision_ids
+                        );
+
+                        if ($count_sql !== false && $count_sql !== null) {
+                            $remaining_meta += (int) $wpdb->get_var($count_sql);
+                        }
                     }
                 }
             } while (count($revision_ids) === $batch_size);
+
+            if (function_exists('wp_suspend_cache_invalidation')) {
+                wp_suspend_cache_invalidation((bool) $previous_cache_invalidation);
+            }
 
             $notice_class = $cleaned > 0 ? 'notice-success' : 'notice-info';
             $message = sprintf(

@@ -38,11 +38,11 @@ msgid "Details"
 msgstr ""
 
 #: modules/custom_dashboards.php:53
-msgid "Server Response (TTFB):"
+msgid "Server PHP Processing:"
 msgstr ""
 
 #: modules/custom_dashboards.php:54
-msgid "Time to First Byte measures how quickly your server responds. Under 200ms is excellent."
+msgid "Measures the backend execution time captured at shutdown. Under 200ms indicates an excellent PHP response."
 msgstr ""
 
 #: modules/custom_dashboards.php:66
