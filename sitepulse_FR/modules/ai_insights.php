@@ -14,6 +14,51 @@ add_action('admin_menu', function() {
 add_action('admin_enqueue_scripts', 'sitepulse_ai_insights_enqueue_assets');
 add_action('wp_ajax_sitepulse_generate_ai_insight', 'sitepulse_generate_ai_insight');
 
+/**
+ * Retrieves the cached AI insight payload for the current request.
+ *
+ * @param bool $force_refresh When true, clears the transient cache and resets the in-request cache.
+ *
+ * @return array{text?:string,timestamp?:int}
+ */
+function sitepulse_ai_get_cached_insight($force_refresh = false) {
+    static $cached_insight = null;
+
+    if ($force_refresh) {
+        delete_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
+        $cached_insight = [];
+
+        return $cached_insight;
+    }
+
+    if ($cached_insight !== null) {
+        return $cached_insight;
+    }
+
+    $cached_insight = [];
+    $stored_insight = get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
+
+    if (is_array($stored_insight) && isset($stored_insight['text'])) {
+        $cached_text = sanitize_textarea_field($stored_insight['text']);
+
+        if ('' !== $cached_text) {
+            $cached_insight['text'] = $cached_text;
+
+            if (isset($stored_insight['timestamp'])) {
+                $cached_insight['timestamp'] = (int) $stored_insight['timestamp'];
+            }
+        }
+    } elseif (is_string($stored_insight) && '' !== $stored_insight) {
+        $cached_text = sanitize_textarea_field($stored_insight);
+
+        if ('' !== $cached_text) {
+            $cached_insight['text'] = $cached_text;
+        }
+    }
+
+    return $cached_insight;
+}
+
 function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
     if ('sitepulse-dashboard_page_sitepulse-ai' !== $hook_suffix) {
         return;
@@ -27,19 +72,9 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
         true
     );
 
-    $stored_insight    = get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
-    $insight_text      = '';
-    $insight_timestamp = null;
-
-    if (is_array($stored_insight) && isset($stored_insight['text'])) {
-        $insight_text = sanitize_textarea_field($stored_insight['text']);
-
-        if (isset($stored_insight['timestamp'])) {
-            $insight_timestamp = absint($stored_insight['timestamp']);
-        }
-    } elseif (is_string($stored_insight) && '' !== $stored_insight) {
-        $insight_text = sanitize_textarea_field($stored_insight);
-    }
+    $stored_insight    = sitepulse_ai_get_cached_insight();
+    $insight_text      = isset($stored_insight['text']) ? $stored_insight['text'] : '';
+    $insight_timestamp = isset($stored_insight['timestamp']) ? absint($stored_insight['timestamp']) : null;
 
     wp_localize_script(
         'sitepulse-ai-insights',
@@ -97,27 +132,6 @@ function sitepulse_ai_insights_page() {
 }
 
 function sitepulse_generate_ai_insight() {
-    $stored_insight = get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
-    $cached_payload = [];
-
-    if (is_array($stored_insight) && isset($stored_insight['text'])) {
-        $cached_text = sanitize_textarea_field($stored_insight['text']);
-
-        if ('' !== $cached_text) {
-            $cached_payload['text'] = $cached_text;
-
-            if (isset($stored_insight['timestamp'])) {
-                $cached_payload['timestamp'] = (int) $stored_insight['timestamp'];
-            }
-        }
-    } elseif (is_string($stored_insight) && '' !== $stored_insight) {
-        $cached_text = sanitize_textarea_field($stored_insight);
-
-        if ('' !== $cached_text) {
-            $cached_payload['text'] = $cached_text;
-        }
-    }
-
     if (!current_user_can('manage_options')) {
         wp_send_json_error([
             'message' => esc_html__("Vous n'avez pas les permissions nécessaires pour effectuer cette action.", 'sitepulse'),
@@ -138,41 +152,13 @@ function sitepulse_generate_ai_insight() {
         $force_refresh = filter_var(wp_unslash($_POST['force_refresh']), FILTER_VALIDATE_BOOLEAN);
     }
 
-    if ($force_refresh) {
-        delete_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
-        $cached_payload = [];
-    }
+    $cached_payload = $force_refresh
+        ? sitepulse_ai_get_cached_insight(true)
+        : sitepulse_ai_get_cached_insight();
 
     if (!$force_refresh && !empty($cached_payload)) {
         $cached_payload['cached'] = true;
         wp_send_json_success($cached_payload);
-    }
-
-    if (!$force_refresh) {
-        $cached_insight = get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
-
-        if (is_array($cached_insight) && isset($cached_insight['text'])) {
-            $cached_text = sanitize_textarea_field($cached_insight['text']);
-
-            if ('' !== $cached_text) {
-                $payload = ['text' => $cached_text, 'cached' => true];
-
-                if (isset($cached_insight['timestamp'])) {
-                    $payload['timestamp'] = (int) $cached_insight['timestamp'];
-                }
-
-                wp_send_json_success($payload);
-            }
-        } elseif (is_string($cached_insight) && '' !== $cached_insight) {
-            $cached_text = sanitize_textarea_field($cached_insight);
-
-            if ('' !== $cached_text) {
-                wp_send_json_success([
-                    'text'   => $cached_text,
-                    'cached' => true,
-                ]);
-            }
-        }
     }
 
     $api_key = trim((string) get_option(SITEPULSE_OPTION_GEMINI_API_KEY));
