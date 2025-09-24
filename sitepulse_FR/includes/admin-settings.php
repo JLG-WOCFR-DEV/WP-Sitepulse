@@ -428,8 +428,26 @@ function sitepulse_settings_page() {
     $is_debug_mode_enabled = rest_sanitize_boolean($debug_mode_option);
 
     if (isset($_POST[SITEPULSE_NONCE_FIELD_CLEANUP]) && wp_verify_nonce($_POST[SITEPULSE_NONCE_FIELD_CLEANUP], SITEPULSE_NONCE_ACTION_CLEANUP)) {
-        if (isset($_POST['sitepulse_clear_log']) && defined('SITEPULSE_DEBUG_LOG') && file_exists(SITEPULSE_DEBUG_LOG)) {
-            $cleared = @file_put_contents(SITEPULSE_DEBUG_LOG, '');
+        $filesystem = sitepulse_get_filesystem();
+        $log_exists = defined('SITEPULSE_DEBUG_LOG') && (
+            file_exists(SITEPULSE_DEBUG_LOG) ||
+            ($filesystem instanceof WP_Filesystem_Base && $filesystem->exists(SITEPULSE_DEBUG_LOG))
+        );
+
+        if (isset($_POST['sitepulse_clear_log']) && $log_exists) {
+            $cleared = false;
+
+            if ($filesystem instanceof WP_Filesystem_Base) {
+                $cleared = $filesystem->put_contents(
+                    SITEPULSE_DEBUG_LOG,
+                    '',
+                    defined('FS_CHMOD_FILE') ? FS_CHMOD_FILE : false
+                );
+            }
+
+            if (!$cleared) {
+                $cleared = @file_put_contents(SITEPULSE_DEBUG_LOG, '');
+            }
 
             if ($cleared === false) {
                 error_log(sprintf('SitePulse: unable to clear debug log file (%s).', SITEPULSE_DEBUG_LOG));

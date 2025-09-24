@@ -142,6 +142,38 @@ function sitepulse_plugin_impact_get_loader_signature() {
 }
 
 /**
+ * Attempts to bootstrap the WordPress filesystem abstraction layer.
+ *
+ * @return WP_Filesystem_Base|null
+ */
+function sitepulse_get_filesystem() {
+    static $filesystem_initialized = false;
+    static $filesystem_instance = null;
+
+    if ($filesystem_initialized) {
+        return $filesystem_instance;
+    }
+
+    $filesystem_initialized = true;
+
+    if (!function_exists('WP_Filesystem')) {
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+    }
+
+    if (!function_exists('WP_Filesystem')) {
+        return null;
+    }
+
+    global $wp_filesystem;
+
+    if (WP_Filesystem() && $wp_filesystem instanceof WP_Filesystem_Base) {
+        $filesystem_instance = $wp_filesystem;
+    }
+
+    return $filesystem_instance;
+}
+
+/**
  * Installs or refreshes the MU loader responsible for early instrumentation.
  *
  * @return void
@@ -158,19 +190,8 @@ function sitepulse_plugin_impact_install_mu_loader() {
         return;
     }
 
-    $filesystem = null;
-
-    if (!function_exists('WP_Filesystem')) {
-        require_once ABSPATH . 'wp-admin/includes/file.php';
-    }
-
-    if (function_exists('WP_Filesystem')) {
-        global $wp_filesystem;
-
-        if (WP_Filesystem()) {
-            $filesystem = $wp_filesystem instanceof WP_Filesystem_Base ? $wp_filesystem : null;
-        }
-    }
+    $filesystem = sitepulse_get_filesystem();
+    $stored_signature = get_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
 
     if ($filesystem instanceof WP_Filesystem_Base) {
         if (!$filesystem->is_dir($target_dir)) {
@@ -199,20 +220,33 @@ function sitepulse_plugin_impact_install_mu_loader() {
     $has_valid_loader = false;
     $needs_copy = true;
 
-    if ($filesystem instanceof WP_Filesystem_Base) {
-        if ($filesystem->exists($target_file)) {
+    if ($stored_signature === $signature) {
+        if ($filesystem instanceof WP_Filesystem_Base) {
+            if ($filesystem->exists($target_file)) {
+                $has_valid_loader = true;
+                $needs_copy      = false;
+            }
+        } elseif (file_exists($target_file)) {
+            $has_valid_loader = true;
+            $needs_copy      = false;
+        }
+    }
+
+    if ($needs_copy) {
+        if ($filesystem instanceof WP_Filesystem_Base && $filesystem->exists($target_file)) {
             $contents = $filesystem->get_contents($target_file);
 
             if (is_string($contents) && md5($contents) === $signature) {
                 $has_valid_loader = true;
-                $needs_copy = false;
+                $needs_copy      = false;
             }
-        }
-    } elseif (file_exists($target_file)) {
-        $existing_signature = md5_file($target_file);
-        if ($existing_signature === $signature) {
-            $has_valid_loader = true;
-            $needs_copy = false;
+        } elseif (file_exists($target_file)) {
+            $existing_signature = md5_file($target_file);
+
+            if ($existing_signature === $signature) {
+                $has_valid_loader = true;
+                $needs_copy      = false;
+            }
         }
     }
 
@@ -266,9 +300,19 @@ function sitepulse_plugin_impact_install_mu_loader() {
 function sitepulse_plugin_impact_remove_mu_loader() {
     $paths = sitepulse_plugin_impact_get_mu_loader_paths();
     $target_file = $paths['file'];
+    $filesystem = sitepulse_get_filesystem();
+    $deleted = false;
 
-    if (file_exists($target_file) && is_writable($target_file)) {
-        unlink($target_file);
+    if ($filesystem instanceof WP_Filesystem_Base && $filesystem->exists($target_file)) {
+        $deleted = $filesystem->delete($target_file);
+    }
+
+    if (!$deleted && file_exists($target_file)) {
+        $deleted = @unlink($target_file);
+    }
+
+    if (!$deleted && file_exists($target_file)) {
+        sitepulse_log(sprintf('SitePulse impact loader removal failed for %s.', $target_file), 'ERROR');
     }
 
     delete_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
@@ -415,6 +459,7 @@ function sitepulse_log($message, $level = 'INFO') {
     }
 
     $log_dir = dirname(SITEPULSE_DEBUG_LOG);
+    $filesystem = sitepulse_get_filesystem();
 
     if (!is_dir($log_dir)) {
         $error_message = sprintf('SitePulse: debug log directory does not exist (%s).', $log_dir);
@@ -424,7 +469,13 @@ function sitepulse_log($message, $level = 'INFO') {
         return;
     }
 
-    if (!is_writable($log_dir)) {
+    $is_directory_writable = is_writable($log_dir);
+
+    if (!$is_directory_writable && $filesystem instanceof WP_Filesystem_Base) {
+        $is_directory_writable = $filesystem->is_writable($log_dir);
+    }
+
+    if (!$is_directory_writable) {
         $error_message = sprintf('SitePulse: debug log directory is not writable (%s).', $log_dir);
         error_log($error_message);
         sitepulse_schedule_debug_admin_notice($error_message);
@@ -443,13 +494,35 @@ function sitepulse_log($message, $level = 'INFO') {
         ];
 
         foreach ($protection_targets as $path => $contents) {
-            if (file_exists($path)) {
+            $protection_exists = file_exists($path);
+
+            if (!$protection_exists && $filesystem instanceof WP_Filesystem_Base) {
+                $protection_exists = $filesystem->exists($path);
+            }
+
+            if ($protection_exists) {
                 continue;
             }
 
-            $written = file_put_contents($path, $contents, LOCK_EX);
+            $written = false;
 
-            if ($written === false) {
+            if ($filesystem instanceof WP_Filesystem_Base) {
+                $written = $filesystem->put_contents($path, $contents, defined('FS_CHMOD_FILE') ? FS_CHMOD_FILE : false);
+            }
+
+            if (!$written) {
+                $result = file_put_contents($path, $contents, LOCK_EX);
+
+                if ($result !== false) {
+                    $written = true;
+
+                    if (function_exists('chmod')) {
+                        @chmod($path, 0644);
+                    }
+                }
+            }
+
+            if (!$written) {
                 $error_message = sprintf('SitePulse: unable to write protection file (%s).', $path);
                 error_log($error_message);
                 sitepulse_schedule_debug_admin_notice($error_message);
@@ -468,7 +541,13 @@ function sitepulse_log($message, $level = 'INFO') {
     $max_size   = 5 * 1024 * 1024; // 5 MB
 
     if (file_exists(SITEPULSE_DEBUG_LOG)) {
-        if (!is_writable(SITEPULSE_DEBUG_LOG)) {
+        $is_log_writable = is_writable(SITEPULSE_DEBUG_LOG);
+
+        if (!$is_log_writable && $filesystem instanceof WP_Filesystem_Base) {
+            $is_log_writable = $filesystem->is_writable(SITEPULSE_DEBUG_LOG);
+        }
+
+        if (!$is_log_writable) {
             $error_message = sprintf('SitePulse: debug log file is not writable (%s).', SITEPULSE_DEBUG_LOG);
             error_log($error_message);
             sitepulse_schedule_debug_admin_notice($error_message);
@@ -478,7 +557,13 @@ function sitepulse_log($message, $level = 'INFO') {
 
         if (filesize(SITEPULSE_DEBUG_LOG) > $max_size) {
             $archive = SITEPULSE_DEBUG_LOG . '.' . time();
-            if (!rename(SITEPULSE_DEBUG_LOG, $archive)) {
+            $rotated = false;
+
+            if ($filesystem instanceof WP_Filesystem_Base && 'direct' !== $filesystem->method) {
+                $rotated = $filesystem->move(SITEPULSE_DEBUG_LOG, $archive, true);
+            }
+
+            if (!$rotated && !@rename(SITEPULSE_DEBUG_LOG, $archive)) {
                 $error_message = sprintf('SitePulse: unable to rotate debug log file (%s).', SITEPULSE_DEBUG_LOG);
                 error_log($error_message);
                 sitepulse_schedule_debug_admin_notice($error_message);
@@ -486,9 +571,31 @@ function sitepulse_log($message, $level = 'INFO') {
         }
     }
 
-    $result = file_put_contents(SITEPULSE_DEBUG_LOG, $log_entry, FILE_APPEND | LOCK_EX);
+    $write_succeeded = false;
 
-    if ($result === false) {
+    if ($filesystem instanceof WP_Filesystem_Base && 'direct' !== $filesystem->method) {
+        $existing_contents = '';
+
+        if ($filesystem->exists(SITEPULSE_DEBUG_LOG)) {
+            $existing = $filesystem->get_contents(SITEPULSE_DEBUG_LOG);
+            if (is_string($existing)) {
+                $existing_contents = $existing;
+            }
+        }
+
+        $write_succeeded = $filesystem->put_contents(
+            SITEPULSE_DEBUG_LOG,
+            $existing_contents . $log_entry,
+            defined('FS_CHMOD_FILE') ? FS_CHMOD_FILE : false
+        );
+    }
+
+    if (!$write_succeeded) {
+        $result = file_put_contents(SITEPULSE_DEBUG_LOG, $log_entry, FILE_APPEND | LOCK_EX);
+        $write_succeeded = ($result !== false);
+    }
+
+    if (!$write_succeeded) {
         $error_message = sprintf('SitePulse: unable to write to debug log file (%s).', SITEPULSE_DEBUG_LOG);
         error_log($error_message);
         sitepulse_schedule_debug_admin_notice($error_message);
@@ -552,13 +659,13 @@ add_action('plugins_loaded', 'sitepulse_load_modules');
  */
 function sitepulse_activate_site() {
     // **FIX:** Activate the dashboard by default to prevent fatal errors on first load.
-    add_option(SITEPULSE_OPTION_ACTIVE_MODULES, ['custom_dashboards']);
-    add_option(SITEPULSE_OPTION_DEBUG_MODE, false);
-    add_option(SITEPULSE_OPTION_GEMINI_API_KEY, '');
-    add_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 5);
-    add_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60);
-    add_option(SITEPULSE_OPTION_ALERT_INTERVAL, 5);
-    add_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, []);
+    add_option(SITEPULSE_OPTION_ACTIVE_MODULES, ['custom_dashboards'], '', false);
+    add_option(SITEPULSE_OPTION_DEBUG_MODE, false, '', false);
+    add_option(SITEPULSE_OPTION_GEMINI_API_KEY, '', '', false);
+    add_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 5, '', false);
+    add_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60, '', false);
+    add_option(SITEPULSE_OPTION_ALERT_INTERVAL, 5, '', false);
+    add_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, [], '', false);
 
     sitepulse_plugin_impact_install_mu_loader();
 }
