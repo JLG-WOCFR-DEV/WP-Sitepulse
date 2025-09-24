@@ -80,6 +80,89 @@ function sitepulse_error_alert_get_cpu_threshold() {
 }
 
 /**
+ * Attempts to determine the number of CPU cores available.
+ *
+ * The detection tries several strategies so it keeps working on a wide range
+ * of hosting environments, and falls back to a sane default when no reliable
+ * information is available.
+ *
+ * @return int Number of CPU cores (minimum of 1).
+ */
+function sitepulse_error_alert_get_cpu_core_count() {
+    static $cached_core_count = null;
+
+    if ($cached_core_count !== null) {
+        return $cached_core_count;
+    }
+
+    $core_count = 0;
+
+    // Allow site owners to provide their own value up-front.
+    $filtered_initial = apply_filters('sitepulse_error_alert_cpu_core_count', null);
+    if (is_numeric($filtered_initial) && (int) $filtered_initial > 0) {
+        $core_count = (int) $filtered_initial;
+    }
+
+    if ($core_count < 1 && function_exists('shell_exec')) {
+        $disabled = explode(',', (string) ini_get('disable_functions'));
+        $disabled = array_map('trim', $disabled);
+
+        if (!in_array('shell_exec', $disabled, true)) {
+            $nproc = @shell_exec('nproc 2>/dev/null');
+            if (is_string($nproc)) {
+                $nproc = (int) trim($nproc);
+                if ($nproc > 0) {
+                    $core_count = $nproc;
+                }
+            }
+
+            if ($core_count < 1) {
+                $sysctl = @shell_exec('sysctl -n hw.ncpu 2>/dev/null');
+                if (is_string($sysctl)) {
+                    $sysctl = (int) trim($sysctl);
+                    if ($sysctl > 0) {
+                        $core_count = $sysctl;
+                    }
+                }
+            }
+        }
+    }
+
+    if ($core_count < 1) {
+        $cpuinfo = @file_get_contents('/proc/cpuinfo');
+        if (is_string($cpuinfo) && $cpuinfo !== '') {
+            if (preg_match_all('/^processor\s*:/m', $cpuinfo, $matches)) {
+                $cpuinfo_cores = count($matches[0]);
+                if ($cpuinfo_cores > 0) {
+                    $core_count = $cpuinfo_cores;
+                }
+            }
+        }
+    }
+
+    if ($core_count < 1 && function_exists('getenv')) {
+        $env_cores = getenv('NUMBER_OF_PROCESSORS');
+        if ($env_cores !== false && is_numeric($env_cores) && (int) $env_cores > 0) {
+            $core_count = (int) $env_cores;
+        }
+    }
+
+    if ($core_count < 1) {
+        $core_count = 1;
+    }
+
+    $core_count = (int) apply_filters('sitepulse_error_alert_detected_cpu_core_count', $core_count);
+
+    if ($core_count < 1) {
+        $core_count = 1;
+    }
+
+    $cached_core_count = $core_count;
+
+    return $cached_core_count;
+}
+
+/**
  * Returns the throttling window (in seconds) for alert e-mails.
  *
  * @return int
@@ -274,9 +357,19 @@ function sitepulse_error_alerts_check_cpu_load() {
     }
 
     $threshold = sitepulse_error_alert_get_cpu_threshold();
+    $core_count = sitepulse_error_alert_get_cpu_core_count();
+    $core_count = max(1, (int) $core_count);
 
-    if ((float) $load[0] > $threshold) {
-        $message = "La charge actuelle est de : " . $load[0] . " (seuil : " . $threshold . ")";
+    $normalized_load = (float) $load[0] / $core_count;
+
+    if ($normalized_load > $threshold) {
+        $message = sprintf(
+            'Charge serveur actuelle : %1$s (cœurs détectés : %2$d, charge par cœur : %3$s, seuil par cœur : %4$s)',
+            number_format_i18n((float) $load[0], 2),
+            $core_count,
+            number_format_i18n($normalized_load, 2),
+            number_format_i18n($threshold, 2)
+        );
         sitepulse_error_alert_send('cpu', 'Alerte SitePulse: Charge Serveur Élevée', $message);
     }
 }

@@ -248,8 +248,9 @@ function sitepulse_plugin_impact_tracker_persist() {
         set_transient(
             SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS,
             [
-                'ttfb'      => $request_duration_ms,
-                'timestamp' => $current_timestamp,
+                'server_processing_ms' => $request_duration_ms,
+                'ttfb'                 => $request_duration_ms, // Back-compat for earlier dashboard versions.
+                'timestamp'            => $current_timestamp,
             ],
             MINUTE_IN_SECONDS * 10
         );

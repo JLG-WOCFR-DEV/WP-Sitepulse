@@ -44,31 +44,35 @@ function sitepulse_custom_dashboards_page() {
             <div class="sitepulse-card">
                 <?php
                 $results = get_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
-                $ttfb = null;
+                $processing_time = null;
 
                 if (is_array($results)) {
-                    if (isset($results['ttfb']) && is_numeric($results['ttfb'])) {
-                        $ttfb = (float) $results['ttfb'];
+                    if (isset($results['server_processing_ms']) && is_numeric($results['server_processing_ms'])) {
+                        $processing_time = (float) $results['server_processing_ms'];
+                    } elseif (isset($results['ttfb']) && is_numeric($results['ttfb'])) {
+                        $processing_time = (float) $results['ttfb'];
+                    } elseif (isset($results['data']['server_processing_ms']) && is_numeric($results['data']['server_processing_ms'])) {
+                        $processing_time = (float) $results['data']['server_processing_ms'];
                     } elseif (isset($results['data']['ttfb']) && is_numeric($results['data']['ttfb'])) {
-                        $ttfb = (float) $results['data']['ttfb'];
+                        $processing_time = (float) $results['data']['ttfb'];
                     }
                 }
 
-                $ttfb_status = 'status-ok';
+                $processing_status = 'status-ok';
 
-                if ($ttfb === null) {
-                    $ttfb_status = 'status-warn';
-                } elseif ($ttfb > 500) {
-                    $ttfb_status = 'status-bad';
-                } elseif ($ttfb > 200) {
-                    $ttfb_status = 'status-warn';
+                if ($processing_time === null) {
+                    $processing_status = 'status-warn';
+                } elseif ($processing_time > 500) {
+                    $processing_status = 'status-bad';
+                } elseif ($processing_time > 200) {
+                    $processing_status = 'status-warn';
                 }
                 ?>
-                <?php $ttfb_display = $ttfb !== null ? round($ttfb) . ' ' . esc_html__('ms', 'sitepulse') : esc_html__('N/A', 'sitepulse'); ?>
+                <?php $processing_display = $processing_time !== null ? round($processing_time) . ' ' . esc_html__('ms', 'sitepulse') : esc_html__('N/A', 'sitepulse'); ?>
                 <h2><span class="dashicons dashicons-performance"></span> <?php esc_html_e('Speed', 'sitepulse'); ?></h2>
                 <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-speed')); ?>" class="button"><?php esc_html_e('Details', 'sitepulse'); ?></a>
-                <p><?php esc_html_e('Server Response (TTFB):', 'sitepulse'); ?> <span class="metric <?php echo esc_attr($ttfb_status); ?>"><?php echo esc_html($ttfb_display); ?></span></p>
-                <p class="description"><?php esc_html_e('Time to First Byte measures how quickly your server responds. Under 200ms is excellent.', 'sitepulse'); ?></p>
+                <p><?php esc_html_e('Server PHP Processing:', 'sitepulse'); ?> <span class="metric <?php echo esc_attr($processing_status); ?>"><?php echo esc_html($processing_display); ?></span></p>
+                <p class="description"><?php esc_html_e('Measures the backend execution time captured at shutdown. Under 200ms indicates an excellent PHP response.', 'sitepulse'); ?></p>
             </div>
 
             <!-- Uptime Card -->
