@@ -21,13 +21,27 @@ function sitepulse_custom_dashboard_enqueue_assets($hook_suffix) {
         return;
     }
 
+    $default_chartjs_src = SITEPULSE_URL . 'modules/vendor/chart.js/chart.umd.js';
+    $chartjs_src = apply_filters('sitepulse_chartjs_src', $default_chartjs_src);
+
     wp_register_script(
         'sitepulse-chartjs',
-        'https://cdn.jsdelivr.net/npm/chart.js@4.4.5/dist/chart.umd.min.js',
+        $chartjs_src,
         [],
         '4.4.5',
         true
     );
+
+    if ($chartjs_src !== $default_chartjs_src) {
+        $fallback_loader = '(function(){if (typeof window.Chart === "undefined") {'
+            . 'var script=document.createElement("script");'
+            . 'script.src=' . wp_json_encode($default_chartjs_src) . ';'
+            . 'script.defer=true;'
+            . 'document.head.appendChild(script);'
+            . '}})();';
+
+        wp_add_inline_script('sitepulse-chartjs', $fallback_loader, 'after');
+    }
 
     wp_register_script(
         'sitepulse-dashboard-charts',
