@@ -138,7 +138,70 @@ function sitepulse_plugin_impact_get_loader_signature() {
         return null;
     }
 
-    return md5_file($source) ?: null;
+    $signature = hash_file('sha256', $source);
+
+    return $signature !== false ? $signature : null;
+}
+
+/**
+ * Timing safe string comparison with graceful fallback.
+ *
+ * @param string $known_string Known string (reference).
+ * @param string $user_string  User-provided string.
+ * @return bool
+ */
+function sitepulse_hash_equals($known_string, $user_string) {
+    if (!is_string($known_string) || !is_string($user_string)) {
+        return false;
+    }
+
+    if (function_exists('hash_equals')) {
+        return hash_equals($known_string, $user_string);
+    }
+
+    $known_length = strlen($known_string);
+
+    if ($known_length !== strlen($user_string)) {
+        return false;
+    }
+
+    $result = 0;
+
+    for ($i = 0; $i < $known_length; $i++) {
+        $result |= ord($known_string[$i]) ^ ord($user_string[$i]);
+    }
+
+    return $result === 0;
+}
+
+/**
+ * Checks whether a log line contains a fatal PHP error.
+ *
+ * @param string $log_line Log line to inspect.
+ * @return bool
+ */
+function sitepulse_log_line_contains_fatal_error($log_line) {
+    if (!is_string($log_line) || $log_line === '') {
+        return false;
+    }
+
+    $fatal_patterns = [
+        '/PHP Fatal error/i',
+        '/PHP Parse error/i',
+        '/PHP Compile error/i',
+        '/PHP Core error/i',
+        '/PHP Recoverable fatal error/i',
+        '/Uncaught\s+(?:Error|Exception)/i',
+        '/\bE_(?:ERROR|PARSE|COMPILE_ERROR|CORE_ERROR|RECOVERABLE_ERROR)\b/',
+    ];
+
+    foreach ($fatal_patterns as $pattern) {
+        if (preg_match($pattern, $log_line)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /**
@@ -220,7 +283,7 @@ function sitepulse_plugin_impact_install_mu_loader() {
     $has_valid_loader = false;
     $needs_copy = true;
 
-    if ($stored_signature === $signature) {
+    if (is_string($stored_signature) && sitepulse_hash_equals($signature, $stored_signature)) {
         if ($filesystem instanceof WP_Filesystem_Base) {
             if ($filesystem->exists($target_file)) {
                 $has_valid_loader = true;
@@ -236,14 +299,18 @@ function sitepulse_plugin_impact_install_mu_loader() {
         if ($filesystem instanceof WP_Filesystem_Base && $filesystem->exists($target_file)) {
             $contents = $filesystem->get_contents($target_file);
 
-            if (is_string($contents) && md5($contents) === $signature) {
-                $has_valid_loader = true;
-                $needs_copy      = false;
+            if (is_string($contents)) {
+                $existing_signature = hash('sha256', $contents);
+
+                if ($existing_signature !== false && sitepulse_hash_equals($signature, $existing_signature)) {
+                    $has_valid_loader = true;
+                    $needs_copy      = false;
+                }
             }
         } elseif (file_exists($target_file)) {
-            $existing_signature = md5_file($target_file);
+            $existing_signature = hash_file('sha256', $target_file);
 
-            if ($existing_signature === $signature) {
+            if ($existing_signature !== false && sitepulse_hash_equals($signature, $existing_signature)) {
                 $has_valid_loader = true;
                 $needs_copy      = false;
             }
@@ -273,13 +340,18 @@ function sitepulse_plugin_impact_install_mu_loader() {
         if ($copied) {
             if ($filesystem instanceof WP_Filesystem_Base) {
                 $contents = $filesystem->get_contents($target_file);
-                if (is_string($contents) && md5($contents) === $signature) {
-                    $has_valid_loader = true;
+                if (is_string($contents)) {
+                    $existing_signature = hash('sha256', $contents);
+
+                    if ($existing_signature !== false && sitepulse_hash_equals($signature, $existing_signature)) {
+                        $has_valid_loader = true;
+                    }
                 }
             }
 
             if (!$has_valid_loader && file_exists($target_file)) {
-                $has_valid_loader = md5_file($target_file) === $signature;
+                $existing_signature = hash_file('sha256', $target_file);
+                $has_valid_loader   = $existing_signature !== false && sitepulse_hash_equals($signature, $existing_signature);
             }
         }
     }
