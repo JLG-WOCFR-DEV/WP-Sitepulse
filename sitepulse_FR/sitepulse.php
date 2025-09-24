@@ -28,6 +28,10 @@ define('SITEPULSE_OPTION_CPU_ALERT_THRESHOLD', 'sitepulse_cpu_alert_threshold');
 define('SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES', 'sitepulse_alert_cooldown_minutes');
 define('SITEPULSE_OPTION_ALERT_INTERVAL', 'sitepulse_alert_interval');
 define('SITEPULSE_OPTION_ALERT_RECIPIENTS', 'sitepulse_alert_recipients');
+define('SITEPULSE_OPTION_REPORT_FREQUENCY', 'sitepulse_report_frequency');
+define('SITEPULSE_OPTION_REPORT_TIME', 'sitepulse_report_time');
+define('SITEPULSE_OPTION_REPORT_WEEKDAY', 'sitepulse_report_weekday');
+define('SITEPULSE_OPTION_REPORT_RECIPIENTS', 'sitepulse_report_recipients');
 define('SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE', 'sitepulse_impact_loader_signature');
 
 define('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS', 'sitepulse_speed_scan_results');
@@ -441,6 +445,7 @@ function sitepulse_load_modules() {
         'ai_insights'           => 'AI-Powered Insights',
         'custom_dashboards'     => 'Custom Dashboards',
         'error_alerts'          => 'Error Alerts',
+        'email_reports'         => 'Email Reports',
     ];
     
     $active_modules_option = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
@@ -478,13 +483,17 @@ add_action('plugins_loaded', 'sitepulse_load_modules');
  */
 function sitepulse_activate_site() {
     // **FIX:** Activate the dashboard by default to prevent fatal errors on first load.
-    add_option(SITEPULSE_OPTION_ACTIVE_MODULES, ['custom_dashboards']);
+    add_option(SITEPULSE_OPTION_ACTIVE_MODULES, ['custom_dashboards', 'email_reports']);
     add_option(SITEPULSE_OPTION_DEBUG_MODE, false);
     add_option(SITEPULSE_OPTION_GEMINI_API_KEY, '');
     add_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 5);
     add_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60);
     add_option(SITEPULSE_OPTION_ALERT_INTERVAL, 5);
     add_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, []);
+    add_option(SITEPULSE_OPTION_REPORT_FREQUENCY, 'disabled');
+    add_option(SITEPULSE_OPTION_REPORT_TIME, '08:00');
+    add_option(SITEPULSE_OPTION_REPORT_WEEKDAY, 1);
+    add_option(SITEPULSE_OPTION_REPORT_RECIPIENTS, []);
 
     sitepulse_plugin_impact_install_mu_loader();
 }

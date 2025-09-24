@@ -98,6 +98,10 @@ function sitepulse_get_managed_settings_keys() {
         SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES,
         SITEPULSE_OPTION_ALERT_INTERVAL,
         SITEPULSE_OPTION_ALERT_RECIPIENTS,
+        SITEPULSE_OPTION_REPORT_FREQUENCY,
+        SITEPULSE_OPTION_REPORT_TIME,
+        SITEPULSE_OPTION_REPORT_WEEKDAY,
+        SITEPULSE_OPTION_REPORT_RECIPIENTS,
     ];
 }
 
@@ -191,6 +195,18 @@ function sitepulse_import_settings_from_array($settings) {
                 break;
             case SITEPULSE_OPTION_ALERT_RECIPIENTS:
                 $value = sitepulse_sanitize_alert_recipients($value);
+                break;
+            case SITEPULSE_OPTION_REPORT_FREQUENCY:
+                $value = sitepulse_sanitize_report_frequency($value);
+                break;
+            case SITEPULSE_OPTION_REPORT_TIME:
+                $value = sitepulse_sanitize_report_time($value);
+                break;
+            case SITEPULSE_OPTION_REPORT_WEEKDAY:
+                $value = sitepulse_sanitize_report_weekday($value);
+                break;
+            case SITEPULSE_OPTION_REPORT_RECIPIENTS:
+                $value = sitepulse_sanitize_report_recipients($value);
                 break;
             default:
                 continue 2;
@@ -386,6 +402,18 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_ALERT_RECIPIENTS, [
         'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_alert_recipients', 'default' => []
     ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_REPORT_FREQUENCY, [
+        'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_report_frequency', 'default' => 'disabled'
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_REPORT_TIME, [
+        'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_report_time', 'default' => '08:00'
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_REPORT_WEEKDAY, [
+        'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_report_weekday', 'default' => 1
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_REPORT_RECIPIENTS, [
+        'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_report_recipients', 'default' => []
+    ]);
 }
 add_action('admin_init', 'sitepulse_register_settings');
 
@@ -393,7 +421,7 @@ add_action('admin_init', 'sitepulse_register_settings');
  * Sanitizes the module selection.
  */
 function sitepulse_sanitize_modules($input) {
-    $valid_keys = ['log_analyzer', 'resource_monitor', 'plugin_impact_scanner', 'speed_analyzer', 'database_optimizer', 'maintenance_advisor', 'uptime_tracker', 'ai_insights', 'custom_dashboards', 'error_alerts'];
+    $valid_keys = ['log_analyzer', 'resource_monitor', 'plugin_impact_scanner', 'speed_analyzer', 'database_optimizer', 'maintenance_advisor', 'uptime_tracker', 'ai_insights', 'custom_dashboards', 'error_alerts', 'email_reports'];
     $sanitized = [];
     if (is_array($input)) {
         foreach ($input as $key) {
@@ -488,6 +516,85 @@ function sitepulse_sanitize_alert_recipients($value) {
     }
 
     return array_values(array_unique($sanitized));
+}
+
+/**
+ * Sanitizes the scheduled report frequency.
+ *
+ * @param mixed $value Raw user input value.
+ * @return string Allowed frequency value.
+ */
+function sitepulse_sanitize_report_frequency($value) {
+    $value = is_string($value) ? strtolower(trim($value)) : '';
+
+    $allowed = ['disabled', 'weekly', 'monthly'];
+
+    if (!in_array($value, $allowed, true)) {
+        $value = 'disabled';
+    }
+
+    return $value;
+}
+
+/**
+ * Sanitizes the scheduled report time field.
+ *
+ * @param mixed $value Raw user input value.
+ * @return string Time string formatted as HH:MM.
+ */
+function sitepulse_sanitize_report_time($value) {
+    if (is_string($value)) {
+        $value = trim($value);
+    } else {
+        $value = '';
+    }
+
+    if ($value === '') {
+        return '08:00';
+    }
+
+    if (!preg_match('/^(\d{1,2}):(\d{2})$/', $value, $matches)) {
+        return '08:00';
+    }
+
+    $hours   = (int) $matches[1];
+    $minutes = (int) $matches[2];
+
+    if ($hours < 0 || $hours > 23) {
+        $hours = 8;
+    }
+
+    if ($minutes < 0 || $minutes > 59) {
+        $minutes = 0;
+    }
+
+    return sprintf('%02d:%02d', $hours, $minutes);
+}
+
+/**
+ * Sanitizes the preferred weekday for weekly reports.
+ *
+ * @param mixed $value Raw user input value.
+ * @return int Normalized weekday (0 for Sunday through 6 for Saturday).
+ */
+function sitepulse_sanitize_report_weekday($value) {
+    $weekday = is_scalar($value) ? (int) $value : 1;
+
+    if ($weekday < 0 || $weekday > 6) {
+        $weekday = 1;
+    }
+
+    return $weekday;
+}
+
+/**
+ * Sanitizes the scheduled report recipients list.
+ *
+ * @param mixed $value Raw user input value.
+ * @return array List of unique e-mail addresses.
+ */
+function sitepulse_sanitize_report_recipients($value) {
+    return sitepulse_sanitize_alert_recipients($value);
 }
 
 if (!function_exists('sitepulse_delete_transients_by_prefix')) {
@@ -701,6 +808,7 @@ function sitepulse_settings_page() {
         'ai_insights'           => __('AI-Powered Insights', 'sitepulse'),
         'custom_dashboards'     => __('Custom Dashboards', 'sitepulse'),
         'error_alerts'          => __('Error Alerts', 'sitepulse'),
+        'email_reports'         => __('Scheduled Reports', 'sitepulse'),
     ];
     $active_modules = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
     $debug_mode_option = get_option(SITEPULSE_OPTION_DEBUG_MODE);
@@ -735,11 +843,16 @@ function sitepulse_settings_page() {
                 SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES,
                 SITEPULSE_OPTION_ALERT_INTERVAL,
                 SITEPULSE_OPTION_ALERT_RECIPIENTS,
+                SITEPULSE_OPTION_REPORT_FREQUENCY,
+                SITEPULSE_OPTION_REPORT_TIME,
+                SITEPULSE_OPTION_REPORT_WEEKDAY,
+                SITEPULSE_OPTION_REPORT_RECIPIENTS,
                 SITEPULSE_PLUGIN_IMPACT_OPTION,
             ];
 
             // Clear stored alert recipients so the default (empty) list is restored on activation.
             $options_to_delete[] = SITEPULSE_OPTION_ALERT_RECIPIENTS;
+            $options_to_delete[] = SITEPULSE_OPTION_REPORT_RECIPIENTS;
 
             foreach ($options_to_delete as $option_key) {
                 delete_option($option_key);
@@ -905,6 +1018,71 @@ function sitepulse_settings_page() {
                             <?php endforeach; ?>
                         </select>
                         <p class="description"><?php esc_html_e('Détermine la fréquence des vérifications automatisées pour les alertes.', 'sitepulse'); ?></p>
+                    </td>
+                </tr>
+            </table>
+            <h2><?php esc_html_e('Rapports programmés', 'sitepulse'); ?></h2>
+            <p><?php esc_html_e('Recevez un résumé périodique des métriques clés du site directement par e-mail.', 'sitepulse'); ?></p>
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_REPORT_RECIPIENTS); ?>"><?php esc_html_e('Destinataires du rapport', 'sitepulse'); ?></label></th>
+                    <td>
+                        <?php
+                        $report_recipients       = (array) get_option(SITEPULSE_OPTION_REPORT_RECIPIENTS, []);
+                        $report_recipients_value = implode("\n", $report_recipients);
+                        ?>
+                        <textarea id="<?php echo esc_attr(SITEPULSE_OPTION_REPORT_RECIPIENTS); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_REPORT_RECIPIENTS); ?>" rows="4" cols="50" class="large-text code"><?php echo esc_textarea($report_recipients_value); ?></textarea>
+                        <p class="description"><?php esc_html_e('Indiquez une adresse par ligne (ou séparée par des virgules). Le rapport utilise également l’adresse e-mail de l’administrateur si elle est valide.', 'sitepulse'); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_REPORT_FREQUENCY); ?>"><?php esc_html_e('Fréquence d’envoi', 'sitepulse'); ?></label></th>
+                    <td>
+                        <?php
+                        $report_frequency = get_option(SITEPULSE_OPTION_REPORT_FREQUENCY, 'disabled');
+                        $frequency_choices = [
+                            'disabled' => __('Désactivé', 'sitepulse'),
+                            'weekly'   => __('Hebdomadaire', 'sitepulse'),
+                            'monthly'  => __('Mensuel', 'sitepulse'),
+                        ];
+                        ?>
+                        <select id="<?php echo esc_attr(SITEPULSE_OPTION_REPORT_FREQUENCY); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_REPORT_FREQUENCY); ?>">
+                            <?php foreach ($frequency_choices as $key => $label) : ?>
+                                <option value="<?php echo esc_attr($key); ?>" <?php selected($report_frequency, $key); ?>><?php echo esc_html($label); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <p class="description"><?php esc_html_e('Choisissez la fréquence d’envoi du rapport. Les envois mensuels sont envoyés le premier jour du mois.', 'sitepulse'); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_REPORT_WEEKDAY); ?>"><?php esc_html_e('Jour hebdomadaire', 'sitepulse'); ?></label></th>
+                    <td>
+                        <?php
+                        $report_weekday = (int) get_option(SITEPULSE_OPTION_REPORT_WEEKDAY, 1);
+                        $weekday_labels = [
+                            0 => __('Dimanche', 'sitepulse'),
+                            1 => __('Lundi', 'sitepulse'),
+                            2 => __('Mardi', 'sitepulse'),
+                            3 => __('Mercredi', 'sitepulse'),
+                            4 => __('Jeudi', 'sitepulse'),
+                            5 => __('Vendredi', 'sitepulse'),
+                            6 => __('Samedi', 'sitepulse'),
+                        ];
+                        ?>
+                        <select id="<?php echo esc_attr(SITEPULSE_OPTION_REPORT_WEEKDAY); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_REPORT_WEEKDAY); ?>">
+                            <?php foreach ($weekday_labels as $weekday_value => $weekday_label) : ?>
+                                <option value="<?php echo esc_attr($weekday_value); ?>" <?php selected($report_weekday, $weekday_value); ?>><?php echo esc_html($weekday_label); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <p class="description"><?php esc_html_e('Utilisé uniquement pour les rapports hebdomadaires.', 'sitepulse'); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_REPORT_TIME); ?>"><?php esc_html_e('Heure d’envoi', 'sitepulse'); ?></label></th>
+                    <td>
+                        <?php $report_time = get_option(SITEPULSE_OPTION_REPORT_TIME, '08:00'); ?>
+                        <input type="time" id="<?php echo esc_attr(SITEPULSE_OPTION_REPORT_TIME); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_REPORT_TIME); ?>" value="<?php echo esc_attr($report_time); ?>" class="small-text">
+                        <p class="description"><?php esc_html_e('Heure locale utilisée pour déclencher l’e-mail automatique.', 'sitepulse'); ?></p>
                     </td>
                 </tr>
             </table>
