@@ -183,11 +183,7 @@ function sitepulse_generate_ai_insight() {
         ], 400);
     }
 
-    $endpoint = add_query_arg(
-        'key',
-        $api_key,
-        'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
-    );
+    $endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
 
     $site_name        = wp_strip_all_tags(get_bloginfo('name'));
     $site_url         = esc_url_raw(home_url());
@@ -228,7 +224,8 @@ function sitepulse_generate_ai_insight() {
         $endpoint,
         [
             'headers' => [
-                'Content-Type' => 'application/json',
+                'Content-Type'  => 'application/json',
+                'x-goog-api-key' => $api_key,
             ],
             'body'    => wp_json_encode($request_body),
             'timeout' => 30,
