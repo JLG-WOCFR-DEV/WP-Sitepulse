@@ -28,6 +28,7 @@ define('SITEPULSE_OPTION_CPU_ALERT_THRESHOLD', 'sitepulse_cpu_alert_threshold');
 define('SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES', 'sitepulse_alert_cooldown_minutes');
 define('SITEPULSE_OPTION_ALERT_INTERVAL', 'sitepulse_alert_interval');
 define('SITEPULSE_OPTION_ALERT_RECIPIENTS', 'sitepulse_alert_recipients');
+define('SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE', 'sitepulse_impact_loader_signature');
 
 define('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS', 'sitepulse_speed_scan_results');
 define('SITEPULSE_TRANSIENT_AI_INSIGHT', 'sitepulse_ai_insight');
@@ -108,265 +109,119 @@ if (function_exists('wp_mkdir_p') && !is_dir($sitepulse_debug_directory)) {
 
 define('SITEPULSE_DEBUG_LOG', rtrim($sitepulse_debug_directory, '/\\') . '/sitepulse-debug.log');
 
-define('SITEPULSE_PLUGIN_IMPACT_OPTION', 'sitepulse_plugin_impact_stats');
-define('SITEPULSE_PLUGIN_IMPACT_REFRESH_INTERVAL', 15 * MINUTE_IN_SECONDS);
-
-$sitepulse_plugin_impact_tracker_last_tick = microtime(true);
-$sitepulse_plugin_impact_tracker_samples = [];
-$sitepulse_plugin_impact_tracker_force_persist = false;
-
-add_action('plugin_loaded', 'sitepulse_plugin_impact_tracker_on_plugin_loaded', PHP_INT_MAX, 1);
-add_action('shutdown', 'sitepulse_plugin_impact_tracker_persist', PHP_INT_MAX);
+require_once SITEPULSE_PATH . 'includes/plugin-impact-tracker.php';
+sitepulse_plugin_impact_tracker_bootstrap();
 
 /**
- * Records the elapsed time between plugin loading operations.
+ * Returns the absolute path to the SitePulse MU loader file.
  *
- * The measurement is taken when the {@see 'plugin_loaded'} action fires for
- * each plugin. The recorded value represents the time elapsed since the last
- * plugin finished loading, which approximates the cost of loading the current
- * plugin.
- *
- * @param string $plugin_file Relative path to the plugin file.
- *
- * @return void
+ * @return array{dir:string,file:string}
  */
-function sitepulse_plugin_impact_tracker_on_plugin_loaded($plugin_file) {
-    global $sitepulse_plugin_impact_tracker_last_tick, $sitepulse_plugin_impact_tracker_samples;
+function sitepulse_plugin_impact_get_mu_loader_paths() {
+    $mu_dir = trailingslashit(WP_CONTENT_DIR) . 'mu-plugins';
 
-    if (!is_string($plugin_file) || $plugin_file === '') {
-        return;
-    }
-
-    $now = microtime(true);
-
-    if (!is_float($sitepulse_plugin_impact_tracker_last_tick)) {
-        $sitepulse_plugin_impact_tracker_last_tick = isset($_SERVER['REQUEST_TIME_FLOAT'])
-            ? (float) $_SERVER['REQUEST_TIME_FLOAT']
-            : $now;
-    }
-
-    $elapsed = max(0.0, $now - $sitepulse_plugin_impact_tracker_last_tick);
-    $sitepulse_plugin_impact_tracker_samples[$plugin_file] = $elapsed;
-    $sitepulse_plugin_impact_tracker_last_tick = $now;
-}
-
-/**
- * Persists the collected plugin load measurements when appropriate.
- *
- * Data is stored at most once per {@see SITEPULSE_PLUGIN_IMPACT_REFRESH_INTERVAL}
- * unless a manual refresh is requested. A moving average is kept for each
- * plugin so that transient spikes have less impact on the reported duration.
- *
- * Request contexts can be skipped entirely by filtering the default behavior
- * via {@see 'sitepulse_plugin_impact_should_measure_request'}.
- *
- * @return void
- */
-function sitepulse_plugin_impact_tracker_persist() {
-    global $sitepulse_plugin_impact_tracker_samples, $sitepulse_plugin_impact_tracker_force_persist;
-
-    if ((function_exists('wp_doing_cron') && wp_doing_cron())
-        || (function_exists('wp_doing_ajax') && wp_doing_ajax())
-        || (defined('REST_REQUEST') && REST_REQUEST)
-    ) {
-        return;
-    }
-
-    $track_admin_requests = apply_filters('sitepulse_track_admin_requests', false);
-
-    if (
-        function_exists('is_admin')
-        && is_admin()
-        && !$sitepulse_plugin_impact_tracker_force_persist
-        && !$track_admin_requests
-    ) {
-        return;
-    }
-
-    $request_start = null;
-
-    $non_representative_context = false;
-
-    if (function_exists('wp_doing_cron') && wp_doing_cron()) {
-        $non_representative_context = true;
-    } elseif (function_exists('wp_doing_ajax') && wp_doing_ajax()) {
-        $non_representative_context = true;
-    } elseif (defined('REST_REQUEST') && REST_REQUEST) {
-        $non_representative_context = true;
-    } elseif (defined('WP_CLI') && WP_CLI) {
-        $non_representative_context = true;
-    } elseif (defined('XMLRPC_REQUEST') && XMLRPC_REQUEST) {
-        $non_representative_context = true;
-    }
-
-    $should_measure_request = apply_filters(
-        'sitepulse_plugin_impact_should_measure_request',
-        !$non_representative_context
-        && (
-            !function_exists('is_admin')
-            || !is_admin()
-            || $sitepulse_plugin_impact_tracker_force_persist
-        )
-    );
-
-    if ($non_representative_context || !$should_measure_request) {
-        return;
-    }
-
-    if (isset($GLOBALS['timestart']) && is_numeric($GLOBALS['timestart'])) {
-        $request_start = (float) $GLOBALS['timestart'];
-    } elseif (isset($_SERVER['REQUEST_TIME_FLOAT']) && is_numeric($_SERVER['REQUEST_TIME_FLOAT'])) {
-        $request_start = (float) $_SERVER['REQUEST_TIME_FLOAT'];
-    }
-
-    $request_duration_ms = 0.0;
-
-    if ($request_start !== null) {
-        $request_duration_ms = max(0.0, (microtime(true) - $request_start) * 1000);
-    }
-
-    $existing_results = get_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
-    $current_timestamp = current_time('timestamp');
-    $should_persist_speed_scan = true;
-
-    if (is_array($existing_results)) {
-        $existing_timestamp = isset($existing_results['timestamp'])
-            ? (int) $existing_results['timestamp']
-            : null;
-
-        if ($existing_timestamp !== null && $existing_timestamp > 0) {
-            $measurement_age = $current_timestamp - $existing_timestamp;
-
-            if ($measurement_age < 60) {
-                $should_persist_speed_scan = false;
-            }
-        }
-    }
-
-    if ($should_persist_speed_scan) {
-        update_option(SITEPULSE_OPTION_LAST_LOAD_TIME, $request_duration_ms, false);
-        set_transient(
-            SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS,
-            [
-                'server_processing_ms' => $request_duration_ms,
-                'ttfb'                 => $request_duration_ms, // Back-compat for earlier dashboard versions.
-                'timestamp'            => $current_timestamp,
-            ],
-            MINUTE_IN_SECONDS * 10
-        );
-    }
-
-    if (empty($sitepulse_plugin_impact_tracker_samples) || !is_array($sitepulse_plugin_impact_tracker_samples)) {
-        return;
-    }
-
-    $option_key = SITEPULSE_PLUGIN_IMPACT_OPTION;
-    $existing = get_option($option_key, []);
-    $now = current_time('timestamp');
-
-    if (!is_array($existing)) {
-        $existing = [];
-    }
-
-    $interval = apply_filters('sitepulse_plugin_impact_refresh_interval', SITEPULSE_PLUGIN_IMPACT_REFRESH_INTERVAL);
-    $last_updated = isset($existing['last_updated']) ? (int) $existing['last_updated'] : 0;
-
-    if (!$sitepulse_plugin_impact_tracker_force_persist && ($now - $last_updated) < $interval) {
-        return;
-    }
-
-    if (!function_exists('get_plugins')) {
-        require_once ABSPATH . 'wp-admin/includes/plugin.php';
-    }
-
-    $all_plugins = function_exists('get_plugins') ? get_plugins() : [];
-    $samples = isset($existing['samples']) && is_array($existing['samples']) ? $existing['samples'] : [];
-
-    foreach ($sitepulse_plugin_impact_tracker_samples as $plugin_file => $duration) {
-        if (!is_string($plugin_file) || $plugin_file === '') {
-            continue;
-        }
-
-        $plugin_file = (string) $plugin_file;
-        $milliseconds = max(0.0, (float) $duration * 1000);
-        $plugin_name = isset($all_plugins[$plugin_file]['Name']) ? $all_plugins[$plugin_file]['Name'] : $plugin_file;
-
-        if (isset($samples[$plugin_file]) && is_array($samples[$plugin_file])) {
-            $count = isset($samples[$plugin_file]['samples']) ? max(1, (int) $samples[$plugin_file]['samples']) : 1;
-            $average = isset($samples[$plugin_file]['avg_ms']) ? (float) $samples[$plugin_file]['avg_ms'] : $milliseconds;
-            $new_count = $count + 1;
-            $samples[$plugin_file]['avg_ms'] = ($average * $count + $milliseconds) / $new_count;
-            $samples[$plugin_file]['samples'] = $new_count;
-            $samples[$plugin_file]['last_ms'] = $milliseconds;
-            $samples[$plugin_file]['name'] = $plugin_name;
-            $samples[$plugin_file]['last_recorded'] = $now;
-        } else {
-            $samples[$plugin_file] = [
-                'file'          => $plugin_file,
-                'name'          => $plugin_name,
-                'avg_ms'        => $milliseconds,
-                'last_ms'       => $milliseconds,
-                'samples'       => 1,
-                'last_recorded' => $now,
-            ];
-        }
-    }
-
-    $active_plugins_option = get_option('active_plugins');
-    $active_plugins = is_array($active_plugins_option) ? array_map('strval', $active_plugins_option) : [];
-    $network_plugins_option = is_multisite() ? get_site_option('active_sitewide_plugins') : false;
-    $active_sitewide_plugins = is_array($network_plugins_option) ? array_map('strval', array_keys($network_plugins_option)) : [];
-    $all_active_plugins = array_unique(array_merge($active_plugins, $active_sitewide_plugins));
-
-    if (is_array($active_plugins_option) || is_array($network_plugins_option)) {
-        $normalized_samples = [];
-
-        foreach ($samples as $plugin_file => $data) {
-            $normalized_plugin_file = is_string($plugin_file) ? $plugin_file : (string) $plugin_file;
-
-            if (!in_array($normalized_plugin_file, $all_active_plugins, true)) {
-                continue;
-            }
-
-            if (!is_array($data)) {
-                $data = [];
-            }
-
-            $data['file'] = isset($data['file']) ? (string) $data['file'] : $normalized_plugin_file;
-            $normalized_samples[$normalized_plugin_file] = $data;
-        }
-
-        $samples = $normalized_samples;
-    }
-
-    $payload = [
-        'last_updated' => $now,
-        'interval'     => $interval,
-        'samples'      => $samples,
+    return [
+        'dir'  => $mu_dir,
+        'file' => trailingslashit($mu_dir) . 'sitepulse-impact-loader.php',
     ];
-
-    update_option($option_key, $payload, false);
 }
 
 /**
- * Forces the persistence of fresh measurements at the end of the current request.
+ * Returns the checksum of the bundled MU loader file.
  *
- * When $reset_existing is true the stored aggregate is cleared so that the next
- * persistence cycle starts with a clean slate.
- *
- * @param bool $reset_existing Whether to remove previous measurements.
+ * @return string|null
+ */
+function sitepulse_plugin_impact_get_loader_signature() {
+    $source = SITEPULSE_PATH . 'includes/mu-plugin/sitepulse-impact-loader.php';
+
+    if (!file_exists($source) || !is_readable($source)) {
+        return null;
+    }
+
+    return md5_file($source) ?: null;
+}
+
+/**
+ * Installs or refreshes the MU loader responsible for early instrumentation.
  *
  * @return void
  */
-function sitepulse_plugin_impact_force_next_persist($reset_existing = false) {
-    global $sitepulse_plugin_impact_tracker_force_persist;
+function sitepulse_plugin_impact_install_mu_loader() {
+    $paths = sitepulse_plugin_impact_get_mu_loader_paths();
+    $source = SITEPULSE_PATH . 'includes/mu-plugin/sitepulse-impact-loader.php';
+    $target_dir = $paths['dir'];
+    $target_file = $paths['file'];
 
-    $sitepulse_plugin_impact_tracker_force_persist = true;
+    $signature = sitepulse_plugin_impact_get_loader_signature();
 
-    if ($reset_existing) {
-        delete_option(SITEPULSE_PLUGIN_IMPACT_OPTION);
+    if ($signature === null) {
+        return;
+    }
+
+    if (!is_dir($target_dir) && function_exists('wp_mkdir_p')) {
+        wp_mkdir_p($target_dir);
+    }
+
+    if (!is_dir($target_dir) || !is_writable($target_dir)) {
+        return;
+    }
+
+    $needs_copy = !file_exists($target_file);
+
+    if (!$needs_copy) {
+        $existing_signature = md5_file($target_file);
+        $needs_copy = ($existing_signature !== $signature);
+    }
+
+    if ($needs_copy) {
+        copy($source, $target_file);
+
+        if (file_exists($target_file) && function_exists('chmod')) {
+            @chmod($target_file, 0644);
+        }
+    }
+
+    update_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE, $signature, false);
+}
+
+/**
+ * Removes the SitePulse MU loader.
+ *
+ * @return void
+ */
+function sitepulse_plugin_impact_remove_mu_loader() {
+    $paths = sitepulse_plugin_impact_get_mu_loader_paths();
+    $target_file = $paths['file'];
+
+    if (file_exists($target_file) && is_writable($target_file)) {
+        unlink($target_file);
+    }
+
+    delete_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
+}
+
+/**
+ * Ensures the MU loader is present and up to date.
+ *
+ * @return void
+ */
+function sitepulse_plugin_impact_maybe_refresh_mu_loader() {
+    $signature = sitepulse_plugin_impact_get_loader_signature();
+
+    if ($signature === null) {
+        return;
+    }
+
+    $paths = sitepulse_plugin_impact_get_mu_loader_paths();
+    $target_file = $paths['file'];
+    $stored_signature = get_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
+
+    if (!file_exists($target_file) || $stored_signature !== $signature) {
+        sitepulse_plugin_impact_install_mu_loader();
     }
 }
+
+sitepulse_plugin_impact_maybe_refresh_mu_loader();
 
 /**
  * Returns the list of cron hook identifiers used across SitePulse modules.
@@ -630,6 +485,8 @@ function sitepulse_activate_site() {
     add_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60);
     add_option(SITEPULSE_OPTION_ALERT_INTERVAL, 5);
     add_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, []);
+
+    sitepulse_plugin_impact_install_mu_loader();
 }
 
 /**
@@ -699,6 +556,8 @@ function sitepulse_deactivate_site() {
     foreach (sitepulse_get_cron_hooks() as $hook) {
         wp_clear_scheduled_hook($hook);
     }
+
+    sitepulse_plugin_impact_remove_mu_loader();
 }
 
 /**

@@ -78,9 +78,18 @@ function sitepulse_custom_dashboards_page() {
             <!-- Uptime Card -->
             <div class="sitepulse-card">
                  <?php
-                $uptime_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+                $raw_uptime_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+                $uptime_log = function_exists('sitepulse_normalize_uptime_log')
+                    ? sitepulse_normalize_uptime_log($raw_uptime_log)
+                    : (array) $raw_uptime_log;
                 $total_checks = count($uptime_log);
-                $up_checks = count(array_filter($uptime_log));
+                $up_checks = count(array_filter($uptime_log, function ($entry) {
+                    if (is_array($entry)) {
+                        return !empty($entry['status']);
+                    }
+
+                    return !empty($entry);
+                }));
                 $uptime_percentage = $total_checks > 0 ? ($up_checks / $total_checks) * 100 : 100;
                 $uptime_status = $uptime_percentage < 99 ? 'status-bad' : ($uptime_percentage < 100 ? 'status-warn' : 'status-ok');
                 ?>
