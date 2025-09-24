@@ -158,30 +158,104 @@ function sitepulse_plugin_impact_install_mu_loader() {
         return;
     }
 
-    if (!is_dir($target_dir) && function_exists('wp_mkdir_p')) {
-        wp_mkdir_p($target_dir);
+    $filesystem = null;
+
+    if (!function_exists('WP_Filesystem')) {
+        require_once ABSPATH . 'wp-admin/includes/file.php';
     }
 
-    if (!is_dir($target_dir) || !is_writable($target_dir)) {
-        return;
-    }
+    if (function_exists('WP_Filesystem')) {
+        global $wp_filesystem;
 
-    $needs_copy = !file_exists($target_file);
-
-    if (!$needs_copy) {
-        $existing_signature = md5_file($target_file);
-        $needs_copy = ($existing_signature !== $signature);
-    }
-
-    if ($needs_copy) {
-        copy($source, $target_file);
-
-        if (file_exists($target_file) && function_exists('chmod')) {
-            @chmod($target_file, 0644);
+        if (WP_Filesystem()) {
+            $filesystem = $wp_filesystem instanceof WP_Filesystem_Base ? $wp_filesystem : null;
         }
     }
 
-    update_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE, $signature, false);
+    if ($filesystem instanceof WP_Filesystem_Base) {
+        if (!$filesystem->is_dir($target_dir)) {
+            $filesystem->mkdir($target_dir, defined('FS_CHMOD_DIR') ? FS_CHMOD_DIR : false);
+        }
+
+        if (!$filesystem->is_dir($target_dir) || !$filesystem->is_writable($target_dir)) {
+            sitepulse_log(sprintf('SitePulse impact loader directory not writable via WP_Filesystem (%s).', $target_dir), 'ERROR');
+            delete_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
+
+            return;
+        }
+    } else {
+        if (!is_dir($target_dir) && function_exists('wp_mkdir_p')) {
+            wp_mkdir_p($target_dir);
+        }
+
+        if (!is_dir($target_dir) || !is_writable($target_dir)) {
+            sitepulse_log(sprintf('SitePulse impact loader directory not writable (%s).', $target_dir), 'ERROR');
+            delete_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
+
+            return;
+        }
+    }
+
+    $has_valid_loader = false;
+    $needs_copy = true;
+
+    if ($filesystem instanceof WP_Filesystem_Base) {
+        if ($filesystem->exists($target_file)) {
+            $contents = $filesystem->get_contents($target_file);
+
+            if (is_string($contents) && md5($contents) === $signature) {
+                $has_valid_loader = true;
+                $needs_copy = false;
+            }
+        }
+    } elseif (file_exists($target_file)) {
+        $existing_signature = md5_file($target_file);
+        if ($existing_signature === $signature) {
+            $has_valid_loader = true;
+            $needs_copy = false;
+        }
+    }
+
+    if ($needs_copy) {
+        $copied = false;
+
+        if ($filesystem instanceof WP_Filesystem_Base) {
+            $copied = $filesystem->copy(
+                $source,
+                $target_file,
+                true,
+                defined('FS_CHMOD_FILE') ? FS_CHMOD_FILE : false
+            );
+        }
+
+        if (!$copied) {
+            $copied = copy($source, $target_file);
+
+            if ($copied && function_exists('chmod')) {
+                @chmod($target_file, 0644);
+            }
+        }
+
+        if ($copied) {
+            if ($filesystem instanceof WP_Filesystem_Base) {
+                $contents = $filesystem->get_contents($target_file);
+                if (is_string($contents) && md5($contents) === $signature) {
+                    $has_valid_loader = true;
+                }
+            }
+
+            if (!$has_valid_loader && file_exists($target_file)) {
+                $has_valid_loader = md5_file($target_file) === $signature;
+            }
+        }
+    }
+
+    if ($has_valid_loader) {
+        update_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE, $signature, false);
+    } else {
+        delete_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
+        sitepulse_log(sprintf('SitePulse impact loader installation failed for %s.', $target_file), 'ERROR');
+    }
 }
 
 /**

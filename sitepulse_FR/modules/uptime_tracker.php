@@ -8,7 +8,8 @@ add_action('admin_menu', function() { add_submenu_page('sitepulse-dashboard', 'U
 if (!empty($sitepulse_uptime_cron_hook)) {
     add_action('init', function() use ($sitepulse_uptime_cron_hook) {
         if (!wp_next_scheduled($sitepulse_uptime_cron_hook)) {
-            wp_schedule_event(time(), 'hourly', $sitepulse_uptime_cron_hook);
+            $next_run = (int) current_time('timestamp', true);
+            wp_schedule_event($next_run, 'hourly', $sitepulse_uptime_cron_hook);
         }
     });
     add_action($sitepulse_uptime_cron_hook, 'sitepulse_run_uptime_check');
@@ -20,7 +21,8 @@ function sitepulse_normalize_uptime_log($log) {
 
     $normalized = [];
     $count = count($log);
-    $approximate_start = time() - max(0, ($count - 1) * HOUR_IN_SECONDS);
+    $now = (int) current_time('timestamp');
+    $approximate_start = $now - max(0, ($count - 1) * HOUR_IN_SECONDS);
 
     foreach (array_values($log) as $index => $entry) {
         $timestamp = $approximate_start + ($index * HOUR_IN_SECONDS);
@@ -98,7 +100,8 @@ function sitepulse_uptime_tracker_page() {
         $last_entry = end($uptime_log);
         if (!$last_entry['status']) {
             $current_incident_start = isset($last_entry['incident_start']) ? (int) $last_entry['incident_start'] : (int) $last_entry['timestamp'];
-            $current_incident_duration = human_time_diff($current_incident_start, time());
+            $current_timestamp = (int) current_time('timestamp');
+            $current_incident_duration = human_time_diff($current_incident_start, $current_timestamp);
         }
         reset($uptime_log);
     }
@@ -226,7 +229,7 @@ function sitepulse_run_uptime_check() {
 
     $log = sitepulse_normalize_uptime_log($raw_log);
 
-    $timestamp = time();
+    $timestamp = (int) current_time('timestamp');
     $entry = [
         'timestamp' => $timestamp,
         'status'    => $is_up,
@@ -253,7 +256,7 @@ function sitepulse_run_uptime_check() {
         $log = array_slice($log, -30);
     }
 
-    update_option(SITEPULSE_OPTION_UPTIME_LOG, array_values($log));
+    update_option(SITEPULSE_OPTION_UPTIME_LOG, array_values($log), false);
     if (!$is_up) { sitepulse_log('Uptime check: Down', 'ALERT'); } 
     else { sitepulse_log('Uptime check: Up'); }
 }
