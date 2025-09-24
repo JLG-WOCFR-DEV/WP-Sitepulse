@@ -338,51 +338,62 @@ function sitepulse_cleanup_transient_source($wpdb, $source, $current_time) {
     $timeout_prefix = $source['timeout_prefix'];
     $value_prefix = $source['value_prefix'];
 
-    $sql = "SELECT {$key_column} FROM {$table} WHERE {$key_column} LIKE %s AND {$value_column} < %s";
-    $params = array($wpdb->esc_like($timeout_prefix) . '%', $current_time);
+    $batch_size = (int) apply_filters('sitepulse_transient_cleanup_batch_size', 100, $source);
 
-    if ($table === $wpdb->sitemeta && $site_id !== null) {
-        $sql .= ' AND site_id = %d';
-        $params[] = $site_id;
-    }
-
-    $prepared = $wpdb->prepare($sql, $params);
-
-    if ($prepared === false) {
-        return 0;
-    }
-
-    $expired_timeouts = (array) $wpdb->get_col($prepared);
-
-    if (empty($expired_timeouts)) {
-        return 0;
+    if ($batch_size <= 0) {
+        $batch_size = 100;
     }
 
     $purged = 0;
 
-    foreach ($expired_timeouts as $timeout_option) {
-        if (!is_string($timeout_option) || $timeout_option === '') {
-            continue;
+    do {
+        $sql = "SELECT {$key_column} FROM {$table} WHERE {$key_column} LIKE %s AND {$value_column} < %s";
+        $params = array($wpdb->esc_like($timeout_prefix) . '%', $current_time);
+
+        if ($table === $wpdb->sitemeta && $site_id !== null) {
+            $sql .= ' AND site_id = %d';
+            $params[] = $site_id;
         }
 
-        if (strpos($timeout_option, $timeout_prefix) !== 0) {
-            continue;
+        $sql .= " ORDER BY {$value_column} ASC LIMIT %d";
+        $params[] = $batch_size;
+
+        $prepared = $wpdb->prepare($sql, $params);
+
+        if ($prepared === false) {
+            break;
         }
 
-        $transient_key = substr($timeout_option, strlen($timeout_prefix));
+        $expired_timeouts = (array) $wpdb->get_col($prepared);
 
-        if ($transient_key === '') {
-            continue;
+        if (empty($expired_timeouts)) {
+            break;
         }
 
-        $value_option = $value_prefix . $transient_key;
-        $deleted_timeout = sitepulse_delete_transient_option($wpdb, $source, $timeout_option, $site_id);
-        $deleted_value = sitepulse_delete_transient_option($wpdb, $source, $value_option, $site_id);
+        foreach ($expired_timeouts as $timeout_option) {
+            if (!is_string($timeout_option) || $timeout_option === '') {
+                continue;
+            }
 
-        if ($deleted_timeout || $deleted_value) {
-            $purged++;
+            if (strpos($timeout_option, $timeout_prefix) !== 0) {
+                continue;
+            }
+
+            $transient_key = substr($timeout_option, strlen($timeout_prefix));
+
+            if ($transient_key === '') {
+                continue;
+            }
+
+            $value_option = $value_prefix . $transient_key;
+            $deleted_timeout = sitepulse_delete_transient_option($wpdb, $source, $timeout_option, $site_id);
+            $deleted_value = sitepulse_delete_transient_option($wpdb, $source, $value_option, $site_id);
+
+            if ($deleted_timeout || $deleted_value) {
+                $purged++;
+            }
         }
-    }
+    } while (count($expired_timeouts) === $batch_size);
 
     return $purged;
 }

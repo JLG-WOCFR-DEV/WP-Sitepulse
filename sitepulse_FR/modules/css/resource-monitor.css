@@ -1,0 +1,45 @@
+.sitepulse-resource-monitor .sitepulse-resource-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-top: 20px;
+}
+
+.sitepulse-resource-monitor .sitepulse-resource-card {
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    border-radius: 4px;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+    flex: 1 1 220px;
+    padding: 18px;
+}
+
+.sitepulse-resource-monitor .sitepulse-resource-card h2 {
+    margin-top: 0;
+    margin-bottom: 12px;
+    font-size: 16px;
+}
+
+.sitepulse-resource-monitor .sitepulse-resource-value {
+    font-size: 1.6em;
+    font-weight: 600;
+    margin: 0 0 4px;
+}
+
+.sitepulse-resource-monitor .sitepulse-resource-subvalue {
+    margin: 0;
+    color: #555d66;
+}
+
+.sitepulse-resource-monitor .sitepulse-resource-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 24px;
+}
+
+.sitepulse-resource-monitor .sitepulse-resource-meta p {
+    margin: 0;
+}
