@@ -1,6 +1,15 @@
 <?php
 if (!defined('ABSPATH')) exit;
-add_action('admin_menu', function() { add_submenu_page('sitepulse-dashboard', 'Database Optimizer', 'Database', 'manage_options', 'sitepulse-db', 'sitepulse_database_optimizer_page'); });
+add_action('admin_menu', function() {
+    add_submenu_page(
+        'sitepulse-dashboard',
+        __('Database Optimizer', 'sitepulse'),
+        __('Database', 'sitepulse'),
+        'manage_options',
+        'sitepulse-db',
+        'sitepulse_database_optimizer_page'
+    );
+});
 function sitepulse_database_optimizer_page() {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
@@ -199,21 +208,67 @@ function sitepulse_database_optimizer_page() {
     }
   ?>
       <div class="wrap">
-        <h1><span class="dashicons-before dashicons-database"></span> Optimiseur de Base de Données</h1>
-        <p>Avec le temps, votre base de données peut accumuler des données qui ne sont plus nécessaires. Cet outil vous aide à la nettoyer en toute sécurité.</p>
+        <h1><span class="dashicons-before dashicons-database"></span> <?php esc_html_e('Database Optimizer', 'sitepulse'); ?></h1>
+        <p><?php esc_html_e('Over time, your database can accumulate data that is no longer necessary. This tool helps you clean it up safely.', 'sitepulse'); ?></p>
         <form method="post">
             <?php wp_nonce_field('db_cleanup', 'db_cleanup_nonce'); ?>
             <div class="card" style="background:#fff; padding:1px 20px 20px; margin-top:20px;">
-                <h2>Nettoyer les révisions d'articles (<?php echo esc_html((int)$revisions); ?> trouvées)</h2>
-                <p><strong>Qu'est-ce que c'est ?</strong> WordPress sauvegarde une copie de vos articles à chaque modification. Ce sont les révisions. Bien qu'utiles, elles peuvent alourdir votre base de données.</p>
-                <p><strong>Est-ce dangereux ?</strong> Généralement, non. Cette action supprime les anciennes versions mais conserve la version publiée. C'est une tâche de maintenance courante et sûre.</p>
-                <p><input type="submit" name="clean_revisions" value="Nettoyer toutes les révisions" class="button" <?php disabled($revisions, 0); ?>></p>
+                <h2>
+                    <?php
+                    printf(
+                        esc_html__('Clean post revisions (%s found)', 'sitepulse'),
+                        esc_html(number_format_i18n((int) $revisions))
+                    );
+                    ?>
+                </h2>
+                <p>
+                    <?php
+                    echo wp_kses_post(
+                        __('<strong>What is this?</strong> WordPress stores a copy of your posts every time you edit them. These are revisions. While useful, they can bloat your database.', 'sitepulse')
+                    );
+                    ?>
+                </p>
+                <p>
+                    <?php
+                    echo wp_kses_post(
+                        __('<strong>Is it risky?</strong> Generally not. This action removes older versions but keeps the published one. It is a common and safe maintenance task.', 'sitepulse')
+                    );
+                    ?>
+                </p>
+                <p>
+                    <button type="submit" name="clean_revisions" value="1" class="button" <?php disabled($revisions, 0); ?>>
+                        <?php esc_html_e('Clean all revisions', 'sitepulse'); ?>
+                    </button>
+                </p>
             </div>
             <div class="card" style="background:#fff; padding:1px 20px 20px; margin-top:20px;">
-                <h2>Nettoyer les Transients (<?php echo esc_html((int)$transients); ?> trouvés)</h2>
-                <p><strong>Qu'est-ce que c'est ?</strong> Les transients sont une forme de cache temporaire utilisé par les plugins et thèmes. Parfois, les transients expirés ne sont pas supprimés correctement.</p>
-                <p><strong>Est-ce dangereux ?</strong> Non, c'est une opération très sûre. Cet outil ne supprime que les transients expirés. Votre site les régénérera automatiquement si besoin.</p>
-                <p><input type="submit" name="clean_transients" value="Nettoyer les Transients Expirés" class="button" <?php disabled($transients, 0); ?>></p>
+                <h2>
+                    <?php
+                    printf(
+                        esc_html__('Clean transients (%s found)', 'sitepulse'),
+                        esc_html(number_format_i18n((int) $transients))
+                    );
+                    ?>
+                </h2>
+                <p>
+                    <?php
+                    echo wp_kses_post(
+                        __('<strong>What is this?</strong> Transients are a form of temporary cache used by plugins and themes. Sometimes expired transients are not cleaned up properly.', 'sitepulse')
+                    );
+                    ?>
+                </p>
+                <p>
+                    <?php
+                    echo wp_kses_post(
+                        __('<strong>Is it risky?</strong> No, this operation only removes expired transients. Your site will regenerate them automatically if needed.', 'sitepulse')
+                    );
+                    ?>
+                </p>
+                <p>
+                    <button type="submit" name="clean_transients" value="1" class="button" <?php disabled($transients, 0); ?>>
+                        <?php esc_html_e('Clean expired transients', 'sitepulse'); ?>
+                    </button>
+                </p>
             </div>
         </form>
       </div>
