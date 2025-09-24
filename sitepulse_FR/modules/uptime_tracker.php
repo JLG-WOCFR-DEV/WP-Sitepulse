@@ -6,13 +6,41 @@ $sitepulse_uptime_cron_hook = function_exists('sitepulse_get_cron_hook') ? sitep
 add_action('admin_menu', function() { add_submenu_page('sitepulse-dashboard', 'Uptime Tracker', 'Uptime', 'manage_options', 'sitepulse-uptime', 'sitepulse_uptime_tracker_page'); });
 
 if (!empty($sitepulse_uptime_cron_hook)) {
-    add_action('init', function() use ($sitepulse_uptime_cron_hook) {
-        if (!wp_next_scheduled($sitepulse_uptime_cron_hook)) {
-            $next_run = (int) current_time('timestamp', true);
-            wp_schedule_event($next_run, 'hourly', $sitepulse_uptime_cron_hook);
-        }
-    });
+    add_action('init', 'sitepulse_uptime_tracker_ensure_cron');
     add_action($sitepulse_uptime_cron_hook, 'sitepulse_run_uptime_check');
+}
+
+/**
+ * Ensures the uptime tracker cron hook is scheduled and reports failures.
+ *
+ * @return void
+ */
+function sitepulse_uptime_tracker_ensure_cron() {
+    global $sitepulse_uptime_cron_hook;
+
+    if (empty($sitepulse_uptime_cron_hook)) {
+        return;
+    }
+
+    $next_run = wp_next_scheduled($sitepulse_uptime_cron_hook);
+
+    if (!$next_run) {
+        $next_run = (int) current_time('timestamp', true);
+        $scheduled = wp_schedule_event($next_run, 'hourly', $sitepulse_uptime_cron_hook);
+
+        if (false === $scheduled && function_exists('sitepulse_log')) {
+            sitepulse_log(sprintf('Unable to schedule uptime tracker cron hook: %s', $sitepulse_uptime_cron_hook), 'ERROR');
+        }
+    }
+
+    if (!wp_next_scheduled($sitepulse_uptime_cron_hook)) {
+        sitepulse_register_cron_warning(
+            'uptime_tracker',
+            __('SitePulse n’a pas pu planifier la vérification d’uptime. Vérifiez que WP-Cron est actif ou programmez manuellement la tâche.', 'sitepulse')
+        );
+    } else {
+        sitepulse_clear_cron_warning('uptime_tracker');
+    }
 }
 function sitepulse_normalize_uptime_log($log) {
     if (!is_array($log) || empty($log)) {

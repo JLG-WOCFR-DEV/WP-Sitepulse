@@ -29,6 +29,8 @@ define('SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES', 'sitepulse_alert_cooldown_minu
 define('SITEPULSE_OPTION_ALERT_INTERVAL', 'sitepulse_alert_interval');
 define('SITEPULSE_OPTION_ALERT_RECIPIENTS', 'sitepulse_alert_recipients');
 define('SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE', 'sitepulse_impact_loader_signature');
+define('SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER', 'sitepulse_error_alert_log_pointer');
+define('SITEPULSE_OPTION_CRON_WARNINGS', 'sitepulse_cron_warnings');
 
 define('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS', 'sitepulse_speed_scan_results');
 define('SITEPULSE_TRANSIENT_AI_INSIGHT', 'sitepulse_ai_insight');
@@ -37,6 +39,7 @@ define('SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX', '_lock');
 define('SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK', SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX . 'cpu' . SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX);
 define('SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK', SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX . 'php_fatal' . SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX);
 define('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX', 'sitepulse_plugin_dir_size_');
+define('SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT', 'sitepulse_resource_monitor_snapshot');
 
 define('SITEPULSE_NONCE_ACTION_AI_INSIGHT', 'sitepulse_get_ai_insight');
 define('SITEPULSE_NONCE_ACTION_CLEANUP', 'sitepulse_cleanup');
@@ -203,6 +206,90 @@ function sitepulse_log_line_contains_fatal_error($log_line) {
 
     return false;
 }
+
+/**
+ * Stores a warning indicating that a cron hook could not be scheduled.
+ *
+ * @param string $module_key Module identifier.
+ * @param string $message    Warning message displayed to administrators.
+ * @return void
+ */
+function sitepulse_register_cron_warning($module_key, $message) {
+    if (!is_string($module_key) || $module_key === '' || !is_string($message) || $message === '') {
+        return;
+    }
+
+    $warnings = get_option(SITEPULSE_OPTION_CRON_WARNINGS, []);
+
+    if (!is_array($warnings)) {
+        $warnings = [];
+    }
+
+    $current = isset($warnings[$module_key]) ? $warnings[$module_key] : null;
+
+    if (is_array($current) && isset($current['message']) && $current['message'] === $message) {
+        return;
+    }
+
+    $warnings[$module_key] = [
+        'message' => $message,
+    ];
+
+    update_option(SITEPULSE_OPTION_CRON_WARNINGS, $warnings, false);
+}
+
+/**
+ * Clears a stored cron warning for a module.
+ *
+ * @param string $module_key Module identifier.
+ * @return void
+ */
+function sitepulse_clear_cron_warning($module_key) {
+    if (!is_string($module_key) || $module_key === '') {
+        return;
+    }
+
+    $warnings = get_option(SITEPULSE_OPTION_CRON_WARNINGS, []);
+
+    if (!is_array($warnings) || !array_key_exists($module_key, $warnings)) {
+        return;
+    }
+
+    unset($warnings[$module_key]);
+
+    update_option(SITEPULSE_OPTION_CRON_WARNINGS, $warnings, false);
+}
+
+/**
+ * Displays stored cron scheduling warnings in the WordPress administration.
+ *
+ * @return void
+ */
+function sitepulse_render_cron_warnings() {
+    if (!is_admin() || !current_user_can('manage_options')) {
+        return;
+    }
+
+    $warnings = get_option(SITEPULSE_OPTION_CRON_WARNINGS, []);
+
+    if (!is_array($warnings) || empty($warnings)) {
+        return;
+    }
+
+    foreach ($warnings as $warning) {
+        if (!is_array($warning) || empty($warning['message'])) {
+            continue;
+        }
+
+        $message = (string) $warning['message'];
+
+        printf(
+            '<div class="notice notice-error"><p>%s</p></div>',
+            esc_html($message)
+        );
+    }
+}
+add_action('admin_notices', 'sitepulse_render_cron_warnings');
 
 /**
  * Attempts to bootstrap the WordPress filesystem abstraction layer.
@@ -738,6 +825,8 @@ function sitepulse_activate_site() {
     add_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60, '', false);
     add_option(SITEPULSE_OPTION_ALERT_INTERVAL, 5, '', false);
     add_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, [], '', false);
+    add_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER, [], '', false);
+    add_option(SITEPULSE_OPTION_CRON_WARNINGS, [], '', false);
 
     sitepulse_plugin_impact_install_mu_loader();
 }

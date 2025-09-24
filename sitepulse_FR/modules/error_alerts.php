@@ -406,25 +406,96 @@ function sitepulse_error_alerts_check_debug_log() {
         return;
     }
 
-    if (!function_exists('sitepulse_get_recent_log_lines')) {
+    $pointer_data = get_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER, []);
+
+    if (!is_array($pointer_data)) {
+        $pointer_data = [];
+    }
+
+    $stored_offset = isset($pointer_data['offset']) ? (int) $pointer_data['offset'] : 0;
+    $stored_inode  = isset($pointer_data['inode']) ? (int) $pointer_data['inode'] : null;
+
+    $inode     = function_exists('fileinode') ? @fileinode($log_file) : null;
+    $file_size = @filesize($log_file);
+
+    if ($file_size === false) {
+        return;
+    }
+
+    $offset           = max(0, $stored_offset);
+    $offset_adjusted  = false;
+    $truncate_partial = false;
+
+    if (is_int($stored_inode) && is_int($inode) && $inode !== $stored_inode) {
+        $offset          = 0;
+        $offset_adjusted = true;
+    }
+
+    if ($offset > $file_size) {
+        $offset          = 0;
+        $offset_adjusted = true;
+    }
+
+    $max_scan_bytes = (int) apply_filters('sitepulse_error_alerts_max_log_scan_bytes', 131072);
+
+    if ($offset === 0 && $file_size > $max_scan_bytes && $max_scan_bytes > 0) {
+        $offset          = $file_size - $max_scan_bytes;
+        $offset_adjusted = true;
+        $truncate_partial = true;
+    }
+
+    $handle = fopen($log_file, 'rb');
+
+    if (false === $handle) {
         if (function_exists('sitepulse_log')) {
-            sitepulse_log('sitepulse_get_recent_log_lines() is unavailable; log scan skipped.', 'ERROR');
+            sitepulse_log(sprintf('Impossible d’ouvrir %s pour lecture.', $log_file), 'ERROR');
         }
 
         return;
     }
 
-    $recent_log_lines = sitepulse_get_recent_log_lines($log_file, 250, 65536);
+    if ($offset > 0) {
+        fseek($handle, $offset);
+    }
 
-    if ($recent_log_lines === null) {
-        if (function_exists('sitepulse_log')) {
-            sitepulse_log(sprintf('Impossible de lire %s pour l’analyse des erreurs.', $log_file), 'ERROR');
-        }
+    $bytes_to_read = $file_size - $offset;
+
+    if ($max_scan_bytes > 0) {
+        $bytes_to_read = min($bytes_to_read, $max_scan_bytes);
+    }
+
+    $log_contents = $bytes_to_read > 0 ? stream_get_contents($handle, $bytes_to_read) : '';
+    $new_offset   = ftell($handle);
+
+    fclose($handle);
+
+    if ($new_offset === false) {
+        $new_offset = $offset + strlen((string) $log_contents);
+    }
+
+    $new_pointer_data = [
+        'offset'     => (int) $new_offset,
+        'inode'      => is_int($inode) ? $inode : null,
+        'updated_at' => time(),
+    ];
+
+    if (!is_string($log_contents) || $log_contents === '') {
+        update_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER, $new_pointer_data, false);
 
         return;
     }
 
-    foreach ($recent_log_lines as $log_line) {
+    $log_lines = preg_split('/\r\n|\r|\n/', $log_contents);
+
+    if (!empty($log_lines) && end($log_lines) === '') {
+        array_pop($log_lines);
+    }
+
+    if (!empty($log_lines) && (($offset_adjusted && $offset > 0) || $truncate_partial)) {
+        array_shift($log_lines);
+    }
+
+    foreach ($log_lines as $log_line) {
         $has_fatal_error = false;
 
         if (function_exists('sitepulse_log_line_contains_fatal_error')) {
@@ -442,6 +513,8 @@ function sitepulse_error_alerts_check_debug_log() {
             break;
         }
     }
+
+    update_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER, $new_pointer_data, false);
 }
 
 /**
@@ -472,23 +545,56 @@ function sitepulse_error_alerts_on_interval_update($old_value, $value, $option =
         }
     }
 
-    if (!wp_next_scheduled($sitepulse_error_alerts_cron_hook)) {
-        wp_schedule_event(time(), $sitepulse_error_alerts_schedule, $sitepulse_error_alerts_cron_hook);
+    sitepulse_error_alerts_schedule_cron_hook();
+}
+
+/**
+ * Ensures the error alert cron hook is scheduled and reports failures.
+ *
+ * @return void
+ */
+function sitepulse_error_alerts_schedule_cron_hook() {
+    global $sitepulse_error_alerts_cron_hook, $sitepulse_error_alerts_schedule;
+
+    if (empty($sitepulse_error_alerts_cron_hook)) {
+        return;
     }
+
+    if (!wp_next_scheduled($sitepulse_error_alerts_cron_hook)) {
+        $scheduled = wp_schedule_event(time(), $sitepulse_error_alerts_schedule, $sitepulse_error_alerts_cron_hook);
+
+        if (false === $scheduled && function_exists('sitepulse_log')) {
+            sitepulse_log(sprintf('Unable to schedule error alert cron hook: %s', $sitepulse_error_alerts_cron_hook), 'ERROR');
+        }
+    }
+
+    if (!wp_next_scheduled($sitepulse_error_alerts_cron_hook)) {
+        sitepulse_register_cron_warning(
+            'error_alerts',
+            __('SitePulse n’a pas pu programmer les alertes d’erreurs. Vérifiez la configuration de WP-Cron.', 'sitepulse')
+        );
+    } else {
+        sitepulse_clear_cron_warning('error_alerts');
+    }
+}
+
+/**
+ * Initializes the cron schedule during WordPress bootstrap.
+ *
+ * @return void
+ */
+function sitepulse_error_alerts_ensure_cron() {
+    global $sitepulse_error_alerts_schedule;
+
+    $sitepulse_error_alerts_schedule = sitepulse_error_alerts_get_schedule_slug();
+
+    sitepulse_error_alerts_schedule_cron_hook();
 }
 
 if (!empty($sitepulse_error_alerts_cron_hook)) {
     add_filter('cron_schedules', 'sitepulse_error_alerts_register_cron_schedule');
 
-    add_action('init', function () use ($sitepulse_error_alerts_cron_hook) {
-        global $sitepulse_error_alerts_schedule;
-
-        $sitepulse_error_alerts_schedule = sitepulse_error_alerts_get_schedule_slug();
-
-        if (!wp_next_scheduled($sitepulse_error_alerts_cron_hook)) {
-            wp_schedule_event(time(), $sitepulse_error_alerts_schedule, $sitepulse_error_alerts_cron_hook);
-        }
-    });
+    add_action('init', 'sitepulse_error_alerts_ensure_cron');
 
     add_action($sitepulse_error_alerts_cron_hook, 'sitepulse_error_alerts_run_checks');
     add_action('update_option_' . SITEPULSE_OPTION_ALERT_INTERVAL, 'sitepulse_error_alerts_on_interval_update', 10, 3);
