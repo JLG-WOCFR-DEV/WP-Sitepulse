@@ -425,7 +425,15 @@ function sitepulse_error_alerts_check_debug_log() {
     }
 
     foreach ($recent_log_lines as $log_line) {
-        if (stripos($log_line, 'PHP Fatal error') !== false) {
+        $has_fatal_error = false;
+
+        if (function_exists('sitepulse_log_line_contains_fatal_error')) {
+            $has_fatal_error = sitepulse_log_line_contains_fatal_error($log_line);
+        } elseif (stripos($log_line, 'PHP Fatal error') !== false) {
+            $has_fatal_error = true;
+        }
+
+        if ($has_fatal_error) {
             sitepulse_error_alert_send(
                 'php_fatal',
                 'Alerte SitePulse: Erreur Fatale Détectée',

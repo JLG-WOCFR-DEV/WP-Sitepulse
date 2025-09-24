@@ -59,7 +59,7 @@ function sitepulse_log_analyzer_page() {
 
                 foreach ($recent_log_lines as $line) {
                     if (empty(trim($line))) continue;
-                    if (stripos($line, 'PHP Fatal error') !== false) { $categorized['fatal_errors'][] = $line; }
+                    if ((function_exists('sitepulse_log_line_contains_fatal_error') && sitepulse_log_line_contains_fatal_error($line)) || stripos($line, 'PHP Fatal error') !== false) { $categorized['fatal_errors'][] = $line; }
                     elseif (stripos($line, 'PHP Parse error') !== false || stripos($line, 'PHP Error') !== false) { $categorized['errors'][] = $line; }
                     elseif (stripos($line, 'PHP Warning') !== false) { $categorized['warnings'][] = $line; }
                     elseif (stripos($line, 'PHP Notice') !== false || stripos($line, 'PHP Deprecated') !== false) { $categorized['notices'][] = $line; }

@@ -719,16 +719,23 @@ function sitepulse_debug_page() {
                         <div class="inside">
                            <ul>
                                 <?php 
-                                $crons = _get_cron_array();
+                                $crons = get_option('cron');
                                 $has_sitepulse_cron = false;
-                                if (!empty($crons)) {
+
+                                if (is_array($crons)) {
                                     foreach ($crons as $timestamp => $cron) {
+                                        if (!is_numeric($timestamp) || !is_array($cron)) {
+                                            continue;
+                                        }
+
                                         foreach ($cron as $hook => $events) {
-                                            if (strpos($hook, 'sitepulse') !== false) {
-                                                $has_sitepulse_cron = true;
-                                                $next_run = wp_date('Y-m-d H:i:s', $timestamp);
-                                                echo '<li><strong>' . esc_html($hook) . '</strong> - Prochaine exécution: ' . esc_html($next_run) . '</li>';
+                                            if (strpos((string) $hook, 'sitepulse') === false) {
+                                                continue;
                                             }
+
+                                            $has_sitepulse_cron = true;
+                                            $next_run = wp_date('Y-m-d H:i:s', (int) $timestamp);
+                                            echo '<li><strong>' . esc_html($hook) . '</strong> - Prochaine exécution: ' . esc_html($next_run) . '</li>';
                                         }
                                     }
                                 }
