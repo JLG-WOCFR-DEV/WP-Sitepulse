@@ -678,7 +678,13 @@ function sitepulse_debug_page() {
                     <div class="postbox">
                         <h2 class="hndle"><span>Détails de l'Environnement</span></h2>
                         <div class="inside">
-                            <?php $active_modules_list = implode(', ', get_option(SITEPULSE_OPTION_ACTIVE_MODULES, [])); ?>
+                            <?php
+                            $active_modules_option = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
+                            $active_modules = array_values(array_filter(array_map('strval', (array) $active_modules_option), static function ($module) {
+                                return $module !== '';
+                            }));
+                            $active_modules_list = implode(', ', $active_modules);
+                            ?>
                             <ul>
                                 <li><strong>Version de SitePulse:</strong> <?php echo esc_html(SITEPULSE_VERSION); ?></li>
                                 <li><strong>Version de WordPress:</strong> <?php echo esc_html(get_bloginfo('version')); ?></li>
