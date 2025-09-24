@@ -7,8 +7,13 @@ function sitepulse_database_optimizer_page() {
     }
 
     global $wpdb;
-    if (isset($_POST['db_cleanup_nonce']) && wp_verify_nonce($_POST['db_cleanup_nonce'], 'db_cleanup')) {
-        if (isset($_POST['clean_revisions'])) {
+    if (isset($_POST['db_cleanup_nonce'])) {
+        check_admin_referer('db_cleanup', 'db_cleanup_nonce');
+
+        $clean_revisions  = isset($_POST['clean_revisions']) && '1' === wp_unslash($_POST['clean_revisions']);
+        $clean_transients = isset($_POST['clean_transients']) && '1' === wp_unslash($_POST['clean_transients']);
+
+        if ($clean_revisions) {
             $batch_size = 500;
             $cleaned = 0;
             $remaining_meta = 0;
@@ -127,7 +132,7 @@ function sitepulse_database_optimizer_page() {
                 );
             }
         }
-        if (isset($_POST['clean_transients'])) {
+        if ($clean_transients) {
             $cleaned = null;
             $generic_success = false;
 
