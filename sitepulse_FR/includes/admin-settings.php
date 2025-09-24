@@ -9,6 +9,285 @@
 
 if (!defined('ABSPATH')) exit;
 
+if (!defined('SITEPULSE_SETTINGS_NOTICE_TRANSIENT')) {
+    define('SITEPULSE_SETTINGS_NOTICE_TRANSIENT', 'sitepulse_settings_notices');
+}
+
+/**
+ * Stores an admin notice to be displayed on the SitePulse settings screen.
+ *
+ * @param string $message Human readable message.
+ * @param string $type    Type of notice: success (default), warning or error.
+ *
+ * @return void
+ */
+function sitepulse_add_settings_notice($message, $type = 'success') {
+    $notices = get_transient(SITEPULSE_SETTINGS_NOTICE_TRANSIENT);
+
+    if (!is_array($notices)) {
+        $notices = [];
+    }
+
+    $notices[] = [
+        'message' => (string) $message,
+        'type'    => in_array($type, ['success', 'warning', 'error'], true) ? $type : 'success',
+    ];
+
+    set_transient(SITEPULSE_SETTINGS_NOTICE_TRANSIENT, $notices, MINUTE_IN_SECONDS);
+}
+
+/**
+ * Outputs any stored admin notices for the SitePulse settings screen.
+ *
+ * @return void
+ */
+function sitepulse_render_settings_notices() {
+    if (!isset($_GET['page']) || $_GET['page'] !== 'sitepulse-settings') { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        return;
+    }
+
+    $notices = get_transient(SITEPULSE_SETTINGS_NOTICE_TRANSIENT);
+
+    if (empty($notices) || !is_array($notices)) {
+        return;
+    }
+
+    delete_transient(SITEPULSE_SETTINGS_NOTICE_TRANSIENT);
+
+    foreach ($notices as $notice) {
+        $type    = isset($notice['type']) ? $notice['type'] : 'success';
+        $message = isset($notice['message']) ? $notice['message'] : '';
+
+        if ($message === '') {
+            continue;
+        }
+
+        $classes = ['notice'];
+
+        switch ($type) {
+            case 'error':
+                $classes[] = 'notice-error';
+                break;
+            case 'warning':
+                $classes[] = 'notice-warning';
+                break;
+            default:
+                $classes[] = 'notice-success';
+        }
+
+        printf(
+            '<div class="%1$s"><p>%2$s</p></div>',
+            esc_attr(implode(' ', $classes)),
+            wp_kses_post($message)
+        );
+    }
+}
+add_action('admin_notices', 'sitepulse_render_settings_notices');
+
+/**
+ * Returns the list of plugin options exported/imported via settings tools.
+ *
+ * @return string[]
+ */
+function sitepulse_get_managed_settings_keys() {
+    return [
+        SITEPULSE_OPTION_ACTIVE_MODULES,
+        SITEPULSE_OPTION_DEBUG_MODE,
+        SITEPULSE_OPTION_GEMINI_API_KEY,
+        SITEPULSE_OPTION_CPU_ALERT_THRESHOLD,
+        SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES,
+        SITEPULSE_OPTION_ALERT_INTERVAL,
+        SITEPULSE_OPTION_ALERT_RECIPIENTS,
+    ];
+}
+
+/**
+ * Builds the export payload for the current SitePulse configuration.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_build_settings_export_payload() {
+    $settings = [];
+
+    foreach (sitepulse_get_managed_settings_keys() as $option_key) {
+        $settings[$option_key] = get_option($option_key);
+    }
+
+    return [
+        'plugin'       => 'sitepulse',
+        'version'      => defined('SITEPULSE_VERSION') ? SITEPULSE_VERSION : null,
+        'generated_at' => gmdate('c'),
+        'settings'     => $settings,
+    ];
+}
+
+/**
+ * Handles the export request for SitePulse settings.
+ *
+ * @return void
+ */
+function sitepulse_handle_settings_export() {
+    if (!current_user_can('manage_options')) {
+        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour effectuer cette action.", 'sitepulse'));
+    }
+
+    check_admin_referer('sitepulse_export_settings');
+
+    $payload = sitepulse_build_settings_export_payload();
+    $json    = wp_json_encode($payload, JSON_PRETTY_PRINT);
+
+    if ($json === false) {
+        sitepulse_add_settings_notice(__('Impossible de générer le fichier d’export. Réessayez plus tard.', 'sitepulse'), 'error');
+        wp_safe_redirect(admin_url('admin.php?page=sitepulse-settings'));
+        exit;
+    }
+
+    nocache_headers();
+
+    header('Content-Type: application/json; charset=utf-8');
+    header('Content-Disposition: attachment; filename="sitepulse-settings-' . gmdate('Ymd-His') . '.json"');
+
+    echo $json; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+    exit;
+}
+add_action('admin_post_sitepulse_export_settings', 'sitepulse_handle_settings_export');
+
+/**
+ * Sanitizes and persists settings imported from a JSON payload.
+ *
+ * @param array<string,mixed> $settings Imported settings array.
+ * @return int Number of options updated.
+ */
+function sitepulse_import_settings_from_array($settings) {
+    $updated = 0;
+
+    $settings = is_array($settings) ? $settings : [];
+
+    foreach (sitepulse_get_managed_settings_keys() as $option_key) {
+        if (!array_key_exists($option_key, $settings)) {
+            continue;
+        }
+
+        $value = $settings[$option_key];
+
+        switch ($option_key) {
+            case SITEPULSE_OPTION_ACTIVE_MODULES:
+                $value = sitepulse_sanitize_modules($value);
+                break;
+            case SITEPULSE_OPTION_DEBUG_MODE:
+                $value = rest_sanitize_boolean($value);
+                break;
+            case SITEPULSE_OPTION_GEMINI_API_KEY:
+                $value = sanitize_text_field(is_scalar($value) ? $value : '');
+                break;
+            case SITEPULSE_OPTION_CPU_ALERT_THRESHOLD:
+                $value = sitepulse_sanitize_cpu_threshold($value);
+                break;
+            case SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES:
+                $value = sitepulse_sanitize_cooldown_minutes($value);
+                break;
+            case SITEPULSE_OPTION_ALERT_INTERVAL:
+                $value = sitepulse_sanitize_alert_interval($value);
+                break;
+            case SITEPULSE_OPTION_ALERT_RECIPIENTS:
+                $value = sitepulse_sanitize_alert_recipients($value);
+                break;
+            default:
+                continue 2;
+        }
+
+        update_option($option_key, $value);
+        $updated++;
+    }
+
+    return $updated;
+}
+
+/**
+ * Handles the import request for SitePulse settings.
+ *
+ * @return void
+ */
+function sitepulse_handle_settings_import() {
+    if (!current_user_can('manage_options')) {
+        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour effectuer cette action.", 'sitepulse'));
+    }
+
+    check_admin_referer('sitepulse_import_settings');
+
+    if (!isset($_FILES['sitepulse_settings_file'])) {
+        sitepulse_add_settings_notice(__('Aucun fichier reçu pour l’import.', 'sitepulse'), 'error');
+        wp_safe_redirect(admin_url('admin.php?page=sitepulse-settings'));
+        exit;
+    }
+
+    $file = $_FILES['sitepulse_settings_file'];
+
+    if (!is_array($file) || !isset($file['tmp_name'], $file['error'])) {
+        sitepulse_add_settings_notice(__('Le fichier d’import est invalide.', 'sitepulse'), 'error');
+        wp_safe_redirect(admin_url('admin.php?page=sitepulse-settings'));
+        exit;
+    }
+
+    if ((int) $file['error'] !== UPLOAD_ERR_OK) {
+        sitepulse_add_settings_notice(__('Échec du téléversement du fichier. Réessayez.', 'sitepulse'), 'error');
+        wp_safe_redirect(admin_url('admin.php?page=sitepulse-settings'));
+        exit;
+    }
+
+    if (!empty($file['size']) && (int) $file['size'] > 524288) {
+        sitepulse_add_settings_notice(__('Le fichier importé est trop volumineux. Limitez-vous à 512 Ko.', 'sitepulse'), 'error');
+        wp_safe_redirect(admin_url('admin.php?page=sitepulse-settings'));
+        exit;
+    }
+
+    if (!is_uploaded_file($file['tmp_name'])) {
+        sitepulse_add_settings_notice(__('Le fichier importé n’a pas été téléversé correctement.', 'sitepulse'), 'error');
+        wp_safe_redirect(admin_url('admin.php?page=sitepulse-settings'));
+        exit;
+    }
+
+    $file_contents = file_get_contents($file['tmp_name']);
+
+    if ($file_contents === false) {
+        sitepulse_add_settings_notice(__('Impossible de lire le fichier importé.', 'sitepulse'), 'error');
+        wp_safe_redirect(admin_url('admin.php?page=sitepulse-settings'));
+        exit;
+    }
+
+    $data = json_decode($file_contents, true);
+
+    if (json_last_error() !== JSON_ERROR_NONE || !is_array($data)) {
+        sitepulse_add_settings_notice(__('Le fichier importé n’est pas un JSON valide.', 'sitepulse'), 'error');
+        wp_safe_redirect(admin_url('admin.php?page=sitepulse-settings'));
+        exit;
+    }
+
+    if (isset($data['plugin']) && $data['plugin'] !== 'sitepulse') {
+        sitepulse_add_settings_notice(__('Le fichier importé ne correspond pas au plugin SitePulse.', 'sitepulse'), 'error');
+        wp_safe_redirect(admin_url('admin.php?page=sitepulse-settings'));
+        exit;
+    }
+
+    if (!isset($data['settings']) || !is_array($data['settings'])) {
+        sitepulse_add_settings_notice(__('Les réglages sont manquants dans le fichier importé.', 'sitepulse'), 'error');
+        wp_safe_redirect(admin_url('admin.php?page=sitepulse-settings'));
+        exit;
+    }
+
+    $updated_count = sitepulse_import_settings_from_array($data['settings']);
+
+    if ($updated_count === 0) {
+        sitepulse_add_settings_notice(__('Aucun réglage n’a été importé. Vérifiez le contenu du fichier.', 'sitepulse'), 'warning');
+    } else {
+        sitepulse_add_settings_notice(__('Réglages importés avec succès.', 'sitepulse'), 'success');
+    }
+
+    wp_safe_redirect(admin_url('admin.php?page=sitepulse-settings'));
+    exit;
+}
+add_action('admin_post_sitepulse_import_settings', 'sitepulse_handle_settings_import');
+
 /**
  * Wrapper for the main SitePulse dashboard page.
  *
@@ -631,6 +910,23 @@ function sitepulse_settings_page() {
             </table>
             <?php submit_button(esc_html__('Enregistrer les modifications', 'sitepulse')); ?>
         </form>
+        <hr>
+        <h2><?php esc_html_e('Export / Import des réglages', 'sitepulse'); ?></h2>
+        <p><?php esc_html_e('Sauvegardez votre configuration ou importez-la depuis un autre site.', 'sitepulse'); ?></p>
+        <div class="sitepulse-settings-tools">
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="sitepulse-settings-tool">
+                <?php wp_nonce_field('sitepulse_export_settings'); ?>
+                <input type="hidden" name="action" value="sitepulse_export_settings">
+                <?php submit_button(esc_html__('Exporter les réglages', 'sitepulse'), 'secondary', 'sitepulse-export-settings', false); ?>
+            </form>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" enctype="multipart/form-data" class="sitepulse-settings-tool">
+                <?php wp_nonce_field('sitepulse_import_settings'); ?>
+                <input type="hidden" name="action" value="sitepulse_import_settings">
+                <label for="sitepulse_settings_file" class="screen-reader-text"><?php esc_html_e('Fichier de réglages SitePulse', 'sitepulse'); ?></label>
+                <input type="file" id="sitepulse_settings_file" name="sitepulse_settings_file" accept="application/json,.json" required>
+                <?php submit_button(esc_html__('Importer les réglages', 'sitepulse'), 'secondary', 'sitepulse-import-settings', false); ?>
+            </form>
+        </div>
         <hr>
         <h2><?php esc_html_e('Nettoyage & Réinitialisation', 'sitepulse'); ?></h2>
         <p><?php esc_html_e('Gérez les données du plugin.', 'sitepulse'); ?></p>
