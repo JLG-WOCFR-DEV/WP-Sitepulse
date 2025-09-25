@@ -13,6 +13,26 @@ msgstr ""
 "X-Generator: Manual\n"
 "X-Domain: sitepulse\n"
 
+#: modules/error_alerts.php:370
+#, php-format
+msgid "SitePulse Alert: High Server Load on %s"
+msgstr ""
+
+#: modules/error_alerts.php:383
+#, php-format
+msgid "Current server load on %1$s: %2$s (detected cores: %3$d, load per core: %4$s, threshold per core: %5$s)"
+msgstr ""
+
+#: modules/error_alerts.php:408
+#, php-format
+msgid "SitePulse Alert: Fatal Error Detected on %s"
+msgstr ""
+
+#: modules/error_alerts.php:414
+#, php-format
+msgid "Review %1$s for error details affecting %2$s."
+msgstr ""
+
 #: modules/custom_dashboards.php:39
 msgid "SitePulse Dashboard"
 msgstr ""

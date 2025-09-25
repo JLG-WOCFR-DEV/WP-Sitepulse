@@ -363,14 +363,32 @@ function sitepulse_error_alerts_check_cpu_load() {
     $normalized_load = (float) $load[0] / $core_count;
 
     if ($normalized_load > $threshold) {
+        $site_name = get_bloginfo('name');
+
+        /* translators: %s: Site title. */
+        $subject = sprintf(
+            __('SitePulse Alert: High Server Load on %s', 'sitepulse'),
+            $site_name
+        );
+
+        /*
+         * translators:
+         * %1$s: Site title.
+         * %2$s: Current server load.
+         * %3$d: Detected CPU cores.
+         * %4$s: Load per core.
+         * %5$s: Threshold per core.
+         */
         $message = sprintf(
-            'Charge serveur actuelle : %1$s (cœurs détectés : %2$d, charge par cœur : %3$s, seuil par cœur : %4$s)',
+            esc_html__('Current server load on %1$s: %2$s (detected cores: %3$d, load per core: %4$s, threshold per core: %5$s)', 'sitepulse'),
+            $site_name,
             number_format_i18n((float) $load[0], 2),
             $core_count,
             number_format_i18n($normalized_load, 2),
             number_format_i18n($threshold, 2)
         );
-        sitepulse_error_alert_send('cpu', 'Alerte SitePulse: Charge Serveur Élevée', $message);
+
+        sitepulse_error_alert_send('cpu', $subject, $message);
     }
 }
 
@@ -505,11 +523,22 @@ function sitepulse_error_alerts_check_debug_log() {
         }
 
         if ($has_fatal_error) {
-            sitepulse_error_alert_send(
-                'php_fatal',
-                'Alerte SitePulse: Erreur Fatale Détectée',
-                sprintf('Vérifiez le fichier %s pour les détails.', $log_file)
+            $site_name = get_bloginfo('name');
+
+            /* translators: %s: Site title. */
+            $subject = sprintf(
+                __('SitePulse Alert: Fatal Error Detected on %s', 'sitepulse'),
+                $site_name
             );
+
+            /* translators: 1: Log file path. 2: Site title. */
+            $message = sprintf(
+                esc_html__('Review %1$s for error details affecting %2$s.', 'sitepulse'),
+                $log_file,
+                $site_name
+            );
+
+            sitepulse_error_alert_send('php_fatal', $subject, $message);
             break;
         }
     }
