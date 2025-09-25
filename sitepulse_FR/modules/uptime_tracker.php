@@ -1,6 +1,10 @@
 <?php
 if (!defined('ABSPATH')) exit;
 
+if (!defined('SITEPULSE_OPTION_UPTIME_FAILURE_STREAK')) {
+    define('SITEPULSE_OPTION_UPTIME_FAILURE_STREAK', 'sitepulse_uptime_failure_streak');
+}
+
 $sitepulse_uptime_cron_hook = function_exists('sitepulse_get_cron_hook') ? sitepulse_get_cron_hook('uptime_tracker') : 'sitepulse_uptime_tracker_cron';
 
 add_action('admin_menu', function() { add_submenu_page('sitepulse-dashboard', 'Uptime Tracker', 'Uptime', 'manage_options', 'sitepulse-uptime', 'sitepulse_uptime_tracker_page'); });
@@ -54,8 +58,9 @@ function sitepulse_normalize_uptime_log($log) {
 
     foreach (array_values($log) as $index => $entry) {
         $timestamp = $approximate_start + ($index * HOUR_IN_SECONDS);
-        $status = false;
+        $status = null;
         $incident_start = null;
+        $error_message = null;
 
         if (is_array($entry)) {
             if (isset($entry['timestamp']) && is_numeric($entry['timestamp'])) {
@@ -63,7 +68,7 @@ function sitepulse_normalize_uptime_log($log) {
             }
 
             if (array_key_exists('status', $entry)) {
-                $status = (bool) $entry['status'];
+                $status = $entry['status'];
             } else {
                 $status = !empty($entry);
             }
@@ -71,34 +76,51 @@ function sitepulse_normalize_uptime_log($log) {
             if (isset($entry['incident_start']) && is_numeric($entry['incident_start'])) {
                 $incident_start = (int) $entry['incident_start'];
             }
+
+            if (isset($entry['error']) && is_string($entry['error'])) {
+                $error_message = $entry['error'];
+            }
         } else {
             $status = (bool) (is_int($entry) ? $entry : !empty($entry));
         }
 
-        if (!$status) {
-            if (null === $incident_start) {
-                if (!empty($normalized)) {
-                    $previous = end($normalized);
-                    if (!$previous['status'] && isset($previous['incident_start'])) {
-                        $incident_start = $previous['incident_start'];
+        if (is_bool($status)) {
+            if (false === $status) {
+                if (null === $incident_start) {
+                    $previous_boolean_entry = null;
+
+                    for ($i = count($normalized) - 1; $i >= 0; $i--) {
+                        if (array_key_exists('status', $normalized[$i]) && is_bool($normalized[$i]['status'])) {
+                            $previous_boolean_entry = $normalized[$i];
+                            break;
+                        }
+                    }
+
+                    if (null !== $previous_boolean_entry && false === $previous_boolean_entry['status'] && isset($previous_boolean_entry['incident_start'])) {
+                        $incident_start = (int) $previous_boolean_entry['incident_start'];
+                    }
+
+                    if (null === $incident_start) {
+                        $incident_start = $timestamp;
                     }
                 }
-
-                if (null === $incident_start) {
-                    $incident_start = $timestamp;
-                }
+            } else {
+                $incident_start = null;
             }
-        } else {
-            $incident_start = null;
+        } elseif (null !== $incident_start && !is_int($incident_start)) {
+            $incident_start = (int) $incident_start;
         }
 
-        $normalized[] = array_filter([
+        $normalized_entry = array_filter([
             'timestamp'      => $timestamp,
             'status'         => $status,
             'incident_start' => $incident_start,
+            'error'          => $error_message,
         ], function ($value) {
             return null !== $value;
         });
+
+        $normalized[] = $normalized_entry;
     }
 
     usort($normalized, function ($a, $b) {
@@ -115,10 +137,14 @@ function sitepulse_uptime_tracker_page() {
 
     $uptime_log = sitepulse_normalize_uptime_log(get_option(SITEPULSE_OPTION_UPTIME_LOG, []));
     $total_checks = count($uptime_log);
-    $up_checks = count(array_filter($uptime_log, function ($entry) {
-        return !empty($entry['status']);
+    $boolean_checks = array_values(array_filter($uptime_log, function ($entry) {
+        return isset($entry['status']) && is_bool($entry['status']);
     }));
-    $uptime_percentage = $total_checks > 0 ? ($up_checks / $total_checks) * 100 : 100;
+    $evaluated_checks = count($boolean_checks);
+    $up_checks = count(array_filter($boolean_checks, function ($entry) {
+        return isset($entry['status']) && true === $entry['status'];
+    }));
+    $uptime_percentage = $evaluated_checks > 0 ? ($up_checks / $evaluated_checks) * 100 : 100;
     $date_format = get_option('date_format');
     $time_format = get_option('time_format');
     $current_incident_duration = '';
@@ -126,7 +152,7 @@ function sitepulse_uptime_tracker_page() {
 
     if (!empty($uptime_log)) {
         $last_entry = end($uptime_log);
-        if (!$last_entry['status']) {
+        if (isset($last_entry['status']) && is_bool($last_entry['status']) && false === $last_entry['status']) {
             $current_incident_start = isset($last_entry['incident_start']) ? (int) $last_entry['incident_start'] : (int) $last_entry['timestamp'];
             $current_timestamp = (int) current_time('timestamp');
             $current_incident_duration = human_time_diff($current_incident_start, $current_timestamp);
@@ -134,7 +160,7 @@ function sitepulse_uptime_tracker_page() {
         reset($uptime_log);
     }
     ?>
-    <style> .uptime-chart { display: flex; gap: 2px; height: 60px; align-items: flex-end; } .uptime-bar { flex-grow: 1; } .uptime-bar.up { background-color: #4CAF50; } .uptime-bar.down { background-color: #F44336; } </style>
+    <style> .uptime-chart { display: flex; gap: 2px; height: 60px; align-items: flex-end; } .uptime-bar { flex-grow: 1; } .uptime-bar.up { background-color: #4CAF50; } .uptime-bar.down { background-color: #F44336; } .uptime-bar.unknown { background-color: #9E9E9E; } </style>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-chart-bar"></span> Suivi de Disponibilité</h1>
         <p>Cet outil vérifie la disponibilité de votre site toutes les heures. Voici le statut des <?php echo esc_html($total_checks); ?> dernières vérifications.</p>
@@ -143,8 +169,13 @@ function sitepulse_uptime_tracker_page() {
             <?php if (empty($uptime_log)): ?><p>Aucune donnée de disponibilité. La première vérification aura lieu dans l'heure.</p><?php else: ?>
                 <?php foreach ($uptime_log as $index => $entry): ?>
                     <?php
-                    $status = !empty($entry['status']);
-                    $bar_class = $status ? 'up' : 'down';
+                    $status = $entry['status'] ?? null;
+                    $bar_class = 'unknown';
+                    if (true === $status) {
+                        $bar_class = 'up';
+                    } elseif (false === $status) {
+                        $bar_class = 'down';
+                    }
                     $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
                     $check_time = $timestamp > 0
                         ? date_i18n($date_format . ' ' . $time_format, $timestamp)
@@ -152,31 +183,31 @@ function sitepulse_uptime_tracker_page() {
                     $previous_entry = $index > 0 ? $uptime_log[$index - 1] : null;
                     $next_entry = ($index + 1) < $total_checks ? $uptime_log[$index + 1] : null;
 
-                    if ($status) {
+                    if (true === $status) {
                         $bar_title = sprintf(__('Site OK lors du contrôle du %s.', 'sitepulse'), $check_time);
 
-                        if (!empty($previous_entry) && empty($previous_entry['status'])) {
+                        if (!empty($previous_entry) && isset($previous_entry['status']) && is_bool($previous_entry['status']) && false === $previous_entry['status']) {
                             $incident_start = isset($previous_entry['incident_start']) ? (int) $previous_entry['incident_start'] : (isset($previous_entry['timestamp']) ? (int) $previous_entry['timestamp'] : 0);
                             if ($incident_start > 0 && $timestamp >= $incident_start) {
                                 $incident_start_formatted = date_i18n($date_format . ' ' . $time_format, $incident_start);
                                 $bar_title .= ' ' . sprintf(__('Retour à la normale après un incident débuté le %1$s (durée : %2$s).', 'sitepulse'), $incident_start_formatted, human_time_diff($incident_start, $timestamp));
                             }
                         }
-                    } else {
+                    } elseif (false === $status) {
                         $incident_start = isset($entry['incident_start']) ? (int) $entry['incident_start'] : $timestamp;
                         $incident_start_formatted = $incident_start > 0
                             ? date_i18n($date_format . ' ' . $time_format, $incident_start)
                             : __('horodatage inconnu', 'sitepulse');
                         $bar_title = sprintf(__('Site KO lors du contrôle du %1$s. Incident commencé le %2$s.', 'sitepulse'), $check_time, $incident_start_formatted);
 
-                        $is_transition = empty($previous_entry) || !empty($previous_entry['status']);
+                        $is_transition = empty($previous_entry) || (isset($previous_entry['status']) && true === $previous_entry['status']);
 
                         if ($index === $total_checks - 1 && !empty($current_incident_duration)) {
                             $bar_title .= ' ' . sprintf(__('Incident en cours depuis %s.', 'sitepulse'), $current_incident_duration);
                         } else {
                             $duration_reference = null;
 
-                            if (!empty($next_entry) && !empty($next_entry['status'])) {
+                            if (!empty($next_entry) && isset($next_entry['status']) && true === $next_entry['status']) {
                                 $duration_reference = isset($next_entry['timestamp']) ? (int) $next_entry['timestamp'] : null;
                             } elseif ($timestamp > 0) {
                                 $duration_reference = $timestamp;
@@ -188,6 +219,9 @@ function sitepulse_uptime_tracker_page() {
                                 $bar_title .= ' ' . sprintf($label, $duration_text);
                             }
                         }
+                    } else {
+                        $error_text = isset($entry['error']) ? $entry['error'] : __('Erreur réseau inconnue.', 'sitepulse');
+                        $bar_title = sprintf(__('Statut indéterminé lors du contrôle du %1$s : %2$s', 'sitepulse'), $check_time, $error_text);
                     }
                     ?>
                     <div class="uptime-bar <?php echo esc_attr($bar_class); ?>" title="<?php echo esc_attr($bar_title); ?>"></div>
@@ -245,9 +279,6 @@ function sitepulse_run_uptime_check() {
     unset($request_args['url']);
 
     $response = wp_remote_get($request_url, $request_args);
-    $response_code = wp_remote_retrieve_response_code($response);
-    // Considère les réponses HTTP dans la plage 2xx ou 3xx comme un site "up"
-    $is_up = !is_wp_error($response) && $response_code >= 200 && $response_code < 400;
 
     $raw_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
 
@@ -260,31 +291,75 @@ function sitepulse_run_uptime_check() {
     $timestamp = (int) current_time('timestamp');
     $entry = [
         'timestamp' => $timestamp,
-        'status'    => $is_up,
     ];
 
-    if (!$is_up) {
-        $incident_start = $timestamp;
-        if (!empty($log)) {
-            $previous = end($log);
-            if (!$previous['status']) {
-                if (isset($previous['incident_start'])) {
-                    $incident_start = (int) $previous['incident_start'];
-                } elseif (isset($previous['timestamp'])) {
-                    $incident_start = (int) $previous['timestamp'];
+    if (is_wp_error($response)) {
+        $error_message = $response->get_error_message();
+        $entry['status'] = 'unknown';
+        if (!empty($error_message)) {
+            $entry['error'] = $error_message;
+        }
+
+        $failure_streak = (int) get_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0) + 1;
+        update_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, $failure_streak, false);
+
+        $default_threshold = 3;
+        $threshold = (int) apply_filters('sitepulse_uptime_consecutive_failures', $default_threshold, $failure_streak, $response, $request_url, $request_args);
+        $threshold = max(1, $threshold);
+
+        $log[] = $entry;
+
+        if ($failure_streak >= $threshold) {
+            sitepulse_log(sprintf('Uptime check: network error (%1$d/%2$d) - %3$s', $failure_streak, $threshold, $error_message), 'ALERT');
+        } else {
+            sitepulse_log(sprintf('Uptime check: network error (%1$d/%2$d) - %3$s', $failure_streak, $threshold, $error_message), 'WARNING');
+        }
+    } else {
+        $response_code = wp_remote_retrieve_response_code($response);
+        $is_up = $response_code >= 200 && $response_code < 400;
+
+        if ((int) get_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0) !== 0) {
+            update_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0, false);
+        }
+
+        $entry['status'] = $is_up;
+
+        if (!$is_up) {
+            $incident_start = $timestamp;
+
+            if (!empty($log)) {
+                for ($i = count($log) - 1; $i >= 0; $i--) {
+                    if (!isset($log[$i]['status']) || !is_bool($log[$i]['status'])) {
+                        continue;
+                    }
+
+                    if (false === $log[$i]['status']) {
+                        if (isset($log[$i]['incident_start'])) {
+                            $incident_start = (int) $log[$i]['incident_start'];
+                        } elseif (isset($log[$i]['timestamp'])) {
+                            $incident_start = (int) $log[$i]['timestamp'];
+                        }
+                    }
+
+                    break;
                 }
             }
-        }
-        $entry['incident_start'] = $incident_start;
-    }
 
-    $log[] = $entry;
+            $entry['incident_start'] = $incident_start;
+        }
+
+        $log[] = $entry;
+
+        if (!$is_up) {
+            sitepulse_log(sprintf('Uptime check: Down (HTTP %d)', $response_code), 'ALERT');
+        } else {
+            sitepulse_log('Uptime check: Up');
+        }
+    }
 
     if (count($log) > 30) {
         $log = array_slice($log, -30);
     }
 
     update_option(SITEPULSE_OPTION_UPTIME_LOG, array_values($log), false);
-    if (!$is_up) { sitepulse_log('Uptime check: Down', 'ALERT'); } 
-    else { sitepulse_log('Uptime check: Up'); }
 }

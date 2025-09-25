@@ -176,14 +176,14 @@ function sitepulse_custom_dashboards_page() {
         ? sitepulse_normalize_uptime_log($raw_uptime_log)
         : (array) $raw_uptime_log;
     $total_checks = count($uptime_log);
-    $up_checks = count(array_filter($uptime_log, function ($entry) {
-        if (is_array($entry)) {
-            return !empty($entry['status']);
-        }
-
-        return !empty($entry);
+    $boolean_checks = array_values(array_filter($uptime_log, function ($entry) {
+        return is_array($entry) && array_key_exists('status', $entry) && is_bool($entry['status']);
     }));
-    $uptime_percentage = $total_checks > 0 ? ($up_checks / $total_checks) * 100 : 100;
+    $evaluated_checks = count($boolean_checks);
+    $up_checks = count(array_filter($boolean_checks, function ($entry) {
+        return isset($entry['status']) && true === $entry['status'];
+    }));
+    $uptime_percentage = $evaluated_checks > 0 ? ($up_checks / $evaluated_checks) * 100 : 100;
     $uptime_status = $uptime_percentage < 99 ? 'status-bad' : ($uptime_percentage < 100 ? 'status-warn' : 'status-ok');
     $uptime_entries = array_slice($uptime_log, -30);
 
@@ -198,11 +198,20 @@ function sitepulse_custom_dashboards_page() {
         $label = $timestamp > 0
             ? date_i18n($date_format . ' ' . $time_format, $timestamp)
             : __('Unknown', 'sitepulse');
-        $is_up = is_array($entry) ? !empty($entry['status']) : !empty($entry);
+        $status = is_array($entry) && array_key_exists('status', $entry) ? $entry['status'] : (!empty($entry));
+        $is_up = true === $status;
 
         $uptime_labels[] = $label;
-        $uptime_values[] = $is_up ? 100 : 0;
-        $uptime_colors[] = $is_up ? $palette['green'] : $palette['red'];
+        if ($status === false) {
+            $uptime_values[] = 0;
+            $uptime_colors[] = $palette['red'];
+        } elseif ($status === true) {
+            $uptime_values[] = 100;
+            $uptime_colors[] = $palette['green'];
+        } else {
+            $uptime_values[] = 50;
+            $uptime_colors[] = $palette['grey'];
+        }
     }
 
     $uptime_chart = [
