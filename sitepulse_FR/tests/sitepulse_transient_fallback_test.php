@@ -65,6 +65,12 @@ if (!function_exists('disabled')) {
     function disabled(...$args) { return ''; }
 }
 
+if (!function_exists('apply_filters')) {
+    function apply_filters($hook, $value, ...$args) {
+        return $value;
+    }
+}
+
 if (!function_exists('is_multisite')) {
     $GLOBALS['sitepulse_is_multisite'] = false;
 
