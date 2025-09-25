@@ -128,6 +128,7 @@ $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
 sitepulse_assert(count($log) === 1, 'Expected one log entry after first WP_Error.');
 sitepulse_assert($log[0]['status'] === 'unknown', 'First entry must be marked as unknown.');
 sitepulse_assert($log[0]['error'] === 'Request timeout', 'Error message must be preserved.');
+sitepulse_assert(!isset($log[0]['incident_start']), 'Unknown status should not record an incident start.');
 sitepulse_assert(get_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0) === 1, 'Failure streak should increment to 1.');
 $last_log = end($GLOBALS['sitepulse_logger']);
 sitepulse_assert($last_log['level'] === 'WARNING', 'First network error should log a warning.');
@@ -173,6 +174,7 @@ sitepulse_assert(count($log) === 3, 'Expected three log entries in mixed outage 
 sitepulse_assert($log[0]['status'] === false, 'First entry should be a downtime event.');
 sitepulse_assert(isset($log[0]['incident_start']), 'First downtime should define incident start.');
 sitepulse_assert($log[1]['status'] === 'unknown', 'Second entry should remain unknown.');
+sitepulse_assert(!isset($log[1]['incident_start']), 'Unknown sample should not have incident start.');
 sitepulse_assert($log[2]['status'] === false, 'Third entry should record ongoing downtime.');
 sitepulse_assert($log[2]['incident_start'] === $log[0]['incident_start'], 'Incident start should persist across unknown sample.');
 
