@@ -33,6 +33,8 @@ function sitepulse_database_optimizer_page() {
                 $previous_cache_invalidation = wp_suspend_cache_invalidation(true);
             }
 
+            $revision_ids = [];
+
             do {
                 $sql = $wpdb->prepare(
                     "SELECT ID FROM {$wpdb->posts} WHERE post_type = 'revision' AND ID > %d ORDER BY ID ASC LIMIT %d",
@@ -345,6 +347,8 @@ function sitepulse_cleanup_transient_source($wpdb, $source, $current_time) {
     }
 
     $purged = 0;
+
+    $expired_timeouts = [];
 
     do {
         $sql = "SELECT {$key_column} FROM {$table} WHERE {$key_column} LIKE %s AND {$value_column} < %s";
