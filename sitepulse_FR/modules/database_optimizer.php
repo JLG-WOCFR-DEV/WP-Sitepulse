@@ -356,7 +356,7 @@ function sitepulse_cleanup_transient_source($wpdb, $source, $current_time) {
 
         if ($table === $wpdb->sitemeta && $site_id !== null) {
             $sql .= ' AND site_id = %d';
-            $params[] = $site_id;
+            $params[] = (int) $site_id;
         }
 
         $sql .= " ORDER BY {$value_column} ASC LIMIT %d";

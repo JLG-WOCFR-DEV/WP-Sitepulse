@@ -413,15 +413,20 @@ $GLOBALS['sitepulse_is_multisite'] = true;
 $wpdb_ms = new Sitepulse_Fake_WPDB();
 $wpdb_ms->add_sitemeta_row(1, '_site_transient_timeout_network', $now - 20);
 $wpdb_ms->add_sitemeta_row(1, '_site_transient_network', 'network-value');
+$wpdb_ms->add_sitemeta_row(1, '_site_transient_timeout_network_invalid', 'invalid-timestamp');
+$wpdb_ms->add_sitemeta_row(1, '_site_transient_network_invalid', 'network-invalid-value');
 $GLOBALS['wpdb'] = $wpdb_ms;
 $GLOBALS['sitepulse_cache_log'] = [];
 
 $cleaned_ms = sitepulse_delete_expired_transients_fallback($wpdb_ms);
 
-sitepulse_assert($cleaned_ms === 1, 'Expected one multisite transient to be cleaned.');
+sitepulse_assert($cleaned_ms === 2, 'Expected two multisite transients to be cleaned, including malformed ones.');
 sitepulse_assert($wpdb_ms->get_sitemeta_value(1, '_site_transient_network') === null, 'Multisite transient value should be removed.');
+sitepulse_assert($wpdb_ms->get_sitemeta_value(1, '_site_transient_network_invalid') === null, 'Malformed multisite transient should be removed.');
 sitepulse_assert(in_array(['group' => 'site-options', 'key' => '1:_site_transient_timeout_network'], $GLOBALS['sitepulse_cache_log'], true), 'Cache flush missing for multisite timeout.');
 sitepulse_assert(in_array(['group' => 'site-options', 'key' => '1:_site_transient_network'], $GLOBALS['sitepulse_cache_log'], true), 'Cache flush missing for multisite value.');
+sitepulse_assert(in_array(['group' => 'site-options', 'key' => '1:_site_transient_timeout_network_invalid'], $GLOBALS['sitepulse_cache_log'], true), 'Cache flush missing for malformed multisite timeout.');
+sitepulse_assert(in_array(['group' => 'site-options', 'key' => '1:_site_transient_network_invalid'], $GLOBALS['sitepulse_cache_log'], true), 'Cache flush missing for malformed multisite value.');
 
 $ms_statements = $wpdb_ms->get_prepared_log();
 $found_site_id_clause = false;
@@ -455,5 +460,16 @@ foreach ($ms_statements as $statement) {
 }
 
 sitepulse_assert($found_site_id_clause, 'Expected multisite cleanup query to include the site_id clause.');
+
+$found_integer_site_id = false;
+
+foreach ($ms_statements as $statement) {
+    if ($statement['query'] === $expected_ms_query) {
+        $found_integer_site_id = isset($statement['args'][2]) && is_int($statement['args'][2]);
+        break;
+    }
+}
+
+sitepulse_assert($found_integer_site_id, 'Expected site_id parameter to be passed to $wpdb->prepare() as an integer.');
 
 echo "All transient fallback assertions passed." . PHP_EOL;
