@@ -31,6 +31,7 @@ define('SITEPULSE_OPTION_ALERT_RECIPIENTS', 'sitepulse_alert_recipients');
 define('SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE', 'sitepulse_impact_loader_signature');
 define('SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER', 'sitepulse_error_alert_log_pointer');
 define('SITEPULSE_OPTION_CRON_WARNINGS', 'sitepulse_cron_warnings');
+define('SITEPULSE_OPTION_DEBUG_NOTICES', 'sitepulse_debug_notices');
 
 define('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS', 'sitepulse_speed_scan_results');
 define('SITEPULSE_TRANSIENT_AI_INSIGHT', 'sitepulse_ai_insight');
@@ -112,6 +113,7 @@ if (function_exists('wp_mkdir_p') && !is_dir($sitepulse_debug_directory)) {
 
 define('SITEPULSE_DEBUG_LOG', rtrim($sitepulse_debug_directory, '/\\') . '/sitepulse-debug.log');
 
+require_once SITEPULSE_PATH . 'includes/debug-notices.php';
 require_once SITEPULSE_PATH . 'includes/plugin-impact-tracker.php';
 sitepulse_plugin_impact_tracker_bootstrap();
 
@@ -565,40 +567,6 @@ function sitepulse_handle_module_changes($old_value, $value, $option = null) {
 }
 
 add_action('update_option_' . SITEPULSE_OPTION_ACTIVE_MODULES, 'sitepulse_handle_module_changes', 10, 3);
-
-/**
- * Schedules an admin notice to report SitePulse debug errors.
- *
- * @param string $message The notice body.
- * @param string $type    The notice type (error, warning, info, success).
- *
- * @return void
- */
-function sitepulse_schedule_debug_admin_notice($message, $type = 'error') {
-    if (!SITEPULSE_DEBUG || !function_exists('add_action') || !function_exists('is_admin') || !is_admin()) {
-        return;
-    }
-
-    static $displayed_messages = [];
-
-    if (isset($displayed_messages[$message])) {
-        return;
-    }
-
-    $displayed_messages[$message] = true;
-
-    $allowed_types = ['error', 'warning', 'info', 'success'];
-    $type          = in_array($type, $allowed_types, true) ? $type : 'error';
-    $class         = 'notice notice-' . $type;
-
-    add_action('admin_notices', function () use ($message, $class) {
-        if (!function_exists('esc_attr') || !function_exists('esc_html')) {
-            return;
-        }
-
-        printf('<div class="%s"><p>%s</p></div>', esc_attr($class), esc_html($message));
-    });
-}
 
 /**
  * Logging function for debugging purposes.
