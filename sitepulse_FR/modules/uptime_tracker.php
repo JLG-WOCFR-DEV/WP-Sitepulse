@@ -107,8 +107,8 @@ function sitepulse_normalize_uptime_log($log) {
             } else {
                 $incident_start = null;
             }
-        } elseif (null !== $incident_start && !is_int($incident_start)) {
-            $incident_start = (int) $incident_start;
+        } else {
+            $incident_start = null;
         }
 
         $normalized_entry = array_filter([
@@ -279,6 +279,7 @@ function sitepulse_run_uptime_check() {
     unset($request_args['url']);
 
     $response = wp_remote_get($request_url, $request_args);
+    $is_wp_error = is_wp_error($response);
 
     $raw_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
 
@@ -293,9 +294,10 @@ function sitepulse_run_uptime_check() {
         'timestamp' => $timestamp,
     ];
 
-    if (is_wp_error($response)) {
+    if ($is_wp_error) {
         $error_message = $response->get_error_message();
         $entry['status'] = 'unknown';
+
         if (!empty($error_message)) {
             $entry['error'] = $error_message;
         }
@@ -309,11 +311,9 @@ function sitepulse_run_uptime_check() {
 
         $log[] = $entry;
 
-        if ($failure_streak >= $threshold) {
-            sitepulse_log(sprintf('Uptime check: network error (%1$d/%2$d) - %3$s', $failure_streak, $threshold, $error_message), 'ALERT');
-        } else {
-            sitepulse_log(sprintf('Uptime check: network error (%1$d/%2$d) - %3$s', $failure_streak, $threshold, $error_message), 'WARNING');
-        }
+        $level = $failure_streak >= $threshold ? 'ALERT' : 'WARNING';
+        $log_message = sprintf('Uptime check: network error (%1$d/%2$d)%3$s', $failure_streak, $threshold, !empty($error_message) ? ' - ' . $error_message : '');
+        sitepulse_log($log_message, $level);
     } else {
         $response_code = wp_remote_retrieve_response_code($response);
         $is_up = $response_code >= 200 && $response_code < 400;
