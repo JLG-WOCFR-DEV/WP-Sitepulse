@@ -128,16 +128,17 @@ class Sitepulse_Fake_WPDB {
             $args = array_slice(func_get_args(), 1);
         }
 
-        $token = 'stmt_' . count($this->prepared);
+        $prepared_query = $this->build_prepared_query($query, $args);
         $statement = [
-            'query' => $query,
-            'args'  => $args,
+            'query'    => $query,
+            'args'     => $args,
+            'prepared' => $prepared_query,
         ];
 
-        $this->prepared[$token] = $statement;
+        $this->prepared[$prepared_query] = $statement;
         $this->prepared_log[] = $statement;
 
-        return $token;
+        return $prepared_query;
     }
 
     public function get_prepared_log() {
@@ -148,13 +149,13 @@ class Sitepulse_Fake_WPDB {
         $this->prepared_log = [];
     }
 
-    public function get_col($token) {
-        if (!isset($this->prepared[$token])) {
+    public function get_col($prepared_query) {
+        if (!isset($this->prepared[$prepared_query])) {
             return [];
         }
 
-        $statement = $this->prepared[$token];
-        unset($this->prepared[$token]);
+        $statement = $this->prepared[$prepared_query];
+        unset($this->prepared[$prepared_query]);
 
         if (!preg_match('/FROM\s+(\S+)/i', $statement['query'], $matches)) {
             return [];
@@ -258,6 +259,52 @@ class Sitepulse_Fake_WPDB {
 
         return $value;
     }
+
+    private function build_prepared_query($query, $args) {
+        if (empty($args)) {
+            return $query;
+        }
+
+        $prepared = '';
+        $offset = 0;
+        $arg_index = 0;
+
+        while (preg_match('/%(?:%|(?:\d+\$)?[dsf])/i', $query, $matches, PREG_OFFSET_CAPTURE, $offset)) {
+            $placeholder = $matches[0][0];
+            $position = $matches[0][1];
+
+            $prepared .= substr($query, $offset, $position - $offset);
+            $offset = $position + strlen($placeholder);
+
+            if ($placeholder === '%%') {
+                $prepared .= '%';
+                continue;
+            }
+
+            if (!array_key_exists($arg_index, $args)) {
+                break;
+            }
+
+            $prepared .= $this->format_placeholder($placeholder, $args[$arg_index]);
+            $arg_index++;
+        }
+
+        $prepared .= substr($query, $offset);
+
+        return $prepared;
+    }
+
+    private function format_placeholder($placeholder, $value) {
+        switch ($placeholder) {
+            case '%d':
+                return (string) (int) $value;
+            case '%f':
+                return (string) (float) $value;
+            case '%s':
+            default:
+                return "'" . addslashes((string) $value) . "'";
+        }
+    }
 }
 
 function sitepulse_assert($condition, $message) {
@@ -315,8 +362,25 @@ sitepulse_assert($wpdb->get_option_value('_transient_active') !== null, 'Active 
 $prepared_statements = $wpdb->get_prepared_log();
 $found_numeric_cast = false;
 $expected_options_query = "SELECT option_name FROM options WHERE option_name LIKE %s AND CAST(option_value AS UNSIGNED) < %d ORDER BY option_value ASC LIMIT %d";
+$expected_options_prepared = sprintf(
+    "SELECT option_name FROM options WHERE option_name LIKE '%s' AND CAST(option_value AS UNSIGNED) < %d ORDER BY option_value ASC LIMIT %d",
+    addslashes($wpdb->esc_like('_transient_timeout_') . '%'),
+    (int) $now,
+    100
+);
 
 sitepulse_assert(in_array($expected_options_query, array_column($prepared_statements, 'query'), true), 'Expected prepared statement to match the options cleanup query.');
+
+$matched_options_prepared = null;
+
+foreach ($prepared_statements as $statement) {
+    if ($statement['query'] === $expected_options_query) {
+        $matched_options_prepared = $statement['prepared'];
+        break;
+    }
+}
+
+sitepulse_assert($matched_options_prepared === $expected_options_prepared, 'Prepared SQL for options cleanup does not match expectation.');
 
 foreach ($prepared_statements as $statement) {
     if (strpos($statement['query'], 'CAST(option_value AS UNSIGNED) < %d') !== false) {
@@ -362,8 +426,26 @@ sitepulse_assert(in_array(['group' => 'site-options', 'key' => '1:_site_transien
 $ms_statements = $wpdb_ms->get_prepared_log();
 $found_site_id_clause = false;
 $expected_ms_query = "SELECT meta_key FROM sitemeta WHERE meta_key LIKE %s AND CAST(meta_value AS UNSIGNED) < %d AND site_id = %d ORDER BY meta_value ASC LIMIT %d";
+$expected_ms_prepared = sprintf(
+    "SELECT meta_key FROM sitemeta WHERE meta_key LIKE '%s' AND CAST(meta_value AS UNSIGNED) < %d AND site_id = %d ORDER BY meta_value ASC LIMIT %d",
+    addslashes($wpdb_ms->esc_like('_site_transient_timeout_') . '%'),
+    (int) $now,
+    1,
+    100
+);
 
 sitepulse_assert(in_array($expected_ms_query, array_column($ms_statements, 'query'), true), 'Expected prepared statement to match the multisite cleanup query.');
+
+$matched_ms_prepared = null;
+
+foreach ($ms_statements as $statement) {
+    if ($statement['query'] === $expected_ms_query) {
+        $matched_ms_prepared = $statement['prepared'];
+        break;
+    }
+}
+
+sitepulse_assert($matched_ms_prepared === $expected_ms_prepared, 'Prepared SQL for multisite cleanup does not match expectation.');
 
 foreach ($ms_statements as $statement) {
     if (strpos($statement['query'], 'FROM sitemeta') !== false && strpos($statement['query'], 'AND site_id = %d') !== false) {

@@ -364,7 +364,7 @@ function sitepulse_cleanup_transient_source($wpdb, $source, $current_time) {
 
         $prepared = $wpdb->prepare($sql, $params);
 
-        if ($prepared === false) {
+        if ($prepared === false || !is_string($prepared)) {
             break;
         }
 
