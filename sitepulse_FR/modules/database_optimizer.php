@@ -351,8 +351,8 @@ function sitepulse_cleanup_transient_source($wpdb, $source, $current_time) {
     $expired_timeouts = [];
 
     do {
-        $sql = "SELECT {$key_column} FROM {$table} WHERE {$key_column} LIKE %s AND {$value_column} < %s";
-        $params = array($wpdb->esc_like($timeout_prefix) . '%', $current_time);
+        $sql = "SELECT {$key_column} FROM {$table} WHERE {$key_column} LIKE %s AND CAST({$value_column} AS UNSIGNED) < %d";
+        $params = array($wpdb->esc_like($timeout_prefix) . '%', (int) $current_time);
 
         if ($table === $wpdb->sitemeta && $site_id !== null) {
             $sql .= ' AND site_id = %d';

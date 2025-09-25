@@ -53,6 +53,12 @@ if (!function_exists('wp_verify_nonce')) {
     function wp_verify_nonce(...$args) { return true; }
 }
 
+if (!function_exists('apply_filters')) {
+    function apply_filters($tag, $value) {
+        return $value;
+    }
+}
+
 if (!function_exists('wp_delete_post')) {
     function wp_delete_post(...$args) { return true; }
 }
@@ -105,6 +111,7 @@ class Sitepulse_Fake_WPDB {
     ];
 
     private $prepared = [];
+    private $prepared_log = [];
 
     public function esc_like($text) {
         return addcslashes($text, '_%\\');
@@ -116,12 +123,23 @@ class Sitepulse_Fake_WPDB {
         }
 
         $token = 'stmt_' . count($this->prepared);
-        $this->prepared[$token] = [
+        $statement = [
             'query' => $query,
             'args'  => $args,
         ];
 
+        $this->prepared[$token] = $statement;
+        $this->prepared_log[] = $statement;
+
         return $token;
+    }
+
+    public function get_prepared_log() {
+        return $this->prepared_log;
+    }
+
+    public function reset_prepared_log() {
+        $this->prepared_log = [];
     }
 
     public function get_col($token) {
@@ -272,21 +290,43 @@ $wpdb->add_option_row('_transient_timeout_expired', $now - 10);
 $wpdb->add_option_row('_transient_expired', 'expired-value');
 $wpdb->add_option_row('_transient_timeout_active', $now + 1000);
 $wpdb->add_option_row('_transient_active', 'active-value');
+$wpdb->add_option_row('_transient_timeout_invalid', 'not-a-number');
+$wpdb->add_option_row('_transient_invalid', 'invalid-value');
 $wpdb->add_option_row('_site_transient_timeout_site', $now - 10);
 $wpdb->add_option_row('_site_transient_site', 'site-value');
 
 $cleaned = sitepulse_delete_expired_transients_fallback($wpdb);
 
-sitepulse_assert($cleaned === 2, 'Expected two expired transients to be cleaned.');
+sitepulse_assert($cleaned === 3, 'Expected three expired transients to be cleaned, including malformed ones.');
 sitepulse_assert($wpdb->get_option_value('_transient_expired') === null, 'Transient value should be removed.');
 sitepulse_assert($wpdb->get_option_value('_transient_timeout_expired') === null, 'Transient timeout should be removed.');
+sitepulse_assert($wpdb->get_option_value('_transient_invalid') === null, 'Malformed transient value should be removed.');
+sitepulse_assert($wpdb->get_option_value('_transient_timeout_invalid') === null, 'Malformed transient timeout should be removed.');
 sitepulse_assert($wpdb->get_option_value('_site_transient_site') === null, 'Site transient value should be removed.');
 sitepulse_assert(get_transient('expired') === false, 'get_transient must return false for expired entries.');
 sitepulse_assert($wpdb->get_option_value('_transient_active') !== null, 'Active transient should remain untouched.');
 
+$prepared_statements = $wpdb->get_prepared_log();
+$found_numeric_cast = false;
+$expected_options_query = "SELECT option_name FROM options WHERE option_name LIKE %s AND CAST(option_value AS UNSIGNED) < %d ORDER BY option_value ASC LIMIT %d";
+
+sitepulse_assert(in_array($expected_options_query, array_column($prepared_statements, 'query'), true), 'Expected prepared statement to match the options cleanup query.');
+
+foreach ($prepared_statements as $statement) {
+    if (strpos($statement['query'], 'CAST(option_value AS UNSIGNED) < %d') !== false) {
+        sitepulse_assert(isset($statement['args'][1]) && is_int($statement['args'][1]), 'Current time must be passed as integer.');
+        $found_numeric_cast = true;
+        break;
+    }
+}
+
+sitepulse_assert($found_numeric_cast, 'Expected transient cleanup query to cast option_value as UNSIGNED.');
+
 $expected_cache_keys = [
     ['group' => 'options', 'key' => '_transient_timeout_expired'],
     ['group' => 'options', 'key' => '_transient_expired'],
+    ['group' => 'options', 'key' => '_transient_timeout_invalid'],
+    ['group' => 'options', 'key' => '_transient_invalid'],
     ['group' => 'options', 'key' => '_site_transient_timeout_site'],
     ['group' => 'options', 'key' => '_site_transient_site'],
 ];
@@ -294,6 +334,9 @@ $expected_cache_keys = [
 foreach ($expected_cache_keys as $expected) {
     sitepulse_assert(in_array($expected, $GLOBALS['sitepulse_cache_log'], true), 'Cache flush missing for ' . $expected['key']);
 }
+
+// Reset the prepared statements log for the multisite scenario.
+$wpdb->reset_prepared_log();
 
 // Scenario 2: multisite sitemeta table.
 $GLOBALS['sitepulse_is_multisite'] = true;
@@ -309,5 +352,20 @@ sitepulse_assert($cleaned_ms === 1, 'Expected one multisite transient to be clea
 sitepulse_assert($wpdb_ms->get_sitemeta_value(1, '_site_transient_network') === null, 'Multisite transient value should be removed.');
 sitepulse_assert(in_array(['group' => 'site-options', 'key' => '1:_site_transient_timeout_network'], $GLOBALS['sitepulse_cache_log'], true), 'Cache flush missing for multisite timeout.');
 sitepulse_assert(in_array(['group' => 'site-options', 'key' => '1:_site_transient_network'], $GLOBALS['sitepulse_cache_log'], true), 'Cache flush missing for multisite value.');
+
+$ms_statements = $wpdb_ms->get_prepared_log();
+$found_site_id_clause = false;
+$expected_ms_query = "SELECT meta_key FROM sitemeta WHERE meta_key LIKE %s AND CAST(meta_value AS UNSIGNED) < %d AND site_id = %d ORDER BY meta_value ASC LIMIT %d";
+
+sitepulse_assert(in_array($expected_ms_query, array_column($ms_statements, 'query'), true), 'Expected prepared statement to match the multisite cleanup query.');
+
+foreach ($ms_statements as $statement) {
+    if (strpos($statement['query'], 'FROM sitemeta') !== false && strpos($statement['query'], 'AND site_id = %d') !== false) {
+        $found_site_id_clause = true;
+        break;
+    }
+}
+
+sitepulse_assert($found_site_id_clause, 'Expected multisite cleanup query to include the site_id clause.');
 
 echo "All transient fallback assertions passed." . PHP_EOL;
