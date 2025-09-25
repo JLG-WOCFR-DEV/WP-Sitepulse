@@ -66,7 +66,13 @@ function sitepulse_plugin_impact_clear_dir_cache_on_upgrade($upgrader, $hook_ext
         sitepulse_clear_dir_size_cache($plugin_dir_path);
 
         if (is_multisite()) {
-            $site_ids = function_exists('get_sites') ? get_sites(['fields' => 'ids']) : [];
+            $site_ids = function_exists('get_sites')
+                ? get_sites([
+                    'fields' => 'ids',
+                    'number' => 0,
+                    'no_found_rows' => true,
+                ])
+                : [];
 
             if (!empty($site_ids) && defined('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX')) {
                 $transient_key = SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX . md5($plugin_dir_path);
