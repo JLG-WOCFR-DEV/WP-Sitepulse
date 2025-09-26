@@ -13,6 +13,27 @@ add_action('admin_menu', function() {
     );
 });
 
+add_action('admin_enqueue_scripts', 'sitepulse_speed_analyzer_enqueue_assets');
+
+/**
+ * Enqueues the Speed Analyzer stylesheet on the relevant admin page.
+ *
+ * @param string $hook_suffix Current admin page identifier.
+ * @return void
+ */
+function sitepulse_speed_analyzer_enqueue_assets($hook_suffix) {
+    if ($hook_suffix !== 'sitepulse-dashboard_page_sitepulse-speed') {
+        return;
+    }
+
+    wp_enqueue_style(
+        'sitepulse-speed-analyzer',
+        SITEPULSE_URL . 'modules/css/speed-analyzer.css',
+        [],
+        SITEPULSE_VERSION
+    );
+}
+
 /**
  * Renders the Speed Analyzer page.
  * The analysis is now based on internal WordPress timers for better reliability.
@@ -58,19 +79,6 @@ function sitepulse_speed_analyzer_page() {
     $php_version = PHP_VERSION;
 
     ?>
-    <style>
-        .speed-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
-        .speed-card { background: #fff; padding: 20px; border: 1px solid #ddd; }
-        .speed-card h3 { margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 10px; font-size: 16px; display: flex; align-items: center; gap: 8px; }
-        .health-list { list-style: none; padding-left: 0; }
-        .health-list li { padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
-        .health-list li:last-child { border-bottom: none; }
-        .health-list .metric-name { font-weight: bold; display: block; }
-        .health-list .metric-value { float: right; font-weight: bold; }
-        .status-ok { color: #4CAF50; }
-        .status-warn { color: #FFC107; }
-        .status-bad { color: #F44336; }
-    </style>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-performance"></span> Analyseur de Vitesse</h1>
         <p>Cet outil analyse la performance interne de votre serveur et de votre base de données à chaque chargement de page.</p>

@@ -1,0 +1,31 @@
+.impact-bar-bg {
+    background: #eee;
+    border-radius: 3px;
+    overflow: hidden;
+    width: 100%;
+}
+
+.impact-bar {
+    height: 18px;
+    border-radius: 3px;
+    background-color: #FFC107;
+    text-align: right;
+    color: #fff;
+    padding-right: 5px;
+    white-space: nowrap;
+    font-size: 12px;
+    line-height: 18px;
+}
+
+.sitepulse-impact-meta {
+    margin-bottom: 1em;
+}
+
+.sitepulse-impact-meta p {
+    margin: 0.2em 0;
+}
+
+.sitepulse-impact-limitations {
+    list-style: disc;
+    margin-left: 1.5em;
+}

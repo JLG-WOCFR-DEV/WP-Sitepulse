@@ -1,0 +1,58 @@
+.speed-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.speed-card {
+    background: #fff;
+    padding: 20px;
+    border: 1px solid #ddd;
+}
+
+.speed-card h3 {
+    margin-top: 0;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 10px;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.health-list {
+    list-style: none;
+    padding-left: 0;
+}
+
+.health-list li {
+    padding: 10px 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.health-list li:last-child {
+    border-bottom: none;
+}
+
+.health-list .metric-name {
+    font-weight: bold;
+    display: block;
+}
+
+.health-list .metric-value {
+    float: right;
+    font-weight: bold;
+}
+
+.status-ok {
+    color: #4CAF50;
+}
+
+.status-warn {
+    color: #FFC107;
+}
+
+.status-bad {
+    color: #F44336;
+}

@@ -1,0 +1,22 @@
+.uptime-chart {
+    display: flex;
+    gap: 2px;
+    height: 60px;
+    align-items: flex-end;
+}
+
+.uptime-bar {
+    flex-grow: 1;
+}
+
+.uptime-bar.up {
+    background-color: #4CAF50;
+}
+
+.uptime-bar.down {
+    background-color: #F44336;
+}
+
+.uptime-bar.unknown {
+    background-color: #9E9E9E;
+}
