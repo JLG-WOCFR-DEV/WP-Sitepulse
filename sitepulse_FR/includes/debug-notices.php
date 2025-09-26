@@ -56,7 +56,7 @@ function sitepulse_debug_notice_registry($notice_key = null, $mark = false)
  */
 function sitepulse_schedule_debug_admin_notice($message, $type = 'error')
 {
-    if (!SITEPULSE_DEBUG || !function_exists('add_action')) {
+    if (!SITEPULSE_DEBUG) {
         return;
     }
 
@@ -71,7 +71,9 @@ function sitepulse_schedule_debug_admin_notice($message, $type = 'error')
 
     sitepulse_debug_notice_registry($notice_key, true);
 
-    if (!function_exists('is_admin') || !is_admin()) {
+    $is_admin_context = function_exists('is_admin') && is_admin();
+
+    if (!$is_admin_context) {
         if (!function_exists('get_option') || !function_exists('update_option')) {
             return;
         }
@@ -97,11 +99,15 @@ function sitepulse_schedule_debug_admin_notice($message, $type = 'error')
 
         $queued_notices[] = [
             'message' => $message,
-            'type'    => $type,
+            'level'   => $type,
         ];
 
         update_option(SITEPULSE_OPTION_DEBUG_NOTICES, $queued_notices);
 
+        return;
+    }
+
+    if (!function_exists('add_action')) {
         return;
     }
 
@@ -145,7 +151,13 @@ function sitepulse_display_queued_debug_notices()
         }
 
         $message = (string) $notice['message'];
-        $type    = isset($notice['type']) ? (string) $notice['type'] : 'error';
+        $type    = 'error';
+
+        if (isset($notice['level'])) {
+            $type = (string) $notice['level'];
+        } elseif (isset($notice['type'])) {
+            $type = (string) $notice['type'];
+        }
 
         if (!in_array($type, $allowed_types, true)) {
             $type = 'error';

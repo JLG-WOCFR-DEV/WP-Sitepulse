@@ -83,7 +83,7 @@ sitepulse_schedule_debug_admin_notice('Rotation failed', 'error');
 $queued = get_option(SITEPULSE_OPTION_DEBUG_NOTICES, []);
 sitepulse_assert(count($queued) === 1, 'Frontend scheduling should queue a notice.');
 sitepulse_assert($queued[0]['message'] === 'Rotation failed', 'Queued message must be preserved.');
-sitepulse_assert($queued[0]['type'] === 'error', 'Queued type must be normalized.');
+sitepulse_assert($queued[0]['level'] === 'error', 'Queued level must be normalized.');
 
 // Duplicate message should not be added twice.
 sitepulse_schedule_debug_admin_notice('Rotation failed', 'error');
