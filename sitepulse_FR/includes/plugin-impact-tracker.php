@@ -238,6 +238,8 @@ function sitepulse_plugin_impact_tracker_persist() {
     }
 
     $interval = apply_filters('sitepulse_plugin_impact_refresh_interval', SITEPULSE_PLUGIN_IMPACT_REFRESH_INTERVAL);
+    $interval = absint($interval);
+    $interval = max(1, $interval);
     $last_updated = isset($existing['last_updated']) ? (int) $existing['last_updated'] : 0;
 
     if (!$sitepulse_plugin_impact_tracker_force_persist && ($now - $last_updated) < $interval) {
