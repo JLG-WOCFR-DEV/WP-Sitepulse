@@ -154,4 +154,72 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
             'A log entry should be recorded for disk total failures.'
         );
     }
+
+    public function test_snapshot_timestamp_is_rendered_in_site_timezone() {
+        $original_gmt_offset      = get_option('gmt_offset');
+        $original_timezone_string = get_option('timezone_string');
+        $original_date_format     = get_option('date_format');
+        $original_time_format     = get_option('time_format');
+
+        update_option('timezone_string', '');
+        update_option('gmt_offset', 2);
+        update_option('date_format', 'Y-m-d');
+        update_option('time_format', 'H:i');
+
+        $generated_at = gmmktime(12, 0, 0, 1, 1, 2024);
+
+        $snapshot = [
+            'load'         => ['N/A', 'N/A', 'N/A'],
+            'load_display' => 'N/A / N/A / N/A',
+            'memory_usage' => '0 MB',
+            'memory_limit' => '128M',
+            'disk_free'    => 'N/A',
+            'disk_total'   => 'N/A',
+            'notices'      => [],
+            'generated_at' => $generated_at,
+        ];
+
+        set_transient(SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT, $snapshot, MINUTE_IN_SECONDS);
+
+        $administrator_id = self::factory()->user->create(['role' => 'administrator']);
+        wp_set_current_user($administrator_id);
+
+        ob_start();
+        sitepulse_resource_monitor_page();
+        $output = ob_get_clean();
+
+        $expected_time = wp_date('Y-m-d H:i', $generated_at);
+
+        $this->assertStringContainsString(
+            sprintf('Mesures relevées le %s', $expected_time),
+            $output,
+            'Snapshot timestamp should be converted from UTC to the configured site timezone.'
+        );
+
+        wp_set_current_user(0);
+
+        if ($original_timezone_string === false) {
+            delete_option('timezone_string');
+        } else {
+            update_option('timezone_string', $original_timezone_string);
+        }
+
+        if ($original_gmt_offset === false) {
+            delete_option('gmt_offset');
+        } else {
+            update_option('gmt_offset', $original_gmt_offset);
+        }
+
+        if ($original_date_format === false) {
+            delete_option('date_format');
+        } else {
+            update_option('date_format', $original_date_format);
+        }
+
+        if ($original_time_format === false) {
+            delete_option('time_format');
+        } else {
+            update_option('time_format', $original_time_format);
+        }
+    }
 }

@@ -199,7 +199,7 @@ function sitepulse_resource_monitor_get_snapshot() {
         'disk_free'    => $disk_free,
         'disk_total'   => $disk_total,
         'notices'      => $notices,
-        'generated_at' => (int) current_time('timestamp'),
+        'generated_at' => (int) current_time('timestamp', true),
     ];
 
     $cache_ttl = (int) apply_filters('sitepulse_resource_monitor_cache_ttl', 5 * MINUTE_IN_SECONDS, $snapshot);
@@ -236,13 +236,13 @@ function sitepulse_resource_monitor_page() {
 
     $generated_at = isset($snapshot['generated_at']) ? (int) $snapshot['generated_at'] : 0;
     $generated_label = $generated_at > 0
-        ? date_i18n(get_option('date_format') . ' ' . get_option('time_format'), $generated_at)
+        ? wp_date(get_option('date_format') . ' ' . get_option('time_format'), $generated_at)
         : __('Inconnue', 'sitepulse');
 
     $age = '';
 
     if ($generated_at > 0) {
-        $age = human_time_diff($generated_at, (int) current_time('timestamp'));
+        $age = human_time_diff($generated_at, (int) current_time('timestamp', true));
     }
     ?>
     <div class="wrap sitepulse-resource-monitor">
