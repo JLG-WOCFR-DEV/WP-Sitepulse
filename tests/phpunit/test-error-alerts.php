@@ -3,8 +3,6 @@
  * Tests for error alert log scanning and cooldown behavior.
  */
 
-require_once dirname(__DIR__, 2) . '/sitepulse_FR/modules/error_alerts.php';
-
 class Sitepulse_Error_Alerts_Test extends WP_UnitTestCase {
     /**
      * Captured calls to wp_mail.
@@ -12,6 +10,10 @@ class Sitepulse_Error_Alerts_Test extends WP_UnitTestCase {
      * @var array
      */
     private $sent_mail = [];
+
+    public static function wpSetUpBeforeClass($factory) {
+        require_once dirname(__DIR__, 2) . '/sitepulse_FR/modules/error_alerts.php';
+    }
 
     protected function set_up(): void {
         parent::set_up();
@@ -55,6 +57,10 @@ class Sitepulse_Error_Alerts_Test extends WP_UnitTestCase {
         $GLOBALS['sitepulse_test_log_path'] = $path;
 
         return $path;
+    }
+
+    public function limit_log_scan_bytes($default) {
+        return 64;
     }
 
     public function test_log_pointer_resets_when_file_shrinks() {
@@ -103,5 +109,31 @@ Another line
             end($GLOBALS['sitepulse_logger'])['message']
         );
         $this->assertSame(filesize($log_path), get_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER)['offset']);
+    }
+
+    public function test_truncated_scan_skips_partial_line_and_still_detects_fatal() {
+        $log_lines = [
+            str_repeat('WordPress debug filler ', 15),
+            'Notice: Something minor happened',
+            'PHP Fatal error: Final crash',
+        ];
+
+        $log_path = $this->create_log_file(implode(PHP_EOL, $log_lines) . PHP_EOL);
+
+        update_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, ['alerts@example.com']);
+
+        add_filter('sitepulse_error_alerts_max_log_scan_bytes', [$this, 'limit_log_scan_bytes']);
+
+        try {
+            sitepulse_error_alerts_check_debug_log();
+        } finally {
+            remove_filter('sitepulse_error_alerts_max_log_scan_bytes', [$this, 'limit_log_scan_bytes']);
+        }
+
+        $this->assertCount(1, $this->sent_mail, 'Fatal error within truncated scan window should send an alert.');
+
+        $pointer = get_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER, []);
+        $this->assertSame(filesize($log_path), $pointer['offset'], 'Pointer should advance to end of truncated file.');
+        $this->assertArrayHasKey('inode', $pointer, 'Pointer data should persist inode information.');
     }
 }
