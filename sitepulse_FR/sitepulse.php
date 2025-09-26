@@ -344,6 +344,13 @@ function sitepulse_plugin_impact_install_mu_loader() {
 
     $filesystem = sitepulse_get_filesystem();
     $stored_signature = get_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
+    $warning_message = sprintf(
+        __(
+            'SitePulse n’a pas pu installer le chargeur MU du suivi d’impact (%s). Vérifiez les permissions du dossier mu-plugins.',
+            'sitepulse'
+        ),
+        $target_dir
+    );
 
     if ($filesystem instanceof WP_Filesystem_Base) {
         if (!$filesystem->is_dir($target_dir)) {
@@ -353,6 +360,7 @@ function sitepulse_plugin_impact_install_mu_loader() {
         if (!$filesystem->is_dir($target_dir) || !$filesystem->is_writable($target_dir)) {
             sitepulse_log(sprintf('SitePulse impact loader directory not writable via WP_Filesystem (%s).', $target_dir), 'ERROR');
             delete_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
+            sitepulse_register_cron_warning('plugin_impact', $warning_message);
 
             return;
         }
@@ -364,6 +372,7 @@ function sitepulse_plugin_impact_install_mu_loader() {
         if (!is_dir($target_dir) || !is_writable($target_dir)) {
             sitepulse_log(sprintf('SitePulse impact loader directory not writable (%s).', $target_dir), 'ERROR');
             delete_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
+            sitepulse_register_cron_warning('plugin_impact', $warning_message);
 
             return;
         }
@@ -447,9 +456,11 @@ function sitepulse_plugin_impact_install_mu_loader() {
 
     if ($has_valid_loader) {
         update_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE, $signature, false);
+        sitepulse_clear_cron_warning('plugin_impact');
     } else {
         delete_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
         sitepulse_log(sprintf('SitePulse impact loader installation failed for %s.', $target_file), 'ERROR');
+        sitepulse_register_cron_warning('plugin_impact', $warning_message);
     }
 }
 
