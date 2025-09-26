@@ -19,6 +19,10 @@ if (!defined('SITEPULSE_OPTION_DEBUG_NOTICES')) {
     define('SITEPULSE_OPTION_DEBUG_NOTICES', 'sitepulse_debug_notices');
 }
 
+if (!defined('SITEPULSE_OPTION_GEMINI_API_KEY')) {
+    define('SITEPULSE_OPTION_GEMINI_API_KEY', 'sitepulse_gemini_api_key');
+}
+
 if (!defined('SITEPULSE_OPTION_ALERT_RECIPIENTS')) {
     define('SITEPULSE_OPTION_ALERT_RECIPIENTS', 'sitepulse_alert_recipients');
 }
@@ -51,6 +55,22 @@ if (!defined('SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK')) {
         'SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK',
         SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX . 'php_fatal' . SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX
     );
+}
+
+if (!defined('SITEPULSE_TRANSIENT_AI_INSIGHT')) {
+    define('SITEPULSE_TRANSIENT_AI_INSIGHT', 'sitepulse_ai_insight');
+}
+
+if (!defined('SITEPULSE_NONCE_ACTION_AI_INSIGHT')) {
+    define('SITEPULSE_NONCE_ACTION_AI_INSIGHT', 'sitepulse_get_ai_insight');
+}
+
+if (!defined('SITEPULSE_VERSION')) {
+    define('SITEPULSE_VERSION', 'test');
+}
+
+if (!defined('SITEPULSE_URL')) {
+    define('SITEPULSE_URL', 'https://example.com/wp-content/plugins/sitepulse/');
 }
 
 if (!function_exists('sitepulse_log')) {
