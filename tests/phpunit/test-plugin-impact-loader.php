@@ -3,6 +3,34 @@
  * Tests for the plugin impact MU loader installation warnings.
  */
 
+require_once ABSPATH . 'wp-admin/includes/class-wp-filesystem-base.php';
+require_once ABSPATH . 'wp-admin/includes/class-wp-filesystem-direct.php';
+
+if (!class_exists('Sitepulse_Unwritable_Filesystem')) {
+    class Sitepulse_Unwritable_Filesystem extends WP_Filesystem_Direct {
+        public function __construct() {
+            parent::__construct([]);
+            $this->method = 'sitepulse-test';
+        }
+
+        public function is_dir($path) {
+            return false;
+        }
+
+        public function mkdir($path, $chmod = false, $chown = false, $chgrp = false) {
+            return false;
+        }
+
+        public function is_writable($path) {
+            return false;
+        }
+
+        public function exists($path) {
+            return false;
+        }
+    }
+}
+
 class Sitepulse_Plugin_Impact_Loader_Test extends WP_UnitTestCase {
     protected $mu_loader_dir;
     protected $mu_loader_file;
@@ -20,6 +48,10 @@ class Sitepulse_Plugin_Impact_Loader_Test extends WP_UnitTestCase {
 
         delete_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
         delete_option(SITEPULSE_OPTION_CRON_WARNINGS);
+
+        $GLOBALS['sitepulse_filesystem_initialized'] = false;
+        $GLOBALS['sitepulse_filesystem_instance']    = null;
+        remove_all_filters('sitepulse_pre_get_filesystem');
 
         $paths = sitepulse_plugin_impact_get_mu_loader_paths();
         $this->mu_loader_dir  = $paths['dir'];
@@ -39,6 +71,10 @@ class Sitepulse_Plugin_Impact_Loader_Test extends WP_UnitTestCase {
     }
 
     protected function tearDown(): void {
+        remove_all_filters('sitepulse_pre_get_filesystem');
+        $GLOBALS['sitepulse_filesystem_initialized'] = false;
+        $GLOBALS['sitepulse_filesystem_instance']    = null;
+
         if (file_exists($this->mu_loader_file)) {
             unlink($this->mu_loader_file);
         }
@@ -57,41 +93,23 @@ class Sitepulse_Plugin_Impact_Loader_Test extends WP_UnitTestCase {
     }
 
     public function test_registers_warning_when_mu_directory_is_unwritable(): void {
-        $original_dir = $this->mu_loader_dir;
-        $backup_dir   = null;
-
-        if (is_dir($original_dir)) {
-            $backup_dir = $original_dir . '-backup-' . uniqid('', true);
-
-            if (!@rename($original_dir, $backup_dir)) {
-                $backup_dir = null;
+        add_filter(
+            'sitepulse_pre_get_filesystem',
+            static function () {
+                return new Sitepulse_Unwritable_Filesystem();
             }
-        }
+        );
 
-        file_put_contents($original_dir, '');
+        sitepulse_plugin_impact_install_mu_loader();
 
-        try {
-            sitepulse_plugin_impact_install_mu_loader();
+        $warnings = get_option(SITEPULSE_OPTION_CRON_WARNINGS, []);
 
-            $warnings = get_option(SITEPULSE_OPTION_CRON_WARNINGS, []);
-
-            $this->assertIsArray($warnings, 'Cron warnings option should store an array.');
-            $this->assertArrayHasKey('plugin_impact', $warnings, 'Plugin impact warning should be registered on failure.');
-            $this->assertNotEmpty(
-                $warnings['plugin_impact']['message'] ?? '',
-                'Registered warning should include a user-facing message.'
-            );
-        } finally {
-            if (file_exists($original_dir) && !is_dir($original_dir)) {
-                unlink($original_dir);
-            }
-
-            if ($backup_dir !== null && is_dir($backup_dir)) {
-                @rename($backup_dir, $original_dir);
-            } elseif (!is_dir($original_dir)) {
-                wp_mkdir_p($original_dir);
-            }
-        }
+        $this->assertIsArray($warnings, 'Cron warnings option should store an array.');
+        $this->assertArrayHasKey('plugin_impact', $warnings, 'Plugin impact warning should be registered on failure.');
+        $this->assertNotEmpty(
+            $warnings['plugin_impact']['message'] ?? '',
+            'Registered warning should include a user-facing message.'
+        );
     }
 
     public function test_successful_installation_clears_warning(): void {
