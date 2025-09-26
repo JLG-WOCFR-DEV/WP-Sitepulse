@@ -9,6 +9,27 @@ $sitepulse_uptime_cron_hook = function_exists('sitepulse_get_cron_hook') ? sitep
 
 add_action('admin_menu', function() { add_submenu_page('sitepulse-dashboard', 'Uptime Tracker', 'Uptime', 'manage_options', 'sitepulse-uptime', 'sitepulse_uptime_tracker_page'); });
 
+add_action('admin_enqueue_scripts', 'sitepulse_uptime_tracker_enqueue_assets');
+
+/**
+ * Enqueues the stylesheet required for the uptime tracker admin page.
+ *
+ * @param string $hook_suffix Current admin page identifier.
+ * @return void
+ */
+function sitepulse_uptime_tracker_enqueue_assets($hook_suffix) {
+    if ($hook_suffix !== 'sitepulse-dashboard_page_sitepulse-uptime') {
+        return;
+    }
+
+    wp_enqueue_style(
+        'sitepulse-uptime-tracker',
+        SITEPULSE_URL . 'modules/css/uptime-tracker.css',
+        [],
+        SITEPULSE_VERSION
+    );
+}
+
 if (!empty($sitepulse_uptime_cron_hook)) {
     add_action('init', 'sitepulse_uptime_tracker_ensure_cron');
     add_action($sitepulse_uptime_cron_hook, 'sitepulse_run_uptime_check');
@@ -160,7 +181,6 @@ function sitepulse_uptime_tracker_page() {
         reset($uptime_log);
     }
     ?>
-    <style> .uptime-chart { display: flex; gap: 2px; height: 60px; align-items: flex-end; } .uptime-bar { flex-grow: 1; } .uptime-bar.up { background-color: #4CAF50; } .uptime-bar.down { background-color: #F44336; } .uptime-bar.unknown { background-color: #9E9E9E; } </style>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-chart-bar"></span> Suivi de Disponibilité</h1>
         <p>Cet outil vérifie la disponibilité de votre site toutes les heures. Voici le statut des <?php echo esc_html($total_checks); ?> dernières vérifications.</p>
