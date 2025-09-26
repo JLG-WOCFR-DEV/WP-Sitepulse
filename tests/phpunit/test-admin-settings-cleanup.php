@@ -150,6 +150,7 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
         }
 
         set_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS, 'cached');
+        set_site_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS, 'cached');
         set_transient(SITEPULSE_TRANSIENT_AI_INSIGHT, 'ai');
         set_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK, 'lock');
         set_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK, 'lock');
@@ -158,6 +159,7 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
         set_transient($prefixed_transient, 'size');
 
         $GLOBALS['sitepulse_test_cron_hooks'] = ['sitepulse_fake_cron'];
+        wp_schedule_single_event(time() + MINUTE_IN_SECONDS, 'sitepulse_fake_cron');
 
         $_POST = [
             'sitepulse_reset_all'                  => '1',
@@ -173,10 +175,12 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
         }
 
         $this->assertFalse(get_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS));
+        $this->assertFalse(get_site_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS));
         $this->assertFalse(get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT));
         $this->assertFalse(get_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK));
         $this->assertFalse(get_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK));
         $this->assertFalse(get_transient($prefixed_transient));
+        $this->assertFalse(wp_next_scheduled('sitepulse_fake_cron'));
         $this->assertSame(1, $GLOBALS['sitepulse_activate_site_calls']);
         $this->assertStringContainsString('SitePulse a été réinitialisé.', $output);
     }
