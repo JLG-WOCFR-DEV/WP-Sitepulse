@@ -17,6 +17,27 @@ add_action(
     }
 );
 
+add_action('admin_enqueue_scripts', 'sitepulse_plugin_impact_scanner_enqueue_assets');
+
+/**
+ * Enqueues the stylesheet required for the plugin impact scanner admin screen.
+ *
+ * @param string $hook_suffix Identifier of the current admin page.
+ * @return void
+ */
+function sitepulse_plugin_impact_scanner_enqueue_assets($hook_suffix) {
+    if ($hook_suffix !== 'sitepulse-dashboard_page_sitepulse-plugins') {
+        return;
+    }
+
+    wp_enqueue_style(
+        'sitepulse-plugin-impact',
+        SITEPULSE_URL . 'modules/css/plugin-impact-scanner.css',
+        [],
+        SITEPULSE_VERSION
+    );
+}
+
 add_action('upgrader_process_complete', 'sitepulse_plugin_impact_clear_dir_cache_on_upgrade', 10, 2);
 
 function sitepulse_plugin_impact_clear_dir_cache_on_upgrade($upgrader, $hook_extra) {
@@ -296,13 +317,6 @@ function sitepulse_plugin_impact_scanner_page() {
         sitepulse_plugin_impact_format_interval($interval)
     );
     ?>
-    <style>
-        .impact-bar-bg { background: #eee; border-radius: 3px; overflow: hidden; width: 100%; }
-        .impact-bar { height: 18px; border-radius: 3px; background-color: #FFC107; text-align: right; color: white; padding-right: 5px; white-space: nowrap; font-size: 12px; line-height: 18px; }
-        .sitepulse-impact-meta { margin-bottom: 1em; }
-        .sitepulse-impact-meta p { margin: 0.2em 0; }
-        .sitepulse-impact-limitations { list-style: disc; margin-left: 1.5em; }
-    </style>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-filter"></span> <?php esc_html_e("Analyseur d'Impact des Plugins", 'sitepulse'); ?></h1>
 
