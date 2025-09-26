@@ -299,14 +299,34 @@ add_action('admin_notices', 'sitepulse_render_cron_warnings');
  * @return WP_Filesystem_Base|null
  */
 function sitepulse_get_filesystem() {
-    static $filesystem_initialized = false;
-    static $filesystem_instance = null;
+    global $sitepulse_filesystem_initialized, $sitepulse_filesystem_instance;
 
-    if ($filesystem_initialized) {
-        return $filesystem_instance;
+    if (!is_bool($sitepulse_filesystem_initialized ?? null)) {
+        $sitepulse_filesystem_initialized = false;
+        $sitepulse_filesystem_instance    = null;
     }
 
-    $filesystem_initialized = true;
+    if (function_exists('apply_filters')) {
+        $override = apply_filters(
+            'sitepulse_pre_get_filesystem',
+            null,
+            $sitepulse_filesystem_initialized,
+            $sitepulse_filesystem_instance
+        );
+
+        if ($override !== null) {
+            $sitepulse_filesystem_initialized = true;
+            $sitepulse_filesystem_instance    = $override instanceof WP_Filesystem_Base ? $override : null;
+
+            return $sitepulse_filesystem_instance;
+        }
+    }
+
+    if ($sitepulse_filesystem_initialized) {
+        return $sitepulse_filesystem_instance;
+    }
+
+    $sitepulse_filesystem_initialized = true;
 
     if (!function_exists('WP_Filesystem')) {
         require_once ABSPATH . 'wp-admin/includes/file.php';
@@ -319,10 +339,12 @@ function sitepulse_get_filesystem() {
     global $wp_filesystem;
 
     if (WP_Filesystem() && $wp_filesystem instanceof WP_Filesystem_Base) {
-        $filesystem_instance = $wp_filesystem;
+        $sitepulse_filesystem_instance = $wp_filesystem;
+    } else {
+        $sitepulse_filesystem_instance = null;
     }
 
-    return $filesystem_instance;
+    return $sitepulse_filesystem_instance;
 }
 
 /**
@@ -457,11 +479,13 @@ function sitepulse_plugin_impact_install_mu_loader() {
     if ($has_valid_loader) {
         update_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE, $signature, false);
         sitepulse_clear_cron_warning('plugin_impact');
-    } else {
-        delete_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
-        sitepulse_log(sprintf('SitePulse impact loader installation failed for %s.', $target_file), 'ERROR');
-        sitepulse_register_cron_warning('plugin_impact', $warning_message);
+
+        return;
     }
+
+    delete_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
+    sitepulse_log(sprintf('SitePulse impact loader installation failed for %s.', $target_file), 'ERROR');
+    sitepulse_register_cron_warning('plugin_impact', $warning_message);
 }
 
 /**
