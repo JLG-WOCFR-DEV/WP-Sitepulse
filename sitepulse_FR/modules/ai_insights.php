@@ -25,10 +25,9 @@ function sitepulse_ai_get_cached_insight($force_refresh = false) {
     static $cached_insight = null;
 
     if ($force_refresh) {
-        delete_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
-        $cached_insight = [];
+        $cached_insight = null;
 
-        return $cached_insight;
+        return [];
     }
 
     if ($cached_insight !== null) {
@@ -293,9 +292,20 @@ function sitepulse_generate_ai_insight() {
         HOUR_IN_SECONDS
     );
 
+    sitepulse_ai_get_cached_insight(true);
+
+    $fresh_payload = sitepulse_ai_get_cached_insight();
+
+    if (empty($fresh_payload)) {
+        $fresh_payload = [
+            'text'      => $generated_text,
+            'timestamp' => $timestamp,
+        ];
+    }
+
     wp_send_json_success([
-        'text'      => $generated_text,
-        'timestamp' => $timestamp,
+        'text'      => isset($fresh_payload['text']) ? $fresh_payload['text'] : $generated_text,
+        'timestamp' => isset($fresh_payload['timestamp']) ? $fresh_payload['timestamp'] : $timestamp,
         'cached'    => false,
     ]);
 }

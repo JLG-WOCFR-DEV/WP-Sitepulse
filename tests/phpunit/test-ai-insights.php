@@ -189,6 +189,51 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
     }
 
     /**
+     * Ensures that forcing a refresh keeps the transient when the remote request errors.
+     */
+    public function test_force_refresh_error_keeps_existing_transient() {
+        $existing_payload = [
+            'text'      => 'Ancienne recommandation.',
+            'timestamp' => 1_708_123_456,
+        ];
+
+        set_transient(
+            SITEPULSE_TRANSIENT_AI_INSIGHT,
+            $existing_payload,
+            HOUR_IN_SECONDS
+        );
+
+        $this->reset_cached_insight_static();
+
+        update_option(SITEPULSE_OPTION_GEMINI_API_KEY, 'test-api-key');
+
+        add_filter('pre_http_request', [$this, 'mock_gemini_error'], 10, 3);
+
+        $_POST['nonce'] = wp_create_nonce(SITEPULSE_NONCE_ACTION_AI_INSIGHT);
+        $_POST['force_refresh'] = 'true';
+
+        try {
+            $this->_handleAjax('sitepulse_generate_ai_insight');
+        } catch (WPAjaxDieStopException $exception) {
+            // Expected.
+        }
+
+        remove_filter('pre_http_request', [$this, 'mock_gemini_error'], 10);
+
+        $this->assertSame(1, $this->http_request_count, 'Force refresh should trigger an HTTP request.');
+
+        $response = json_decode($this->_last_response, true);
+
+        $this->assertIsArray($response);
+        $this->assertArrayHasKey('success', $response);
+        $this->assertFalse($response['success'], 'Errors should return success false.');
+
+        $cached_payload = get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
+
+        $this->assertSame($existing_payload, $cached_payload, 'Existing transient should remain intact.');
+    }
+
+    /**
      * Provides a deterministic Gemini response payload.
      *
      * @param false|array $preempt Whether to short-circuit the request.
@@ -246,6 +291,21 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->http_request_count++;
 
         return new WP_Error('unexpected_http_request', 'HTTP requests should not occur when cached data is available.');
+    }
+
+    /**
+     * Returns a WP_Error to simulate a failed Gemini request.
+     *
+     * @param false|array $preempt Whether to short-circuit the request.
+     * @param array       $args    The request arguments.
+     * @param string      $url     The request URL.
+     *
+     * @return WP_Error
+     */
+    public function mock_gemini_error($preempt, $args, $url) {
+        $this->http_request_count++;
+
+        return new WP_Error('gemini_error', 'Boom');
     }
 
     /**
