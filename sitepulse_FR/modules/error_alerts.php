@@ -331,6 +331,10 @@ function sitepulse_error_alerts_check_cpu_load() {
     }
 
     $load = sys_getloadavg();
+    if (has_filter('sitepulse_error_alerts_cpu_load')) {
+        $load = apply_filters('sitepulse_error_alerts_cpu_load', $load);
+    }
+
     if (!is_array($load) || !isset($load[0])) {
         return;
     }
@@ -339,9 +343,10 @@ function sitepulse_error_alerts_check_cpu_load() {
     $core_count = sitepulse_error_alert_get_cpu_core_count();
     $core_count = max(1, (int) $core_count);
 
-    $normalized_load = (float) $load[0] / $core_count;
+    $normalized_load   = (float) $load[0] / $core_count;
+    $total_threshold   = $threshold * $core_count;
 
-    if ($normalized_load > $threshold) {
+    if ((float) $load[0] > $total_threshold) {
         $site_name = get_bloginfo('name');
 
         /* translators: %s: Site title. */
@@ -355,14 +360,16 @@ function sitepulse_error_alerts_check_cpu_load() {
          * %1$s: Site title.
          * %2$s: Current server load.
          * %3$d: Detected CPU cores.
-         * %4$s: Load per core.
-         * %5$s: Threshold per core.
+         * %4$s: Total load threshold.
+         * %5$s: Load per core.
+         * %6$s: Threshold per core.
          */
         $message = sprintf(
-            esc_html__('Current server load on %1$s: %2$s (detected cores: %3$d, load per core: %4$s, threshold per core: %5$s)', 'sitepulse'),
+            esc_html__('Current server load on %1$s: %2$s (detected cores: %3$d, total threshold: %4$s, load per core: %5$s, threshold per core: %6$s)', 'sitepulse'),
             $site_name,
             number_format_i18n((float) $load[0], 2),
             $core_count,
+            number_format_i18n($total_threshold, 2),
             number_format_i18n($normalized_load, 2),
             number_format_i18n($threshold, 2)
         );

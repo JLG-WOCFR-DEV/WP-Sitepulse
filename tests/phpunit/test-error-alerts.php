@@ -35,6 +35,7 @@ class Sitepulse_Error_Alerts_Test extends WP_UnitTestCase {
         delete_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER);
         delete_option(SITEPULSE_OPTION_ALERT_RECIPIENTS);
         delete_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK);
+        delete_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK);
     }
 
     protected function tear_down(): void {
@@ -44,6 +45,7 @@ class Sitepulse_Error_Alerts_Test extends WP_UnitTestCase {
         delete_option(SITEPULSE_OPTION_ALERT_RECIPIENTS);
         delete_option(SITEPULSE_OPTION_ALERT_INTERVAL);
         delete_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK);
+        delete_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK);
 
         if (!empty($GLOBALS['sitepulse_test_log_path']) && file_exists($GLOBALS['sitepulse_test_log_path'])) {
             unlink($GLOBALS['sitepulse_test_log_path']);
@@ -175,5 +177,61 @@ Another line
         $pointer = get_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER, []);
         $this->assertSame(filesize($log_path), $pointer['offset'], 'Pointer should advance to end of truncated file.');
         $this->assertArrayHasKey('inode', $pointer, 'Pointer data should persist inode information.');
+    }
+
+    public function test_cpu_alert_scales_threshold_with_core_count() {
+        update_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 2);
+        update_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, ['alerts@example.com']);
+
+        $core_filter = static function ($value = null) {
+            return 4;
+        };
+
+        $load_filter = static function ($load) {
+            return [9.5, 0.0, 0.0];
+        };
+
+        add_filter('sitepulse_error_alert_cpu_core_count', $core_filter, 10, 1);
+        add_filter('sitepulse_error_alerts_cpu_load', $load_filter, 10, 1);
+
+        try {
+            sitepulse_error_alerts_check_cpu_load();
+        } finally {
+            remove_filter('sitepulse_error_alert_cpu_core_count', $core_filter, 10);
+            remove_filter('sitepulse_error_alerts_cpu_load', $load_filter, 10);
+        }
+
+        $this->assertCount(1, $this->sent_mail, 'High load should trigger one alert e-mail.');
+
+        $mail = $this->sent_mail[0];
+        $this->assertStringContainsString('Test Blog', $mail['subject']);
+        $this->assertMatchesRegularExpression('/total threshold:\s*8[,.]00/', $mail['message']);
+        $this->assertMatchesRegularExpression('/2[,.]38/', $mail['message']);
+    }
+
+    public function test_cpu_alert_ignores_load_below_scaled_threshold() {
+        update_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 2);
+        update_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, ['alerts@example.com']);
+
+        $core_filter = static function ($value = null) {
+            return 4;
+        };
+
+        $load_filter = static function ($load) {
+            return [7.0, 0.0, 0.0];
+        };
+
+        add_filter('sitepulse_error_alert_cpu_core_count', $core_filter, 10, 1);
+        add_filter('sitepulse_error_alerts_cpu_load', $load_filter, 10, 1);
+
+        try {
+            sitepulse_error_alerts_check_cpu_load();
+        } finally {
+            remove_filter('sitepulse_error_alert_cpu_core_count', $core_filter, 10);
+            remove_filter('sitepulse_error_alerts_cpu_load', $load_filter, 10);
+        }
+
+        $this->assertCount(0, $this->sent_mail, 'Load below scaled threshold must not trigger an alert.');
+        $this->assertFalse(get_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK), 'Cooldown lock should not be created when below the threshold.');
     }
 }

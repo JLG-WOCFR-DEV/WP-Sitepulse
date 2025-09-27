@@ -20,7 +20,7 @@ msgstr ""
 
 #: modules/error_alerts.php:383
 #, php-format
-msgid "Current server load on %1$s: %2$s (detected cores: %3$d, load per core: %4$s, threshold per core: %5$s)"
+msgid "Current server load on %1$s: %2$s (detected cores: %3$d, total threshold: %4$s, load per core: %5$s, threshold per core: %6$s)"
 msgstr ""
 
 #: modules/error_alerts.php:408

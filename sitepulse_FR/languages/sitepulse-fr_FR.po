@@ -20,8 +20,8 @@ msgstr "Alerte SitePulse : charge serveur élevée sur %s"
 
 #: modules/error_alerts.php:383
 #, php-format
-msgid "Current server load on %1$s: %2$s (detected cores: %3$d, load per core: %4$s, threshold per core: %5$s)"
-msgstr "Charge serveur actuelle sur %1$s : %2$s (cœurs détectés : %3$d, charge par cœur : %4$s, seuil par cœur : %5$s)"
+msgid "Current server load on %1$s: %2$s (detected cores: %3$d, total threshold: %4$s, load per core: %5$s, threshold per core: %6$s)"
+msgstr "Charge serveur actuelle sur %1$s : %2$s (cœurs détectés : %3$d, seuil total : %4$s, charge par cœur : %5$s, seuil par cœur : %6$s)"
 
 #: modules/error_alerts.php:408
 #, php-format
