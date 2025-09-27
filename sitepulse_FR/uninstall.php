@@ -30,6 +30,7 @@ $sitepulse_constants = [
     'SITEPULSE_OPTION_CRON_WARNINGS'              => 'sitepulse_cron_warnings',
     'SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT' => 'sitepulse_resource_monitor_snapshot',
     'SITEPULSE_PLUGIN_IMPACT_OPTION'              => 'sitepulse_plugin_impact_stats',
+    'SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE'    => 'sitepulse_impact_loader_signature',
 ];
 
 foreach ($sitepulse_constants as $constant => $value) {
@@ -59,6 +60,7 @@ $options = [
     SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER,
     SITEPULSE_OPTION_CRON_WARNINGS,
     SITEPULSE_PLUGIN_IMPACT_OPTION,
+    SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE,
 ];
 
 $transients = [
@@ -274,5 +276,16 @@ if (!empty($legacy_log_files)) {
         if (is_file($legacy_log_file)) {
             @unlink($legacy_log_file);
         }
+    }
+}
+
+$mu_loader_dir  = trailingslashit(WP_CONTENT_DIR) . 'mu-plugins';
+$mu_loader_file = trailingslashit($mu_loader_dir) . 'sitepulse-impact-loader.php';
+
+if (is_file($mu_loader_file)) {
+    if (function_exists('wp_delete_file')) {
+        wp_delete_file($mu_loader_file);
+    } else {
+        @unlink($mu_loader_file);
     }
 }
