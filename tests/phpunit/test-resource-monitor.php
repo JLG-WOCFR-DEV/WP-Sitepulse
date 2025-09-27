@@ -97,6 +97,43 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
         $this->assertEqualsWithDelta($custom_ttl, $timeout_option - time(), 3, 'Stored TTL should respect the filter override.');
     }
 
+    public function test_unlimited_memory_limit_is_normalized_for_display() {
+        $original_memory_limit = ini_get('memory_limit');
+        $result = ini_set('memory_limit', '-1');
+
+        if ($result === false) {
+            $this->markTestSkipped('Unable to set memory_limit to -1 for this environment.');
+        }
+
+        try {
+            delete_transient(SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT);
+
+            $snapshot = sitepulse_resource_monitor_get_snapshot();
+            $this->assertSame(__('Illimitée', 'sitepulse'), $snapshot['memory_limit'], 'Unlimited memory should be displayed as a translated label.');
+
+            $administrator_id = self::factory()->user->create(['role' => 'administrator']);
+            wp_set_current_user($administrator_id);
+
+            try {
+                ob_start();
+                sitepulse_resource_monitor_page();
+                $output = ob_get_clean();
+            } finally {
+                wp_set_current_user(0);
+            }
+
+            $this->assertStringContainsString('Limite PHP : Illimitée', $output, 'Page output should show the translated unlimited label.');
+        } finally {
+            if ($original_memory_limit === false) {
+                if (function_exists('ini_restore')) {
+                    ini_restore('memory_limit');
+                }
+            } else {
+                ini_set('memory_limit', (string) $original_memory_limit);
+            }
+        }
+    }
+
     public function test_records_notices_when_disk_space_queries_fail() {
         $original_open_basedir = ini_get('open_basedir');
         $restore_value = $original_open_basedir ? (string) $original_open_basedir : '';
