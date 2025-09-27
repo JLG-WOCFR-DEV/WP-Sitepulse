@@ -219,6 +219,44 @@ if (is_multisite()) {
     }
 }
 
+$mu_loader_file = rtrim(WP_CONTENT_DIR, '/\\') . '/mu-plugins/sitepulse-impact-loader.php';
+$mu_loader_dir  = dirname($mu_loader_file);
+$mu_loader_deleted = false;
+$filesystem = null;
+
+if (function_exists('sitepulse_get_filesystem')) {
+    $filesystem = sitepulse_get_filesystem();
+} elseif (function_exists('WP_Filesystem')) {
+    if (!function_exists('request_filesystem_credentials')) {
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+    }
+
+    if (WP_Filesystem()) {
+        global $wp_filesystem;
+
+        if ($wp_filesystem instanceof WP_Filesystem_Base) {
+            $filesystem = $wp_filesystem;
+        }
+    }
+}
+
+if ($filesystem instanceof WP_Filesystem_Base && $filesystem->exists($mu_loader_file)) {
+    $mu_loader_deleted = $filesystem->delete($mu_loader_file);
+}
+
+if (!$mu_loader_deleted && file_exists($mu_loader_file)) {
+    $mu_loader_deleted = @unlink($mu_loader_file);
+}
+
+if (($mu_loader_deleted || !file_exists($mu_loader_file)) && is_dir($mu_loader_dir)) {
+    $mu_loader_dir_trimmed = rtrim($mu_loader_dir, '/\\');
+    $mu_loader_remaining = glob($mu_loader_dir_trimmed . '/*');
+
+    if (empty($mu_loader_remaining)) {
+        @rmdir($mu_loader_dir_trimmed);
+    }
+}
+
 $sitepulse_directories = [];
 
 if (function_exists('wp_upload_dir')) {
