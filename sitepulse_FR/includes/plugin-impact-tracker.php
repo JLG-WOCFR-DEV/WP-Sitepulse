@@ -204,9 +204,13 @@ function sitepulse_plugin_impact_tracker_persist() {
             : null;
 
         if ($existing_timestamp !== null && $existing_timestamp > 0) {
-            $measurement_age = $current_timestamp - $existing_timestamp;
+            $raw_measurement_age = $current_timestamp - $existing_timestamp;
+            $measurement_age = max(0, $raw_measurement_age);
 
-            if ($measurement_age < 60) {
+            // When the current timestamp appears older than the stored value (e.g. due to clock
+            // drift or mocked time in tests) we treat the difference as zero so that the stale
+            // measurement still triggers a refresh.
+            if ($raw_measurement_age >= 0 && $measurement_age < 60) {
                 $should_persist_speed_scan = false;
             }
         }

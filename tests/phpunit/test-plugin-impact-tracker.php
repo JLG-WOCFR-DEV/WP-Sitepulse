@@ -67,5 +67,49 @@ class Sitepulse_Plugin_Impact_Tracker_Test extends WP_UnitTestCase {
         $this->assertArrayHasKey('interval', $payload, 'Persisted payload must include sanitized interval.');
         $this->assertSame(1, $payload['interval'], 'Interval should fall back to the sanitized minimum when filter is invalid.');
     }
+
+    public function test_speed_scan_persists_when_time_goes_backwards(): void {
+        global $sitepulse_plugin_impact_tracker_samples, $sitepulse_plugin_impact_tracker_force_persist;
+
+        $sitepulse_plugin_impact_tracker_force_persist = true;
+        $sitepulse_plugin_impact_tracker_samples = [];
+
+        $existing_timestamp = 1_000;
+
+        set_transient(
+            SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS,
+            [
+                'server_processing_ms' => 5,
+                'ttfb'                 => 5,
+                'timestamp'            => $existing_timestamp,
+            ],
+            MINUTE_IN_SECONDS
+        );
+
+        $older_time_callback = static function ($timestamp, $type, $gmt) use ($existing_timestamp) {
+            if ($type === 'timestamp') {
+                return $existing_timestamp - 30;
+            }
+
+            return $timestamp;
+        };
+
+        add_filter('current_time', $older_time_callback, 10, 3);
+
+        try {
+            sitepulse_plugin_impact_tracker_persist();
+        } finally {
+            remove_filter('current_time', $older_time_callback, 10);
+        }
+
+        $results = get_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
+
+        $this->assertIsArray($results, 'Speed scan transient should persist an array payload.');
+        $this->assertSame(
+            $existing_timestamp - 30,
+            $results['timestamp'],
+            'A backwards time change should still result in refreshed speed scan results.'
+        );
+    }
 }
 
