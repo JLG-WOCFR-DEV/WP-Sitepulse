@@ -89,7 +89,25 @@ function sitepulse_resource_monitor_get_snapshot() {
     }
 
     $memory_usage = size_format(memory_get_usage());
-    $memory_limit = ini_get('memory_limit');
+    $memory_limit_ini = ini_get('memory_limit');
+    $memory_limit = $memory_limit_ini;
+
+    if ($memory_limit_ini !== false) {
+        $memory_limit_value = trim((string) $memory_limit_ini);
+        $memory_limit = $memory_limit_value;
+
+        if ($memory_limit_value !== '') {
+            $memory_limit_lower = strtolower($memory_limit_value);
+
+            if (
+                $memory_limit_lower === '-1'
+                || $memory_limit_lower === 'unlimited'
+                || (float) $memory_limit_value === -1.0
+            ) {
+                $memory_limit = __('Illimitée', 'sitepulse');
+            }
+        }
+    }
 
     $disk_free = 'N/A';
 
