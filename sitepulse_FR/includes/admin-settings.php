@@ -35,6 +35,7 @@ function sitepulse_render_dashboard_page() {
         $notice = __('Le module de tableau de bord est activé mais son rendu est indisponible. Vérifiez les fichiers du plugin ou les journaux d’erreurs.', 'sitepulse');
     } else {
         $notice = sprintf(
+            /* translators: %s is the URL to the SitePulse settings page. */
             __('Le module de tableau de bord est désactivé. Activez-le depuis les <a href="%s">réglages de SitePulse</a>.', 'sitepulse'),
             esc_url($settings_url)
         );
@@ -51,8 +52,8 @@ function sitepulse_render_dashboard_page() {
  */
 function sitepulse_admin_menu() {
     add_menu_page(
-        'SitePulse Dashboard',
-        'Sitepulse - JLG',
+        __('SitePulse Dashboard', 'sitepulse'),
+        __('Sitepulse - JLG', 'sitepulse'),
         'manage_options',
         'sitepulse-dashboard',
         'sitepulse_render_dashboard_page',
@@ -62,8 +63,8 @@ function sitepulse_admin_menu() {
 
     add_submenu_page(
         'sitepulse-dashboard',
-        'SitePulse Settings',
-        'Settings',
+        __('SitePulse Settings', 'sitepulse'),
+        __('Settings', 'sitepulse'),
         'manage_options',
         'sitepulse-settings',
         'sitepulse_settings_page'
@@ -72,8 +73,8 @@ function sitepulse_admin_menu() {
     if (defined('SITEPULSE_DEBUG') && SITEPULSE_DEBUG) {
         add_submenu_page(
             'sitepulse-dashboard',
-            'SitePulse Debug',
-            'Debug',
+            __('SitePulse Debug', 'sitepulse'),
+            __('Debug', 'sitepulse'),
             'manage_options',
             'sitepulse-debug',
             'sitepulse_debug_page'
@@ -536,6 +537,7 @@ function sitepulse_debug_page() {
         <p class="description">
             <?php
             printf(
+                /* translators: 1: number of log lines kept, 2: formatted size limit. */
                 esc_html__('Seules les %1$d dernières lignes du journal (limitées à %2$s) sont chargées pour éviter toute surcharge mémoire.', 'sitepulse'),
                 (int) $log_max_lines,
                 wp_kses_post(size_format($log_max_bytes))
