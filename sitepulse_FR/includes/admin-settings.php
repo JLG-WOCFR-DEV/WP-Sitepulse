@@ -259,12 +259,10 @@ function sitepulse_settings_page() {
                 SITEPULSE_OPTION_CPU_ALERT_THRESHOLD,
                 SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES,
                 SITEPULSE_OPTION_ALERT_INTERVAL,
+                // Clear stored alert recipients so the default (empty) list is restored on activation.
                 SITEPULSE_OPTION_ALERT_RECIPIENTS,
                 SITEPULSE_PLUGIN_IMPACT_OPTION,
             ];
-
-            // Clear stored alert recipients so the default (empty) list is restored on activation.
-            $options_to_delete[] = SITEPULSE_OPTION_ALERT_RECIPIENTS;
 
             foreach ($options_to_delete as $option_key) {
                 delete_option($option_key);
