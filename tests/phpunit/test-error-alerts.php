@@ -12,7 +12,15 @@ class Sitepulse_Error_Alerts_Test extends WP_UnitTestCase {
     private $sent_mail = [];
 
     public static function wpSetUpBeforeClass($factory) {
-        require_once dirname(__DIR__, 2) . '/sitepulse_FR/modules/error_alerts.php';
+        $plugin_root = dirname(__DIR__, 2) . '/sitepulse_FR/';
+
+        require_once $plugin_root . 'includes/functions.php';
+
+        if (!defined('SITEPULSE_OPTION_ALERT_INTERVAL')) {
+            define('SITEPULSE_OPTION_ALERT_INTERVAL', 'sitepulse_alert_interval');
+        }
+
+        require_once $plugin_root . 'modules/error_alerts.php';
     }
 
     protected function set_up(): void {
@@ -34,6 +42,7 @@ class Sitepulse_Error_Alerts_Test extends WP_UnitTestCase {
 
         delete_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER);
         delete_option(SITEPULSE_OPTION_ALERT_RECIPIENTS);
+        delete_option(SITEPULSE_OPTION_ALERT_INTERVAL);
         delete_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK);
 
         if (!empty($GLOBALS['sitepulse_test_log_path']) && file_exists($GLOBALS['sitepulse_test_log_path'])) {
@@ -61,6 +70,37 @@ class Sitepulse_Error_Alerts_Test extends WP_UnitTestCase {
 
     public function limit_log_scan_bytes($default) {
         return 64;
+    }
+
+    public function test_interval_uses_shared_sanitizer() {
+        $this->assertTrue(function_exists('sitepulse_sanitize_alert_interval'));
+
+        update_option(SITEPULSE_OPTION_ALERT_INTERVAL, 27);
+
+        $expected = sitepulse_sanitize_alert_interval(27);
+
+        $this->assertSame($expected, sitepulse_error_alerts_get_interval_minutes());
+    }
+
+    public function test_schedule_slug_sanitizes_override_with_helper() {
+        $override_minutes = 2;
+        $expected_minutes = sitepulse_sanitize_alert_interval($override_minutes);
+
+        $this->assertSame(
+            'sitepulse_error_alerts_' . $expected_minutes . '_minutes',
+            sitepulse_error_alerts_get_schedule_slug($override_minutes)
+        );
+    }
+
+    public function test_schedule_slug_uses_sanitized_option_value() {
+        update_option(SITEPULSE_OPTION_ALERT_INTERVAL, 13);
+
+        $expected_minutes = sitepulse_sanitize_alert_interval(13);
+
+        $this->assertSame(
+            'sitepulse_error_alerts_' . $expected_minutes . '_minutes',
+            sitepulse_error_alerts_get_schedule_slug()
+        );
     }
 
     public function test_log_pointer_resets_when_file_shrinks() {

@@ -7,45 +7,24 @@ $sitepulse_error_alerts_cron_hook = function_exists('sitepulse_get_cron_hook') ?
 $sitepulse_error_alerts_schedule   = 'sitepulse_error_alerts_five_minutes';
 
 /**
- * Normalizes the alert interval to one of the supported values.
- *
- * @param mixed $value Raw value to sanitize.
- * @return int Sanitized interval in minutes.
- */
-function sitepulse_error_alerts_sanitize_interval($value) {
-    $allowed = [5, 10, 15, 30];
-    $value   = is_scalar($value) ? absint($value) : 0;
-
-    if ($value < 5) {
-        $value = 5;
-    } elseif ($value > 30) {
-        $value = 30;
-    }
-
-    if (!in_array($value, $allowed, true)) {
-        $value = 5;
-    }
-
-    return $value;
-}
-
-/**
  * Retrieves the interval (in minutes) configured for the alert checks.
+ *
+ * Uses the shared sitepulse_sanitize_alert_interval() helper to normalize the
+ * stored value to one of the supported schedules.
  *
  * @return int
  */
 function sitepulse_error_alerts_get_interval_minutes() {
     $stored_value = get_option(SITEPULSE_OPTION_ALERT_INTERVAL, 5);
 
-    if (function_exists('sitepulse_sanitize_alert_interval')) {
-        return sitepulse_sanitize_alert_interval($stored_value);
-    }
-
-    return sitepulse_error_alerts_sanitize_interval($stored_value);
+    return sitepulse_sanitize_alert_interval($stored_value);
 }
 
 /**
  * Builds the cron schedule slug based on the configured interval.
+ *
+ * The optional override is sanitized through sitepulse_sanitize_alert_interval()
+ * to ensure a consistent and valid schedule name.
  *
  * @param int|null $minutes Interval override (optional).
  * @return string
@@ -53,7 +32,7 @@ function sitepulse_error_alerts_get_interval_minutes() {
 function sitepulse_error_alerts_get_schedule_slug($minutes = null) {
     $minutes = $minutes === null
         ? sitepulse_error_alerts_get_interval_minutes()
-        : sitepulse_error_alerts_sanitize_interval($minutes);
+        : sitepulse_sanitize_alert_interval($minutes);
 
     return 'sitepulse_error_alerts_' . $minutes . '_minutes';
 }
