@@ -402,7 +402,7 @@ function sitepulse_settings_page() {
                     <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>"><?php esc_html_e("Seuil d'alerte de charge CPU", 'sitepulse'); ?></label></th>
                     <td>
                         <input type="number" step="0.1" min="0" id="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>" value="<?php echo esc_attr(get_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 5)); ?>" class="small-text">
-                        <p class="description"><?php esc_html_e('Une alerte e-mail est envoyée lorsque la charge moyenne sur 1 minute dépasse ce seuil.', 'sitepulse'); ?></p>
+                        <p class="description"><?php esc_html_e('Une alerte e-mail est envoyée lorsque la charge moyenne sur 1 minute dépasse ce seuil multiplié par le nombre de cœurs détectés.', 'sitepulse'); ?></p>
                     </td>
                 </tr>
                 <tr>
