@@ -30,6 +30,7 @@ $sitepulse_constants = [
     'SITEPULSE_OPTION_CRON_WARNINGS'              => 'sitepulse_cron_warnings',
     'SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT' => 'sitepulse_resource_monitor_snapshot',
     'SITEPULSE_PLUGIN_IMPACT_OPTION'              => 'sitepulse_plugin_impact_stats',
+    'SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE'    => 'sitepulse_impact_loader_signature',
 ];
 
 foreach ($sitepulse_constants as $constant => $value) {
@@ -59,6 +60,7 @@ $options = [
     SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER,
     SITEPULSE_OPTION_CRON_WARNINGS,
     SITEPULSE_PLUGIN_IMPACT_OPTION,
+    SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE,
 ];
 
 $transients = [
@@ -214,6 +216,44 @@ if (is_multisite()) {
 
     foreach ($transient_prefixes as $transient_prefix) {
         sitepulse_delete_site_transients_with_prefix($transient_prefix);
+    }
+}
+
+$mu_loader_file = rtrim(WP_CONTENT_DIR, '/\\') . '/mu-plugins/sitepulse-impact-loader.php';
+$mu_loader_dir  = dirname($mu_loader_file);
+$mu_loader_deleted = false;
+$filesystem = null;
+
+if (function_exists('sitepulse_get_filesystem')) {
+    $filesystem = sitepulse_get_filesystem();
+} elseif (function_exists('WP_Filesystem')) {
+    if (!function_exists('request_filesystem_credentials')) {
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+    }
+
+    if (WP_Filesystem()) {
+        global $wp_filesystem;
+
+        if ($wp_filesystem instanceof WP_Filesystem_Base) {
+            $filesystem = $wp_filesystem;
+        }
+    }
+}
+
+if ($filesystem instanceof WP_Filesystem_Base && $filesystem->exists($mu_loader_file)) {
+    $mu_loader_deleted = $filesystem->delete($mu_loader_file);
+}
+
+if (!$mu_loader_deleted && file_exists($mu_loader_file)) {
+    $mu_loader_deleted = @unlink($mu_loader_file);
+}
+
+if (($mu_loader_deleted || !file_exists($mu_loader_file)) && is_dir($mu_loader_dir)) {
+    $mu_loader_dir_trimmed = rtrim($mu_loader_dir, '/\\');
+    $mu_loader_remaining = glob($mu_loader_dir_trimmed . '/*');
+
+    if (empty($mu_loader_remaining)) {
+        @rmdir($mu_loader_dir_trimmed);
     }
 }
 
