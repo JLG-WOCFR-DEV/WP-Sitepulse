@@ -179,6 +179,28 @@ Another line
         $this->assertArrayHasKey('inode', $pointer, 'Pointer data should persist inode information.');
     }
 
+    public function test_windows_style_log_path_is_normalized_and_preserves_separators() {
+        update_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, ['alerts@example.com']);
+
+        $windows_path = 'C:\\logs\\debug.log';
+
+        if (file_exists($windows_path)) {
+            unlink($windows_path);
+        }
+
+        file_put_contents($windows_path, "PHP Fatal error: Crash\n");
+
+        $GLOBALS['sitepulse_test_log_path'] = $windows_path;
+
+        sitepulse_error_alerts_check_debug_log();
+
+        $this->assertCount(1, $this->sent_mail, 'Windows-style path should still trigger fatal alert e-mail.');
+
+        $mail = $this->sent_mail[0];
+        $this->assertStringContainsString('C:/logs/debug.log', $mail['message'], 'Normalized path should use forward slashes.');
+        $this->assertStringNotContainsString('C:logsdebug.log', $mail['message'], 'Sanitization must preserve directory separators.');
+    }
+
     public function test_cpu_alert_scales_threshold_with_core_count() {
         update_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 2);
         update_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, ['alerts@example.com']);
