@@ -620,6 +620,7 @@ function sitepulse_handle_module_changes($old_value, $value, $option = null) {
 
         if (is_string($hook) && $hook !== '') {
             wp_clear_scheduled_hook($hook);
+            sitepulse_clear_cron_warning($module);
         }
     }
 }
