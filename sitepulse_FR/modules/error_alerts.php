@@ -347,13 +347,16 @@ function sitepulse_error_alerts_check_cpu_load() {
     $total_threshold   = $threshold * $core_count;
 
     if ((float) $load[0] > $total_threshold) {
-        $site_name = get_bloginfo('name');
+        $raw_site_name = get_bloginfo('name');
+        $site_name     = trim(wp_strip_all_tags((string) $raw_site_name));
 
         /* translators: %s: Site title. */
         $subject = sprintf(
             __('SitePulse Alert: High Server Load on %s', 'sitepulse'),
             $site_name
         );
+
+        $subject = sanitize_text_field($subject);
 
         /*
          * translators:
@@ -373,6 +376,8 @@ function sitepulse_error_alerts_check_cpu_load() {
             number_format_i18n($normalized_load, 2),
             number_format_i18n($threshold, 2)
         );
+
+        $message = sanitize_textarea_field($message);
 
         sitepulse_error_alert_send('cpu', $subject, $message);
     }
@@ -509,7 +514,10 @@ function sitepulse_error_alerts_check_debug_log() {
         }
 
         if ($has_fatal_error) {
-            $site_name = get_bloginfo('name');
+            $raw_site_name = get_bloginfo('name');
+            $site_name     = trim(wp_strip_all_tags((string) $raw_site_name));
+
+            $log_file_for_message = is_string($log_file) ? sanitize_text_field($log_file) : '';
 
             /* translators: %s: Site title. */
             $subject = sprintf(
@@ -517,12 +525,16 @@ function sitepulse_error_alerts_check_debug_log() {
                 $site_name
             );
 
+            $subject = sanitize_text_field($subject);
+
             /* translators: 1: Log file path. 2: Site title. */
             $message = sprintf(
                 esc_html__('Review %1$s for error details affecting %2$s.', 'sitepulse'),
-                $log_file,
+                $log_file_for_message,
                 $site_name
             );
+
+            $message = sanitize_textarea_field($message);
 
             sitepulse_error_alert_send('php_fatal', $subject, $message);
             break;

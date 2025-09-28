@@ -234,4 +234,50 @@ Another line
         $this->assertCount(0, $this->sent_mail, 'Load below scaled threshold must not trigger an alert.');
         $this->assertFalse(get_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK), 'Cooldown lock should not be created when below the threshold.');
     }
+
+    public function test_alert_messages_strip_control_characters() {
+        update_option('blogname', "Control\x07 Site\nName");
+        update_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, ['alerts@example.com']);
+
+        $core_filter = static function ($value = null) {
+            return 2;
+        };
+
+        $load_filter = static function ($load) {
+            return [9.5, 0.0, 0.0];
+        };
+
+        add_filter('sitepulse_error_alert_cpu_core_count', $core_filter, 10, 1);
+        add_filter('sitepulse_error_alerts_cpu_load', $load_filter, 10, 1);
+
+        try {
+            sitepulse_error_alerts_check_cpu_load();
+        } finally {
+            remove_filter('sitepulse_error_alert_cpu_core_count', $core_filter, 10);
+            remove_filter('sitepulse_error_alerts_cpu_load', $load_filter, 10);
+        }
+
+        $this->assertCount(1, $this->sent_mail, 'CPU alert should send e-mail with sanitized content.');
+
+        $mail = $this->sent_mail[0];
+        $this->assertDoesNotMatchRegularExpression('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $mail['subject'], 'Subject must not contain control characters.');
+        $this->assertDoesNotMatchRegularExpression('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $mail['message'], 'Message must not contain control characters.');
+
+        $this->sent_mail = [];
+
+        $log_path = $this->create_log_file("PHP Fatal error: Boom\n");
+        $weird_path = $log_path . "\x07control.log";
+        $this->assertTrue(rename($log_path, $weird_path), 'Renaming log file to include control characters should succeed.');
+        $GLOBALS['sitepulse_test_log_path'] = $weird_path;
+
+        sitepulse_error_alerts_check_debug_log();
+
+        $this->assertCount(1, $this->sent_mail, 'Fatal error alert should send sanitized e-mail.');
+
+        $mail = $this->sent_mail[0];
+        $this->assertDoesNotMatchRegularExpression('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $mail['subject'], 'Fatal alert subject must not contain control characters.');
+        $this->assertDoesNotMatchRegularExpression('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $mail['message'], 'Fatal alert message must not contain control characters.');
+
+        update_option('blogname', 'Test Blog');
+    }
 }
