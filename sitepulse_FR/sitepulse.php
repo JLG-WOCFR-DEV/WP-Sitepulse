@@ -907,6 +907,61 @@ function sitepulse_deactivate_site() {
 }
 
 /**
+ * Executes a callback within the context of a specific site when switching succeeds.
+ *
+ * @param int      $site_id Site identifier.
+ * @param callable $callback Callback to execute after switching.
+ * @param string   $context  Operation context (e.g., activation, deactivation).
+ *
+ * @return bool True when the site switch succeeds, false otherwise.
+ */
+function sitepulse_run_for_site($site_id, callable $callback, $context) {
+    $site_id = (int) $site_id;
+
+    if ($site_id <= 0) {
+        return false;
+    }
+
+    $context = (string) $context;
+
+    if (!function_exists('switch_to_blog') || !function_exists('restore_current_blog')) {
+        return false;
+    }
+
+    /**
+     * Filters the pre-determined switch result for a SitePulse network operation.
+     *
+     * Returning a non-null value short-circuits the call to switch_to_blog().
+     *
+     * @param bool|null $pre_switched Whether the site switch was handled externally.
+     * @param int       $site_id      Site identifier.
+     * @param string    $context      Operation context.
+     */
+    $pre_switched = apply_filters('sitepulse_pre_switch_to_site', null, $site_id, $context);
+    $switched = null === $pre_switched ? switch_to_blog($site_id) : (bool) $pre_switched;
+
+    if (!$switched) {
+        $message = sprintf('SitePulse: unable to switch to site ID %d during %s. Skipping.', $site_id, $context);
+
+        if (function_exists('sitepulse_log')) {
+            sitepulse_log($message, 'ERROR');
+        } else {
+            error_log($message);
+        }
+
+        return false;
+    }
+
+    try {
+        call_user_func($callback);
+    } finally {
+        restore_current_blog();
+    }
+
+    return true;
+}
+
+/**
  * Activation hook. Sets default options.
  *
  * @param bool $network_wide Whether the plugin is being activated network-wide.
@@ -919,15 +974,7 @@ register_activation_hook(__FILE__, function($network_wide) {
         ]);
 
         foreach ($site_ids as $site_id) {
-            $site_id = (int) $site_id;
-
-            if ($site_id <= 0) {
-                continue;
-            }
-
-            switch_to_blog($site_id);
-            sitepulse_activate_site();
-            restore_current_blog();
+            sitepulse_run_for_site($site_id, 'sitepulse_activate_site', 'network activation');
         }
 
         return;
@@ -949,15 +996,7 @@ register_deactivation_hook(__FILE__, function($network_wide) {
         ]);
 
         foreach ($site_ids as $site_id) {
-            $site_id = (int) $site_id;
-
-            if ($site_id <= 0) {
-                continue;
-            }
-
-            switch_to_blog($site_id);
-            sitepulse_deactivate_site();
-            restore_current_blog();
+            sitepulse_run_for_site($site_id, 'sitepulse_deactivate_site', 'network deactivation');
         }
 
         return;
