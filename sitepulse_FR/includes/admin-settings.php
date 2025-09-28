@@ -94,7 +94,7 @@ function sitepulse_register_settings() {
         'type' => 'boolean', 'sanitize_callback' => 'rest_sanitize_boolean', 'default' => false
     ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_GEMINI_API_KEY, [
-        'type' => 'string', 'sanitize_callback' => 'sanitize_text_field', 'default' => ''
+        'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_gemini_api_key', 'default' => ''
     ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, [
         'type' => 'number', 'sanitize_callback' => 'sitepulse_sanitize_cpu_threshold', 'default' => 5
@@ -110,6 +110,39 @@ function sitepulse_register_settings() {
     ]);
 }
 add_action('admin_init', 'sitepulse_register_settings');
+
+/**
+ * Sanitizes the Gemini API key option.
+ *
+ * The existing key is preserved when the field is submitted empty so that the
+ * user is not forced to re-enter their credentials when saving other settings.
+ * The key can be explicitly deleted through the dedicated checkbox rendered in
+ * the settings form.
+ *
+ * @param mixed $value Raw user input value.
+ * @return string Sanitized API key or an empty string when deletion is requested.
+ */
+function sitepulse_sanitize_gemini_api_key($value) {
+    $current_value = (string) get_option(SITEPULSE_OPTION_GEMINI_API_KEY, '');
+
+    $should_delete = !empty($_POST['sitepulse_delete_gemini_api_key']);
+    if ($should_delete) {
+        return '';
+    }
+
+    if (!is_string($value)) {
+        return $current_value;
+    }
+
+    $value = trim($value);
+    if ($value === '') {
+        return $current_value;
+    }
+
+    $sanitized = sanitize_text_field($value);
+
+    return $sanitized !== '' ? $sanitized : $current_value;
+}
 
 /**
  * Sanitizes the module selection.
@@ -209,6 +242,8 @@ function sitepulse_settings_page() {
         'custom_dashboards'     => __('Custom Dashboards', 'sitepulse'),
         'error_alerts'          => __('Error Alerts', 'sitepulse'),
     ];
+    $gemini_api_key = (string) get_option(SITEPULSE_OPTION_GEMINI_API_KEY, '');
+    $has_gemini_api_key = $gemini_api_key !== '';
     $active_modules = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
     $debug_mode_option = get_option(SITEPULSE_OPTION_DEBUG_MODE);
     $is_debug_mode_enabled = rest_sanitize_boolean($debug_mode_option);
@@ -353,7 +388,14 @@ function sitepulse_settings_page() {
                 <tr valign="top">
                     <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>"><?php esc_html_e('Clé API Google Gemini', 'sitepulse'); ?></label></th>
                     <td>
-                        <input type="password" id="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>" value="<?php echo esc_attr(get_option(SITEPULSE_OPTION_GEMINI_API_KEY)); ?>" class="regular-text" />
+                        <input type="password" id="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>" value="" class="regular-text" autocomplete="new-password"<?php echo $has_gemini_api_key ? ' placeholder="' . esc_attr__('Une clé API est enregistrée', 'sitepulse') . '"' : ''; ?> />
+                        <?php if ($has_gemini_api_key): ?>
+                            <p class="description"><?php esc_html_e('Une clé API est déjà enregistrée. Laissez le champ vide pour la conserver ou cochez la case ci-dessous pour l’effacer.', 'sitepulse'); ?></p>
+                            <label for="sitepulse_delete_gemini_api_key">
+                                <input type="checkbox" id="sitepulse_delete_gemini_api_key" name="sitepulse_delete_gemini_api_key" value="1">
+                                <?php esc_html_e('Effacer la clé API enregistrée', 'sitepulse'); ?>
+                            </label>
+                        <?php endif; ?>
                         <p class="description"><?php printf(
                             wp_kses(
                                 /* translators: %s: URL to Google AI Studio. */
