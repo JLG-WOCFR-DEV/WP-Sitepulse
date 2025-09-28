@@ -517,7 +517,15 @@ function sitepulse_error_alerts_check_debug_log() {
             $raw_site_name = get_bloginfo('name');
             $site_name     = trim(wp_strip_all_tags((string) $raw_site_name));
 
-            $log_file_for_message = is_string($log_file) ? sanitize_text_field($log_file) : '';
+            $log_file_for_message = '';
+
+            if (is_string($log_file)) {
+                $normalized_log_file = function_exists('wp_normalize_path')
+                    ? wp_normalize_path($log_file)
+                    : str_replace('\\', '/', $log_file);
+
+                $log_file_for_message = sanitize_textarea_field($normalized_log_file);
+            }
 
             /* translators: %s: Site title. */
             $subject = sprintf(
