@@ -32,6 +32,20 @@ SitePulse - JLG est un plugin WordPress développé par Jérôme Le Gousse. Il s
 - **Nettoyage et désinstallation** : les réglages permettent de purger journaux et données, tandis que la routine `uninstall.php` supprime options, transients, tâches planifiées et fichiers de log en toute sécurité lors de la suppression du plugin.【F:sitepulse_FR/includes/admin-settings.php†L333-L366】【F:sitepulse_FR/uninstall.php†L1-L126】
 - **Pour aller plus loin** : consultez chaque module dans `sitepulse_FR/modules/` pour comprendre les métriques collectées, les interfaces générées et adapter vos interventions si besoin.【F:sitepulse_FR/modules/custom_dashboards.php†L1-L121】
 
+## Sécurisation du journal de debug
+- **Localisation par défaut** : SitePulse écrit ses logs dans `wp-content/uploads/sitepulse/sitepulse-debug.log` et crée automatiquement le dossier si nécessaire.【F:sitepulse_FR/sitepulse.php†L75-L114】
+- **Attention sur Nginx** : sur les environnements qui n'appliquent pas les directives `.htaccess`/`web.config`, le fichier peut rester téléchargeable publiquement. Déplacez-le vers un répertoire protégé (hors webroot) via le filtre `sitepulse_debug_log_base_dir` ou ajoutez une règle serveur qui bloque l'accès HTTP.【F:sitepulse_FR/sitepulse.php†L75-L114】
+- **Exemple de déplacement** :
+
+  ```php
+  add_filter('sitepulse_debug_log_base_dir', function ($base_dir) {
+      return '/var/log/sitepulse'; // répertoire hors webroot, accessible en écriture
+  });
+  ```
+
+  Assurez-vous de créer le dossier cible avec les bonnes permissions si WordPress ne peut pas le faire automatiquement.
+
+
 ## Tests
 Un harnais PHPUnit/WP-Unit est disponible dans `tests/phpunit/` (configuré via `phpunit.xml.dist`) afin de valider les modules clefs : suivi d'uptime, notices de debug, nettoyage des transients ainsi que l'analyse du journal d'erreurs (pointeurs de lecture, détection des fatals et verrou de cooldown).
 
@@ -47,3 +61,4 @@ Ce flux peut être réutilisé en CI pour éviter les régressions sur les fonct
 
 ## Filtres disponibles
 - `sitepulse_uptime_request_args` : ajuste les arguments passés à `wp_remote_get()` lors de la vérification d'uptime. Peut être utilisé pour désactiver `sslverify`, modifier le `timeout` ou définir une clé `url` pointant vers une adresse de test dédiée.
+- `sitepulse_debug_log_base_dir` : permet de modifier le répertoire racine qui accueillera `sitepulse-debug.log` afin de le déplacer hors du webroot ou vers un volume dédié.【F:sitepulse_FR/sitepulse.php†L86-L114】

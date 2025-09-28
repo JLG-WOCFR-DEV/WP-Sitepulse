@@ -105,12 +105,35 @@ if (is_array($sitepulse_upload_dir) && empty($sitepulse_upload_dir['error']) && 
     $sitepulse_debug_basedir = $sitepulse_upload_dir['basedir'];
 }
 
+/**
+ * Filters the base directory used to store SitePulse debug logs.
+ *
+ * This filter allows hosts to move the log directory outside of the publicly
+ * accessible web root when server-level protections (such as .htaccess or
+ * web.config) are not enforced.
+ *
+ * @param string     $sitepulse_debug_basedir Current base directory.
+ * @param array|bool $sitepulse_upload_dir    Result of wp_upload_dir().
+ */
+$sitepulse_filtered_basedir = apply_filters('sitepulse_debug_log_base_dir', $sitepulse_debug_basedir, $sitepulse_upload_dir);
+
+if (is_string($sitepulse_filtered_basedir) && $sitepulse_filtered_basedir !== '') {
+    $sitepulse_debug_basedir = $sitepulse_filtered_basedir;
+}
+
 $sitepulse_debug_directory = rtrim($sitepulse_debug_basedir, '/\\') . '/sitepulse';
 
 if (function_exists('wp_mkdir_p') && !is_dir($sitepulse_debug_directory)) {
     wp_mkdir_p($sitepulse_debug_directory);
 }
 
+/**
+ * Absolute path to the SitePulse debug log file.
+ *
+ * By default, the log lives in the WordPress uploads directory. Use the
+ * `sitepulse_debug_log_base_dir` filter to relocate it (e.g. outside the
+ * web root) when web server protections cannot be enforced automatically.
+ */
 define('SITEPULSE_DEBUG_LOG', rtrim($sitepulse_debug_directory, '/\\') . '/sitepulse-debug.log');
 
 require_once SITEPULSE_PATH . 'includes/debug-notices.php';
