@@ -25,6 +25,13 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
      */
     private $mock_response_parts = [];
 
+    /**
+     * Arguments passed to the most recent mocked HTTP request.
+     *
+     * @var array|null
+     */
+    private $last_http_args = null;
+
     public static function wpSetUpBeforeClass($factory) {
         require_once dirname(__DIR__, 2) . '/sitepulse_FR/modules/ai_insights.php';
     }
@@ -42,6 +49,7 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
 
         $this->http_request_count = 0;
         $this->mock_response_parts = [];
+        $this->last_http_args      = null;
 
         delete_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
         update_option(SITEPULSE_OPTION_GEMINI_API_KEY, '');
@@ -81,6 +89,9 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         remove_filter('pre_http_request', [$this, 'mock_gemini_success'], 10);
 
         $this->assertSame(1, $this->http_request_count, 'Exactly one Gemini request should be dispatched.');
+        $this->assertIsArray($this->last_http_args, 'HTTP request arguments should be captured.');
+        $this->assertArrayHasKey('limit_response_size', $this->last_http_args, 'A response size limit must be enforced.');
+        $this->assertSame(MB_IN_BYTES, $this->last_http_args['limit_response_size']);
 
         $response = json_decode($this->_last_response, true);
 
@@ -234,6 +245,45 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
     }
 
     /**
+     * Ensures the administrator receives a clear error when Gemini exceeds the response size limit.
+     */
+    public function test_response_size_limit_error_returns_clear_message() {
+        update_option(SITEPULSE_OPTION_GEMINI_API_KEY, 'test-api-key');
+
+        add_filter('sitepulse_ai_response_size_limit', [$this, 'filter_custom_response_size_limit']);
+        add_filter('pre_http_request', [$this, 'mock_gemini_response_size_error'], 10, 3);
+
+        $_POST['nonce'] = wp_create_nonce(SITEPULSE_NONCE_ACTION_AI_INSIGHT);
+        $_POST['force_refresh'] = 'true';
+
+        try {
+            $this->_handleAjax('sitepulse_generate_ai_insight');
+        } catch (WPAjaxDieStopException $exception) {
+            // Expected.
+        }
+
+        remove_filter('pre_http_request', [$this, 'mock_gemini_response_size_error'], 10);
+        remove_filter('sitepulse_ai_response_size_limit', [$this, 'filter_custom_response_size_limit']);
+
+        $this->assertSame(1, $this->http_request_count, 'The HTTP request should have been attempted once.');
+        $this->assertIsArray($this->last_http_args, 'HTTP request arguments should be captured.');
+        $this->assertArrayHasKey('limit_response_size', $this->last_http_args);
+        $this->assertSame(2 * MB_IN_BYTES, $this->last_http_args['limit_response_size']);
+
+        $response = json_decode($this->_last_response, true);
+
+        $this->assertIsArray($response);
+        $this->assertFalse($response['success']);
+
+        $expected_message = sprintf(
+            'La réponse de Gemini dépasse la taille maximale autorisée (%s). Veuillez réessayer ou augmenter la limite via le filtre sitepulse_ai_response_size_limit.',
+            sanitize_text_field(size_format(2 * MB_IN_BYTES, 2))
+        );
+
+        $this->assertSame($expected_message, $response['data']['message']);
+    }
+
+    /**
      * Provides a deterministic Gemini response payload.
      *
      * @param false|array $preempt Whether to short-circuit the request.
@@ -244,6 +294,7 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
      */
     public function mock_gemini_success($preempt, $args, $url) {
         $this->http_request_count++;
+        $this->last_http_args = $args;
 
         $parts = [];
 
@@ -304,8 +355,34 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
      */
     public function mock_gemini_error($preempt, $args, $url) {
         $this->http_request_count++;
+        $this->last_http_args = $args;
 
         return new WP_Error('gemini_error', 'Boom');
+    }
+
+    /**
+     * Returns a WP_Error mimicking the response size limit being exceeded.
+     *
+     * @param false|array $preempt Whether to short-circuit the request.
+     * @param array       $args    The request arguments.
+     * @param string      $url     The request URL.
+     *
+     * @return WP_Error
+     */
+    public function mock_gemini_response_size_error($preempt, $args, $url) {
+        $this->http_request_count++;
+        $this->last_http_args = $args;
+
+        return new WP_Error('http_request_failed', 'Response size limit reached');
+    }
+
+    /**
+     * Forces a predictable custom response size limit.
+     *
+     * @return int
+     */
+    public function filter_custom_response_size_limit() {
+        return 2 * MB_IN_BYTES;
     }
 
     /**
