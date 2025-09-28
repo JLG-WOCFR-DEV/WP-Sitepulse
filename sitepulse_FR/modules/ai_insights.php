@@ -205,19 +205,43 @@ function sitepulse_generate_ai_insight() {
         ],
     ];
 
+    $response_size_limit = (int) apply_filters('sitepulse_ai_response_size_limit', defined('MB_IN_BYTES') ? MB_IN_BYTES : 1_048_576);
+
+    $request_args = [
+        'headers' => [
+            'Content-Type'   => 'application/json',
+            'x-goog-api-key' => $api_key,
+        ],
+        'body'    => wp_json_encode($request_body),
+        'timeout' => 30,
+    ];
+
+    if ($response_size_limit > 0) {
+        $request_args['limit_response_size'] = $response_size_limit;
+    }
+
     $response = wp_remote_post(
         $endpoint,
-        [
-            'headers' => [
-                'Content-Type'  => 'application/json',
-                'x-goog-api-key' => $api_key,
-            ],
-            'body'    => wp_json_encode($request_body),
-            'timeout' => 30,
-        ]
+        $request_args
     );
 
     if (is_wp_error($response)) {
+        if (
+            $response_size_limit > 0
+            && 'http_request_failed' === $response->get_error_code()
+            && false !== stripos($response->get_error_message(), 'limit')
+        ) {
+            $formatted_limit = size_format($response_size_limit, 2);
+
+            wp_send_json_error([
+                'message' => sprintf(
+                    /* translators: %s: formatted size limit */
+                    esc_html__('La réponse de Gemini dépasse la taille maximale autorisée (%s). Veuillez réessayer ou augmenter la limite via le filtre sitepulse_ai_response_size_limit.', 'sitepulse'),
+                    sanitize_text_field($formatted_limit)
+                ),
+            ], 500);
+        }
+
         wp_send_json_error([
             'message' => sprintf(
                 /* translators: %s: error message */
