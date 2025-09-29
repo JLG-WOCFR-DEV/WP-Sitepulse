@@ -6,6 +6,10 @@
 class Sitepulse_Debug_Notices_Test extends WP_UnitTestCase {
     public static function wpSetUpBeforeClass($factory) {
         require_once dirname(__DIR__, 2) . '/sitepulse_FR/includes/debug-notices.php';
+
+        if (!defined('SITEPULSE_DEBUG_LOG')) {
+            require_once dirname(__DIR__, 2) . '/sitepulse_FR/sitepulse.php';
+        }
     }
 
     protected function set_up(): void {
@@ -13,11 +17,23 @@ class Sitepulse_Debug_Notices_Test extends WP_UnitTestCase {
 
         update_option(SITEPULSE_OPTION_DEBUG_NOTICES, []);
         sitepulse_debug_notice_registry(null, true);
+
+        if (function_exists('sitepulse_debug_logging_block_state')) {
+            sitepulse_debug_logging_block_state(false);
+        }
+
+        if (isset($GLOBALS['sitepulse_log_callable'])) {
+            unset($GLOBALS['sitepulse_log_callable']);
+        }
     }
 
     protected function tear_down(): void {
         sitepulse_debug_notice_registry(null, true);
         delete_option(SITEPULSE_OPTION_DEBUG_NOTICES);
+
+        if (isset($GLOBALS['sitepulse_log_callable'])) {
+            unset($GLOBALS['sitepulse_log_callable']);
+        }
 
         parent::tear_down();
     }
@@ -81,5 +97,65 @@ class Sitepulse_Debug_Notices_Test extends WP_UnitTestCase {
             '<div class="notice notice-info"><p>Immediate notice</p></div>',
             $immediate_output
         );
+    }
+
+    public function test_debug_log_write_blocked_when_relocation_failed(): void {
+        if (!defined('SITEPULSE_DEBUG_LOG') || !function_exists('sitepulse_real_log')) {
+            $this->markTestSkipped('Debug log implementation is not available.');
+        }
+
+        $previous_context = $GLOBALS['sitepulse_debug_log_security_context'] ?? null;
+
+        $log_path = SITEPULSE_DEBUG_LOG;
+        $log_dir  = dirname($log_path);
+
+        if (!is_dir($log_dir)) {
+            wp_mkdir_p($log_dir);
+        }
+
+        file_put_contents($log_path, "initial\n");
+
+        set_current_screen('front');
+        sitepulse_debug_notice_registry(null, true);
+        update_option(SITEPULSE_OPTION_DEBUG_NOTICES, []);
+
+        sitepulse_debug_logging_block_state(false);
+
+        $GLOBALS['sitepulse_log_callable'] = 'sitepulse_real_log';
+
+        $GLOBALS['sitepulse_debug_log_security_context'] = [
+            'server_support'       => 'unsupported',
+            'relocation_attempted' => true,
+            'relocation_success'   => false,
+            'relocation_failed'    => true,
+            'inside_webroot'       => true,
+            'directory_created'    => true,
+            'target_directory'     => $log_dir,
+        ];
+
+        sitepulse_log('Blocked attempt #1');
+
+        $this->assertSame("initial\n", file_get_contents($log_path), 'Log file should remain unchanged.');
+        $this->assertTrue(sitepulse_debug_logging_block_state(), 'Security context should block subsequent writes.');
+
+        $queued_notices = get_option(SITEPULSE_OPTION_DEBUG_NOTICES, []);
+        $this->assertCount(1, $queued_notices, 'Warning notice should be queued.');
+        $this->assertSame('warning', $queued_notices[0]['level']);
+        $this->assertStringContainsString('server appears to ignore', $queued_notices[0]['message']);
+
+        sitepulse_log('Blocked attempt #2');
+
+        $this->assertSame("initial\n", file_get_contents($log_path), 'Subsequent writes should be skipped.');
+        $this->assertCount(1, get_option(SITEPULSE_OPTION_DEBUG_NOTICES, []), 'No duplicate notices should be stored.');
+
+        set_current_screen('dashboard');
+
+        if ($previous_context === null) {
+            unset($GLOBALS['sitepulse_debug_log_security_context']);
+        } else {
+            $GLOBALS['sitepulse_debug_log_security_context'] = $previous_context;
+        }
+
+        sitepulse_debug_logging_block_state(false);
     }
 }
