@@ -98,8 +98,18 @@ function sitepulse_normalize_uptime_log($log) {
                 $incident_start = (int) $entry['incident_start'];
             }
 
-            if (isset($entry['error']) && is_string($entry['error'])) {
-                $error_message = $entry['error'];
+            if (array_key_exists('error', $entry)) {
+                $raw_error = $entry['error'];
+
+                if (is_scalar($raw_error)) {
+                    $error_message = (string) $raw_error;
+                } elseif (null !== $raw_error) {
+                    $encoded_error = wp_json_encode($raw_error);
+
+                    if (false !== $encoded_error) {
+                        $error_message = $encoded_error;
+                    }
+                }
             }
         } else {
             $status = (bool) (is_int($entry) ? $entry : !empty($entry));
@@ -219,6 +229,14 @@ function sitepulse_uptime_tracker_page() {
                             ? date_i18n($date_format . ' ' . $time_format, $incident_start)
                             : __('horodatage inconnu', 'sitepulse');
                         $bar_title = sprintf(__('Site KO lors du contrôle du %1$s. Incident commencé le %2$s.', 'sitepulse'), $check_time, $incident_start_formatted);
+
+                        if (array_key_exists('error', $entry)) {
+                            $error_detail = is_scalar($entry['error']) ? (string) $entry['error'] : wp_json_encode($entry['error']);
+
+                            if ('' !== $error_detail && false !== $error_detail) {
+                                $bar_title .= ' ' . sprintf(__('Détails : %s.', 'sitepulse'), $error_detail);
+                            }
+                        }
 
                         $is_transition = empty($previous_entry) || (isset($previous_entry['status']) && true === $previous_entry['status']);
 
@@ -374,6 +392,7 @@ function sitepulse_run_uptime_check() {
         }
 
         $entry['incident_start'] = $incident_start;
+        $entry['error'] = sprintf('HTTP %d', $response_code);
     }
 
     $log[] = $entry;
