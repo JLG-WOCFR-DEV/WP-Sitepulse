@@ -33,9 +33,10 @@ SitePulse - JLG est un plugin WordPress développé par Jérôme Le Gousse. Il s
 - **Pour aller plus loin** : consultez chaque module dans `sitepulse_FR/modules/` pour comprendre les métriques collectées, les interfaces générées et adapter vos interventions si besoin.【F:sitepulse_FR/modules/custom_dashboards.php†L1-L121】
 
 ## Sécurisation du journal de debug
-- **Localisation par défaut** : SitePulse écrit ses logs dans `wp-content/uploads/sitepulse/sitepulse-debug.log` et crée automatiquement le dossier si nécessaire.【F:sitepulse_FR/sitepulse.php†L75-L114】
-- **Attention sur Nginx** : sur les environnements qui n'appliquent pas les directives `.htaccess`/`web.config`, le fichier peut rester téléchargeable publiquement. Déplacez-le vers un répertoire protégé (hors webroot) via le filtre `sitepulse_debug_log_base_dir` ou ajoutez une règle serveur qui bloque l'accès HTTP.【F:sitepulse_FR/sitepulse.php†L75-L114】
-- **Exemple de déplacement** :
+- **Détection et relocalisation automatiques** : SitePulse détecte les serveurs qui ignorent les protections `.htaccess`/`web.config` (Nginx, Caddy, Lighttpd, etc.) et bascule le journal vers `dirname(ABSPATH)/sitepulse/sitepulse-debug.log` lorsqu'il reste dans le webroot après filtrage, en créant le dossier si possible.【F:sitepulse_FR/sitepulse.php†L195-L276】
+- **Avertissement explicite en cas d'échec** : si le déplacement hors webroot échoue (permissions insuffisantes, racine inaccessible, etc.), SitePulse écrit un avertissement dans le journal PHP et programme une notice d'administration afin d'inviter l'utilisateur à personnaliser `sitepulse_debug_log_base_dir` ou à renforcer le blocage côté serveur.【F:sitepulse_FR/sitepulse.php†L821-L878】
+- **Test manuel Nginx** : sur un serveur Nginx vierge, activez le mode debug, vérifiez que `wp-content/uploads/sitepulse/` reste vide et que le fichier `sitepulse-debug.log` est bien créé dans `dirname(ABSPATH)/sitepulse/`; assurez-vous ensuite qu'il n'est plus téléchargeable publiquement (ex. `curl -I https://exemple.test/sitepulse-debug.log` doit renvoyer 404/403).【F:sitepulse_FR/sitepulse.php†L195-L276】
+- **Localisation personnalisée** : vous pouvez toujours définir un emplacement dédié via le filtre `sitepulse_debug_log_base_dir` (troisième argument = support serveur) pour pointer vers un volume applicatif ou un stockage centralisé.【F:sitepulse_FR/sitepulse.php†L202-L218】
 
   ```php
   add_filter('sitepulse_debug_log_base_dir', function ($base_dir) {
@@ -61,4 +62,5 @@ Ce flux peut être réutilisé en CI pour éviter les régressions sur les fonct
 
 ## Filtres disponibles
 - `sitepulse_uptime_request_args` : ajuste les arguments passés à `wp_remote_get()` lors de la vérification d'uptime. Peut être utilisé pour désactiver `sslverify`, modifier le `timeout` ou définir une clé `url` pointant vers une adresse de test dédiée.
-- `sitepulse_debug_log_base_dir` : permet de modifier le répertoire racine qui accueillera `sitepulse-debug.log` afin de le déplacer hors du webroot ou vers un volume dédié.【F:sitepulse_FR/sitepulse.php†L86-L114】
+- `sitepulse_debug_log_base_dir` : permet de modifier le répertoire racine qui accueillera `sitepulse-debug.log` afin de le déplacer hors du webroot ou vers un volume dédié (le troisième argument indique si le serveur gère les protections).【F:sitepulse_FR/sitepulse.php†L202-L218】
+- `sitepulse_server_protection_file_support` : ajuste la détection automatique des serveurs compatibles (`supported`, `unsupported`, `unknown`) pour forcer ou désactiver la relocalisation des journaux.【F:sitepulse_FR/sitepulse.php†L93-L126】
