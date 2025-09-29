@@ -25,6 +25,49 @@ function sitepulse_resource_monitor_enqueue_assets($hook_suffix) {
 }
 
 /**
+ * Formats CPU load values for display.
+ *
+ * @param mixed $load_values Raw load average values.
+ * @return string
+ */
+function sitepulse_resource_monitor_format_load_display($load_values) {
+    if (!is_array($load_values) || empty($load_values)) {
+        $load_values = ['N/A', 'N/A', 'N/A'];
+    }
+
+    $normalized_values = array_map(
+        static function ($value) {
+            if (is_numeric($value)) {
+                return number_format_i18n((float) $value, 2);
+            }
+
+            if (is_string($value) && $value !== '') {
+                return $value;
+            }
+
+            if (is_bool($value)) {
+                return $value ? '1' : '0';
+            }
+
+            if (is_null($value)) {
+                return 'N/A';
+            }
+
+            if (is_scalar($value)) {
+                return (string) $value;
+            }
+
+            return 'N/A';
+        },
+        array_slice(array_values((array) $load_values), 0, 3)
+    );
+
+    $normalized_values = array_pad($normalized_values, 3, 'N/A');
+
+    return implode(' / ', $normalized_values);
+}
+
+/**
  * Returns cached resource metrics or computes a fresh snapshot.
  *
  * @return array{
@@ -47,7 +90,7 @@ function sitepulse_resource_monitor_get_snapshot() {
 
     $notices = [];
     $load = ['N/A', 'N/A', 'N/A'];
-    $load_display = implode(' / ', array_map('strval', $load));
+    $load_display = sitepulse_resource_monitor_format_load_display($load);
 
     if (function_exists('sys_getloadavg')) {
         $load_values = sys_getloadavg();
@@ -64,7 +107,7 @@ function sitepulse_resource_monitor_get_snapshot() {
 
         if ($load_values_are_numeric) {
             $load = $load_values;
-            $load_display = implode(' / ', array_map('strval', $load));
+            $load_display = sitepulse_resource_monitor_format_load_display($load);
         } else {
             $message = esc_html__('Indisponible – sys_getloadavg() désactivée par votre hébergeur', 'sitepulse');
             $notices[] = [
@@ -285,7 +328,12 @@ function sitepulse_resource_monitor_page() {
         <div class="sitepulse-resource-grid">
             <div class="sitepulse-resource-card">
                 <h2><?php esc_html_e('Charge CPU (1/5/15 min)', 'sitepulse'); ?></h2>
-                <p class="sitepulse-resource-value"><?php echo esc_html($snapshot['load_display']); ?></p>
+                <?php
+                $load_display_output = isset($snapshot['load']) && is_array($snapshot['load'])
+                    ? sitepulse_resource_monitor_format_load_display($snapshot['load'])
+                    : (string) $snapshot['load_display'];
+                ?>
+                <p class="sitepulse-resource-value"><?php echo esc_html($load_display_output); ?></p>
             </div>
             <div class="sitepulse-resource-card">
                 <h2><?php esc_html_e('Mémoire', 'sitepulse'); ?></h2>
