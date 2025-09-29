@@ -284,6 +284,48 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
     }
 
     /**
+     * Ensures that HTTP errors trigger the AI insight logger with sanitized output.
+     */
+    public function test_http_error_triggers_logger() {
+        update_option(SITEPULSE_OPTION_GEMINI_API_KEY, 'test-api-key');
+
+        add_filter('pre_http_request', [$this, 'mock_gemini_http_error'], 10, 3);
+
+        $_POST['nonce'] = wp_create_nonce(SITEPULSE_NONCE_ACTION_AI_INSIGHT);
+        $_POST['force_refresh'] = 'true';
+
+        $logged_entries = [];
+
+        $GLOBALS['sitepulse_log_callable'] = function ($message, $level) use (&$logged_entries) {
+            $logged_entries[] = [
+                'message' => $message,
+                'level'   => $level,
+            ];
+        };
+
+        try {
+            $this->_handleAjax('sitepulse_generate_ai_insight');
+        } catch (WPAjaxDieStopException $exception) {
+            // Expected.
+        }
+
+        remove_filter('pre_http_request', [$this, 'mock_gemini_http_error'], 10);
+
+        unset($GLOBALS['sitepulse_log_callable']);
+
+        $this->assertNotEmpty($logged_entries, 'An HTTP error should be logged.');
+        $this->assertSame('ERROR', $logged_entries[0]['level']);
+        $this->assertStringContainsString('AI Insights', $logged_entries[0]['message']);
+        $this->assertStringContainsString('Server exploded', $logged_entries[0]['message']);
+        $this->assertStringNotContainsString('<b>', $logged_entries[0]['message']);
+        $this->assertStringContainsString('500', $logged_entries[0]['message']);
+
+        $response = json_decode($this->_last_response, true);
+
+        $this->assertFalse($response['success']);
+    }
+
+    /**
      * Provides a deterministic Gemini response payload.
      *
      * @param false|array $preempt Whether to short-circuit the request.
@@ -374,6 +416,32 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->last_http_args = $args;
 
         return new WP_Error('http_request_failed', 'Response size limit reached');
+    }
+
+    /**
+     * Returns an HTTP error-style response to trigger logging.
+     *
+     * @param false|array $preempt Whether to short-circuit the request.
+     * @param array       $args    The request arguments.
+     * @param string      $url     The request URL.
+     *
+     * @return array
+     */
+    public function mock_gemini_http_error($preempt, $args, $url) {
+        $this->http_request_count++;
+        $this->last_http_args = $args;
+
+        return [
+            'response' => [
+                'code'    => 500,
+                'message' => 'Internal Server Error',
+            ],
+            'body' => wp_json_encode([
+                'error' => [
+                    'message' => '<b>Server exploded</b>',
+                ],
+            ]),
+        ];
     }
 
     /**
