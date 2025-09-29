@@ -768,6 +768,23 @@ function sitepulse_handle_module_changes($old_value, $value, $option = null) {
 add_action('update_option_' . SITEPULSE_OPTION_ACTIVE_MODULES, 'sitepulse_handle_module_changes', 10, 3);
 
 /**
+ * Tracks whether SitePulse debug log writes should be blocked.
+ *
+ * @param bool|null $set Optional. New blocked state.
+ *
+ * @return bool Current blocked state.
+ */
+function sitepulse_debug_logging_block_state($set = null) {
+    static $blocked = false;
+
+    if ($set !== null) {
+        $blocked = (bool) $set;
+    }
+
+    return $blocked;
+}
+
+/**
  * Logging function for debugging purposes.
  *
  * Writes SitePulse debug entries to a dedicated log file when debug mode is enabled.
@@ -779,8 +796,12 @@ add_action('update_option_' . SITEPULSE_OPTION_ACTIVE_MODULES, 'sitepulse_handle
  * @param string $message The message to log.
  * @param string $level   The log level (e.g., INFO, WARNING, ERROR).
  */
-function sitepulse_log($message, $level = 'INFO') {
+function sitepulse_real_log($message, $level = 'INFO') {
     if (!SITEPULSE_DEBUG) {
+        return;
+    }
+
+    if (sitepulse_debug_logging_block_state()) {
         return;
     }
 
@@ -861,8 +882,16 @@ function sitepulse_log($message, $level = 'INFO') {
             $relocation_attempted = !empty($security_context['relocation_attempted']);
             $relocation_success   = !empty($security_context['relocation_success']);
             $relocation_failed    = !empty($security_context['relocation_failed']);
+            $inside_webroot       = array_key_exists('inside_webroot', $security_context)
+                ? $security_context['inside_webroot']
+                : null;
 
-            if ($server_support === 'unsupported' && $relocation_attempted && (!$relocation_success || $relocation_failed)) {
+            $relocation_block_required = (
+                $relocation_failed
+                || ($relocation_attempted && !$relocation_success)
+            );
+
+            if ($server_support === 'unsupported' && $relocation_block_required && $inside_webroot !== false) {
                 static $sitepulse_insecure_log_warning_emitted = false;
 
                 if (!$sitepulse_insecure_log_warning_emitted) {
@@ -876,6 +905,10 @@ function sitepulse_log($message, $level = 'INFO') {
                     error_log($warning_message);
                     sitepulse_schedule_debug_admin_notice($warning_message, 'warning');
                 }
+
+                sitepulse_debug_logging_block_state(true);
+
+                return;
             }
         }
     }
@@ -949,6 +982,20 @@ function sitepulse_log($message, $level = 'INFO') {
         $error_message = sprintf('SitePulse: unable to write to debug log file (%s).', SITEPULSE_DEBUG_LOG);
         error_log($error_message);
         sitepulse_schedule_debug_admin_notice($error_message);
+    }
+}
+
+if (!function_exists('sitepulse_log')) {
+    /**
+     * Wrapper for the real logging implementation to support test overrides.
+     *
+     * @param string $message The message to log.
+     * @param string $level   The log level (e.g., INFO, WARNING, ERROR).
+     *
+     * @return void
+     */
+    function sitepulse_log($message, $level = 'INFO') {
+        sitepulse_real_log($message, $level);
     }
 }
 sitepulse_log('SitePulse loaded. Version: ' . SITEPULSE_VERSION);

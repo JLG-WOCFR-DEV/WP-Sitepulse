@@ -75,6 +75,10 @@ if (!defined('SITEPULSE_URL')) {
 
 if (!function_exists('sitepulse_log')) {
     function sitepulse_log($message, $level = 'INFO') {
+        if (isset($GLOBALS['sitepulse_log_callable']) && is_callable($GLOBALS['sitepulse_log_callable'])) {
+            return call_user_func($GLOBALS['sitepulse_log_callable'], $message, $level);
+        }
+
         if (!isset($GLOBALS['sitepulse_logger'])) {
             $GLOBALS['sitepulse_logger'] = [];
         }
