@@ -24,6 +24,71 @@ function sitepulse_custom_dashboard_enqueue_assets($hook_suffix) {
     $default_chartjs_src = SITEPULSE_URL . 'modules/vendor/chart.js/chart.umd.js';
     $chartjs_src = apply_filters('sitepulse_chartjs_src', $default_chartjs_src);
 
+    if ($chartjs_src !== $default_chartjs_src) {
+        $original_chartjs_src = $chartjs_src;
+        $is_valid_chartjs_src = false;
+
+        if (is_string($chartjs_src) && $chartjs_src !== '') {
+            $validated_chartjs_src = wp_http_validate_url($chartjs_src);
+
+            if ($validated_chartjs_src !== false) {
+                $parsed_chartjs_src = wp_parse_url($validated_chartjs_src);
+                $scheme = isset($parsed_chartjs_src['scheme']) ? strtolower($parsed_chartjs_src['scheme']) : '';
+                $is_https = ('https' === $scheme);
+                $is_plugin_internal = false;
+
+                $sitepulse_base = wp_parse_url(SITEPULSE_URL);
+
+                if (is_array($parsed_chartjs_src) && is_array($sitepulse_base)) {
+                    $source_host = isset($parsed_chartjs_src['host']) ? strtolower($parsed_chartjs_src['host']) : '';
+                    $base_host = isset($sitepulse_base['host']) ? strtolower($sitepulse_base['host']) : '';
+
+                    if ($source_host && $base_host && $source_host === $base_host) {
+                        $source_path = isset($parsed_chartjs_src['path']) ? $parsed_chartjs_src['path'] : '';
+                        $base_path = isset($sitepulse_base['path']) ? $sitepulse_base['path'] : '';
+
+                        if ($base_path === '' || strpos($source_path, $base_path) === 0) {
+                            $is_plugin_internal = true;
+                        }
+                    }
+                }
+
+                if ($is_https || $is_plugin_internal) {
+                    $chartjs_src = $validated_chartjs_src;
+                    $is_valid_chartjs_src = true;
+                }
+            } elseif (strpos($chartjs_src, SITEPULSE_URL) === 0) {
+                // Allow internal plugin URLs even if wp_http_validate_url() returned false.
+                $is_valid_chartjs_src = true;
+            }
+        }
+
+        if (!$is_valid_chartjs_src) {
+            if (function_exists('sitepulse_log')) {
+                $log_value = '';
+
+                if (is_string($original_chartjs_src)) {
+                    $log_value = esc_url_raw($original_chartjs_src);
+                } elseif (is_scalar($original_chartjs_src)) {
+                    $log_value = (string) $original_chartjs_src;
+                } else {
+                    $encoded_value = wp_json_encode($original_chartjs_src);
+                    $log_value = is_string($encoded_value) ? $encoded_value : '';
+                }
+
+                sitepulse_log(
+                    sprintf(
+                        'SitePulse: invalid Chart.js source override rejected. Value: %s',
+                        $log_value
+                    ),
+                    'DEBUG'
+                );
+            }
+
+            $chartjs_src = $default_chartjs_src;
+        }
+    }
+
     wp_register_script(
         'sitepulse-chartjs',
         $chartjs_src,
