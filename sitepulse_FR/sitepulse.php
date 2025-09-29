@@ -85,6 +85,100 @@ function sitepulse_get_wp_debug_log_path($require_readable = false) {
     return $path;
 }
 
+/**
+ * Detects whether the current web server honours .htaccess or web.config files.
+ *
+ * @return string One of 'supported', 'unsupported' or 'unknown'.
+ */
+function sitepulse_server_supports_protection_files() {
+    static $support = null;
+
+    if ($support !== null) {
+        return $support;
+    }
+
+    $support = 'unknown';
+    $server_software = '';
+
+    if (isset($_SERVER['SERVER_SOFTWARE'])) {
+        $server_software = strtolower((string) $_SERVER['SERVER_SOFTWARE']);
+    }
+
+    if (defined('NGINX') && NGINX) {
+        $support = 'unsupported';
+    } elseif ($server_software !== '') {
+        if (strpos($server_software, 'nginx') !== false || strpos($server_software, 'caddy') !== false || strpos($server_software, 'lighttpd') !== false) {
+            $support = 'unsupported';
+        } elseif (strpos($server_software, 'apache') !== false || strpos($server_software, 'litespeed') !== false || strpos($server_software, 'iis') !== false) {
+            $support = 'supported';
+        }
+    }
+
+    if (function_exists('apply_filters')) {
+        $filtered_support = apply_filters('sitepulse_server_protection_file_support', $support, $server_software);
+
+        if (is_string($filtered_support) && $filtered_support !== '') {
+            $support = $filtered_support;
+        }
+    }
+
+    return $support;
+}
+
+/**
+ * Normalizes a filesystem path for comparisons.
+ *
+ * @param string $path Raw filesystem path.
+ *
+ * @return string Normalized path without a trailing slash.
+ */
+function sitepulse_normalize_path_for_comparison($path) {
+    $path = (string) $path;
+
+    if ($path === '') {
+        return '';
+    }
+
+    if (function_exists('wp_normalize_path')) {
+        $path = wp_normalize_path($path);
+    } else {
+        $path = str_replace('\\', '/', $path);
+    }
+
+    $path = rtrim($path, '/');
+
+    return $path;
+}
+
+/**
+ * Determines whether a path is contained within a given root directory.
+ *
+ * @param string $path Absolute path to evaluate.
+ * @param string $root Absolute root directory.
+ *
+ * @return bool|null True when contained, false when outside, null when undetermined.
+ */
+function sitepulse_path_is_within_root($path, $root) {
+    $path = sitepulse_normalize_path_for_comparison($path);
+    $root = sitepulse_normalize_path_for_comparison($root);
+
+    if ($path === '' || $root === '') {
+        return null;
+    }
+
+    $is_windows = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
+
+    if ($is_windows) {
+        $path = strtolower($path);
+        $root = strtolower($root);
+    }
+
+    $root_with_slash = rtrim($root, '/') . '/';
+    $path_with_slash = rtrim($path, '/') . '/';
+
+    return strpos($path_with_slash, $root_with_slash) === 0;
+}
+
 $debug_mode = get_option(SITEPULSE_OPTION_DEBUG_MODE, false);
 define('SITEPULSE_DEBUG', (bool) $debug_mode);
 
@@ -105,6 +199,8 @@ if (is_array($sitepulse_upload_dir) && empty($sitepulse_upload_dir['error']) && 
     $sitepulse_debug_basedir = $sitepulse_upload_dir['basedir'];
 }
 
+$sitepulse_server_protection_support = sitepulse_server_supports_protection_files();
+
 /**
  * Filters the base directory used to store SitePulse debug logs.
  *
@@ -112,20 +208,64 @@ if (is_array($sitepulse_upload_dir) && empty($sitepulse_upload_dir['error']) && 
  * accessible web root when server-level protections (such as .htaccess or
  * web.config) are not enforced.
  *
- * @param string     $sitepulse_debug_basedir Current base directory.
- * @param array|bool $sitepulse_upload_dir    Result of wp_upload_dir().
+ * @param string     $sitepulse_debug_basedir       Current base directory.
+ * @param array|bool $sitepulse_upload_dir          Result of wp_upload_dir().
+ * @param string     $sitepulse_server_protection_support One of 'supported',
+ *                                                        'unsupported' or 'unknown'.
  */
-$sitepulse_filtered_basedir = apply_filters('sitepulse_debug_log_base_dir', $sitepulse_debug_basedir, $sitepulse_upload_dir);
+$sitepulse_filtered_basedir = apply_filters('sitepulse_debug_log_base_dir', $sitepulse_debug_basedir, $sitepulse_upload_dir, $sitepulse_server_protection_support);
 
 if (is_string($sitepulse_filtered_basedir) && $sitepulse_filtered_basedir !== '') {
     $sitepulse_debug_basedir = $sitepulse_filtered_basedir;
 }
 
-$sitepulse_debug_directory = rtrim($sitepulse_debug_basedir, '/\\') . '/sitepulse';
+$sitepulse_security_context = [
+    'server_support'       => $sitepulse_server_protection_support,
+    'relocation_attempted' => false,
+    'relocation_success'   => false,
+    'relocation_failed'    => false,
+    'directory_created'    => false,
+    'inside_webroot'       => null,
+    'target_directory'     => null,
+];
 
-if (function_exists('wp_mkdir_p') && !is_dir($sitepulse_debug_directory)) {
-    wp_mkdir_p($sitepulse_debug_directory);
+$sitepulse_base_inside_webroot = sitepulse_path_is_within_root($sitepulse_debug_basedir, ABSPATH);
+
+if ($sitepulse_server_protection_support === 'unsupported' && $sitepulse_base_inside_webroot !== false) {
+    $sitepulse_security_context['relocation_attempted'] = true;
+    $sitepulse_debug_basedir = dirname(ABSPATH);
+    $sitepulse_base_inside_webroot = sitepulse_path_is_within_root($sitepulse_debug_basedir, ABSPATH);
+
+    if ($sitepulse_base_inside_webroot !== false) {
+        $sitepulse_security_context['relocation_failed'] = true;
+    }
 }
+
+$sitepulse_debug_directory = rtrim($sitepulse_debug_basedir, '/\\') . '/sitepulse';
+$sitepulse_security_context['target_directory'] = $sitepulse_debug_directory;
+
+$sitepulse_directory_exists = is_dir($sitepulse_debug_directory);
+
+if (!$sitepulse_directory_exists && function_exists('wp_mkdir_p')) {
+    $sitepulse_directory_exists = wp_mkdir_p($sitepulse_debug_directory);
+}
+
+if (!$sitepulse_directory_exists) {
+    $sitepulse_directory_exists = is_dir($sitepulse_debug_directory);
+}
+
+$sitepulse_security_context['directory_created'] = $sitepulse_directory_exists;
+$sitepulse_security_context['inside_webroot']   = sitepulse_path_is_within_root($sitepulse_debug_directory, ABSPATH);
+
+if ($sitepulse_security_context['relocation_attempted']) {
+    if ($sitepulse_directory_exists && $sitepulse_security_context['inside_webroot'] === false) {
+        $sitepulse_security_context['relocation_success'] = true;
+    } else {
+        $sitepulse_security_context['relocation_failed'] = true;
+    }
+}
+
+$GLOBALS['sitepulse_debug_log_security_context'] = $sitepulse_security_context;
 
 /**
  * Absolute path to the SitePulse debug log file.
@@ -712,6 +852,30 @@ function sitepulse_log($message, $level = 'INFO') {
                 $error_message = sprintf('SitePulse: unable to write protection file (%s).', $path);
                 error_log($error_message);
                 sitepulse_schedule_debug_admin_notice($error_message);
+            }
+        }
+
+        if (isset($GLOBALS['sitepulse_debug_log_security_context']) && is_array($GLOBALS['sitepulse_debug_log_security_context'])) {
+            $security_context = $GLOBALS['sitepulse_debug_log_security_context'];
+            $server_support   = isset($security_context['server_support']) ? $security_context['server_support'] : 'unknown';
+            $relocation_attempted = !empty($security_context['relocation_attempted']);
+            $relocation_success   = !empty($security_context['relocation_success']);
+            $relocation_failed    = !empty($security_context['relocation_failed']);
+
+            if ($server_support === 'unsupported' && $relocation_attempted && (!$relocation_success || $relocation_failed)) {
+                static $sitepulse_insecure_log_warning_emitted = false;
+
+                if (!$sitepulse_insecure_log_warning_emitted) {
+                    $sitepulse_insecure_log_warning_emitted = true;
+                    $warning_message = 'SitePulse: the server appears to ignore .htaccess/web.config directives and the debug log could not be moved outside of the web root. Please customize the sitepulse_debug_log_base_dir filter or block HTTP access at the server level.';
+
+                    if (function_exists('__')) {
+                        $warning_message = __('SitePulse: the server appears to ignore .htaccess/web.config directives and the debug log could not be moved outside of the web root. Please customize the sitepulse_debug_log_base_dir filter or block HTTP access at the server level.', 'sitepulse');
+                    }
+
+                    error_log($warning_message);
+                    sitepulse_schedule_debug_admin_notice($warning_message, 'warning');
+                }
             }
         }
     }
