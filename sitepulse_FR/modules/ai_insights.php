@@ -131,17 +131,38 @@ function sitepulse_ai_insights_page() {
 }
 
 function sitepulse_generate_ai_insight() {
+    $log_ai_error = static function ($message, $status_code = null) {
+        if (!function_exists('sitepulse_log')) {
+            return;
+        }
+
+        $message = (string) $message;
+        $log_message = null !== $status_code
+            ? sprintf('AI Insights (%d): %s', (int) $status_code, $message)
+            : sprintf('AI Insights: %s', $message);
+
+        sitepulse_log($log_message, 'ERROR');
+    };
+
     if (!current_user_can('manage_options')) {
+        $error_message = esc_html__("Vous n'avez pas les permissions nécessaires pour effectuer cette action.", 'sitepulse');
+
+        $log_ai_error($error_message, 403);
+
         wp_send_json_error([
-            'message' => esc_html__("Vous n'avez pas les permissions nécessaires pour effectuer cette action.", 'sitepulse'),
+            'message' => $error_message,
         ], 403);
     }
 
     $nonce = isset($_POST['nonce']) ? sanitize_text_field(wp_unslash($_POST['nonce'])) : '';
 
     if (!wp_verify_nonce($nonce, SITEPULSE_NONCE_ACTION_AI_INSIGHT)) {
+        $error_message = esc_html__('Échec de la vérification de sécurité. Veuillez recharger la page et réessayer.', 'sitepulse');
+
+        $log_ai_error($error_message, 400);
+
         wp_send_json_error([
-            'message' => esc_html__('Échec de la vérification de sécurité. Veuillez recharger la page et réessayer.', 'sitepulse'),
+            'message' => $error_message,
         ], 400);
     }
 
@@ -163,8 +184,12 @@ function sitepulse_generate_ai_insight() {
     $api_key = trim((string) get_option(SITEPULSE_OPTION_GEMINI_API_KEY));
 
     if ('' === $api_key) {
+        $error_message = esc_html__('Veuillez entrer votre clé API Google Gemini dans les réglages de SitePulse.', 'sitepulse');
+
+        $log_ai_error($error_message, 400);
+
         wp_send_json_error([
-            'message' => esc_html__('Veuillez entrer votre clé API Google Gemini dans les réglages de SitePulse.', 'sitepulse'),
+            'message' => $error_message,
         ], 400);
     }
 
@@ -232,22 +257,31 @@ function sitepulse_generate_ai_insight() {
             && false !== stripos($response->get_error_message(), 'limit')
         ) {
             $formatted_limit = size_format($response_size_limit, 2);
+            $sanitized_limit = sanitize_text_field($formatted_limit);
+            $error_message   = sprintf(
+                /* translators: %s: formatted size limit */
+                esc_html__('La réponse de Gemini dépasse la taille maximale autorisée (%s). Veuillez réessayer ou augmenter la limite via le filtre sitepulse_ai_response_size_limit.', 'sitepulse'),
+                $sanitized_limit
+            );
+
+            $log_ai_error($error_message, 500);
 
             wp_send_json_error([
-                'message' => sprintf(
-                    /* translators: %s: formatted size limit */
-                    esc_html__('La réponse de Gemini dépasse la taille maximale autorisée (%s). Veuillez réessayer ou augmenter la limite via le filtre sitepulse_ai_response_size_limit.', 'sitepulse'),
-                    sanitize_text_field($formatted_limit)
-                ),
+                'message' => $error_message,
             ], 500);
         }
 
+        $sanitized_error_message = sanitize_text_field($response->get_error_message());
+        $error_message           = sprintf(
+            /* translators: %s: error message */
+            esc_html__('Erreur lors de la génération de l’analyse IA : %s', 'sitepulse'),
+            $sanitized_error_message
+        );
+
+        $log_ai_error($error_message, 500);
+
         wp_send_json_error([
-            'message' => sprintf(
-                /* translators: %s: error message */
-                esc_html__('Erreur lors de la génération de l’analyse IA : %s', 'sitepulse'),
-                sanitize_text_field($response->get_error_message())
-            ),
+            'message' => $error_message,
         ], 500);
     }
 
@@ -271,20 +305,29 @@ function sitepulse_generate_ai_insight() {
             $error_detail = sprintf(esc_html__('HTTP %d', 'sitepulse'), $status_code);
         }
 
+        $sanitized_error_detail = sanitize_text_field($error_detail);
+        $error_message          = sprintf(
+            /* translators: %s: error message */
+            esc_html__('Erreur lors de la génération de l’analyse IA : %s', 'sitepulse'),
+            $sanitized_error_detail
+        );
+
+        $log_ai_error($error_message, $status_code);
+
         wp_send_json_error([
-            'message' => sprintf(
-                /* translators: %s: error message */
-                esc_html__('Erreur lors de la génération de l’analyse IA : %s', 'sitepulse'),
-                sanitize_text_field($error_detail)
-            ),
+            'message' => $error_message,
         ], 500);
     }
 
     $decoded_body = json_decode($body, true);
 
     if (!is_array($decoded_body) || !isset($decoded_body['candidates'][0]['content']['parts']) || !is_array($decoded_body['candidates'][0]['content']['parts'])) {
+        $error_message = esc_html__('Structure de réponse inattendue reçue depuis Gemini.', 'sitepulse');
+
+        $log_ai_error($error_message, 500);
+
         wp_send_json_error([
-            'message' => esc_html__('Structure de réponse inattendue reçue depuis Gemini.', 'sitepulse'),
+            'message' => $error_message,
         ], 500);
     }
 
@@ -299,8 +342,12 @@ function sitepulse_generate_ai_insight() {
     $generated_text = trim($generated_text);
 
     if ('' === $generated_text) {
+        $error_message = esc_html__('La réponse de Gemini ne contient aucun texte exploitable.', 'sitepulse');
+
+        $log_ai_error($error_message, 500);
+
         wp_send_json_error([
-            'message' => esc_html__('La réponse de Gemini ne contient aucun texte exploitable.', 'sitepulse'),
+            'message' => $error_message,
         ], 500);
     }
 
