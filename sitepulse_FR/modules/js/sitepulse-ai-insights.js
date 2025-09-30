@@ -78,6 +78,19 @@
         $errorContainer.show();
     }
 
+    function reinstateLastResult($resultContainer, $resultText, $timestampEl, $statusEl, lastResultData) {
+        if (lastResultData && lastResultData.text) {
+            renderResult($resultContainer, $resultText, $timestampEl, $statusEl, lastResultData);
+
+            return true;
+        }
+
+        setStatus($statusEl, '');
+        $resultContainer.hide();
+
+        return false;
+    }
+
     $(function () {
         if (typeof sitepulseAIInsights === 'undefined') {
             return;
@@ -93,6 +106,93 @@
         var $timestampEl = $resultContainer.find('.sitepulse-ai-insight-timestamp');
         var $forceRefreshToggle = $('#sitepulse-ai-force-refresh');
         var lastResultData = null;
+        var pollTimer = null;
+        var activeJobId = null;
+
+        function clearPollingTimer() {
+            if (pollTimer) {
+                window.clearTimeout(pollTimer);
+                pollTimer = null;
+            }
+        }
+
+        function finalizeRequest() {
+            clearPollingTimer();
+            activeJobId = null;
+            $spinner.removeClass('is-active');
+            $button.prop('disabled', false);
+        }
+
+        function scheduleJobPoll(jobId, immediate) {
+            clearPollingTimer();
+
+            var interval = parseInt(sitepulseAIInsights.pollInterval, 10);
+
+            if (!isFinite(interval) || interval <= 0) {
+                interval = 5000;
+            }
+
+            pollTimer = window.setTimeout(function () {
+                $.post(sitepulseAIInsights.ajaxUrl, {
+                    action: sitepulseAIInsights.statusAction || 'sitepulse_get_ai_insight_status',
+                    nonce: sitepulseAIInsights.nonce,
+                    job_id: jobId
+                }).done(function (response) {
+                    if (response && response.success && response.data) {
+                        var status = typeof response.data.status === 'string' ? response.data.status : 'queued';
+
+                        if (status === 'completed' && response.data.result) {
+                            lastResultData = renderResult($resultContainer, $resultText, $timestampEl, $statusEl, response.data.result);
+                            finalizeRequest();
+                        } else if (status === 'failed') {
+                            var failureMessage = response.data.message || sitepulseAIInsights.strings.defaultError;
+                            showError($errorContainer, $errorText, failureMessage);
+                            var hadPrevious = reinstateLastResult($resultContainer, $resultText, $timestampEl, $statusEl, lastResultData);
+                            setStatus($statusEl, sitepulseAIInsights.strings.statusFailed);
+                            if (!hadPrevious) {
+                                $resultContainer.show();
+                            }
+                            finalizeRequest();
+                        } else {
+                            var queuedMessage = sitepulseAIInsights.strings.statusGenerating;
+
+                            if (status === 'queued' && sitepulseAIInsights.strings.statusQueued) {
+                                queuedMessage = sitepulseAIInsights.strings.statusQueued;
+                            }
+
+                            setStatus($statusEl, queuedMessage);
+                            $resultContainer.show();
+                            scheduleJobPoll(jobId, false);
+                        }
+                    } else {
+                        var unknownMessage = response && response.data && response.data.message
+                            ? response.data.message
+                            : sitepulseAIInsights.strings.defaultError;
+                        showError($errorContainer, $errorText, unknownMessage);
+                        var hadResult = reinstateLastResult($resultContainer, $resultText, $timestampEl, $statusEl, lastResultData);
+                        setStatus($statusEl, sitepulseAIInsights.strings.statusFailed);
+                        if (!hadResult) {
+                            $resultContainer.show();
+                        }
+                        finalizeRequest();
+                    }
+                }).fail(function (xhr) {
+                    var message = sitepulseAIInsights.strings.defaultError;
+
+                    if (xhr && xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) {
+                        message = xhr.responseJSON.data.message;
+                    }
+
+                    showError($errorContainer, $errorText, message);
+                    var hadData = reinstateLastResult($resultContainer, $resultText, $timestampEl, $statusEl, lastResultData);
+                    setStatus($statusEl, sitepulseAIInsights.strings.statusFailed);
+                    if (!hadData) {
+                        $resultContainer.show();
+                    }
+                    finalizeRequest();
+                });
+            }, immediate ? 0 : interval);
+        }
 
         $errorContainer.hide();
         $spinner.removeClass('is-active');
@@ -130,29 +230,22 @@
 
             $.post(sitepulseAIInsights.ajaxUrl, requestData).done(function (response) {
                 if (response && response.success && response.data) {
-                    lastResultData = renderResult($resultContainer, $resultText, $timestampEl, $statusEl, response.data);
+                    if (response.data.jobId) {
+                        activeJobId = response.data.jobId;
+                        setStatus($statusEl, sitepulseAIInsights.strings.statusGenerating);
+                        scheduleJobPoll(activeJobId, true);
+                    } else {
+                        lastResultData = renderResult($resultContainer, $resultText, $timestampEl, $statusEl, response.data);
+                        finalizeRequest();
+                    }
                 } else if (response && response.data && response.data.message) {
                     showError($errorContainer, $errorText, response.data.message);
-                    if (lastResultData && lastResultData.text) {
-                        setStatus(
-                            $statusEl,
-                            lastResultData.cached ? sitepulseAIInsights.strings.statusCached : sitepulseAIInsights.strings.statusFresh
-                        );
-                    } else {
-                        setStatus($statusEl, '');
-                        $resultContainer.hide();
-                    }
+                    reinstateLastResult($resultContainer, $resultText, $timestampEl, $statusEl, lastResultData);
+                    finalizeRequest();
                 } else {
                     showError($errorContainer, $errorText);
-                    if (lastResultData && lastResultData.text) {
-                        setStatus(
-                            $statusEl,
-                            lastResultData.cached ? sitepulseAIInsights.strings.statusCached : sitepulseAIInsights.strings.statusFresh
-                        );
-                    } else {
-                        setStatus($statusEl, '');
-                        $resultContainer.hide();
-                    }
+                    reinstateLastResult($resultContainer, $resultText, $timestampEl, $statusEl, lastResultData);
+                    finalizeRequest();
                 }
             }).fail(function (xhr) {
                 var message = sitepulseAIInsights.strings.defaultError;
@@ -162,18 +255,13 @@
                 }
 
                 showError($errorContainer, $errorText, message);
-                if (lastResultData && lastResultData.text) {
-                    setStatus(
-                        $statusEl,
-                        lastResultData.cached ? sitepulseAIInsights.strings.statusCached : sitepulseAIInsights.strings.statusFresh
-                    );
-                } else {
-                    setStatus($statusEl, '');
-                    $resultContainer.hide();
-                }
+                reinstateLastResult($resultContainer, $resultText, $timestampEl, $statusEl, lastResultData);
+                finalizeRequest();
             }).always(function () {
-                $spinner.removeClass('is-active');
-                $button.prop('disabled', false);
+                if (!activeJobId) {
+                    $spinner.removeClass('is-active');
+                    $button.prop('disabled', false);
+                }
             });
         });
     });
