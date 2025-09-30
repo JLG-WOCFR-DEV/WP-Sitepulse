@@ -19,6 +19,10 @@ if (!defined('SITEPULSE_OPTION_DEBUG_NOTICES')) {
     define('SITEPULSE_OPTION_DEBUG_NOTICES', 'sitepulse_debug_notices');
 }
 
+if (!defined('SITEPULSE_OPTION_AI_INSIGHT_HISTORY')) {
+    define('SITEPULSE_OPTION_AI_INSIGHT_HISTORY', 'sitepulse_ai_insights');
+}
+
 if (!defined('SITEPULSE_OPTION_GEMINI_API_KEY')) {
     define('SITEPULSE_OPTION_GEMINI_API_KEY', 'sitepulse_gemini_api_key');
 }
@@ -59,6 +63,14 @@ if (!defined('SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK')) {
 
 if (!defined('SITEPULSE_TRANSIENT_AI_INSIGHT')) {
     define('SITEPULSE_TRANSIENT_AI_INSIGHT', 'sitepulse_ai_insight');
+}
+
+if (!defined('SITEPULSE_TRANSIENT_AI_INSIGHT_LOCK')) {
+    define('SITEPULSE_TRANSIENT_AI_INSIGHT_LOCK', 'sitepulse_ai_insight_lock');
+}
+
+if (!defined('SITEPULSE_AI_INSIGHT_HISTORY_LIMIT')) {
+    define('SITEPULSE_AI_INSIGHT_HISTORY_LIMIT', 7);
 }
 
 if (!defined('SITEPULSE_NONCE_ACTION_AI_INSIGHT')) {

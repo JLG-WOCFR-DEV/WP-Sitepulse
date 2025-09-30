@@ -143,6 +143,7 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
             SITEPULSE_OPTION_ALERT_INTERVAL         => 10,
             SITEPULSE_OPTION_ALERT_RECIPIENTS       => ['test@example.com'],
             SITEPULSE_PLUGIN_IMPACT_OPTION          => ['payload'],
+            SITEPULSE_OPTION_AI_INSIGHT_HISTORY     => ['entries' => []],
         ];
 
         foreach ($options_to_seed as $option => $value) {
@@ -152,6 +153,7 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
         set_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS, 'cached');
         set_site_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS, 'cached');
         set_transient(SITEPULSE_TRANSIENT_AI_INSIGHT, 'ai');
+        set_transient(SITEPULSE_TRANSIENT_AI_INSIGHT_LOCK, 'lock');
         set_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK, 'lock');
         set_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK, 'lock');
 
@@ -177,6 +179,7 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
         $this->assertFalse(get_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS));
         $this->assertFalse(get_site_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS));
         $this->assertFalse(get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT));
+        $this->assertFalse(get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT_LOCK));
         $this->assertFalse(get_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK));
         $this->assertFalse(get_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK));
         $this->assertFalse(get_transient($prefixed_transient));

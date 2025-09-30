@@ -52,6 +52,8 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->last_http_args      = null;
 
         delete_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
+        delete_option(SITEPULSE_OPTION_AI_INSIGHT_HISTORY);
+        delete_transient(SITEPULSE_TRANSIENT_AI_INSIGHT_LOCK);
         update_option(SITEPULSE_OPTION_GEMINI_API_KEY, '');
         $this->reset_cached_insight_static();
     }
@@ -59,6 +61,8 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
     protected function tear_down(): void {
         $this->reset_cached_insight_static();
         delete_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
+        delete_option(SITEPULSE_OPTION_AI_INSIGHT_HISTORY);
+        delete_transient(SITEPULSE_TRANSIENT_AI_INSIGHT_LOCK);
         delete_option(SITEPULSE_OPTION_GEMINI_API_KEY);
 
         parent::tear_down();
@@ -110,12 +114,24 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->assertArrayHasKey('timestamp', $data);
         $this->assertIsInt($data['timestamp']);
         $this->assertGreaterThan(0, $data['timestamp']);
+        $this->assertArrayHasKey('history', $data);
+        $this->assertIsArray($data['history']);
+        $this->assertNotEmpty($data['history']);
+        $this->assertSame($expected_text, $data['history'][0]['text']);
+        $this->assertSame($data['timestamp'], $data['history'][0]['timestamp']);
+        $this->assertSame('manual', $data['history'][0]['source']);
+        $this->assertArrayHasKey('lastAutoRefresh', $data);
+        $this->assertNull($data['lastAutoRefresh']);
 
-        $cached_payload = get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
+        $stored_history = get_option(SITEPULSE_OPTION_AI_INSIGHT_HISTORY);
 
-        $this->assertIsArray($cached_payload, 'Insight transient should be stored.');
-        $this->assertSame($expected_text, $cached_payload['text']);
-        $this->assertSame($data['timestamp'], $cached_payload['timestamp']);
+        $this->assertIsArray($stored_history, 'Insight history option should be stored.');
+        $this->assertArrayHasKey('entries', $stored_history);
+        $this->assertNotEmpty($stored_history['entries']);
+        $this->assertSame($expected_text, $stored_history['entries'][0]['text']);
+        $this->assertSame($data['timestamp'], $stored_history['entries'][0]['timestamp']);
+        $this->assertSame('manual', $stored_history['entries'][0]['source']);
+        $this->assertFalse(get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT_LOCK));
     }
 
     /**
@@ -161,13 +177,17 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $cached_text = ' <strong>Réponse mise en cache</strong> avec balises.';
         $cached_timestamp = 1_708_000_000;
 
-        set_transient(
-            SITEPULSE_TRANSIENT_AI_INSIGHT,
+        update_option(
+            SITEPULSE_OPTION_AI_INSIGHT_HISTORY,
             [
-                'text'      => $cached_text,
-                'timestamp' => $cached_timestamp,
-            ],
-            HOUR_IN_SECONDS
+                'entries' => [
+                    [
+                        'text'      => $cached_text,
+                        'timestamp' => $cached_timestamp,
+                        'source'    => 'manual',
+                    ],
+                ],
+            ]
         );
 
         $this->reset_cached_insight_static();
@@ -197,6 +217,10 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->assertTrue($data['cached'], 'Response should indicate the data came from cache.');
         $this->assertSame($expected_text, $data['text']);
         $this->assertSame($cached_timestamp, $data['timestamp']);
+        $this->assertArrayHasKey('history', $data);
+        $this->assertSame($expected_text, $data['history'][0]['text']);
+        $this->assertSame($cached_timestamp, $data['history'][0]['timestamp']);
+        $this->assertSame('manual', $data['history'][0]['source']);
     }
 
     /**
@@ -208,10 +232,17 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
             'timestamp' => 1_708_123_456,
         ];
 
-        set_transient(
-            SITEPULSE_TRANSIENT_AI_INSIGHT,
-            $existing_payload,
-            HOUR_IN_SECONDS
+        update_option(
+            SITEPULSE_OPTION_AI_INSIGHT_HISTORY,
+            [
+                'entries' => [
+                    [
+                        'text'      => $existing_payload['text'],
+                        'timestamp' => $existing_payload['timestamp'],
+                        'source'    => 'manual',
+                    ],
+                ],
+            ]
         );
 
         $this->reset_cached_insight_static();
@@ -239,9 +270,11 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->assertArrayHasKey('success', $response);
         $this->assertFalse($response['success'], 'Errors should return success false.');
 
-        $cached_payload = get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
+        $stored_history = get_option(SITEPULSE_OPTION_AI_INSIGHT_HISTORY);
 
-        $this->assertSame($existing_payload, $cached_payload, 'Existing transient should remain intact.');
+        $this->assertSame($existing_payload['text'], $stored_history['entries'][0]['text']);
+        $this->assertSame($existing_payload['timestamp'], $stored_history['entries'][0]['timestamp']);
+        $this->assertSame('manual', $stored_history['entries'][0]['source']);
     }
 
     /**
@@ -457,6 +490,10 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
      * Resets the static cache used by sitepulse_ai_get_cached_insight().
      */
     private function reset_cached_insight_static() {
+        if (function_exists('sitepulse_ai_get_cached_insight')) {
+            sitepulse_ai_get_cached_insight(true);
+        }
+
         $reset = \Closure::bind(
             function () {
                 static $cached_insight = null;

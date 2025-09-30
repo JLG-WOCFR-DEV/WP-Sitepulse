@@ -33,15 +33,19 @@ define('SITEPULSE_OPTION_PLUGIN_BASENAME', 'sitepulse_plugin_basename');
 define('SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER', 'sitepulse_error_alert_log_pointer');
 define('SITEPULSE_OPTION_CRON_WARNINGS', 'sitepulse_cron_warnings');
 define('SITEPULSE_OPTION_DEBUG_NOTICES', 'sitepulse_debug_notices');
+define('SITEPULSE_OPTION_AI_INSIGHT_HISTORY', 'sitepulse_ai_insights');
 
 define('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS', 'sitepulse_speed_scan_results');
 define('SITEPULSE_TRANSIENT_AI_INSIGHT', 'sitepulse_ai_insight');
+define('SITEPULSE_TRANSIENT_AI_INSIGHT_LOCK', 'sitepulse_ai_insight_lock');
 define('SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX', 'sitepulse_error_alert_');
 define('SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX', '_lock');
 define('SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK', SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX . 'cpu' . SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX);
 define('SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK', SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX . 'php_fatal' . SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX);
 define('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX', 'sitepulse_plugin_dir_size_');
 define('SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT', 'sitepulse_resource_monitor_snapshot');
+
+define('SITEPULSE_AI_INSIGHT_HISTORY_LIMIT', 7);
 
 define('SITEPULSE_NONCE_ACTION_AI_INSIGHT', 'sitepulse_get_ai_insight');
 define('SITEPULSE_NONCE_ACTION_CLEANUP', 'sitepulse_cleanup');

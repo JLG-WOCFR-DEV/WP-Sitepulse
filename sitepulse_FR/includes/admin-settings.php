@@ -279,7 +279,9 @@ function sitepulse_settings_page() {
         }
         if (isset($_POST['sitepulse_clear_data'])) {
             delete_option(SITEPULSE_OPTION_UPTIME_LOG);
+            delete_option(SITEPULSE_OPTION_AI_INSIGHT_HISTORY);
             delete_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
+            delete_transient(SITEPULSE_TRANSIENT_AI_INSIGHT_LOCK);
             echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('Données stockées effacées.', 'sitepulse') . '</p></div>';
         }
         if (isset($_POST['sitepulse_reset_all'])) {
@@ -290,6 +292,7 @@ function sitepulse_settings_page() {
                 SITEPULSE_OPTION_DEBUG_MODE,
                 SITEPULSE_OPTION_GEMINI_API_KEY,
                 SITEPULSE_OPTION_UPTIME_LOG,
+                SITEPULSE_OPTION_AI_INSIGHT_HISTORY,
                 SITEPULSE_OPTION_LAST_LOAD_TIME,
                 SITEPULSE_OPTION_CPU_ALERT_THRESHOLD,
                 SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES,
@@ -306,6 +309,7 @@ function sitepulse_settings_page() {
             $transients_to_delete = [
                 SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS,
                 SITEPULSE_TRANSIENT_AI_INSIGHT,
+                SITEPULSE_TRANSIENT_AI_INSIGHT_LOCK,
                 SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK,
                 SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK,
             ];

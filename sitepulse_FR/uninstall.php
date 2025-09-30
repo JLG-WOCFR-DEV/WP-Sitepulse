@@ -24,6 +24,7 @@ $sitepulse_constants = [
     'SITEPULSE_OPTION_DEBUG_NOTICES'              => 'sitepulse_debug_notices',
     'SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS'      => 'sitepulse_speed_scan_results',
     'SITEPULSE_TRANSIENT_AI_INSIGHT'              => 'sitepulse_ai_insight',
+    'SITEPULSE_TRANSIENT_AI_INSIGHT_LOCK'         => 'sitepulse_ai_insight_lock',
     'SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX' => 'sitepulse_error_alert_',
     'SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX' => '_lock',
     'SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX'  => 'sitepulse_plugin_dir_size_',
@@ -32,6 +33,7 @@ $sitepulse_constants = [
     'SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT' => 'sitepulse_resource_monitor_snapshot',
     'SITEPULSE_PLUGIN_IMPACT_OPTION'              => 'sitepulse_plugin_impact_stats',
     'SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE'    => 'sitepulse_impact_loader_signature',
+    'SITEPULSE_OPTION_AI_INSIGHT_HISTORY'         => 'sitepulse_ai_insights',
 ];
 
 foreach ($sitepulse_constants as $constant => $value) {
@@ -53,6 +55,7 @@ $options = [
     SITEPULSE_OPTION_DEBUG_MODE,
     SITEPULSE_OPTION_GEMINI_API_KEY,
     SITEPULSE_OPTION_UPTIME_LOG,
+    SITEPULSE_OPTION_AI_INSIGHT_HISTORY,
     SITEPULSE_OPTION_LAST_LOAD_TIME,
     SITEPULSE_OPTION_CPU_ALERT_THRESHOLD,
     SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES,
@@ -68,6 +71,7 @@ $options = [
 $transients = [
     SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS,
     SITEPULSE_TRANSIENT_AI_INSIGHT,
+    SITEPULSE_TRANSIENT_AI_INSIGHT_LOCK,
     SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK,
     SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK,
     SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT,
