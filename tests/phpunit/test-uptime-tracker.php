@@ -16,6 +16,7 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
      */
     public static function wpSetUpBeforeClass($factory) {
         $module = dirname(__DIR__, 2) . '/sitepulse_FR/modules/uptime_tracker.php';
+        require_once dirname(__DIR__, 2) . '/sitepulse_FR/includes/admin-settings.php';
         require_once $module;
     }
 
@@ -30,6 +31,7 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
 
         delete_option(SITEPULSE_OPTION_UPTIME_LOG);
         delete_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK);
+        delete_option(SITEPULSE_OPTION_UPTIME_ARCHIVE);
     }
 
     protected function tear_down(): void {
@@ -38,6 +40,7 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
 
         delete_option(SITEPULSE_OPTION_UPTIME_LOG);
         delete_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK);
+        delete_option(SITEPULSE_OPTION_UPTIME_ARCHIVE);
 
         parent::tear_down();
     }
@@ -128,5 +131,64 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
         $this->assertFalse($log[2]['status']);
         $this->assertSame($incident_start, $log[2]['incident_start']);
+    }
+
+    public function test_run_updates_daily_archive() {
+        $this->enqueue_response(['response' => ['code' => 200]]);
+        sitepulse_run_uptime_check();
+
+        $archive = get_option(SITEPULSE_OPTION_UPTIME_ARCHIVE, []);
+        $this->assertNotEmpty($archive, 'Archive should contain the first successful check.');
+        $day_key = array_key_last($archive);
+        $this->assertSame(1, $archive[$day_key]['up']);
+        $this->assertSame(1, $archive[$day_key]['total']);
+
+        $this->enqueue_response(['response' => ['code' => 500]]);
+        sitepulse_run_uptime_check();
+
+        $archive = get_option(SITEPULSE_OPTION_UPTIME_ARCHIVE, []);
+        $this->assertSame(1, $archive[$day_key]['down']);
+        $this->assertSame(2, $archive[$day_key]['total']);
+    }
+
+    public function test_uptime_tracker_page_includes_extended_metrics() {
+        $now = time();
+        $archive = [];
+
+        for ($i = 9; $i >= 0; $i--) {
+            $day_timestamp = $now - ($i * DAY_IN_SECONDS);
+            $day_key = gmdate('Y-m-d', $day_timestamp);
+            $archive[$day_key] = [
+                'date'            => $day_key,
+                'up'              => 20,
+                'down'            => 4,
+                'unknown'         => 0,
+                'total'           => 24,
+                'first_timestamp' => $day_timestamp,
+                'last_timestamp'  => $day_timestamp,
+            ];
+        }
+
+        update_option(SITEPULSE_OPTION_UPTIME_ARCHIVE, $archive, false);
+        update_option(SITEPULSE_OPTION_UPTIME_LOG, [
+            [
+                'timestamp' => $now,
+                'status'    => true,
+            ],
+        ], false);
+
+        $admin_id = self::factory()->user->create(['role' => 'administrator']);
+        wp_set_current_user($admin_id);
+
+        ob_start();
+        sitepulse_uptime_tracker_page();
+        $output = ob_get_clean();
+
+        $this->assertStringContainsString('Disponibilité 7 derniers jours', $output);
+        $this->assertStringContainsString('Disponibilité 30 derniers jours', $output);
+        $this->assertStringContainsString('Tendance de disponibilité (30 jours)', $output);
+        $this->assertStringContainsString('uptime-trend__bar', $output);
+
+        wp_set_current_user(0);
     }
 }
