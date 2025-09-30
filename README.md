@@ -22,6 +22,23 @@ SitePulse - JLG est un plugin WordPress développé par Jérôme Le Gousse. Il s
 4. **Alertes** : définissez le seuil d'alerte CPU et la fenêtre anti-spam pour contrôler la fréquence des e-mails envoyés par le module d'alertes.【F:sitepulse_FR/includes/admin-settings.php†L273-L287】【F:sitepulse_FR/modules/error_alerts.php†L9-L63】
 5. **Mode debug et nettoyage** : activez le mode debug pour exposer le sous-menu de diagnostic, vider le journal de debug ou réinitialiser les données directement depuis la même page de réglages.【F:sitepulse_FR/includes/admin-settings.php†L265-L366】
 
+### Droits d'accès et capacités
+- **Capacité dédiée** : SitePulse vérifie systématiquement la capacité renvoyée par `sitepulse_get_capability()` (filtrable via `sitepulse_required_capability`) afin de protéger le menu principal, les sous-menus et les écrans de réglages.【F:sitepulse_FR/includes/admin-settings.php†L14-L88】【F:sitepulse_FR/modules/resource_monitor.php†L1-L8】
+- **Activation** : lors de l'activation du plugin, cette capacité est automatiquement ajoutée au rôle `administrator`, garantissant l'accès immédiat à l'interface.【F:sitepulse_FR/sitepulse.php†L1192-L1206】
+- **Rôles personnalisés** : pour déléguer la gestion à un rôle sur mesure, ajoutez la capacité filtrée sur un hook (exemple ci-dessous avec une capacité `manage_sitepulse`).
+
+  ```php
+  add_filter('sitepulse_required_capability', function () {
+      return 'manage_sitepulse';
+  });
+
+  add_action('init', function () {
+      if ($role = get_role('gestionnaire_sitepulse')) {
+          $role->add_cap('manage_sitepulse');
+      }
+  });
+  ```
+
 ## Intégrations et automatisations
 - **Planification de la disponibilité** : le module de suivi programme un cron horaire (`wp_schedule_event`) pour exécuter `sitepulse_run_uptime_check`, conservant un historique glissant de 30 points et consignant les incidents.【F:sitepulse_FR/modules/uptime_tracker.php†L5-L74】
 - **Boucle d'alertes automatisées** : un cron personnalisé toutes les cinq minutes orchestre la lecture du fichier `debug.log` et la surveillance de la charge CPU, avec verrouillage par transient pour éviter le spam d'e-mails.【F:sitepulse_FR/modules/error_alerts.php†L1-L121】

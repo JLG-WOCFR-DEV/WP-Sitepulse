@@ -10,7 +10,7 @@ add_action(
             'sitepulse-dashboard',
             'Plugin Impact Scanner',
             'Plugin Impact',
-            'manage_options',
+            sitepulse_get_capability(),
             'sitepulse-plugins',
             'sitepulse_plugin_impact_scanner_page'
         );
@@ -120,7 +120,7 @@ function sitepulse_plugin_impact_clear_dir_cache_on_upgrade($upgrader, $hook_ext
 }
 
 function sitepulse_plugin_impact_scanner_page() {
-    if (!current_user_can('manage_options')) {
+    if (!current_user_can(sitepulse_get_capability())) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 

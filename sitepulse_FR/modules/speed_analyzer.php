@@ -7,7 +7,7 @@ add_action('admin_menu', function() {
         'sitepulse-dashboard',
         'Speed Analyzer',
         'Speed',
-        'manage_options',
+        sitepulse_get_capability(),
         'sitepulse-speed',
         'sitepulse_speed_analyzer_page'
     );
@@ -39,7 +39,7 @@ function sitepulse_speed_analyzer_enqueue_assets($hook_suffix) {
  * The analysis is now based on internal WordPress timers for better reliability.
  */
 function sitepulse_speed_analyzer_page() {
-    if (!current_user_can('manage_options')) {
+    if (!current_user_can(sitepulse_get_capability())) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 

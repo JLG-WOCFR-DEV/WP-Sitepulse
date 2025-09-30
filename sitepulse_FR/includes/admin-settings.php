@@ -10,6 +10,25 @@
 if (!defined('ABSPATH')) exit;
 
 /**
+ * Returns the capability required to manage SitePulse settings.
+ *
+ * @return string Filterable capability name.
+ */
+function sitepulse_get_capability() {
+    $default_capability = 'manage_options';
+
+    if (function_exists('apply_filters')) {
+        $filtered_capability = apply_filters('sitepulse_required_capability', $default_capability);
+
+        if (is_string($filtered_capability) && $filtered_capability !== '') {
+            return $filtered_capability;
+        }
+    }
+
+    return $default_capability;
+}
+
+/**
  * Wrapper for the main SitePulse dashboard page.
  *
  * Ensures that the menu callback registered via {@see add_menu_page()} is always
@@ -18,7 +37,7 @@ if (!defined('ABSPATH')) exit;
  * notice is displayed with guidance on how to enable the feature.
  */
 function sitepulse_render_dashboard_page() {
-    if (!current_user_can('manage_options')) {
+    if (!current_user_can(sitepulse_get_capability())) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
@@ -54,7 +73,7 @@ function sitepulse_admin_menu() {
     add_menu_page(
         __('SitePulse Dashboard', 'sitepulse'),
         __('Sitepulse - JLG', 'sitepulse'),
-        'manage_options',
+        sitepulse_get_capability(),
         'sitepulse-dashboard',
         'sitepulse_render_dashboard_page',
         'dashicons-chart-area',
@@ -65,7 +84,7 @@ function sitepulse_admin_menu() {
         'sitepulse-dashboard',
         __('SitePulse Settings', 'sitepulse'),
         __('Settings', 'sitepulse'),
-        'manage_options',
+        sitepulse_get_capability(),
         'sitepulse-settings',
         'sitepulse_settings_page'
     );
@@ -75,7 +94,7 @@ function sitepulse_admin_menu() {
             'sitepulse-dashboard',
             __('SitePulse Debug', 'sitepulse'),
             __('Debug', 'sitepulse'),
-            'manage_options',
+            sitepulse_get_capability(),
             'sitepulse-debug',
             'sitepulse_debug_page'
         );
@@ -226,7 +245,7 @@ function sitepulse_sanitize_alert_recipients($value) {
  * Renders the settings page.
  */
 function sitepulse_settings_page() {
-    if (!current_user_can('manage_options')) {
+    if (!current_user_can(sitepulse_get_capability())) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
@@ -507,7 +526,7 @@ function sitepulse_settings_page() {
  * Renders the debug page.
  */
 function sitepulse_debug_page() {
-    if (!current_user_can('manage_options')) {
+    if (!current_user_can(sitepulse_get_capability())) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
