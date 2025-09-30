@@ -5,6 +5,10 @@ if (!defined('SITEPULSE_OPTION_UPTIME_FAILURE_STREAK')) {
     define('SITEPULSE_OPTION_UPTIME_FAILURE_STREAK', 'sitepulse_uptime_failure_streak');
 }
 
+if (!defined('SITEPULSE_OPTION_UPTIME_ARCHIVE')) {
+    define('SITEPULSE_OPTION_UPTIME_ARCHIVE', 'sitepulse_uptime_archive');
+}
+
 $sitepulse_uptime_cron_hook = function_exists('sitepulse_get_cron_hook') ? sitepulse_get_cron_hook('uptime_tracker') : 'sitepulse_uptime_tracker_cron';
 
 add_action('admin_menu', function() {
@@ -163,12 +167,137 @@ function sitepulse_normalize_uptime_log($log) {
     return array_values($normalized);
 }
 
+/**
+ * Retrieves the persisted uptime archive ordered by day.
+ *
+ * @return array<string,array<string,int>>
+ */
+function sitepulse_get_uptime_archive() {
+    $archive = get_option(SITEPULSE_OPTION_UPTIME_ARCHIVE, []);
+
+    if (!is_array($archive)) {
+        return [];
+    }
+
+    uksort($archive, function ($a, $b) {
+        return strcmp($a, $b);
+    });
+
+    return $archive;
+}
+
+/**
+ * Stores the provided log entry inside the daily uptime archive.
+ *
+ * @param array $entry Normalized uptime entry.
+ * @return void
+ */
+function sitepulse_update_uptime_archive($entry) {
+    if (!is_array($entry) || empty($entry)) {
+        return;
+    }
+
+    $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : (int) current_time('timestamp');
+    $day_key = wp_date('Y-m-d', $timestamp);
+
+    $status_key = 'unknown';
+
+    if (array_key_exists('status', $entry)) {
+        if (true === $entry['status']) {
+            $status_key = 'up';
+        } elseif (false === $entry['status']) {
+            $status_key = 'down';
+        } elseif (is_string($entry['status']) && 'unknown' === $entry['status']) {
+            $status_key = 'unknown';
+        }
+    }
+
+    $archive = sitepulse_get_uptime_archive();
+
+    if (!isset($archive[$day_key]) || !is_array($archive[$day_key])) {
+        $archive[$day_key] = [
+            'date'            => $day_key,
+            'up'              => 0,
+            'down'            => 0,
+            'unknown'         => 0,
+            'total'           => 0,
+            'first_timestamp' => $timestamp,
+            'last_timestamp'  => $timestamp,
+        ];
+    }
+
+    if (!isset($archive[$day_key][$status_key])) {
+        $archive[$day_key][$status_key] = 0;
+    }
+
+    $archive[$day_key][$status_key]++;
+    $archive[$day_key]['total']++;
+
+    $archive[$day_key]['first_timestamp'] = isset($archive[$day_key]['first_timestamp'])
+        ? min((int) $archive[$day_key]['first_timestamp'], $timestamp)
+        : $timestamp;
+    $archive[$day_key]['last_timestamp'] = isset($archive[$day_key]['last_timestamp'])
+        ? max((int) $archive[$day_key]['last_timestamp'], $timestamp)
+        : $timestamp;
+
+    if (count($archive) > 120) {
+        $archive = array_slice($archive, -120, null, true);
+    }
+
+    update_option(SITEPULSE_OPTION_UPTIME_ARCHIVE, $archive, false);
+}
+
+/**
+ * Calculates aggregate metrics for the requested archive window.
+ *
+ * @param array<string,array<string,int>> $archive Archive of daily totals.
+ * @param int                             $days    Number of days to include.
+ * @return array<string,int|float>
+ */
+function sitepulse_calculate_uptime_window_metrics($archive, $days) {
+    if (!is_array($archive) || empty($archive) || $days < 1) {
+        return [
+            'days'           => 0,
+            'total_checks'   => 0,
+            'up_checks'      => 0,
+            'down_checks'    => 0,
+            'unknown_checks' => 0,
+            'uptime'         => 100.0,
+        ];
+    }
+
+    $window = array_slice($archive, -$days, null, true);
+
+    $totals = [
+        'days'           => count($window),
+        'total_checks'   => 0,
+        'up_checks'      => 0,
+        'down_checks'    => 0,
+        'unknown_checks' => 0,
+        'uptime'         => 100.0,
+    ];
+
+    foreach ($window as $entry) {
+        $totals['total_checks'] += isset($entry['total']) ? (int) $entry['total'] : 0;
+        $totals['up_checks'] += isset($entry['up']) ? (int) $entry['up'] : 0;
+        $totals['down_checks'] += isset($entry['down']) ? (int) $entry['down'] : 0;
+        $totals['unknown_checks'] += isset($entry['unknown']) ? (int) $entry['unknown'] : 0;
+    }
+
+    if ($totals['total_checks'] > 0) {
+        $totals['uptime'] = ($totals['up_checks'] / $totals['total_checks']) * 100;
+    }
+
+    return $totals;
+}
+
 function sitepulse_uptime_tracker_page() {
     if (!current_user_can(sitepulse_get_capability())) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
     $uptime_log = sitepulse_normalize_uptime_log(get_option(SITEPULSE_OPTION_UPTIME_LOG, []));
+    $uptime_archive = sitepulse_get_uptime_archive();
     $total_checks = count($uptime_log);
     $boolean_checks = array_values(array_filter($uptime_log, function ($entry) {
         return isset($entry['status']) && is_bool($entry['status']);
@@ -192,11 +321,74 @@ function sitepulse_uptime_tracker_page() {
         }
         reset($uptime_log);
     }
+    $trend_entries = array_slice($uptime_archive, -30, null, true);
+    $trend_data = [];
+
+    foreach ($trend_entries as $day_key => $daily_entry) {
+        $total = isset($daily_entry['total']) ? max(0, (int) $daily_entry['total']) : 0;
+        $up = isset($daily_entry['up']) ? (int) $daily_entry['up'] : 0;
+        $uptime_value = $total > 0 ? ($up / $total) * 100 : 100;
+        $uptime_value = max(0, min(100, $uptime_value));
+        $bar_height = (int) max(4, round($uptime_value));
+        $trend_timestamp = isset($daily_entry['last_timestamp']) ? (int) $daily_entry['last_timestamp'] : strtotime($day_key . ' 23:59:59');
+        $formatted_day = wp_date($date_format, $trend_timestamp);
+        $formatted_value = number_format_i18n($uptime_value, 2);
+        $total_label = number_format_i18n($total);
+        $bar_class = 'uptime-trend__bar--high';
+
+        if ($uptime_value < 95) {
+            $bar_class = 'uptime-trend__bar--low';
+        } elseif ($uptime_value < 99) {
+            $bar_class = 'uptime-trend__bar--medium';
+        }
+
+        $trend_data[] = [
+            'height' => $bar_height,
+            'class'  => $bar_class,
+            'label'  => sprintf(
+                /* translators: 1: formatted date, 2: uptime percentage, 3: number of checks. */
+                __('Disponibilité du %1$s : %2$s%% (%3$s contrôles)', 'sitepulse'),
+                $formatted_day,
+                $formatted_value,
+                $total_label
+            ),
+        ];
+    }
+
+    $seven_day_metrics = sitepulse_calculate_uptime_window_metrics($uptime_archive, 7);
+    $thirty_day_metrics = sitepulse_calculate_uptime_window_metrics($uptime_archive, 30);
+
     ?>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-chart-bar"></span> Suivi de Disponibilité</h1>
         <p>Cet outil vérifie la disponibilité de votre site toutes les heures. Voici le statut des <?php echo esc_html($total_checks); ?> dernières vérifications.</p>
         <h2>Disponibilité (<?php echo esc_html($total_checks); ?> dernières heures): <strong style="font-size: 1.4em;"><?php echo esc_html(round($uptime_percentage, 2)); ?>%</strong></h2>
+        <div class="uptime-summary-grid">
+            <div class="uptime-summary-card">
+                <h3><?php esc_html_e('Disponibilité 7 derniers jours', 'sitepulse'); ?></h3>
+                <p class="uptime-summary-card__value"><?php echo esc_html(number_format_i18n($seven_day_metrics['uptime'], 2)); ?>%</p>
+                <p class="uptime-summary-card__meta"><?php
+                    printf(
+                        /* translators: 1: total checks, 2: incidents */
+                        esc_html__('Sur %1$s contrôles (%2$s incidents)', 'sitepulse'),
+                        esc_html(number_format_i18n($seven_day_metrics['total_checks'])),
+                        esc_html(number_format_i18n($seven_day_metrics['down_checks']))
+                    );
+                ?></p>
+            </div>
+            <div class="uptime-summary-card">
+                <h3><?php esc_html_e('Disponibilité 30 derniers jours', 'sitepulse'); ?></h3>
+                <p class="uptime-summary-card__value"><?php echo esc_html(number_format_i18n($thirty_day_metrics['uptime'], 2)); ?>%</p>
+                <p class="uptime-summary-card__meta"><?php
+                    printf(
+                        /* translators: 1: total checks, 2: incidents */
+                        esc_html__('Sur %1$s contrôles (%2$s incidents)', 'sitepulse'),
+                        esc_html(number_format_i18n($thirty_day_metrics['total_checks'])),
+                        esc_html(number_format_i18n($thirty_day_metrics['down_checks']))
+                    );
+                ?></p>
+            </div>
+        </div>
         <div class="uptime-chart">
             <?php if (empty($uptime_log)): ?><p>Aucune donnée de disponibilité. La première vérification aura lieu dans l'heure.</p><?php else: ?>
                 <?php foreach ($uptime_log as $index => $entry): ?>
@@ -286,6 +478,19 @@ function sitepulse_uptime_tracker_page() {
                 </p>
             </div>
         <?php endif; ?>
+        <?php if (!empty($trend_data)): ?>
+            <h2><?php esc_html_e('Tendance de disponibilité (30 jours)', 'sitepulse'); ?></h2>
+            <div class="uptime-trend" role="img" aria-label="<?php echo esc_attr(sprintf(__('Disponibilité quotidienne sur %d jours.', 'sitepulse'), count($trend_data))); ?>">
+                <?php foreach ($trend_data as $bar): ?>
+                    <span class="uptime-trend__bar <?php echo esc_attr($bar['class']); ?>" style="height: <?php echo esc_attr($bar['height']); ?>%;" title="<?php echo esc_attr($bar['label']); ?>"></span>
+                <?php endforeach; ?>
+            </div>
+            <p class="uptime-trend__legend">
+                <span class="uptime-trend__legend-item uptime-trend__legend-item--high"><?php esc_html_e('≥ 99% de disponibilité', 'sitepulse'); ?></span>
+                <span class="uptime-trend__legend-item uptime-trend__legend-item--medium"><?php esc_html_e('95 – 98% de disponibilité', 'sitepulse'); ?></span>
+                <span class="uptime-trend__legend-item uptime-trend__legend-item--low"><?php esc_html_e('< 95% de disponibilité', 'sitepulse'); ?></span>
+            </p>
+        <?php endif; ?>
         <div class="notice notice-info" style="margin-top: 20px;"><p><strong>Comment ça marche :</strong> Une barre verte indique que votre site était en ligne. Une barre rouge indique un possible incident où votre site était inaccessible.</p></div>
     </div>
     <?php
@@ -359,6 +564,7 @@ function sitepulse_run_uptime_check() {
         }
 
         update_option(SITEPULSE_OPTION_UPTIME_LOG, array_values($log), false);
+        sitepulse_update_uptime_archive($entry);
 
         return;
     }
@@ -410,4 +616,5 @@ function sitepulse_run_uptime_check() {
     }
 
     update_option(SITEPULSE_OPTION_UPTIME_LOG, array_values($log), false);
+    sitepulse_update_uptime_archive($entry);
 }
