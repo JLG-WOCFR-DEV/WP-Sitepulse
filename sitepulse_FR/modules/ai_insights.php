@@ -230,6 +230,29 @@ function sitepulse_generate_ai_insight() {
         ],
     ];
 
+    $json_body = wp_json_encode($request_body);
+
+    if (false === $json_body) {
+        $error_detail = function_exists('json_last_error_msg') ? json_last_error_msg() : '';
+
+        if ('' === $error_detail) {
+            $error_detail = esc_html__('erreur JSON inconnue', 'sitepulse');
+        }
+
+        $sanitized_detail = sanitize_text_field($error_detail);
+        $error_message    = sprintf(
+            /* translators: %s: error detail */
+            esc_html__('Impossible de préparer la requête pour Gemini : %s', 'sitepulse'),
+            $sanitized_detail
+        );
+
+        $log_ai_error($error_message, 500);
+
+        wp_send_json_error([
+            'message' => $error_message,
+        ], 500);
+    }
+
     $response_size_limit = (int) apply_filters('sitepulse_ai_response_size_limit', defined('MB_IN_BYTES') ? MB_IN_BYTES : 1_048_576);
 
     $request_args = [
@@ -237,7 +260,7 @@ function sitepulse_generate_ai_insight() {
             'Content-Type'   => 'application/json',
             'x-goog-api-key' => $api_key,
         ],
-        'body'    => wp_json_encode($request_body),
+        'body'    => $json_body,
         'timeout' => 30,
     ];
 
