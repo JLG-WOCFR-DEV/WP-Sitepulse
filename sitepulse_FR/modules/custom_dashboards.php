@@ -131,9 +131,8 @@ function sitepulse_custom_dashboards_page() {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
-    global $wpdb;
-
     $active_modules = array_map('strval', (array) get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []));
+    global $wpdb;
     $is_speed_enabled = in_array('speed_analyzer', $active_modules, true);
     $is_uptime_enabled = in_array('uptime_tracker', $active_modules, true);
     $is_database_enabled = in_array('database_optimizer', $active_modules, true);
@@ -465,6 +464,19 @@ function sitepulse_custom_dashboards_page() {
         ];
     }
 
+    $module_chart_keys = [
+        'speed_analyzer'     => 'speed',
+        'uptime_tracker'     => 'uptime',
+        'database_optimizer' => 'database',
+        'log_analyzer'       => 'logs',
+    ];
+
+    foreach ($module_chart_keys as $module_key => $chart_key) {
+        if (!in_array($module_key, $active_modules, true)) {
+            unset($charts_payload[$chart_key]);
+        }
+    }
+
     $charts_for_localization = empty($charts_payload) ? new stdClass() : $charts_payload;
 
     $localization_payload = [
@@ -514,7 +526,7 @@ function sitepulse_custom_dashboards_page() {
         <p><?php esc_html_e("A real-time overview of your site's performance and health.", 'sitepulse'); ?></p>
 
         <div class="sitepulse-grid">
-            <?php if ($speed_card !== null): ?>
+            <?php if ($is_speed_enabled && $speed_card !== null): ?>
                 <div class="sitepulse-card">
                     <div class="sitepulse-card-header">
                         <h2><span class="dashicons dashicons-performance"></span> <?php esc_html_e('Speed', 'sitepulse'); ?></h2>
@@ -529,7 +541,7 @@ function sitepulse_custom_dashboards_page() {
                 </div>
             <?php endif; ?>
 
-            <?php if ($uptime_card !== null): ?>
+            <?php if ($is_uptime_enabled && $uptime_card !== null): ?>
                 <div class="sitepulse-card">
                     <div class="sitepulse-card-header">
                         <h2><span class="dashicons dashicons-chart-bar"></span> <?php esc_html_e('Uptime', 'sitepulse'); ?></h2>
@@ -544,7 +556,7 @@ function sitepulse_custom_dashboards_page() {
                 </div>
             <?php endif; ?>
 
-            <?php if ($database_card !== null): ?>
+            <?php if ($is_database_enabled && $database_card !== null): ?>
                 <div class="sitepulse-card">
                     <div class="sitepulse-card-header">
                         <h2><span class="dashicons dashicons-database"></span> <?php esc_html_e('Database Health', 'sitepulse'); ?></h2>
@@ -562,7 +574,7 @@ function sitepulse_custom_dashboards_page() {
                 </div>
             <?php endif; ?>
 
-            <?php if ($logs_card !== null): ?>
+            <?php if ($is_logs_enabled && $logs_card !== null): ?>
                 <div class="sitepulse-card">
                     <div class="sitepulse-card-header">
                         <h2><span class="dashicons dashicons-hammer"></span> <?php esc_html_e('Error Log', 'sitepulse'); ?></h2>

@@ -123,3 +123,27 @@ if (!function_exists('sitepulse_get_wp_debug_log_path')) {
         return $path;
     }
 }
+
+if (!function_exists('sitepulse_get_recent_log_lines')) {
+    function sitepulse_get_recent_log_lines($file_path, $max_lines = 100, $max_bytes = 131072) {
+        if (!is_string($file_path) || $file_path === '') {
+            return null;
+        }
+
+        if (!file_exists($file_path) || !is_readable($file_path)) {
+            return null;
+        }
+
+        $contents = file($file_path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+
+        if ($contents === false) {
+            return null;
+        }
+
+        if ($max_lines > 0 && count($contents) > $max_lines) {
+            $contents = array_slice($contents, -$max_lines);
+        }
+
+        return array_values($contents);
+    }
+}
