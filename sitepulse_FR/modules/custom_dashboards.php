@@ -133,6 +133,12 @@ function sitepulse_custom_dashboards_page() {
 
     global $wpdb;
 
+    $active_modules = array_map('strval', (array) get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []));
+    $is_speed_enabled = in_array('speed_analyzer', $active_modules, true);
+    $is_uptime_enabled = in_array('uptime_tracker', $active_modules, true);
+    $is_database_enabled = in_array('database_optimizer', $active_modules, true);
+    $is_logs_enabled = in_array('log_analyzer', $active_modules, true);
+
     if (!wp_script_is('sitepulse-dashboard-charts', 'registered')) {
         sitepulse_custom_dashboard_enqueue_assets('toplevel_page_sitepulse-dashboard');
     }
@@ -152,283 +158,317 @@ function sitepulse_custom_dashboards_page() {
         'purple'   => '#9C27B0',
     ];
 
-    // Speed metrics.
-    $results = get_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
-    $processing_time = null;
+    $charts_payload = [];
+    $speed_card = null;
 
-    if (is_array($results)) {
-        if (isset($results['server_processing_ms']) && is_numeric($results['server_processing_ms'])) {
-            $processing_time = (float) $results['server_processing_ms'];
-        } elseif (isset($results['ttfb']) && is_numeric($results['ttfb'])) {
-            $processing_time = (float) $results['ttfb'];
-        } elseif (isset($results['data']['server_processing_ms']) && is_numeric($results['data']['server_processing_ms'])) {
-            $processing_time = (float) $results['data']['server_processing_ms'];
-        } elseif (isset($results['data']['ttfb']) && is_numeric($results['data']['ttfb'])) {
-            $processing_time = (float) $results['data']['ttfb'];
+    if ($is_speed_enabled) {
+        $results = get_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
+        $processing_time = null;
+
+        if (is_array($results)) {
+            if (isset($results['server_processing_ms']) && is_numeric($results['server_processing_ms'])) {
+                $processing_time = (float) $results['server_processing_ms'];
+            } elseif (isset($results['ttfb']) && is_numeric($results['ttfb'])) {
+                $processing_time = (float) $results['ttfb'];
+            } elseif (isset($results['data']['server_processing_ms']) && is_numeric($results['data']['server_processing_ms'])) {
+                $processing_time = (float) $results['data']['server_processing_ms'];
+            } elseif (isset($results['data']['ttfb']) && is_numeric($results['data']['ttfb'])) {
+                $processing_time = (float) $results['data']['ttfb'];
+            }
         }
-    }
 
-    $processing_status = 'status-ok';
+        $processing_status = 'status-ok';
 
-    if ($processing_time === null) {
-        $processing_status = 'status-warn';
-    } elseif ($processing_time > 500) {
-        $processing_status = 'status-bad';
-    } elseif ($processing_time > 200) {
-        $processing_status = 'status-warn';
-    }
+        if ($processing_time === null) {
+            $processing_status = 'status-warn';
+        } elseif ($processing_time > 500) {
+            $processing_status = 'status-bad';
+        } elseif ($processing_time > 200) {
+            $processing_status = 'status-warn';
+        }
 
-    $processing_display = $processing_time !== null
-        ? round($processing_time) . ' ' . esc_html__('ms', 'sitepulse')
-        : esc_html__('N/A', 'sitepulse');
+        $processing_display = $processing_time !== null
+            ? round($processing_time) . ' ' . esc_html__('ms', 'sitepulse')
+            : esc_html__('N/A', 'sitepulse');
 
-    $speed_reference = 1000;
-    $speed_chart = [
-        'type'     => 'doughnut',
-        'labels'   => [],
-        'datasets' => [],
-        'empty'    => true,
-        'status'   => $processing_status,
-        'value'    => $processing_time !== null ? round($processing_time, 2) : null,
-        'unit'     => __('ms', 'sitepulse'),
-    ];
-
-    if ($processing_time !== null) {
-        $speed_chart['empty'] = false;
-        $speed_color_map = [
-            'status-ok'   => $palette['green'],
-            'status-warn' => $palette['amber'],
-            'status-bad'  => $palette['red'],
+        $speed_reference = 1000;
+        $speed_chart = [
+            'type'     => 'doughnut',
+            'labels'   => [],
+            'datasets' => [],
+            'empty'    => true,
+            'status'   => $processing_status,
+            'value'    => $processing_time !== null ? round($processing_time, 2) : null,
+            'unit'     => __('ms', 'sitepulse'),
         ];
-        $speed_primary_color = isset($speed_color_map[$processing_status]) ? $speed_color_map[$processing_status] : $palette['blue'];
 
-        if ($processing_time <= $speed_reference) {
-            $speed_chart['labels'] = [
-                __('Measured time', 'sitepulse'),
-                __('Performance budget', 'sitepulse'),
+        if ($processing_time !== null) {
+            $speed_chart['empty'] = false;
+            $speed_color_map = [
+                'status-ok'   => $palette['green'],
+                'status-warn' => $palette['amber'],
+                'status-bad'  => $palette['red'],
             ];
-            $speed_chart['datasets'][] = [
+            $speed_primary_color = isset($speed_color_map[$processing_status]) ? $speed_color_map[$processing_status] : $palette['blue'];
+
+            if ($processing_time <= $speed_reference) {
+                $speed_chart['labels'] = [
+                    __('Measured time', 'sitepulse'),
+                    __('Performance budget', 'sitepulse'),
+                ];
+                $speed_chart['datasets'][] = [
+                    'data' => [
+                        round($processing_time, 2),
+                        round(max(0, $speed_reference - $processing_time), 2),
+                    ],
+                    'backgroundColor' => [
+                        $speed_primary_color,
+                        $palette['grey'],
+                    ],
+                ];
+            } else {
+                $speed_chart['labels'] = [
+                    __('Performance budget', 'sitepulse'),
+                    __('Over budget', 'sitepulse'),
+                ];
+                $speed_chart['datasets'][] = [
+                    'data' => [
+                        $speed_reference,
+                        round($processing_time - $speed_reference, 2),
+                    ],
+                    'backgroundColor' => [
+                        $speed_primary_color,
+                        $palette['deep_red'],
+                    ],
+                ];
+            }
+        }
+
+        $charts_payload['speed'] = $speed_chart;
+        $speed_card = [
+            'status'  => $processing_status,
+            'display' => $processing_display,
+        ];
+    }
+
+    $uptime_card = null;
+
+    if ($is_uptime_enabled) {
+        $raw_uptime_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+        $uptime_log = function_exists('sitepulse_normalize_uptime_log')
+            ? sitepulse_normalize_uptime_log($raw_uptime_log)
+            : (array) $raw_uptime_log;
+        $boolean_checks = array_values(array_filter($uptime_log, function ($entry) {
+            return is_array($entry) && array_key_exists('status', $entry) && is_bool($entry['status']);
+        }));
+        $evaluated_checks = count($boolean_checks);
+        $up_checks = count(array_filter($boolean_checks, function ($entry) {
+            return isset($entry['status']) && true === $entry['status'];
+        }));
+        $uptime_percentage = $evaluated_checks > 0 ? ($up_checks / $evaluated_checks) * 100 : 100;
+        $uptime_status = $uptime_percentage < 99 ? 'status-bad' : ($uptime_percentage < 100 ? 'status-warn' : 'status-ok');
+        $uptime_entries = array_slice($uptime_log, -30);
+
+        $date_format = get_option('date_format');
+        $time_format = get_option('time_format');
+        $uptime_labels = [];
+        $uptime_values = [];
+        $uptime_colors = [];
+
+        foreach ($uptime_entries as $entry) {
+            $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+            $label = $timestamp > 0
+                ? date_i18n($date_format . ' ' . $time_format, $timestamp)
+                : __('Unknown', 'sitepulse');
+            $status = is_array($entry) && array_key_exists('status', $entry) ? $entry['status'] : (!empty($entry));
+
+            $uptime_labels[] = $label;
+            if ($status === false) {
+                $uptime_values[] = 0;
+                $uptime_colors[] = $palette['red'];
+            } elseif ($status === true) {
+                $uptime_values[] = 100;
+                $uptime_colors[] = $palette['green'];
+            } else {
+                $uptime_values[] = 50;
+                $uptime_colors[] = $palette['grey'];
+            }
+        }
+
+        $uptime_chart = [
+            'type'     => 'bar',
+            'labels'   => $uptime_labels,
+            'datasets' => [
+                [
+                    'data'            => $uptime_values,
+                    'backgroundColor' => $uptime_colors,
+                    'borderWidth'     => 0,
+                    'borderRadius'    => 6,
+                ],
+            ],
+            'empty'    => empty($uptime_labels),
+            'status'   => $uptime_status,
+            'unit'     => __('%', 'sitepulse'),
+        ];
+
+        $charts_payload['uptime'] = $uptime_chart;
+        $uptime_card = [
+            'status'      => $uptime_status,
+            'percentage'  => $uptime_percentage,
+        ];
+    }
+
+    $database_card = null;
+
+    if ($is_database_enabled) {
+        $revisions = (int) $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->posts WHERE post_type = 'revision'");
+        $db_status = $revisions > 100 ? 'status-bad' : ($revisions > 50 ? 'status-warn' : 'status-ok');
+        $revision_limit = 100;
+
+        $database_chart = [
+            'type'     => 'doughnut',
+            'labels'   => [],
+            'datasets' => [],
+            'empty'    => false,
+            'status'   => $db_status,
+            'value'    => $revisions,
+            'limit'    => $revision_limit,
+        ];
+
+        if ($revisions <= $revision_limit) {
+            $database_chart['labels'] = [
+                __('Stored revisions', 'sitepulse'),
+                __('Remaining before cleanup', 'sitepulse'),
+            ];
+            $database_chart['datasets'][] = [
                 'data' => [
-                    round($processing_time, 2),
-                    round(max(0, $speed_reference - $processing_time), 2),
+                    $revisions,
+                    max(0, $revision_limit - $revisions),
                 ],
                 'backgroundColor' => [
-                    $speed_primary_color,
+                    $palette['blue'],
                     $palette['grey'],
                 ],
             ];
         } else {
-            $speed_chart['labels'] = [
-                __('Performance budget', 'sitepulse'),
-                __('Over budget', 'sitepulse'),
+            $database_chart['labels'] = [
+                __('Recommended maximum', 'sitepulse'),
+                __('Excess revisions', 'sitepulse'),
             ];
-            $speed_chart['datasets'][] = [
+            $database_chart['datasets'][] = [
                 'data' => [
-                    $speed_reference,
-                    round($processing_time - $speed_reference, 2),
+                    $revision_limit,
+                    $revisions - $revision_limit,
                 ],
                 'backgroundColor' => [
-                    $speed_primary_color,
-                    $palette['deep_red'],
+                    $palette['amber'],
+                    $palette['red'],
                 ],
             ];
         }
-    }
 
-    // Uptime metrics.
-    $raw_uptime_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
-    $uptime_log = function_exists('sitepulse_normalize_uptime_log')
-        ? sitepulse_normalize_uptime_log($raw_uptime_log)
-        : (array) $raw_uptime_log;
-    $total_checks = count($uptime_log);
-    $boolean_checks = array_values(array_filter($uptime_log, function ($entry) {
-        return is_array($entry) && array_key_exists('status', $entry) && is_bool($entry['status']);
-    }));
-    $evaluated_checks = count($boolean_checks);
-    $up_checks = count(array_filter($boolean_checks, function ($entry) {
-        return isset($entry['status']) && true === $entry['status'];
-    }));
-    $uptime_percentage = $evaluated_checks > 0 ? ($up_checks / $evaluated_checks) * 100 : 100;
-    $uptime_status = $uptime_percentage < 99 ? 'status-bad' : ($uptime_percentage < 100 ? 'status-warn' : 'status-ok');
-    $uptime_entries = array_slice($uptime_log, -30);
-
-    $date_format = get_option('date_format');
-    $time_format = get_option('time_format');
-    $uptime_labels = [];
-    $uptime_values = [];
-    $uptime_colors = [];
-
-    foreach ($uptime_entries as $entry) {
-        $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
-        $label = $timestamp > 0
-            ? date_i18n($date_format . ' ' . $time_format, $timestamp)
-            : __('Unknown', 'sitepulse');
-        $status = is_array($entry) && array_key_exists('status', $entry) ? $entry['status'] : (!empty($entry));
-        $is_up = true === $status;
-
-        $uptime_labels[] = $label;
-        if ($status === false) {
-            $uptime_values[] = 0;
-            $uptime_colors[] = $palette['red'];
-        } elseif ($status === true) {
-            $uptime_values[] = 100;
-            $uptime_colors[] = $palette['green'];
-        } else {
-            $uptime_values[] = 50;
-            $uptime_colors[] = $palette['grey'];
-        }
-    }
-
-    $uptime_chart = [
-        'type'     => 'bar',
-        'labels'   => $uptime_labels,
-        'datasets' => [
-            [
-                'data'            => $uptime_values,
-                'backgroundColor' => $uptime_colors,
-                'borderWidth'     => 0,
-                'borderRadius'    => 6,
-            ],
-        ],
-        'empty'    => empty($uptime_labels),
-        'status'   => $uptime_status,
-        'unit'     => __('%', 'sitepulse'),
-    ];
-
-    // Database metrics.
-    $revisions = (int) $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->posts WHERE post_type = 'revision'");
-    $db_status = $revisions > 100 ? 'status-bad' : ($revisions > 50 ? 'status-warn' : 'status-ok');
-    $revision_limit = 100;
-
-    $database_chart = [
-        'type'     => 'doughnut',
-        'labels'   => [],
-        'datasets' => [],
-        'empty'    => false,
-        'status'   => $db_status,
-        'value'    => $revisions,
-        'limit'    => $revision_limit,
-    ];
-
-    if ($revisions <= $revision_limit) {
-        $database_chart['labels'] = [
-            __('Stored revisions', 'sitepulse'),
-            __('Remaining before cleanup', 'sitepulse'),
-        ];
-        $database_chart['datasets'][] = [
-            'data' => [
-                $revisions,
-                max(0, $revision_limit - $revisions),
-            ],
-            'backgroundColor' => [
-                $palette['blue'],
-                $palette['grey'],
-            ],
-        ];
-    } else {
-        $database_chart['labels'] = [
-            __('Recommended maximum', 'sitepulse'),
-            __('Excess revisions', 'sitepulse'),
-        ];
-        $database_chart['datasets'][] = [
-            'data' => [
-                $revision_limit,
-                $revisions - $revision_limit,
-            ],
-            'backgroundColor' => [
-                $palette['amber'],
-                $palette['red'],
-            ],
+        $charts_payload['database'] = $database_chart;
+        $database_card = [
+            'status'   => $db_status,
+            'revisions'=> $revisions,
+            'limit'    => $revision_limit,
         ];
     }
 
-    // Log metrics.
-    $log_file = function_exists('sitepulse_get_wp_debug_log_path') ? sitepulse_get_wp_debug_log_path() : null;
-    $log_status_class = 'status-ok';
-    $log_summary = __('Log is clean.', 'sitepulse');
-    $log_counts = [
-        'fatal'      => 0,
-        'warning'    => 0,
-        'notice'     => 0,
-        'deprecated' => 0,
-    ];
-    $log_chart_empty = true;
+    $logs_card = null;
 
-    if ($log_file === null) {
-        $log_status_class = 'status-warn';
-        $log_summary = __('Debug log not configured.', 'sitepulse');
-    } elseif (!file_exists($log_file)) {
-        $log_status_class = 'status-warn';
-        $log_summary = sprintf(__('Log file not found (%s).', 'sitepulse'), esc_html($log_file));
-    } elseif (!is_readable($log_file)) {
-        $log_status_class = 'status-warn';
-        $log_summary = sprintf(__('Unable to read log file (%s).', 'sitepulse'), esc_html($log_file));
-    } else {
-        $recent_logs = sitepulse_get_recent_log_lines($log_file, 200, 131072);
+    if ($is_logs_enabled) {
+        $log_file = function_exists('sitepulse_get_wp_debug_log_path') ? sitepulse_get_wp_debug_log_path() : null;
+        $log_status_class = 'status-ok';
+        $log_summary = __('Log is clean.', 'sitepulse');
+        $log_counts = [
+            'fatal'      => 0,
+            'warning'    => 0,
+            'notice'     => 0,
+            'deprecated' => 0,
+        ];
+        $log_chart_empty = true;
 
-        if ($recent_logs === null) {
+        if ($log_file === null) {
+            $log_status_class = 'status-warn';
+            $log_summary = __('Debug log not configured.', 'sitepulse');
+        } elseif (!file_exists($log_file)) {
+            $log_status_class = 'status-warn';
+            $log_summary = sprintf(__('Log file not found (%s).', 'sitepulse'), esc_html($log_file));
+        } elseif (!is_readable($log_file)) {
             $log_status_class = 'status-warn';
             $log_summary = sprintf(__('Unable to read log file (%s).', 'sitepulse'), esc_html($log_file));
-        } elseif (empty($recent_logs)) {
-            $log_summary = __('No recent log entries.', 'sitepulse');
         } else {
-            $log_chart_empty = false;
-            $log_content = implode("\n", $recent_logs);
+            $recent_logs = sitepulse_get_recent_log_lines($log_file, 200, 131072);
 
-            $patterns = [
-                'fatal'      => '/PHP (Fatal error|Parse error|Uncaught)/i',
-                'warning'    => '/PHP Warning/i',
-                'notice'     => '/PHP Notice/i',
-                'deprecated' => '/PHP Deprecated/i',
-            ];
-
-            foreach ($patterns as $type => $pattern) {
-                $matches = preg_match_all($pattern, $log_content, $ignore_matches);
-                $log_counts[$type] = $matches ? (int) $matches : 0;
-            }
-
-            if ($log_counts['fatal'] > 0) {
-                $log_status_class = 'status-bad';
-                $log_summary = __('Fatal errors detected in the debug log.', 'sitepulse');
-            } elseif ($log_counts['warning'] > 0 || $log_counts['deprecated'] > 0) {
+            if ($recent_logs === null) {
                 $log_status_class = 'status-warn';
-                $log_summary = __('Warnings present in the debug log.', 'sitepulse');
+                $log_summary = sprintf(__('Unable to read log file (%s).', 'sitepulse'), esc_html($log_file));
+            } elseif (empty($recent_logs)) {
+                $log_summary = __('No recent log entries.', 'sitepulse');
             } else {
-                $log_summary = __('No critical events detected.', 'sitepulse');
+                $log_chart_empty = false;
+                $log_content = implode("\n", $recent_logs);
+
+                $patterns = [
+                    'fatal'      => '/PHP (Fatal error|Parse error|Uncaught)/i',
+                    'warning'    => '/PHP Warning/i',
+                    'notice'     => '/PHP Notice/i',
+                    'deprecated' => '/PHP Deprecated/i',
+                ];
+
+                foreach ($patterns as $type => $pattern) {
+                    $matches = preg_match_all($pattern, $log_content, $ignore_matches);
+                    $log_counts[$type] = $matches ? (int) $matches : 0;
+                }
+
+                if ($log_counts['fatal'] > 0) {
+                    $log_status_class = 'status-bad';
+                    $log_summary = __('Fatal errors detected in the debug log.', 'sitepulse');
+                } elseif ($log_counts['warning'] > 0 || $log_counts['deprecated'] > 0) {
+                    $log_status_class = 'status-warn';
+                    $log_summary = __('Warnings present in the debug log.', 'sitepulse');
+                } else {
+                    $log_summary = __('No critical events detected.', 'sitepulse');
+                }
             }
         }
-    }
 
-    $log_chart = [
-        'type'     => 'doughnut',
-        'labels'   => [
-            __('Fatal errors', 'sitepulse'),
-            __('Warnings', 'sitepulse'),
-            __('Notices', 'sitepulse'),
-            __('Deprecated notices', 'sitepulse'),
-        ],
-        'datasets' => $log_chart_empty ? [] : [
-            [
-                'data' => array_values($log_counts),
-                'backgroundColor' => [
-                    $palette['red'],
-                    $palette['amber'],
-                    $palette['blue'],
-                    $palette['purple'],
+        $log_chart = [
+            'type'     => 'doughnut',
+            'labels'   => [
+                __('Fatal errors', 'sitepulse'),
+                __('Warnings', 'sitepulse'),
+                __('Notices', 'sitepulse'),
+                __('Deprecated notices', 'sitepulse'),
+            ],
+            'datasets' => $log_chart_empty ? [] : [
+                [
+                    'data' => array_values($log_counts),
+                    'backgroundColor' => [
+                        $palette['red'],
+                        $palette['amber'],
+                        $palette['blue'],
+                        $palette['purple'],
+                    ],
                 ],
             ],
-        ],
-        'empty'   => $log_chart_empty,
-        'status'  => $log_status_class,
-    ];
+            'empty'   => $log_chart_empty,
+            'status'  => $log_status_class,
+        ];
+
+        $charts_payload['logs'] = $log_chart;
+        $logs_card = [
+            'status' => $log_status_class,
+            'summary' => $log_summary,
+            'counts'  => $log_counts,
+        ];
+    }
+
+    $charts_for_localization = empty($charts_payload) ? new stdClass() : $charts_payload;
 
     $localization_payload = [
-        'charts'  => [
-            'speed'    => $speed_chart,
-            'uptime'   => $uptime_chart,
-            'database' => $database_chart,
-            'logs'     => $log_chart,
-        ],
+        'charts'  => $charts_for_localization,
         'strings' => [
             'noData'              => __('Not enough data to render this chart yet.', 'sitepulse'),
             'uptimeTooltipUp'     => __('Site operational', 'sitepulse'),
@@ -474,82 +514,86 @@ function sitepulse_custom_dashboards_page() {
         <p><?php esc_html_e("A real-time overview of your site's performance and health.", 'sitepulse'); ?></p>
 
         <div class="sitepulse-grid">
-            <!-- Speed Card -->
-            <div class="sitepulse-card">
-                <div class="sitepulse-card-header">
-                    <h2><span class="dashicons dashicons-performance"></span> <?php esc_html_e('Speed', 'sitepulse'); ?></h2>
-                    <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-speed')); ?>" class="button button-secondary"><?php esc_html_e('Details', 'sitepulse'); ?></a>
+            <?php if ($speed_card !== null): ?>
+                <div class="sitepulse-card">
+                    <div class="sitepulse-card-header">
+                        <h2><span class="dashicons dashicons-performance"></span> <?php esc_html_e('Speed', 'sitepulse'); ?></h2>
+                        <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-speed')); ?>" class="button button-secondary"><?php esc_html_e('Details', 'sitepulse'); ?></a>
+                    </div>
+                    <p class="sitepulse-card-subtitle"><?php esc_html_e('Backend PHP processing time captured during the latest scan.', 'sitepulse'); ?></p>
+                    <div class="sitepulse-chart-container">
+                        <canvas id="sitepulse-speed-chart" aria-describedby="sitepulse-speed-description"></canvas>
+                    </div>
+                    <p class="sitepulse-metric <?php echo esc_attr($speed_card['status']); ?>"><?php echo esc_html($speed_card['display']); ?></p>
+                    <p id="sitepulse-speed-description" class="description"><?php esc_html_e('Under 200ms indicates an excellent PHP response. Above 500ms suggests investigating plugins or hosting performance.', 'sitepulse'); ?></p>
                 </div>
-                <p class="sitepulse-card-subtitle"><?php esc_html_e('Backend PHP processing time captured during the latest scan.', 'sitepulse'); ?></p>
-                <div class="sitepulse-chart-container">
-                    <canvas id="sitepulse-speed-chart" aria-describedby="sitepulse-speed-description"></canvas>
-                </div>
-                <p class="sitepulse-metric <?php echo esc_attr($processing_status); ?>"><?php echo esc_html($processing_display); ?></p>
-                <p id="sitepulse-speed-description" class="description"><?php esc_html_e('Under 200ms indicates an excellent PHP response. Above 500ms suggests investigating plugins or hosting performance.', 'sitepulse'); ?></p>
-            </div>
+            <?php endif; ?>
 
-            <!-- Uptime Card -->
-            <div class="sitepulse-card">
-                <div class="sitepulse-card-header">
-                    <h2><span class="dashicons dashicons-chart-bar"></span> <?php esc_html_e('Uptime', 'sitepulse'); ?></h2>
-                    <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-uptime')); ?>" class="button button-secondary"><?php esc_html_e('Details', 'sitepulse'); ?></a>
+            <?php if ($uptime_card !== null): ?>
+                <div class="sitepulse-card">
+                    <div class="sitepulse-card-header">
+                        <h2><span class="dashicons dashicons-chart-bar"></span> <?php esc_html_e('Uptime', 'sitepulse'); ?></h2>
+                        <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-uptime')); ?>" class="button button-secondary"><?php esc_html_e('Details', 'sitepulse'); ?></a>
+                    </div>
+                    <p class="sitepulse-card-subtitle"><?php esc_html_e('Availability for the last 30 hourly checks.', 'sitepulse'); ?></p>
+                    <div class="sitepulse-chart-container">
+                        <canvas id="sitepulse-uptime-chart" aria-describedby="sitepulse-uptime-description"></canvas>
+                    </div>
+                    <p class="sitepulse-metric <?php echo esc_attr($uptime_card['status']); ?>"><?php echo esc_html(round($uptime_card['percentage'], 2)); ?>%</p>
+                    <p id="sitepulse-uptime-description" class="description"><?php esc_html_e('Each bar shows whether the site responded during the scheduled availability probe.', 'sitepulse'); ?></p>
                 </div>
-                <p class="sitepulse-card-subtitle"><?php esc_html_e('Availability for the last 30 hourly checks.', 'sitepulse'); ?></p>
-                <div class="sitepulse-chart-container">
-                    <canvas id="sitepulse-uptime-chart" aria-describedby="sitepulse-uptime-description"></canvas>
-                </div>
-                <p class="sitepulse-metric <?php echo esc_attr($uptime_status); ?>"><?php echo esc_html(round($uptime_percentage, 2)); ?>%</p>
-                <p id="sitepulse-uptime-description" class="description"><?php esc_html_e('Each bar shows whether the site responded during the scheduled availability probe.', 'sitepulse'); ?></p>
-            </div>
+            <?php endif; ?>
 
-            <!-- Database Card -->
-            <div class="sitepulse-card">
-                <div class="sitepulse-card-header">
-                    <h2><span class="dashicons dashicons-database"></span> <?php esc_html_e('Database Health', 'sitepulse'); ?></h2>
-                    <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-db')); ?>" class="button button-secondary"><?php esc_html_e('Optimize', 'sitepulse'); ?></a>
+            <?php if ($database_card !== null): ?>
+                <div class="sitepulse-card">
+                    <div class="sitepulse-card-header">
+                        <h2><span class="dashicons dashicons-database"></span> <?php esc_html_e('Database Health', 'sitepulse'); ?></h2>
+                        <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-db')); ?>" class="button button-secondary"><?php esc_html_e('Optimize', 'sitepulse'); ?></a>
+                    </div>
+                    <p class="sitepulse-card-subtitle"><?php esc_html_e('Post revision volume compared to the recommended limit.', 'sitepulse'); ?></p>
+                    <div class="sitepulse-chart-container">
+                        <canvas id="sitepulse-database-chart" aria-describedby="sitepulse-database-description"></canvas>
+                    </div>
+                    <p class="sitepulse-metric <?php echo esc_attr($database_card['status']); ?>">
+                        <?php echo esc_html(number_format_i18n($database_card['revisions'])); ?>
+                        <span class="sitepulse-metric-unit"><?php esc_html_e('revisions', 'sitepulse'); ?></span>
+                    </p>
+                    <p id="sitepulse-database-description" class="description"><?php printf(esc_html__('Keep revisions under %d to avoid bloating the posts table. Cleaning them is safe and reversible with backups.', 'sitepulse'), (int) $database_card['limit']); ?></p>
                 </div>
-                <p class="sitepulse-card-subtitle"><?php esc_html_e('Post revision volume compared to the recommended limit.', 'sitepulse'); ?></p>
-                <div class="sitepulse-chart-container">
-                    <canvas id="sitepulse-database-chart" aria-describedby="sitepulse-database-description"></canvas>
-                </div>
-                <p class="sitepulse-metric <?php echo esc_attr($db_status); ?>">
-                    <?php echo esc_html(number_format_i18n($revisions)); ?>
-                    <span class="sitepulse-metric-unit"><?php esc_html_e('revisions', 'sitepulse'); ?></span>
-                </p>
-                <p id="sitepulse-database-description" class="description"><?php printf(esc_html__('Keep revisions under %d to avoid bloating the posts table. Cleaning them is safe and reversible with backups.', 'sitepulse'), (int) $revision_limit); ?></p>
-            </div>
+            <?php endif; ?>
 
-            <!-- Log Status Card -->
-            <div class="sitepulse-card">
-                <div class="sitepulse-card-header">
-                    <h2><span class="dashicons dashicons-hammer"></span> <?php esc_html_e('Error Log', 'sitepulse'); ?></h2>
-                    <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-logs')); ?>" class="button button-secondary"><?php esc_html_e('Analyze', 'sitepulse'); ?></a>
+            <?php if ($logs_card !== null): ?>
+                <div class="sitepulse-card">
+                    <div class="sitepulse-card-header">
+                        <h2><span class="dashicons dashicons-hammer"></span> <?php esc_html_e('Error Log', 'sitepulse'); ?></h2>
+                        <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-logs')); ?>" class="button button-secondary"><?php esc_html_e('Analyze', 'sitepulse'); ?></a>
+                    </div>
+                    <p class="sitepulse-card-subtitle"><?php esc_html_e('Breakdown of the most recent entries in the WordPress debug log.', 'sitepulse'); ?></p>
+                    <div class="sitepulse-chart-container">
+                        <canvas id="sitepulse-log-chart" aria-describedby="sitepulse-log-description"></canvas>
+                    </div>
+                    <p class="sitepulse-metric <?php echo esc_attr($logs_card['status']); ?>"><?php echo esc_html($logs_card['summary']); ?></p>
+                    <ul class="sitepulse-legend">
+                        <li>
+                            <span class="label"><span class="badge" style="background-color: <?php echo esc_attr($palette['red']); ?>;"></span><?php esc_html_e('Fatal errors', 'sitepulse'); ?></span>
+                            <span class="value"><?php echo esc_html(number_format_i18n($logs_card['counts']['fatal'])); ?></span>
+                        </li>
+                        <li>
+                            <span class="label"><span class="badge" style="background-color: <?php echo esc_attr($palette['amber']); ?>;"></span><?php esc_html_e('Warnings', 'sitepulse'); ?></span>
+                            <span class="value"><?php echo esc_html(number_format_i18n($logs_card['counts']['warning'])); ?></span>
+                        </li>
+                        <li>
+                            <span class="label"><span class="badge" style="background-color: <?php echo esc_attr($palette['blue']); ?>;"></span><?php esc_html_e('Notices', 'sitepulse'); ?></span>
+                            <span class="value"><?php echo esc_html(number_format_i18n($logs_card['counts']['notice'])); ?></span>
+                        </li>
+                        <li>
+                            <span class="label"><span class="badge" style="background-color: <?php echo esc_attr($palette['purple']); ?>;"></span><?php esc_html_e('Deprecated notices', 'sitepulse'); ?></span>
+                            <span class="value"><?php echo esc_html(number_format_i18n($logs_card['counts']['deprecated'])); ?></span>
+                        </li>
+                    </ul>
+                    <p id="sitepulse-log-description" class="description"><?php esc_html_e('Use the analyzer to inspect full stack traces and silence recurring issues.', 'sitepulse'); ?></p>
                 </div>
-                <p class="sitepulse-card-subtitle"><?php esc_html_e('Breakdown of the most recent entries in the WordPress debug log.', 'sitepulse'); ?></p>
-                <div class="sitepulse-chart-container">
-                    <canvas id="sitepulse-log-chart" aria-describedby="sitepulse-log-description"></canvas>
-                </div>
-                <p class="sitepulse-metric <?php echo esc_attr($log_status_class); ?>"><?php echo esc_html($log_summary); ?></p>
-                <ul class="sitepulse-legend">
-                    <li>
-                        <span class="label"><span class="badge" style="background-color: <?php echo esc_attr($palette['red']); ?>;"></span><?php esc_html_e('Fatal errors', 'sitepulse'); ?></span>
-                        <span class="value"><?php echo esc_html(number_format_i18n($log_counts['fatal'])); ?></span>
-                    </li>
-                    <li>
-                        <span class="label"><span class="badge" style="background-color: <?php echo esc_attr($palette['amber']); ?>;"></span><?php esc_html_e('Warnings', 'sitepulse'); ?></span>
-                        <span class="value"><?php echo esc_html(number_format_i18n($log_counts['warning'])); ?></span>
-                    </li>
-                    <li>
-                        <span class="label"><span class="badge" style="background-color: <?php echo esc_attr($palette['blue']); ?>;"></span><?php esc_html_e('Notices', 'sitepulse'); ?></span>
-                        <span class="value"><?php echo esc_html(number_format_i18n($log_counts['notice'])); ?></span>
-                    </li>
-                    <li>
-                        <span class="label"><span class="badge" style="background-color: <?php echo esc_attr($palette['purple']); ?>;"></span><?php esc_html_e('Deprecated notices', 'sitepulse'); ?></span>
-                        <span class="value"><?php echo esc_html(number_format_i18n($log_counts['deprecated'])); ?></span>
-                    </li>
-                </ul>
-                <p id="sitepulse-log-description" class="description"><?php esc_html_e('Use the analyzer to inspect full stack traces and silence recurring issues.', 'sitepulse'); ?></p>
-            </div>
+            <?php endif; ?>
         </div>
     </div>
     <?php
