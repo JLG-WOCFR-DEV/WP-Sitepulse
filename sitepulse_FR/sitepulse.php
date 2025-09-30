@@ -557,7 +557,7 @@ function sitepulse_clear_cron_warning($module_key) {
  * @return void
  */
 function sitepulse_render_cron_warnings() {
-    if (!is_admin() || !current_user_can('manage_options')) {
+    if (!is_admin() || !current_user_can(sitepulse_get_capability())) {
         return;
     }
 
@@ -1202,6 +1202,18 @@ function sitepulse_activate_site() {
     add_option(SITEPULSE_OPTION_CRON_WARNINGS, [], '', false);
 
     sitepulse_plugin_impact_install_mu_loader();
+
+    if (function_exists('get_role')) {
+        $capability = sitepulse_get_capability();
+
+        if (is_string($capability) && $capability !== '') {
+            $administrator_role = get_role('administrator');
+
+            if ($administrator_role instanceof \WP_Role) {
+                $administrator_role->add_cap($capability);
+            }
+        }
+    }
 }
 
 /**

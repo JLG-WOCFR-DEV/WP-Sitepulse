@@ -127,7 +127,7 @@ function sitepulse_custom_dashboard_enqueue_assets($hook_suffix) {
  * to prevent conflicts and duplicate menus.
  */
 function sitepulse_custom_dashboards_page() {
-    if (!current_user_can('manage_options')) {
+    if (!current_user_can(sitepulse_get_capability())) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 

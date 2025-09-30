@@ -6,7 +6,7 @@ add_action('admin_menu', function() {
         'sitepulse-dashboard',
         __('AI Insights', 'sitepulse'),
         __('AI Insights', 'sitepulse'),
-        'manage_options',
+        sitepulse_get_capability(),
         'sitepulse-ai',
         'sitepulse_ai_insights_page'
     );
@@ -98,7 +98,7 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
 }
 
 function sitepulse_ai_insights_page() {
-    if (!current_user_can('manage_options')) {
+    if (!current_user_can(sitepulse_get_capability())) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
@@ -179,7 +179,7 @@ function sitepulse_generate_ai_insight() {
         sitepulse_log($log_message, 'ERROR');
     };
 
-    if (!current_user_can('manage_options')) {
+    if (!current_user_can(sitepulse_get_capability())) {
         $error_message = esc_html__("Vous n'avez pas les permissions nécessaires pour effectuer cette action.", 'sitepulse');
 
         $log_ai_error($error_message, 403);

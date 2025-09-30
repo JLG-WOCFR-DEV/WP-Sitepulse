@@ -5,13 +5,13 @@ add_action('admin_menu', function() {
         'sitepulse-dashboard',
         __('Maintenance Advisor', 'sitepulse'),
         __('Maintenance', 'sitepulse'),
-        'manage_options',
+        sitepulse_get_capability(),
         'sitepulse-maintenance',
         'sitepulse_maintenance_advisor_page'
     );
 });
 function sitepulse_maintenance_advisor_page() {
-    if (!current_user_can('manage_options')) {
+    if (!current_user_can(sitepulse_get_capability())) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 

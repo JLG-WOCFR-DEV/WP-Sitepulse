@@ -2,7 +2,7 @@
 if (!defined('ABSPATH')) exit;
 
 add_action('admin_menu', function() {
-    add_submenu_page('sitepulse-dashboard', 'Resource Monitor', 'Resources', 'manage_options', 'sitepulse-resources', 'sitepulse_resource_monitor_page');
+    add_submenu_page('sitepulse-dashboard', 'Resource Monitor', 'Resources', sitepulse_get_capability(), 'sitepulse-resources', 'sitepulse_resource_monitor_page');
 });
 
 add_action('admin_enqueue_scripts', 'sitepulse_resource_monitor_enqueue_assets');
@@ -273,7 +273,7 @@ function sitepulse_resource_monitor_get_snapshot() {
 }
 
 function sitepulse_resource_monitor_page() {
-    if (!current_user_can('manage_options')) {
+    if (!current_user_can(sitepulse_get_capability())) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 

@@ -5,13 +5,13 @@ add_action('admin_menu', function() {
         'sitepulse-dashboard',
         __('Database Optimizer', 'sitepulse'),
         __('Database', 'sitepulse'),
-        'manage_options',
+        sitepulse_get_capability(),
         'sitepulse-db',
         'sitepulse_database_optimizer_page'
     );
 });
 function sitepulse_database_optimizer_page() {
-    if (!current_user_can('manage_options')) {
+    if (!current_user_can(sitepulse_get_capability())) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
