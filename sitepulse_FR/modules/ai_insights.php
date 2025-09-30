@@ -58,6 +58,153 @@ function sitepulse_ai_get_cached_insight($force_refresh = false) {
     return $cached_insight;
 }
 
+/**
+ * Builds a sanitized summary of the latest collected SitePulse metrics.
+ *
+ * @return string Sanitized summary or empty string when no metrics are available.
+ */
+function sitepulse_ai_get_metrics_summary() {
+    $summary_parts = [];
+
+    if (defined('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS')) {
+        $speed_results = get_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
+        $ttfb_ms       = null;
+
+        if (is_array($speed_results)) {
+            $candidates = [
+                ['server_processing_ms'],
+                ['ttfb'],
+                ['data', 'server_processing_ms'],
+                ['data', 'ttfb'],
+            ];
+
+            foreach ($candidates as $path) {
+                $value = $speed_results;
+
+                foreach ($path as $segment) {
+                    if (!is_array($value) || !array_key_exists($segment, $value)) {
+                        $value = null;
+                        break;
+                    }
+
+                    $value = $value[$segment];
+                }
+
+                if (is_numeric($value)) {
+                    $ttfb_ms = (float) $value;
+                    break;
+                }
+            }
+        } elseif (is_numeric($speed_results)) {
+            $ttfb_ms = (float) $speed_results;
+        }
+
+        if (null !== $ttfb_ms) {
+            $summary_parts[] = sprintf(
+                /* translators: %s: Average TTFB in milliseconds. */
+                __('TTFB moyen observé : %s ms.', 'sitepulse'),
+                number_format_i18n(round($ttfb_ms, 2), 2)
+            );
+        }
+    }
+
+    if (defined('SITEPULSE_OPTION_UPTIME_LOG')) {
+        $uptime_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+
+        if (!is_array($uptime_log)) {
+            $uptime_log = [];
+        }
+
+        if (function_exists('sitepulse_normalize_uptime_log')) {
+            $uptime_log = sitepulse_normalize_uptime_log($uptime_log);
+        }
+
+        $boolean_statuses = [];
+
+        foreach ($uptime_log as $entry) {
+            if (is_array($entry) && array_key_exists('status', $entry) && is_bool($entry['status'])) {
+                $boolean_statuses[] = $entry['status'];
+            } elseif (is_bool($entry)) {
+                $boolean_statuses[] = $entry;
+            } elseif (is_numeric($entry)) {
+                $boolean_statuses[] = (bool) $entry;
+            }
+        }
+
+        if (!empty($boolean_statuses)) {
+            $total_checks = count($boolean_statuses);
+            $up_checks    = count(array_filter($boolean_statuses));
+            $uptime_pct   = $total_checks > 0 ? ($up_checks / $total_checks) * 100 : 0;
+
+            $summary_parts[] = sprintf(
+                /* translators: %s: Uptime percentage. */
+                __('Disponibilité récemment mesurée : %s%%.', 'sitepulse'),
+                number_format_i18n(round($uptime_pct, 2), 2)
+            );
+        }
+    }
+
+    if (defined('SITEPULSE_PLUGIN_IMPACT_OPTION')) {
+        $impact_data = get_option(SITEPULSE_PLUGIN_IMPACT_OPTION, []);
+
+        if (!is_array($impact_data)) {
+            $impact_data = [];
+        }
+
+        $samples = isset($impact_data['samples']) && is_array($impact_data['samples'])
+            ? $impact_data['samples']
+            : [];
+
+        $top_plugin = null;
+
+        foreach ($samples as $plugin_file => $data) {
+            if (!is_array($data)) {
+                continue;
+            }
+
+            $avg_ms = isset($data['avg_ms']) && is_numeric($data['avg_ms']) ? (float) $data['avg_ms'] : null;
+
+            if (null === $avg_ms) {
+                continue;
+            }
+
+            $plugin_name = '';
+
+            if (isset($data['name']) && is_scalar($data['name'])) {
+                $plugin_name = (string) $data['name'];
+            } elseif (isset($data['file']) && is_scalar($data['file'])) {
+                $plugin_name = (string) $data['file'];
+            } elseif (is_string($plugin_file)) {
+                $plugin_name = $plugin_file;
+            }
+
+            if (!is_array($top_plugin) || $avg_ms > $top_plugin['avg_ms']) {
+                $top_plugin = [
+                    'name'   => sanitize_text_field(wp_strip_all_tags($plugin_name)),
+                    'avg_ms' => $avg_ms,
+                ];
+            }
+        }
+
+        if (null !== $top_plugin && '' !== $top_plugin['name']) {
+            $summary_parts[] = sprintf(
+                /* translators: 1: Plugin name, 2: Average execution time in milliseconds. */
+                __('Plugin le plus coûteux : %1$s (%2$s ms en moyenne).', 'sitepulse'),
+                $top_plugin['name'],
+                number_format_i18n(round($top_plugin['avg_ms'], 2), 2)
+            );
+        }
+    }
+
+    if (empty($summary_parts)) {
+        return '';
+    }
+
+    $summary = implode(' ', $summary_parts);
+
+    return sanitize_textarea_field($summary);
+}
+
 function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
     if ('sitepulse-dashboard_page_sitepulse-ai' !== $hook_suffix) {
         return;
@@ -255,6 +402,12 @@ function sitepulse_generate_ai_insight() {
         ),
         __('Fournis trois recommandations concrètes pour améliorer la vitesse, le référencement et la conversion. Réponds en français.', 'sitepulse'),
     ];
+
+    $metrics_summary = sitepulse_ai_get_metrics_summary();
+
+    if ('' !== $metrics_summary) {
+        $prompt_sections[] = $metrics_summary;
+    }
 
     if (!empty($site_description)) {
         $prompt_sections[] = sprintf(

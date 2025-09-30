@@ -52,14 +52,20 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->last_http_args      = null;
 
         delete_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
+        delete_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
         update_option(SITEPULSE_OPTION_GEMINI_API_KEY, '');
+        delete_option(SITEPULSE_PLUGIN_IMPACT_OPTION);
+        delete_option(SITEPULSE_OPTION_UPTIME_LOG);
         $this->reset_cached_insight_static();
     }
 
     protected function tear_down(): void {
         $this->reset_cached_insight_static();
         delete_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
+        delete_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
         delete_option(SITEPULSE_OPTION_GEMINI_API_KEY);
+        delete_option(SITEPULSE_PLUGIN_IMPACT_OPTION);
+        delete_option(SITEPULSE_OPTION_UPTIME_LOG);
 
         parent::tear_down();
     }
@@ -197,6 +203,85 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->assertTrue($data['cached'], 'Response should indicate the data came from cache.');
         $this->assertSame($expected_text, $data['text']);
         $this->assertSame($cached_timestamp, $data['timestamp']);
+    }
+
+    /**
+     * Ensures the Gemini prompt includes the collected metric summary when available.
+     */
+    public function test_prompt_includes_metric_summary_when_available() {
+        update_option(SITEPULSE_OPTION_GEMINI_API_KEY, 'test-api-key');
+
+        set_transient(
+            SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS,
+            [
+                'server_processing_ms' => 321.987,
+                'timestamp'            => current_time('timestamp'),
+            ],
+            MINUTE_IN_SECONDS
+        );
+
+        update_option(
+            SITEPULSE_OPTION_UPTIME_LOG,
+            [
+                ['status' => true],
+                ['status' => false],
+                ['status' => true],
+            ],
+            false
+        );
+
+        update_option(
+            SITEPULSE_PLUGIN_IMPACT_OPTION,
+            [
+                'samples' => [
+                    'plugin-a/plugin.php' => [
+                        'name'   => '<em>Plugin A</em>',
+                        'avg_ms' => 45.3,
+                    ],
+                    'plugin-b/plugin.php' => [
+                        'name'   => 'Plugin B',
+                        'avg_ms' => 125.72,
+                    ],
+                ],
+            ],
+            false
+        );
+
+        $expected_summary = sitepulse_ai_get_metrics_summary();
+
+        $this->assertNotSame('', $expected_summary, 'Precondition: The summary should not be empty.');
+
+        add_filter('pre_http_request', [$this, 'mock_gemini_success'], 10, 3);
+
+        $_POST['nonce']         = wp_create_nonce(SITEPULSE_NONCE_ACTION_AI_INSIGHT);
+        $_POST['force_refresh'] = 'true';
+
+        try {
+            $this->_handleAjax('sitepulse_generate_ai_insight');
+        } catch (WPAjaxDieStopException $exception) {
+            // Expected - WordPress halts execution after sending the JSON response.
+        }
+
+        remove_filter('pre_http_request', [$this, 'mock_gemini_success'], 10);
+
+        $this->assertIsArray($this->last_http_args, 'HTTP request arguments should be captured.');
+        $this->assertArrayHasKey('body', $this->last_http_args, 'The prompt should be present in the HTTP body.');
+
+        $request_body = json_decode($this->last_http_args['body'], true);
+
+        $this->assertIsArray($request_body, 'The HTTP body must be valid JSON.');
+        $this->assertArrayHasKey('contents', $request_body);
+        $this->assertNotEmpty($request_body['contents']);
+
+        $this->assertArrayHasKey('parts', $request_body['contents'][0]);
+        $this->assertNotEmpty($request_body['contents'][0]['parts']);
+        $this->assertArrayHasKey('text', $request_body['contents'][0]['parts'][0]);
+
+        $prompt_text = $request_body['contents'][0]['parts'][0]['text'];
+
+        $this->assertStringContainsString($expected_summary, $prompt_text, 'The prompt should embed the metric summary.');
+
+        $this->assertStringNotContainsString('<em>', $prompt_text, 'The summary must be sanitized.');
     }
 
     /**
