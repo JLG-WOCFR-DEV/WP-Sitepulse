@@ -2,8 +2,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: SitePulse 1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2024-06-02 00:00+0000\n"
-"PO-Revision-Date: 2024-06-02 00:00+0000\n"
+"POT-Creation-Date: 2024-07-06 00:00+0000\n"
+"PO-Revision-Date: 2024-07-06 00:00+0000\n"
 "Last-Translator: \n"
 "Language-Team: \n"
 "Language: \n"
@@ -198,4 +198,32 @@ msgstr ""
 
 #: modules/ai_insights.php:149
 msgid "Votre Recommandation par IA"
+msgstr ""
+#: includes/admin-settings.php:207 modules/ai_insights.php:219 modules/ai_insights.php:243
+msgid "Une fois par jour"
+msgstr ""
+
+#: includes/admin-settings.php:208 modules/ai_insights.php:220 modules/ai_insights.php:244
+msgid "Une fois par semaine"
+msgstr ""
+
+#: includes/admin-settings.php:209 modules/ai_insights.php:221 modules/ai_insights.php:245
+msgid "Une fois par mois"
+msgstr ""
+
+#: includes/admin-settings.php:210 modules/ai_insights.php:223 modules/ai_insights.php:246
+msgid "Illimité"
+msgstr ""
+
+#: includes/admin-settings.php:553
+msgid "Fréquence maximale des analyses IA"
+msgstr ""
+
+#: includes/admin-settings.php:560
+msgid "Définissez la fréquence maximale des nouvelles recommandations générées automatiquement."
+msgstr ""
+
+#: modules/ai_insights.php:1040
+#, php-format
+msgid "La génération par IA est limitée à %2$s. Réessayez dans %1$s."
 msgstr ""
