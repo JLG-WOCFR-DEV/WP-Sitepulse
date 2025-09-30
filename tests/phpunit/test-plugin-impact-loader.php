@@ -34,6 +34,7 @@ if (!class_exists('Sitepulse_Unwritable_Filesystem')) {
 class Sitepulse_Plugin_Impact_Loader_Test extends WP_UnitTestCase {
     protected $mu_loader_dir;
     protected $mu_loader_file;
+    protected $renamed_plugin_dir;
 
     public static function setUpBeforeClass(): void {
         parent::setUpBeforeClass();
@@ -57,6 +58,8 @@ class Sitepulse_Plugin_Impact_Loader_Test extends WP_UnitTestCase {
         $this->mu_loader_dir  = $paths['dir'];
         $this->mu_loader_file = $paths['file'];
 
+        $this->renamed_plugin_dir = trailingslashit(WP_PLUGIN_DIR) . 'sitepulse-renamed';
+
         if (file_exists($this->mu_loader_file)) {
             unlink($this->mu_loader_file);
         }
@@ -68,6 +71,8 @@ class Sitepulse_Plugin_Impact_Loader_Test extends WP_UnitTestCase {
         if (!is_dir($this->mu_loader_dir)) {
             wp_mkdir_p($this->mu_loader_dir);
         }
+
+        $this->remove_directory($this->renamed_plugin_dir);
     }
 
     protected function tearDown(): void {
@@ -88,6 +93,11 @@ class Sitepulse_Plugin_Impact_Loader_Test extends WP_UnitTestCase {
         } else {
             @chmod($this->mu_loader_dir, 0755);
         }
+
+        $this->remove_directory($this->renamed_plugin_dir);
+        sitepulse_update_plugin_basename_option();
+
+        unset($GLOBALS['sitepulse_mu_loader_stub_includes']);
 
         parent::tearDown();
     }
@@ -129,5 +139,77 @@ class Sitepulse_Plugin_Impact_Loader_Test extends WP_UnitTestCase {
         $this->assertIsArray($warnings, 'Cron warnings option should remain an array after clearing entries.');
         $this->assertArrayNotHasKey('plugin_impact', $warnings, 'Successful installation should clear the plugin impact warning.');
         $this->assertArrayHasKey('other', $warnings, 'Other cron warnings should remain untouched.');
+    }
+
+    public function test_loader_includes_tracker_for_renamed_plugin_directory(): void {
+        $includes_dir = trailingslashit($this->renamed_plugin_dir) . 'includes';
+
+        wp_mkdir_p($includes_dir);
+
+        $stub_tracker = $includes_dir . '/plugin-impact-tracker.php';
+
+        $stub_contents = <<<'PHP'
+<?php
+$GLOBALS['sitepulse_mu_loader_stub_includes'][] = __FILE__;
+PHP;
+
+        $this->assertNotFalse(
+            file_put_contents($stub_tracker, $stub_contents),
+            'Failed to create the stub tracker file for the renamed plugin.'
+        );
+
+        $filter = static function ($basename) {
+            return 'sitepulse-renamed/sitepulse.php';
+        };
+
+        add_filter('sitepulse_plugin_basename', $filter);
+
+        try {
+            sitepulse_plugin_impact_install_mu_loader();
+        } finally {
+            remove_filter('sitepulse_plugin_basename', $filter);
+        }
+
+        $this->assertFileExists(
+            $this->mu_loader_file,
+            'MU loader installation should create the loader file.'
+        );
+
+        unset($GLOBALS['sitepulse_mu_loader_stub_includes']);
+
+        include $this->mu_loader_file;
+
+        $this->assertSame(
+            [$stub_tracker],
+            $GLOBALS['sitepulse_mu_loader_stub_includes'] ?? [],
+            'MU loader should include the tracker from the renamed plugin directory.'
+        );
+    }
+
+    private function remove_directory($directory): void {
+        if (!is_string($directory) || $directory === '' || !file_exists($directory)) {
+            return;
+        }
+
+        if (!is_dir($directory)) {
+            unlink($directory);
+
+            return;
+        }
+
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($directory, RecursiveDirectoryIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST
+        );
+
+        foreach ($iterator as $item) {
+            if ($item->isDir()) {
+                @rmdir($item->getPathname());
+            } else {
+                @unlink($item->getPathname());
+            }
+        }
+
+        @rmdir($directory);
     }
 }
