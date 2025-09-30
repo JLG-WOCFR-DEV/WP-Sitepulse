@@ -1219,6 +1219,29 @@ function sitepulse_activate_site() {
 }
 
 /**
+ * Removes the SitePulse capability from the administrator role.
+ *
+ * @return void
+ */
+function sitepulse_remove_administrator_capability() {
+    if (!function_exists('get_role')) {
+        return;
+    }
+
+    $capability = sitepulse_get_capability();
+
+    if (!is_string($capability) || $capability === '') {
+        return;
+    }
+
+    $administrator_role = get_role('administrator');
+
+    if ($administrator_role instanceof \WP_Role) {
+        $administrator_role->remove_cap($capability);
+    }
+}
+
+/**
  * Ensures SitePulse defaults are applied to a newly created site.
  *
  * @param int $site_id Site identifier.
@@ -1355,6 +1378,8 @@ function sitepulse_deactivate_site() {
     foreach (sitepulse_get_cron_hooks() as $hook) {
         wp_clear_scheduled_hook($hook);
     }
+
+    sitepulse_remove_administrator_capability();
 
     if (!sitepulse_is_plugin_active_anywhere()) {
         sitepulse_plugin_impact_remove_mu_loader();
