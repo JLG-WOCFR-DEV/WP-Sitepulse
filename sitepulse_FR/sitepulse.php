@@ -29,6 +29,7 @@ define('SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES', 'sitepulse_alert_cooldown_minu
 define('SITEPULSE_OPTION_ALERT_INTERVAL', 'sitepulse_alert_interval');
 define('SITEPULSE_OPTION_ALERT_RECIPIENTS', 'sitepulse_alert_recipients');
 define('SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE', 'sitepulse_impact_loader_signature');
+define('SITEPULSE_OPTION_PLUGIN_BASENAME', 'sitepulse_plugin_basename');
 define('SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER', 'sitepulse_error_alert_log_pointer');
 define('SITEPULSE_OPTION_CRON_WARNINGS', 'sitepulse_cron_warnings');
 define('SITEPULSE_OPTION_DEBUG_NOTICES', 'sitepulse_debug_notices');
@@ -179,6 +180,68 @@ function sitepulse_path_is_within_root($path, $root) {
     return strpos($path_with_slash, $root_with_slash) === 0;
 }
 
+/**
+ * Returns the current SitePulse plugin basename.
+ *
+ * @return string
+ */
+function sitepulse_get_current_plugin_basename() {
+    $basename = plugin_basename(__FILE__);
+
+    if (function_exists('apply_filters')) {
+        $filtered_basename = apply_filters('sitepulse_plugin_basename', $basename);
+
+        if (is_string($filtered_basename) && $filtered_basename !== '') {
+            $basename = $filtered_basename;
+        }
+    }
+
+    return ltrim((string) $basename, '/\\');
+}
+
+/**
+ * Persists the detected plugin basename when it changes.
+ *
+ * @param string|null $basename Optional override for the plugin basename.
+ * @return string Stored plugin basename.
+ */
+function sitepulse_update_plugin_basename_option($basename = null) {
+    if (!is_string($basename) || $basename === '') {
+        $basename = sitepulse_get_current_plugin_basename();
+    } else {
+        $basename = ltrim($basename, '/\\');
+    }
+
+    $stored_basename = get_option(SITEPULSE_OPTION_PLUGIN_BASENAME, '');
+
+    if (!is_string($stored_basename)) {
+        $stored_basename = '';
+    }
+
+    if ($stored_basename !== $basename) {
+        update_option(SITEPULSE_OPTION_PLUGIN_BASENAME, $basename, false);
+    }
+
+    return $basename;
+}
+
+/**
+ * Retrieves the stored plugin basename with a fallback.
+ *
+ * @return string
+ */
+function sitepulse_get_stored_plugin_basename() {
+    $basename = get_option(SITEPULSE_OPTION_PLUGIN_BASENAME, '');
+
+    if (!is_string($basename) || $basename === '') {
+        $basename = sitepulse_get_current_plugin_basename();
+    }
+
+    return ltrim($basename, '/\\');
+}
+
+sitepulse_update_plugin_basename_option();
+
 $debug_mode = get_option(SITEPULSE_OPTION_DEBUG_MODE, false);
 define('SITEPULSE_DEBUG', (bool) $debug_mode);
 
@@ -295,18 +358,79 @@ function sitepulse_plugin_impact_get_mu_loader_paths() {
 }
 
 /**
+ * Returns the expected MU loader contents for the current installation.
+ *
+ * @return string
+ */
+function sitepulse_plugin_impact_get_loader_contents() {
+    $plugin_basename = sitepulse_get_stored_plugin_basename();
+    $option_name     = SITEPULSE_OPTION_PLUGIN_BASENAME;
+
+    $exported_option_name = var_export($option_name, true);
+    $exported_basename    = var_export($plugin_basename, true);
+
+    $contents = <<<'PHP'
+<?php
+/**
+ * Plugin Name: SitePulse Impact Bootstrap
+ * Description: Ensures SitePulse plugin impact tracking is hooked before standard plugins load.
+ *
+ * This file is auto-generated. Any manual edits may be overwritten.
+ */
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+$sitepulse_plugin_basename_option = %s;
+$sitepulse_plugin_basename = get_option($sitepulse_plugin_basename_option);
+
+if (!is_string($sitepulse_plugin_basename) || $sitepulse_plugin_basename === '') {
+    $sitepulse_plugin_basename = %s;
+}
+
+$sitepulse_plugin_basename = ltrim($sitepulse_plugin_basename, '/\\');
+$sitepulse_plugin_file = WP_PLUGIN_DIR . '/' . $sitepulse_plugin_basename;
+$sitepulse_plugin_directory = dirname($sitepulse_plugin_file);
+
+if ($sitepulse_plugin_directory === '.' || $sitepulse_plugin_directory === '') {
+    $sitepulse_plugin_directory = WP_PLUGIN_DIR;
+}
+
+if (function_exists('trailingslashit')) {
+    $sitepulse_plugin_directory = trailingslashit($sitepulse_plugin_directory);
+} else {
+    $sitepulse_plugin_directory = rtrim($sitepulse_plugin_directory, '/\\') . '/';
+}
+
+$sitepulse_tracker_file = $sitepulse_plugin_directory . 'includes/plugin-impact-tracker.php';
+
+if (file_exists($sitepulse_tracker_file)) {
+    require_once $sitepulse_tracker_file;
+
+    if (function_exists('sitepulse_plugin_impact_tracker_bootstrap')) {
+        sitepulse_plugin_impact_tracker_bootstrap();
+    }
+}
+
+PHP;
+
+    return sprintf($contents, $exported_option_name, $exported_basename);
+}
+
+/**
  * Returns the checksum of the bundled MU loader file.
  *
  * @return string|null
  */
 function sitepulse_plugin_impact_get_loader_signature() {
-    $source = SITEPULSE_PATH . 'includes/mu-plugin/sitepulse-impact-loader.php';
+    $contents = sitepulse_plugin_impact_get_loader_contents();
 
-    if (!file_exists($source) || !is_readable($source)) {
+    if (!is_string($contents) || $contents === '') {
         return null;
     }
 
-    $signature = hash_file('sha256', $source);
+    $signature = hash('sha256', $contents);
 
     return $signature !== false ? $signature : null;
 }
@@ -517,13 +641,20 @@ function sitepulse_get_filesystem() {
  */
 function sitepulse_plugin_impact_install_mu_loader() {
     $paths = sitepulse_plugin_impact_get_mu_loader_paths();
-    $source = SITEPULSE_PATH . 'includes/mu-plugin/sitepulse-impact-loader.php';
     $target_dir = $paths['dir'];
     $target_file = $paths['file'];
 
-    $signature = sitepulse_plugin_impact_get_loader_signature();
+    sitepulse_update_plugin_basename_option();
 
-    if ($signature === null) {
+    $loader_contents = sitepulse_plugin_impact_get_loader_contents();
+
+    if (!is_string($loader_contents) || $loader_contents === '') {
+        return;
+    }
+
+    $signature = hash('sha256', $loader_contents);
+
+    if ($signature === false) {
         return;
     }
 
@@ -564,21 +695,21 @@ function sitepulse_plugin_impact_install_mu_loader() {
     }
 
     $has_valid_loader = false;
-    $needs_copy = true;
+    $needs_write = true;
 
     if (is_string($stored_signature) && sitepulse_hash_equals($signature, $stored_signature)) {
         if ($filesystem instanceof WP_Filesystem_Base) {
             if ($filesystem->exists($target_file)) {
                 $has_valid_loader = true;
-                $needs_copy      = false;
+                $needs_write     = false;
             }
         } elseif (file_exists($target_file)) {
             $has_valid_loader = true;
-            $needs_copy      = false;
+            $needs_write     = false;
         }
     }
 
-    if ($needs_copy) {
+    if ($needs_write) {
         if ($filesystem instanceof WP_Filesystem_Base && $filesystem->exists($target_file)) {
             $contents = $filesystem->get_contents($target_file);
 
@@ -587,7 +718,7 @@ function sitepulse_plugin_impact_install_mu_loader() {
 
                 if ($existing_signature !== false && sitepulse_hash_equals($signature, $existing_signature)) {
                     $has_valid_loader = true;
-                    $needs_copy      = false;
+                    $needs_write     = false;
                 }
             }
         } elseif (file_exists($target_file)) {
@@ -595,32 +726,31 @@ function sitepulse_plugin_impact_install_mu_loader() {
 
             if ($existing_signature !== false && sitepulse_hash_equals($signature, $existing_signature)) {
                 $has_valid_loader = true;
-                $needs_copy      = false;
+                $needs_write     = false;
             }
         }
     }
 
-    if ($needs_copy) {
-        $copied = false;
+    if ($needs_write) {
+        $written = false;
 
         if ($filesystem instanceof WP_Filesystem_Base) {
-            $copied = $filesystem->copy(
-                $source,
+            $written = $filesystem->put_contents(
                 $target_file,
-                true,
+                $loader_contents,
                 defined('FS_CHMOD_FILE') ? FS_CHMOD_FILE : false
             );
         }
 
-        if (!$copied) {
-            $copied = copy($source, $target_file);
+        if (!$written) {
+            $written = file_put_contents($target_file, $loader_contents) !== false;
 
-            if ($copied && function_exists('chmod')) {
+            if ($written && function_exists('chmod')) {
                 @chmod($target_file, 0644);
             }
         }
 
-        if ($copied) {
+        if ($written) {
             if ($filesystem instanceof WP_Filesystem_Base) {
                 $contents = $filesystem->get_contents($target_file);
                 if (is_string($contents)) {
@@ -1056,6 +1186,8 @@ add_action('plugins_loaded', 'sitepulse_load_modules');
  * @return void
  */
 function sitepulse_activate_site() {
+    sitepulse_update_plugin_basename_option();
+
     // **FIX:** Activate the dashboard by default to prevent fatal errors on first load.
     add_option(SITEPULSE_OPTION_ACTIVE_MODULES, ['custom_dashboards'], '', false);
     add_option(SITEPULSE_OPTION_DEBUG_MODE, false, '', false);
