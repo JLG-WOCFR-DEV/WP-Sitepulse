@@ -39,6 +39,11 @@ function sitepulse_plugin_impact_enqueue_assets($hook_suffix) {
 }
 
 add_action('upgrader_process_complete', 'sitepulse_plugin_impact_clear_dir_cache_on_upgrade', 10, 2);
+add_action('sitepulse_queue_plugin_dir_scan', 'sitepulse_process_plugin_dir_scan_queue');
+
+if (!defined('SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION')) {
+    define('SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION', 'sitepulse_plugin_dir_scan_queue');
+}
 
 function sitepulse_plugin_impact_clear_dir_cache_on_upgrade($upgrader, $hook_extra) {
     if (!is_array($hook_extra) || !isset($hook_extra['type']) || $hook_extra['type'] !== 'plugin') {
@@ -200,11 +205,15 @@ function sitepulse_plugin_impact_scanner_page() {
 
         $plugin_dir = dirname($plugin_file);
 
+        $disk_space_status = 'complete';
+
         if ($plugin_dir === '.' || $plugin_dir === '') {
             $plugin_path = WP_PLUGIN_DIR . '/' . $plugin_file;
             $disk_space = is_file($plugin_path) && is_readable($plugin_path) ? filesize($plugin_path) : 0;
         } else {
-            $disk_space = sitepulse_get_dir_size_with_cache(WP_PLUGIN_DIR . '/' . $plugin_dir);
+            $dir_size = sitepulse_get_dir_size_with_cache(WP_PLUGIN_DIR . '/' . $plugin_dir);
+            $disk_space = isset($dir_size['size']) ? (int) $dir_size['size'] : 0;
+            $disk_space_status = isset($dir_size['status']) ? $dir_size['status'] : 'complete';
         }
 
         $impact_data = [
@@ -215,6 +224,7 @@ function sitepulse_plugin_impact_scanner_page() {
             'samples'       => 0,
             'last_recorded' => null,
             'disk_space'    => $disk_space,
+            'disk_space_status' => $disk_space_status,
         ];
 
         if (isset($samples[$plugin_file]) && is_array($samples[$plugin_file])) {
@@ -403,7 +413,15 @@ function sitepulse_plugin_impact_scanner_page() {
                     <tr>
                         <td><strong><?php echo esc_html($data['name']); ?></strong></td>
                         <td><?php echo $impact_output; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></td>
-                        <td><?php echo wp_kses_post(size_format($data['disk_space'], 2)); ?></td>
+                        <td>
+                            <?php
+                            if (isset($data['disk_space_status']) && $data['disk_space_status'] === 'pending') {
+                                echo esc_html__('en cours…', 'sitepulse');
+                            } else {
+                                echo wp_kses_post(size_format((float) $data['disk_space'], 2));
+                            }
+                            ?>
+                        </td>
                         <td>
                             <?php if ($weight !== null) : ?>
                                 <div class="impact-bar-bg">
@@ -520,30 +538,84 @@ function sitepulse_get_dir_size_with_cache($dir) {
     $dir = (string) $dir;
 
     if ($dir === '') {
-        return 0;
+        return [
+            'status' => 'complete',
+            'size'   => 0,
+        ];
     }
 
     if (!defined('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX')) {
-        return sitepulse_get_dir_size_recursive($dir);
+        $size_info = sitepulse_get_dir_size_recursive($dir);
+
+        return [
+            'status' => 'complete',
+            'size'   => isset($size_info['size']) ? (int) $size_info['size'] : 0,
+        ];
     }
 
     $transient_key = SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX . md5($dir);
     $cached_size = get_transient($transient_key);
 
-    if ($cached_size !== false && is_numeric($cached_size)) {
-        return (int) $cached_size;
+    if ($cached_size !== false) {
+        if (is_numeric($cached_size)) {
+            return [
+                'status' => 'complete',
+                'size'   => (int) $cached_size,
+            ];
+        }
+
+        if (is_array($cached_size) && isset($cached_size['status']) && $cached_size['status'] === 'pending') {
+            sitepulse_plugin_dir_scan_enqueue($dir);
+
+            return [
+                'status' => 'pending',
+                'size'   => null,
+            ];
+        }
     }
 
-    $size = sitepulse_get_dir_size_recursive($dir);
+    $threshold = sitepulse_get_plugin_dir_size_threshold($dir);
+    $size_info = sitepulse_get_dir_size_recursive(
+        $dir,
+        [
+            'max_bytes'         => isset($threshold['max_bytes']) ? (int) $threshold['max_bytes'] : 0,
+            'max_files'         => isset($threshold['max_files']) ? (int) $threshold['max_files'] : 0,
+            'stop_on_threshold' => true,
+        ]
+    );
+
     $expiration = (int) apply_filters('sitepulse_plugin_dir_size_cache_ttl', 6 * HOUR_IN_SECONDS, $dir);
 
     if ($expiration <= 0) {
         $expiration = 6 * HOUR_IN_SECONDS;
     }
 
-    set_transient($transient_key, (int) $size, $expiration);
+    if (isset($size_info['exceeded']) && $size_info['exceeded']) {
+        set_transient(
+            $transient_key,
+            [
+                'status' => 'pending',
+                'size'   => null,
+            ],
+            $expiration
+        );
 
-    return (int) $size;
+        sitepulse_plugin_dir_scan_enqueue($dir);
+
+        return [
+            'status' => 'pending',
+            'size'   => null,
+        ];
+    }
+
+    $size = isset($size_info['size']) ? (int) $size_info['size'] : 0;
+
+    set_transient($transient_key, $size, $expiration);
+
+    return [
+        'status' => 'complete',
+        'size'   => $size,
+    ];
 }
 
 function sitepulse_clear_dir_size_cache($dir) {
@@ -560,10 +632,26 @@ function sitepulse_clear_dir_size_cache($dir) {
     if (function_exists('delete_site_transient')) {
         delete_site_transient($transient_key);
     }
+
+    sitepulse_plugin_dir_scan_remove_from_queue($dir);
 }
 
-function sitepulse_get_dir_size_recursive($dir) {
+function sitepulse_get_dir_size_recursive($dir, $args = []) {
+    $defaults = [
+        'max_bytes'         => 0,
+        'max_files'         => 0,
+        'stop_on_threshold' => false,
+    ];
+
+    if (!is_array($args)) {
+        $args = [];
+    }
+
+    $args = wp_parse_args($args, $defaults);
+
     $size = 0;
+    $file_count = 0;
+    $exceeded = false;
 
     $dir = (string) $dir;
     $resolved_dir = $dir;
@@ -578,7 +666,11 @@ function sitepulse_get_dir_size_recursive($dir) {
     }
 
     if (!is_dir($resolved_dir)) {
-        return $size;
+        return [
+            'size'     => $size,
+            'files'    => $file_count,
+            'exceeded' => $exceeded,
+        ];
     }
 
     try {
@@ -588,10 +680,167 @@ function sitepulse_get_dir_size_recursive($dir) {
 
         foreach ($iterator as $file) {
             $size += $file->getSize();
+            $file_count++;
+
+            if ($args['stop_on_threshold']) {
+                $threshold_exceeded = false;
+
+                if ($args['max_bytes'] > 0 && $size > $args['max_bytes']) {
+                    $threshold_exceeded = true;
+                }
+
+                if ($args['max_files'] > 0 && $file_count > $args['max_files']) {
+                    $threshold_exceeded = true;
+                }
+
+                if ($threshold_exceeded) {
+                    $exceeded = true;
+
+                    break;
+                }
+            }
         }
     } catch (UnexpectedValueException | RuntimeException $e) {
-        return $size;
+        return [
+            'size'     => $size,
+            'files'    => $file_count,
+            'exceeded' => $exceeded,
+        ];
     }
 
-    return $size;
+    return [
+        'size'     => $size,
+        'files'    => $file_count,
+        'exceeded' => $exceeded,
+    ];
+}
+
+function sitepulse_get_plugin_dir_size_threshold($dir) {
+    $default_threshold = [
+        'max_bytes' => 100 * MB_IN_BYTES,
+        'max_files' => 0,
+    ];
+
+    $threshold = apply_filters('sitepulse_plugin_dir_size_threshold', $default_threshold, $dir);
+
+    if (!is_array($threshold)) {
+        return $default_threshold;
+    }
+
+    $threshold = wp_parse_args($threshold, $default_threshold);
+
+    $threshold['max_bytes'] = isset($threshold['max_bytes']) ? max(0, (int) $threshold['max_bytes']) : 0;
+    $threshold['max_files'] = isset($threshold['max_files']) ? max(0, (int) $threshold['max_files']) : 0;
+
+    return $threshold;
+}
+
+function sitepulse_plugin_dir_scan_enqueue($dir) {
+    $dir = (string) $dir;
+
+    if ($dir === '') {
+        return;
+    }
+
+    $queue = get_option(SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION, []);
+
+    if (!is_array($queue)) {
+        $queue = [];
+    }
+
+    if (!in_array($dir, $queue, true)) {
+        $queue[] = $dir;
+        update_option(SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION, $queue, false);
+    }
+
+    sitepulse_schedule_plugin_dir_scan();
+}
+
+function sitepulse_plugin_dir_scan_remove_from_queue($dir) {
+    $dir = (string) $dir;
+
+    if ($dir === '') {
+        return;
+    }
+
+    $queue = get_option(SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION, []);
+
+    if (!is_array($queue) || empty($queue)) {
+        return;
+    }
+
+    $position = array_search($dir, $queue, true);
+
+    if ($position === false) {
+        return;
+    }
+
+    unset($queue[$position]);
+
+    if (empty($queue)) {
+        delete_option(SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION);
+    } else {
+        update_option(SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION, array_values($queue), false);
+    }
+}
+
+function sitepulse_schedule_plugin_dir_scan() {
+    if (!wp_next_scheduled('sitepulse_queue_plugin_dir_scan')) {
+        wp_schedule_single_event(time() + MINUTE_IN_SECONDS, 'sitepulse_queue_plugin_dir_scan');
+    }
+}
+
+function sitepulse_process_plugin_dir_scan_queue() {
+    if (!defined('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX')) {
+        return;
+    }
+
+    $queue = get_option(SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION, []);
+
+    if (!is_array($queue) || empty($queue)) {
+        delete_option(SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION);
+
+        return;
+    }
+
+    $dir = array_shift($queue);
+
+    if (empty($queue)) {
+        delete_option(SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION);
+    } else {
+        update_option(SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION, array_values($queue), false);
+    }
+
+    $dir = (string) $dir;
+
+    if ($dir === '') {
+        sitepulse_schedule_plugin_dir_scan();
+
+        return;
+    }
+
+    $size_info = sitepulse_get_dir_size_recursive(
+        $dir,
+        [
+            'max_bytes'         => 0,
+            'max_files'         => 0,
+            'stop_on_threshold' => false,
+        ]
+    );
+
+    $size = isset($size_info['size']) ? (int) $size_info['size'] : 0;
+
+    $expiration = (int) apply_filters('sitepulse_plugin_dir_size_cache_ttl', 6 * HOUR_IN_SECONDS, $dir);
+
+    if ($expiration <= 0) {
+        $expiration = 6 * HOUR_IN_SECONDS;
+    }
+
+    $transient_key = SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX . md5($dir);
+
+    set_transient($transient_key, $size, $expiration);
+
+    if (!empty($queue)) {
+        sitepulse_schedule_plugin_dir_scan();
+    }
 }
