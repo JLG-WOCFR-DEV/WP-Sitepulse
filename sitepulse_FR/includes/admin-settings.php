@@ -96,6 +96,9 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_GEMINI_API_KEY, [
         'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_gemini_api_key', 'default' => ''
     ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_AI_MODEL, [
+        'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_ai_model', 'default' => sitepulse_get_default_ai_model()
+    ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, [
         'type' => 'number', 'sanitize_callback' => 'sitepulse_sanitize_cpu_threshold', 'default' => 5
     ]);
@@ -142,6 +145,34 @@ function sitepulse_sanitize_gemini_api_key($value) {
     $sanitized = sanitize_text_field($value);
 
     return $sanitized !== '' ? $sanitized : $current_value;
+}
+
+/**
+ * Sanitizes the selected AI model.
+ *
+ * @param mixed $value Raw user input value.
+ * @return string Validated AI model identifier.
+ */
+function sitepulse_sanitize_ai_model($value) {
+    $default_model = sitepulse_get_default_ai_model();
+
+    if (!is_string($value)) {
+        return $default_model;
+    }
+
+    $value = trim($value);
+
+    if ($value === '') {
+        return $default_model;
+    }
+
+    $available_models = sitepulse_get_ai_models();
+
+    if (!isset($available_models[$value])) {
+        return $default_model;
+    }
+
+    return $value;
 }
 
 /**
@@ -244,6 +275,13 @@ function sitepulse_settings_page() {
     ];
     $gemini_api_key = (string) get_option(SITEPULSE_OPTION_GEMINI_API_KEY, '');
     $has_gemini_api_key = $gemini_api_key !== '';
+    $available_ai_models = sitepulse_get_ai_models();
+    $default_ai_model = sitepulse_get_default_ai_model();
+    $selected_ai_model = (string) get_option(SITEPULSE_OPTION_AI_MODEL, $default_ai_model);
+
+    if (!isset($available_ai_models[$selected_ai_model])) {
+        $selected_ai_model = $default_ai_model;
+    }
     $active_modules = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
     $debug_mode_option = get_option(SITEPULSE_OPTION_DEBUG_MODE);
     $is_debug_mode_enabled = rest_sanitize_boolean($debug_mode_option);
@@ -404,6 +442,36 @@ function sitepulse_settings_page() {
                             ),
                             esc_url('https://aistudio.google.com/app/apikey')
                         ); ?></p>
+                    </td>
+                </tr>
+            </table>
+            <h2><?php esc_html_e('IA', 'sitepulse'); ?></h2>
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_AI_MODEL); ?>"><?php esc_html_e('Modèle IA', 'sitepulse'); ?></label></th>
+                    <td>
+                        <select id="<?php echo esc_attr(SITEPULSE_OPTION_AI_MODEL); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_AI_MODEL); ?>">
+                            <?php foreach ($available_ai_models as $model_key => $model_data) : ?>
+                                <option value="<?php echo esc_attr($model_key); ?>" <?php selected($selected_ai_model, $model_key); ?>><?php echo esc_html(isset($model_data['label']) ? $model_data['label'] : $model_key); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <p class="description"><?php esc_html_e("Choisissez le modèle utilisé pour générer les recommandations. Les modèles diffèrent en termes de profondeur d'analyse, de coût et de temps de réponse.", 'sitepulse'); ?></p>
+                        <?php if (!empty($available_ai_models)) : ?>
+                            <ul class="description" style="margin-left: 1.5em; list-style: disc;">
+                                <?php foreach ($available_ai_models as $model_key => $model_data) :
+                                    $label = isset($model_data['label']) ? $model_data['label'] : $model_key;
+                                    $description = isset($model_data['description']) ? $model_data['description'] : '';
+                                ?>
+                                    <li>
+                                        <strong><?php echo esc_html($label); ?></strong>
+                                        <?php if ($selected_ai_model === $model_key) : ?>
+                                            <em><?php esc_html_e(' (modèle actuel)', 'sitepulse'); ?></em>
+                                        <?php endif; ?>
+                                        <?php if ($description !== '') : ?> — <?php echo esc_html($description); ?><?php endif; ?>
+                                    </li>
+                                <?php endforeach; ?>
+                            </ul>
+                        <?php endif; ?>
                     </td>
                 </tr>
             </table>
