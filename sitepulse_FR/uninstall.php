@@ -48,6 +48,33 @@ if (!defined('SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK')) {
     define('SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK', SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX . 'php_fatal' . SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX);
 }
 
+require_once __DIR__ . '/includes/admin-settings.php';
+
+if (!function_exists('sitepulse_remove_administrator_capability')) {
+    /**
+     * Removes the SitePulse capability from the administrator role.
+     *
+     * @return void
+     */
+    function sitepulse_remove_administrator_capability() {
+        if (!function_exists('get_role')) {
+            return;
+        }
+
+        $capability = sitepulse_get_capability();
+
+        if (!is_string($capability) || $capability === '') {
+            return;
+        }
+
+        $administrator_role = get_role('administrator');
+
+        if ($administrator_role instanceof \WP_Role) {
+            $administrator_role->remove_cap($capability);
+        }
+    }
+}
+
 $options = [
     SITEPULSE_OPTION_ACTIVE_MODULES,
     SITEPULSE_OPTION_DEBUG_MODE,
@@ -188,6 +215,8 @@ function sitepulse_uninstall_cleanup_blog($options, $transients, $cron_hooks, $t
     foreach ($cron_hooks as $hook) {
         wp_clear_scheduled_hook($hook);
     }
+
+    sitepulse_remove_administrator_capability();
 }
 
 if (is_multisite()) {

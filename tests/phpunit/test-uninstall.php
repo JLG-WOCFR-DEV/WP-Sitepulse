@@ -35,5 +35,27 @@ class SitePulse_Uninstall_Test extends WP_UnitTestCase {
 
         $this->assertFalse(get_site_option(SITEPULSE_OPTION_DEBUG_NOTICES, false));
     }
+
+    public function test_uninstall_removes_filtered_capability(): void {
+        $filter = function() {
+            return 'manage_sitepulse';
+        };
+
+        add_filter('sitepulse_required_capability', $filter);
+
+        $administrator_role = get_role('administrator');
+        $this->assertInstanceOf(WP_Role::class, $administrator_role);
+
+        $administrator_role->add_cap('manage_sitepulse');
+        $this->assertTrue($administrator_role->has_cap('manage_sitepulse'));
+
+        $this->run_uninstall();
+
+        $administrator_role = get_role('administrator');
+        $this->assertInstanceOf(WP_Role::class, $administrator_role);
+        $this->assertFalse($administrator_role->has_cap('manage_sitepulse'));
+
+        remove_filter('sitepulse_required_capability', $filter);
+    }
 }
 
