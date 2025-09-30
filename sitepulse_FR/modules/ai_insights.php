@@ -456,7 +456,7 @@ function sitepulse_ai_execute_generation($api_key, $selected_model, array $avail
         HOUR_IN_SECONDS
     );
 
-    sitepulse_ai_get_cached_insight(true);
+    sitepulse_ai_reset_cached_insight();
 
     $fresh_payload = sitepulse_ai_get_cached_insight();
 
@@ -546,6 +546,8 @@ function sitepulse_run_ai_insight_job($job_id) {
                 'code'    => $status_code,
             ]));
 
+            sitepulse_ai_reset_cached_insight();
+
             return;
         }
 
@@ -565,6 +567,8 @@ function sitepulse_run_ai_insight_job($job_id) {
                 'code'     => $status_code,
                 'finished' => time(),
             ]));
+
+            sitepulse_ai_reset_cached_insight();
 
             return;
         }
@@ -589,7 +593,25 @@ function sitepulse_run_ai_insight_job($job_id) {
             'code'     => (int) $throwable->getCode(),
             'finished' => time(),
         ]));
+
+        sitepulse_ai_reset_cached_insight();
     }
+}
+
+/**
+ * Resets the in-request AI insight cache and optionally removes the persistent transient.
+ *
+ * @param bool $delete_transient Optional. Whether to delete the stored transient. Default false.
+ *
+ * @return void
+ */
+function sitepulse_ai_reset_cached_insight($delete_transient = false) {
+    if ($delete_transient) {
+        delete_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
+    }
+
+    $GLOBALS['sitepulse_ai_cached_insight_ref']            = [];
+    $GLOBALS['sitepulse_ai_cached_insight_initialized_ref'] = false;
 }
 
 /**
@@ -600,15 +622,19 @@ function sitepulse_run_ai_insight_job($job_id) {
  * @return array{text?:string,timestamp?:int}
  */
 function sitepulse_ai_get_cached_insight($force_refresh = false) {
-    static $cached_insight = null;
+    static $cached_insight = [];
+    static $initialized   = false;
+
+    $GLOBALS['sitepulse_ai_cached_insight_ref']          = &$cached_insight;
+    $GLOBALS['sitepulse_ai_cached_insight_initialized_ref'] = &$initialized;
 
     if ($force_refresh) {
-        $cached_insight = null;
+        sitepulse_ai_reset_cached_insight(true);
 
         return [];
     }
 
-    if ($cached_insight !== null) {
+    if ($initialized) {
         return $cached_insight;
     }
 
@@ -632,6 +658,8 @@ function sitepulse_ai_get_cached_insight($force_refresh = false) {
             $cached_insight['text'] = $cached_text;
         }
     }
+
+    $initialized = true;
 
     return $cached_insight;
 }
@@ -919,9 +947,12 @@ function sitepulse_generate_ai_insight() {
         $force_refresh = filter_var(wp_unslash($_POST['force_refresh']), FILTER_VALIDATE_BOOLEAN);
     }
 
-    $cached_payload = $force_refresh
-        ? sitepulse_ai_get_cached_insight(true)
-        : sitepulse_ai_get_cached_insight();
+    if ($force_refresh) {
+        sitepulse_ai_reset_cached_insight(true);
+        $cached_payload = [];
+    } else {
+        $cached_payload = sitepulse_ai_get_cached_insight();
+    }
 
     if (!$force_refresh && !empty($cached_payload)) {
         $cached_payload['cached'] = true;

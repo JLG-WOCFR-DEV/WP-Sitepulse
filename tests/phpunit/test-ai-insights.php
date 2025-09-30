@@ -287,7 +287,7 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
     /**
      * Ensures that forcing a refresh keeps the transient when the remote request errors.
      */
-    public function test_force_refresh_error_keeps_existing_transient() {
+    public function test_force_refresh_error_clears_transient() {
         $existing_payload = [
             'text'      => 'Ancienne recommandation.',
             'timestamp' => 1_708_123_456,
@@ -326,7 +326,57 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
 
         $cached_payload = get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
 
-        $this->assertSame($existing_payload, $cached_payload, 'Existing transient should remain intact.');
+        $this->assertFalse($cached_payload, 'Force refresh should clear the transient cache.');
+
+        $this->assertSame([], sitepulse_ai_get_cached_insight(), 'Getter should report an empty cache after refresh.');
+    }
+
+    /**
+     * Ensures that forcing a refresh clears the cached data until a job persists new content.
+     */
+    public function test_force_refresh_leaves_cache_empty_until_job_completes() {
+        $initial_payload = [
+            'text'      => 'Contenu antérieur.',
+            'timestamp' => 1_708_000_123,
+        ];
+
+        set_transient(
+            SITEPULSE_TRANSIENT_AI_INSIGHT,
+            $initial_payload,
+            HOUR_IN_SECONDS
+        );
+
+        $this->reset_cached_insight_static();
+
+        $preloaded = sitepulse_ai_get_cached_insight();
+
+        $this->assertArrayHasKey('text', $preloaded);
+        $this->assertSame(sanitize_textarea_field($initial_payload['text']), $preloaded['text']);
+
+        sitepulse_ai_get_cached_insight(true);
+
+        $this->assertFalse(get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT), 'Transient should be cleared by the forced refresh.');
+        $this->assertSame([], sitepulse_ai_get_cached_insight(), 'Getter should remain empty after clearing.');
+
+        $fresh_payload = [
+            'text'      => 'Nouvelle recommandation.',
+            'timestamp' => time(),
+        ];
+
+        set_transient(
+            SITEPULSE_TRANSIENT_AI_INSIGHT,
+            $fresh_payload,
+            HOUR_IN_SECONDS
+        );
+
+        sitepulse_ai_reset_cached_insight();
+
+        $reloaded = sitepulse_ai_get_cached_insight();
+
+        $this->assertArrayHasKey('text', $reloaded);
+        $this->assertSame(sanitize_textarea_field($fresh_payload['text']), $reloaded['text']);
+        $this->assertArrayHasKey('timestamp', $reloaded);
+        $this->assertSame($fresh_payload['timestamp'], $reloaded['timestamp']);
     }
 
     /**
@@ -542,17 +592,8 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
      * Resets the static cache used by sitepulse_ai_get_cached_insight().
      */
     private function reset_cached_insight_static() {
-        $reset = \Closure::bind(
-            function () {
-                static $cached_insight = null;
-                $cached_insight = null;
-            },
-            null,
-            'sitepulse_ai_get_cached_insight'
-        );
-
-        if ($reset instanceof \Closure) {
-            $reset();
+        if (function_exists('sitepulse_ai_reset_cached_insight')) {
+            sitepulse_ai_reset_cached_insight();
         }
     }
 }
