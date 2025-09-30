@@ -197,6 +197,87 @@ function sitepulse_ai_render_error_notices() {
 }
 
 /**
+ * Retrieves the sanitized AI rate limit option value.
+ *
+ * @return string
+ */
+function sitepulse_ai_get_current_rate_limit_value() {
+    $default = function_exists('sitepulse_get_default_ai_rate_limit')
+        ? sitepulse_get_default_ai_rate_limit()
+        : 'week';
+
+    $value = get_option(SITEPULSE_OPTION_AI_RATE_LIMIT, $default);
+
+    if (!is_string($value)) {
+        return $default;
+    }
+
+    $value = strtolower(trim($value));
+    $choices = function_exists('sitepulse_get_ai_rate_limit_choices')
+        ? sitepulse_get_ai_rate_limit_choices()
+        : [
+            'day'       => __('Une fois par jour', 'sitepulse'),
+            'week'      => __('Une fois par semaine', 'sitepulse'),
+            'month'     => __('Une fois par mois', 'sitepulse'),
+            'unlimited' => __('Illimité', 'sitepulse'),
+        ];
+
+    if (!isset($choices[$value])) {
+        return $default;
+    }
+
+    return $value;
+}
+
+/**
+ * Returns the localized label for the provided AI rate limit key.
+ *
+ * @param string $rate_limit Rate limit option key.
+ * @return string
+ */
+function sitepulse_ai_get_rate_limit_label($rate_limit) {
+    $choices = function_exists('sitepulse_get_ai_rate_limit_choices')
+        ? sitepulse_get_ai_rate_limit_choices()
+        : [
+            'day'       => __('Une fois par jour', 'sitepulse'),
+            'week'      => __('Une fois par semaine', 'sitepulse'),
+            'month'     => __('Une fois par mois', 'sitepulse'),
+            'unlimited' => __('Illimité', 'sitepulse'),
+        ];
+
+    if (!isset($choices[$rate_limit])) {
+        $default = sitepulse_ai_get_current_rate_limit_value();
+
+        if (isset($choices[$default])) {
+            return $choices[$default];
+        }
+
+        return (string) reset($choices);
+    }
+
+    return $choices[$rate_limit];
+}
+
+/**
+ * Returns the rate limit window in seconds for a given option key.
+ *
+ * @param string $rate_limit Rate limit option key.
+ * @return int Number of seconds in the rate limit window. 0 means unlimited.
+ */
+function sitepulse_ai_get_rate_limit_window_seconds($rate_limit) {
+    switch ($rate_limit) {
+        case 'day':
+            return DAY_IN_SECONDS;
+        case 'week':
+            return WEEK_IN_SECONDS;
+        case 'month':
+            return MONTH_IN_SECONDS;
+        default:
+            return 0;
+    }
+}
+
+/**
  * Creates a WP_Error instance while logging the associated message.
  *
  * @param string   $code        Error code.
@@ -574,6 +655,8 @@ function sitepulse_run_ai_insight_job($job_id) {
             'result'     => $result,
             'finished'   => time(),
         ]));
+
+        update_option(SITEPULSE_OPTION_AI_LAST_RUN, absint(current_time('timestamp', true)));
     } catch (Throwable $throwable) {
         $message = sprintf(
             /* translators: %s: error message */
@@ -919,9 +1002,7 @@ function sitepulse_generate_ai_insight() {
         $force_refresh = filter_var(wp_unslash($_POST['force_refresh']), FILTER_VALIDATE_BOOLEAN);
     }
 
-    $cached_payload = $force_refresh
-        ? sitepulse_ai_get_cached_insight(true)
-        : sitepulse_ai_get_cached_insight();
+    $cached_payload = sitepulse_ai_get_cached_insight();
 
     if (!$force_refresh && !empty($cached_payload)) {
         $cached_payload['cached'] = true;
@@ -936,6 +1017,40 @@ function sitepulse_generate_ai_insight() {
         wp_send_json_error([
             'message' => $environment->get_error_message(),
         ], $status_code);
+    }
+
+    $rate_limit_value   = sitepulse_ai_get_current_rate_limit_value();
+    $rate_limit_window  = sitepulse_ai_get_rate_limit_window_seconds($rate_limit_value);
+    $last_run_timestamp = (int) get_option(SITEPULSE_OPTION_AI_LAST_RUN, 0);
+
+    if ($rate_limit_window > 0 && $last_run_timestamp > 0) {
+        $now_utc = absint(current_time('timestamp', true));
+        $next_allowed = $last_run_timestamp + $rate_limit_window;
+
+        if ($next_allowed > $now_utc) {
+            if (!empty($cached_payload)) {
+                $cached_payload['cached'] = true;
+                wp_send_json_success($cached_payload);
+            }
+
+            $time_remaining = max(0, $next_allowed - $now_utc);
+            $human_delay = human_time_diff($now_utc, $next_allowed);
+            $error_message = sprintf(
+                /* translators: 1: Human readable delay (e.g. "5 minutes"), 2: rate limit label. */
+                esc_html__('La génération par IA est limitée à %2$s. Réessayez dans %1$s.', 'sitepulse'),
+                $human_delay,
+                sitepulse_ai_get_rate_limit_label($rate_limit_value)
+            );
+
+            wp_send_json_error([
+                'message' => $error_message,
+                'retry_after' => $time_remaining,
+            ], 429);
+        }
+    }
+
+    if ($force_refresh) {
+        sitepulse_ai_get_cached_insight(true);
     }
 
     $job_id = sitepulse_ai_schedule_generation_job($force_refresh);

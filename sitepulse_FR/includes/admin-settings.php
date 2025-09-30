@@ -118,6 +118,9 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_AI_MODEL, [
         'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_ai_model', 'default' => sitepulse_get_default_ai_model()
     ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_AI_RATE_LIMIT, [
+        'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_ai_rate_limit', 'default' => sitepulse_get_default_ai_rate_limit()
+    ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, [
         'type' => 'number', 'sanitize_callback' => 'sitepulse_sanitize_cpu_threshold', 'default' => 5
     ]);
@@ -189,6 +192,52 @@ function sitepulse_sanitize_ai_model($value) {
 
     if (!isset($available_models[$value])) {
         return $default_model;
+    }
+
+    return $value;
+}
+
+/**
+ * Returns the available AI rate limit choices.
+ *
+ * @return array<string,string>
+ */
+function sitepulse_get_ai_rate_limit_choices() {
+    return [
+        'day'        => __('Une fois par jour', 'sitepulse'),
+        'week'       => __('Une fois par semaine', 'sitepulse'),
+        'month'      => __('Une fois par mois', 'sitepulse'),
+        'unlimited'  => __('Illimité', 'sitepulse'),
+    ];
+}
+
+/**
+ * Returns the default AI rate limit option key.
+ *
+ * @return string
+ */
+function sitepulse_get_default_ai_rate_limit() {
+    return 'week';
+}
+
+/**
+ * Sanitizes the AI rate limit option value.
+ *
+ * @param mixed $value Raw user input value.
+ * @return string Validated option key.
+ */
+function sitepulse_sanitize_ai_rate_limit($value) {
+    $default = sitepulse_get_default_ai_rate_limit();
+
+    if (!is_string($value)) {
+        return $default;
+    }
+
+    $value = strtolower(trim($value));
+    $choices = sitepulse_get_ai_rate_limit_choices();
+
+    if (!isset($choices[$value])) {
+        return $default;
     }
 
     return $value;
@@ -300,6 +349,13 @@ function sitepulse_settings_page() {
 
     if (!isset($available_ai_models[$selected_ai_model])) {
         $selected_ai_model = $default_ai_model;
+    }
+    $ai_rate_limit_choices = sitepulse_get_ai_rate_limit_choices();
+    $default_ai_rate_limit = sitepulse_get_default_ai_rate_limit();
+    $selected_ai_rate_limit = (string) get_option(SITEPULSE_OPTION_AI_RATE_LIMIT, $default_ai_rate_limit);
+
+    if (!isset($ai_rate_limit_choices[$selected_ai_rate_limit])) {
+        $selected_ai_rate_limit = $default_ai_rate_limit;
     }
     $active_modules = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
     $debug_mode_option = get_option(SITEPULSE_OPTION_DEBUG_MODE);
@@ -491,6 +547,17 @@ function sitepulse_settings_page() {
                                 <?php endforeach; ?>
                             </ul>
                         <?php endif; ?>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_AI_RATE_LIMIT); ?>"><?php esc_html_e('Fréquence maximale des analyses IA', 'sitepulse'); ?></label></th>
+                    <td>
+                        <select id="<?php echo esc_attr(SITEPULSE_OPTION_AI_RATE_LIMIT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_AI_RATE_LIMIT); ?>">
+                            <?php foreach ($ai_rate_limit_choices as $option_value => $option_label) : ?>
+                                <option value="<?php echo esc_attr($option_value); ?>" <?php selected($selected_ai_rate_limit, $option_value); ?>><?php echo esc_html($option_label); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <p class="description"><?php esc_html_e('Définissez la fréquence maximale des nouvelles recommandations générées automatiquement.', 'sitepulse'); ?></p>
                     </td>
                 </tr>
             </table>

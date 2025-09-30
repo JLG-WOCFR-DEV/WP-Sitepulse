@@ -23,6 +23,8 @@ define('SITEPULSE_OPTION_ACTIVE_MODULES', 'sitepulse_active_modules');
 define('SITEPULSE_OPTION_DEBUG_MODE', 'sitepulse_debug_mode');
 define('SITEPULSE_OPTION_GEMINI_API_KEY', 'sitepulse_gemini_api_key');
 define('SITEPULSE_OPTION_AI_MODEL', 'sitepulse_ai_model');
+define('SITEPULSE_OPTION_AI_RATE_LIMIT', 'sitepulse_ai_rate_limit');
+define('SITEPULSE_OPTION_AI_LAST_RUN', 'sitepulse_ai_last_run');
 define('SITEPULSE_DEFAULT_AI_MODEL', 'gemini-1.5-flash');
 define('SITEPULSE_OPTION_UPTIME_LOG', 'sitepulse_uptime_log');
 define('SITEPULSE_OPTION_LAST_LOAD_TIME', 'sitepulse_last_load_time');
