@@ -1279,12 +1279,84 @@ add_action('wpmu_new_blog', function($site_id, $user_id, $domain, $path, $networ
  *
  * @return void
  */
+function sitepulse_is_plugin_active_anywhere() {
+    $basename = sitepulse_get_stored_plugin_basename();
+
+    if ($basename === '') {
+        return false;
+    }
+
+    $active_plugins = get_option('active_plugins', []);
+
+    if (is_array($active_plugins) && in_array($basename, $active_plugins, true)) {
+        return true;
+    }
+
+    if (!is_multisite()) {
+        return false;
+    }
+
+    if (!function_exists('is_plugin_active_for_network')) {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+
+    if (function_exists('is_plugin_active_for_network') && is_plugin_active_for_network($basename)) {
+        return true;
+    }
+
+    if (!function_exists('get_sites')) {
+        return false;
+    }
+
+    $sites = get_sites([
+        'fields' => 'ids',
+        'number' => 0,
+    ]);
+
+    $current_site_id = function_exists('get_current_blog_id') ? (int) get_current_blog_id() : 0;
+
+    foreach ($sites as $site_id) {
+        $site_id = (int) $site_id;
+
+        if ($site_id <= 0 || $site_id === $current_site_id) {
+            continue;
+        }
+
+        $site_active_plugins = null;
+        $switched = false;
+
+        if (function_exists('switch_to_blog') && function_exists('restore_current_blog')) {
+            $switched = switch_to_blog($site_id);
+        }
+
+        try {
+            if ($switched) {
+                $site_active_plugins = get_option('active_plugins', []);
+            } elseif (function_exists('get_blog_option')) {
+                $site_active_plugins = get_blog_option($site_id, 'active_plugins', []);
+            }
+        } finally {
+            if ($switched) {
+                restore_current_blog();
+            }
+        }
+
+        if (is_array($site_active_plugins) && in_array($basename, $site_active_plugins, true)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function sitepulse_deactivate_site() {
     foreach (sitepulse_get_cron_hooks() as $hook) {
         wp_clear_scheduled_hook($hook);
     }
 
-    sitepulse_plugin_impact_remove_mu_loader();
+    if (!sitepulse_is_plugin_active_anywhere()) {
+        sitepulse_plugin_impact_remove_mu_loader();
+    }
 }
 
 /**
