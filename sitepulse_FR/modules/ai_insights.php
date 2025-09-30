@@ -103,10 +103,45 @@ function sitepulse_ai_insights_page() {
     }
 
     $api_key = get_option(SITEPULSE_OPTION_GEMINI_API_KEY);
+    $available_models = sitepulse_get_ai_models();
+    $default_model = sitepulse_get_default_ai_model();
+    $selected_model = (string) get_option(SITEPULSE_OPTION_AI_MODEL, $default_model);
+
+    if (!isset($available_models[$selected_model])) {
+        $selected_model = $default_model;
+    }
+
     ?>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-superhero"></span> <?php esc_html_e('Analyses par IA', 'sitepulse'); ?></h1>
         <p><?php esc_html_e("Obtenez des recommandations personnalisées pour votre site en analysant ses données de performance avec l'IA Gemini de Google.", 'sitepulse'); ?></p>
+        <?php if (!empty($available_models)) : ?>
+            <div class="notice notice-info" style="padding-bottom: 0;">
+                <h2><?php esc_html_e('Choix du modèle IA', 'sitepulse'); ?></h2>
+                <p><?php echo wp_kses(
+                    sprintf(
+                        /* translators: %s: URL to the SitePulse settings page. */
+                        __('Le modèle sélectionné dans les réglages (<a href="%s">Réglages &gt; IA</a>) influence la granularité des recommandations et le temps de génération.', 'sitepulse'),
+                        esc_url(admin_url('admin.php?page=sitepulse-settings#sitepulse_ai_model'))
+                    ),
+                    ['a' => ['href' => true]]
+                ); ?></p>
+                <ul>
+                    <?php foreach ($available_models as $model_key => $model_data) :
+                        $label = isset($model_data['label']) ? $model_data['label'] : $model_key;
+                        $description = isset($model_data['description']) ? $model_data['description'] : '';
+                    ?>
+                        <li>
+                            <strong><?php echo esc_html($label); ?></strong>
+                            <?php if ($selected_model === $model_key) : ?>
+                                <em><?php esc_html_e(' (actuellement utilisé)', 'sitepulse'); ?></em>
+                            <?php endif; ?>
+                            <?php if ($description !== '') : ?> — <?php echo esc_html($description); ?><?php endif; ?>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+            </div>
+        <?php endif; ?>
         <?php if (empty($api_key)) : ?>
             <div class="notice notice-warning"><p><?php echo wp_kses_post(sprintf(__('Veuillez <a href="%s">entrer votre clé API Google Gemini</a> pour utiliser cette fonctionnalité.', 'sitepulse'), esc_url(admin_url('admin.php?page=sitepulse-settings')))); ?></p></div>
         <?php else : ?>
@@ -193,7 +228,18 @@ function sitepulse_generate_ai_insight() {
         ], 400);
     }
 
-    $endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+    $available_models = sitepulse_get_ai_models();
+    $default_model = sitepulse_get_default_ai_model();
+    $selected_model = (string) get_option(SITEPULSE_OPTION_AI_MODEL, $default_model);
+
+    if (!isset($available_models[$selected_model])) {
+        $selected_model = $default_model;
+    }
+
+    $endpoint = sprintf(
+        'https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent',
+        rawurlencode($selected_model)
+    );
 
     $site_name        = wp_strip_all_tags(get_bloginfo('name'));
     $site_url         = esc_url_raw(home_url());
@@ -216,6 +262,10 @@ function sitepulse_generate_ai_insight() {
             __('Description du site : %s.', 'sitepulse'),
             $site_description
         );
+    }
+
+    if (isset($available_models[$selected_model]['prompt_instruction'])) {
+        $prompt_sections[] = (string) $available_models[$selected_model]['prompt_instruction'];
     }
 
     $request_body = [

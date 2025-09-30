@@ -89,6 +89,98 @@ if (!function_exists('sitepulse_delete_site_transients_by_prefix')) {
     }
 }
 
+if (!function_exists('sitepulse_get_ai_models')) {
+    /**
+     * Returns the list of supported AI models.
+     *
+     * @return array<string, array{label:string,description?:string,prompt_instruction?:string}>
+     */
+    function sitepulse_get_ai_models() {
+        $default_models = [
+            'gemini-1.5-flash' => [
+                'label'              => __('Gemini 1.5 Flash', 'sitepulse'),
+                'description'        => __('Réponses rapides et économiques, idéales pour obtenir des recommandations synthétiques à fréquence élevée.', 'sitepulse'),
+                'prompt_instruction' => __('Fournis une synthèse claire et actionnable en te concentrant sur les gains rapides.', 'sitepulse'),
+            ],
+            'gemini-1.5-pro'   => [
+                'label'              => __('Gemini 1.5 Pro', 'sitepulse'),
+                'description'        => __('Analyse plus approfondie avec davantage de contexte et de détails, adaptée aux audits complets mais plus lente et coûteuse.', 'sitepulse'),
+                'prompt_instruction' => __('Apporte une analyse détaillée et justifie chaque recommandation avec les impacts attendus.', 'sitepulse'),
+            ],
+        ];
+
+        if (function_exists('apply_filters')) {
+            $filtered_models = apply_filters('sitepulse_ai_models', $default_models);
+
+            if (is_array($filtered_models) && !empty($filtered_models)) {
+                $sanitized_models = [];
+
+                foreach ($filtered_models as $model_key => $model_data) {
+                    if (!is_string($model_key) || $model_key === '') {
+                        continue;
+                    }
+
+                    if (is_string($model_data)) {
+                        $model_data = ['label' => $model_data];
+                    }
+
+                    if (!is_array($model_data)) {
+                        continue;
+                    }
+
+                    $label = isset($model_data['label']) ? (string) $model_data['label'] : '';
+
+                    if ($label === '') {
+                        $label = $model_key;
+                    }
+
+                    $sanitized_models[$model_key] = [
+                        'label' => $label,
+                    ];
+
+                    if (isset($model_data['description']) && is_string($model_data['description']) && $model_data['description'] !== '') {
+                        $sanitized_models[$model_key]['description'] = $model_data['description'];
+                    }
+
+                    if (isset($model_data['prompt_instruction']) && is_string($model_data['prompt_instruction']) && $model_data['prompt_instruction'] !== '') {
+                        $sanitized_models[$model_key]['prompt_instruction'] = $model_data['prompt_instruction'];
+                    }
+                }
+
+                if (!empty($sanitized_models)) {
+                    return $sanitized_models;
+                }
+            }
+        }
+
+        return $default_models;
+    }
+}
+
+if (!function_exists('sitepulse_get_default_ai_model')) {
+    /**
+     * Returns the default AI model identifier.
+     *
+     * @return string
+     */
+    function sitepulse_get_default_ai_model() {
+        $default = defined('SITEPULSE_DEFAULT_AI_MODEL') ? (string) SITEPULSE_DEFAULT_AI_MODEL : 'gemini-1.5-flash';
+        $models  = sitepulse_get_ai_models();
+
+        if (isset($models[$default])) {
+            return $default;
+        }
+
+        $model_keys = array_keys($models);
+
+        if (!empty($model_keys)) {
+            return (string) $model_keys[0];
+        }
+
+        return 'gemini-1.5-flash';
+    }
+}
+
 if (!function_exists('sitepulse_get_recent_log_lines')) {
     /**
      * Reads the last lines from a log file without loading it entirely in memory.
