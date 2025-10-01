@@ -78,6 +78,32 @@ function sitepulse_speed_analyzer_page() {
     $object_cache_active = wp_using_ext_object_cache();
     $php_version = PHP_VERSION;
 
+    $status_labels = [
+        'status-ok'   => [
+            'label' => __('Bon', 'sitepulse'),
+            'sr'    => __('Statut : bon', 'sitepulse'),
+            'icon'  => '✔️',
+        ],
+        'status-warn' => [
+            'label' => __('Attention', 'sitepulse'),
+            'sr'    => __('Statut : attention', 'sitepulse'),
+            'icon'  => '⚠️',
+        ],
+        'status-bad'  => [
+            'label' => __('Critique', 'sitepulse'),
+            'sr'    => __('Statut : critique', 'sitepulse'),
+            'icon'  => '⛔',
+        ],
+    ];
+
+    $get_status_meta = static function ($status) use ($status_labels) {
+        if (isset($status_labels[$status])) {
+            return $status_labels[$status];
+        }
+
+        return $status_labels['status-warn'];
+    };
+
     ?>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-performance"></span> Analyseur de Vitesse</h1>
@@ -94,7 +120,15 @@ function sitepulse_speed_analyzer_page() {
                     ?>
                     <li>
                         <span class="metric-name">Temps de Génération de la Page</span>
-                        <span class="metric-value <?php echo esc_attr($gen_time_status); ?>"><?php echo esc_html(round($page_generation_time) . ' ms'); ?></span>
+                        <?php $gen_time_meta = $get_status_meta($gen_time_status); ?>
+                        <span class="metric-value">
+                            <span class="status-badge <?php echo esc_attr($gen_time_status); ?>" aria-hidden="true">
+                                <span class="status-icon"><?php echo esc_html($gen_time_meta['icon']); ?></span>
+                                <span class="status-text"><?php echo esc_html($gen_time_meta['label']); ?></span>
+                            </span>
+                            <span class="screen-reader-text"><?php echo esc_html($gen_time_meta['sr']); ?></span>
+                            <span class="status-reading"><?php echo esc_html(round($page_generation_time) . ' ms'); ?></span>
+                        </span>
                         <p class="description">C'est le temps total que met votre serveur pour préparer cette page. Un temps élevé (&gt;1s) peut indiquer un hébergement lent ou un plugin qui consomme beaucoup de ressources.</p>
                     </li>
                 </ul>
@@ -112,7 +146,15 @@ function sitepulse_speed_analyzer_page() {
                         ?>
                         <li>
                             <span class="metric-name">Temps Total des Requêtes BDD</span>
-                            <span class="metric-value <?php echo esc_attr($db_time_status); ?>"><?php echo esc_html(round($db_query_total_time) . ' ms'); ?></span>
+                            <?php $db_time_meta = $get_status_meta($db_time_status); ?>
+                            <span class="metric-value">
+                                <span class="status-badge <?php echo esc_attr($db_time_status); ?>" aria-hidden="true">
+                                    <span class="status-icon"><?php echo esc_html($db_time_meta['icon']); ?></span>
+                                    <span class="status-text"><?php echo esc_html($db_time_meta['label']); ?></span>
+                                </span>
+                                <span class="screen-reader-text"><?php echo esc_html($db_time_meta['sr']); ?></span>
+                                <span class="status-reading"><?php echo esc_html(round($db_query_total_time) . ' ms'); ?></span>
+                            </span>
                             <p class="description">Le temps total passé à attendre la base de données. S'il est élevé, cela peut indiquer des requêtes complexes ou une base de données surchargée.</p>
                         </li>
                         <?php
@@ -120,7 +162,15 @@ function sitepulse_speed_analyzer_page() {
                         ?>
                         <li>
                             <span class="metric-name">Temps Total des Requêtes BDD</span>
-                            <span class="metric-value status-warn">N/A</span>
+                            <?php $db_time_meta = $get_status_meta('status-warn'); ?>
+                            <span class="metric-value">
+                                <span class="status-badge status-warn" aria-hidden="true">
+                                    <span class="status-icon"><?php echo esc_html($db_time_meta['icon']); ?></span>
+                                    <span class="status-text"><?php echo esc_html($db_time_meta['label']); ?></span>
+                                </span>
+                                <span class="screen-reader-text"><?php echo esc_html($db_time_meta['sr']); ?></span>
+                                <span class="status-reading">N/A</span>
+                            </span>
                             <p class="description">Pour activer cette mesure, ajoutez <code>define('SAVEQUERIES', true);</code> à votre fichier <code>wp-config.php</code>. <strong>Note:</strong> N'utilisez ceci que pour le débogage, car cela peut ralentir votre site.</p>
                         </li>
                         <?php
@@ -131,7 +181,15 @@ function sitepulse_speed_analyzer_page() {
                     ?>
                     <li>
                         <span class="metric-name">Nombre de Requêtes BDD</span>
-                        <span class="metric-value <?php echo esc_attr($db_count_status); ?>"><?php echo esc_html($db_query_count); ?></span>
+                        <?php $db_count_meta = $get_status_meta($db_count_status); ?>
+                        <span class="metric-value">
+                            <span class="status-badge <?php echo esc_attr($db_count_status); ?>" aria-hidden="true">
+                                <span class="status-icon"><?php echo esc_html($db_count_meta['icon']); ?></span>
+                                <span class="status-text"><?php echo esc_html($db_count_meta['label']); ?></span>
+                            </span>
+                            <span class="screen-reader-text"><?php echo esc_html($db_count_meta['sr']); ?></span>
+                            <span class="status-reading"><?php echo esc_html($db_query_count); ?></span>
+                        </span>
                         <p class="description">Le nombre de fois que WordPress a interrogé la base de données. Un nombre élevé (&gt;100) peut être le signe d'un plugin ou d'un thème mal optimisé.</p>
                     </li>
                 </ul>
@@ -148,7 +206,15 @@ function sitepulse_speed_analyzer_page() {
                     ?>
                     <li>
                         <span class="metric-name">Object Cache</span>
-                        <span class="metric-value <?php echo esc_attr($cache_status_class); ?>"><?php echo esc_html($cache_text); ?></span>
+                        <?php $cache_meta = $get_status_meta($cache_status_class); ?>
+                        <span class="metric-value">
+                            <span class="status-badge <?php echo esc_attr($cache_status_class); ?>" aria-hidden="true">
+                                <span class="status-icon"><?php echo esc_html($cache_meta['icon']); ?></span>
+                                <span class="status-text"><?php echo esc_html($cache_meta['label']); ?></span>
+                            </span>
+                            <span class="screen-reader-text"><?php echo esc_html($cache_meta['sr']); ?></span>
+                            <span class="status-reading"><?php echo esc_html($cache_text); ?></span>
+                        </span>
                         <p class="description">Un cache d'objets persistant (ex: Redis, Memcached) accélère énormément les requêtes répétitives. Fortement recommandé.</p>
                     </li>
                     <?php
@@ -157,7 +223,15 @@ function sitepulse_speed_analyzer_page() {
                     ?>
                     <li>
                         <span class="metric-name">Version de PHP</span>
-                        <span class="metric-value <?php echo esc_attr($php_status); ?>"><?php echo esc_html($php_version); ?></span>
+                        <?php $php_meta = $get_status_meta($php_status); ?>
+                        <span class="metric-value">
+                            <span class="status-badge <?php echo esc_attr($php_status); ?>" aria-hidden="true">
+                                <span class="status-icon"><?php echo esc_html($php_meta['icon']); ?></span>
+                                <span class="status-text"><?php echo esc_html($php_meta['label']); ?></span>
+                            </span>
+                            <span class="screen-reader-text"><?php echo esc_html($php_meta['sr']); ?></span>
+                            <span class="status-reading"><?php echo esc_html($php_version); ?></span>
+                        </span>
                         <p class="description">Les versions modernes de PHP (8.0+) sont beaucoup plus rapides et sécurisées. Demandez à votre hébergeur de mettre à jour si nécessaire.</p>
                     </li>
                 </ul>
