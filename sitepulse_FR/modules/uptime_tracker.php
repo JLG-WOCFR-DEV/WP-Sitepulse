@@ -407,15 +407,24 @@ function sitepulse_uptime_tracker_page() {
                     $previous_entry = $index > 0 ? $uptime_log[$index - 1] : null;
                     $next_entry = ($index + 1) < $total_checks ? $uptime_log[$index + 1] : null;
 
+                    $status_label = '';
+                    $duration_label = '';
+
                     if (true === $status) {
                         $bar_title = sprintf(__('Site OK lors du contrôle du %s.', 'sitepulse'), $check_time);
+                        $status_label = __('Statut : site disponible.', 'sitepulse');
 
                         if (!empty($previous_entry) && isset($previous_entry['status']) && is_bool($previous_entry['status']) && false === $previous_entry['status']) {
                             $incident_start = isset($previous_entry['incident_start']) ? (int) $previous_entry['incident_start'] : (isset($previous_entry['timestamp']) ? (int) $previous_entry['timestamp'] : 0);
                             if ($incident_start > 0 && $timestamp >= $incident_start) {
                                 $incident_start_formatted = date_i18n($date_format . ' ' . $time_format, $incident_start);
                                 $bar_title .= ' ' . sprintf(__('Retour à la normale après un incident débuté le %1$s (durée : %2$s).', 'sitepulse'), $incident_start_formatted, human_time_diff($incident_start, $timestamp));
+                                $duration_label = sprintf(__('Durée de l’incident résolu : %s.', 'sitepulse'), human_time_diff($incident_start, $timestamp));
                             }
+                        }
+
+                        if ('' === $duration_label) {
+                            $duration_label = __('Durée : disponibilité confirmée lors de ce contrôle.', 'sitepulse');
                         }
                     } elseif (false === $status) {
                         $incident_start = isset($entry['incident_start']) ? (int) $entry['incident_start'] : $timestamp;
@@ -423,6 +432,7 @@ function sitepulse_uptime_tracker_page() {
                             ? date_i18n($date_format . ' ' . $time_format, $incident_start)
                             : __('horodatage inconnu', 'sitepulse');
                         $bar_title = sprintf(__('Site KO lors du contrôle du %1$s. Incident commencé le %2$s.', 'sitepulse'), $check_time, $incident_start_formatted);
+                        $status_label = __('Statut : site indisponible.', 'sitepulse');
 
                         if (array_key_exists('error', $entry)) {
                             $error_detail = is_scalar($entry['error']) ? (string) $entry['error'] : wp_json_encode($entry['error']);
@@ -436,6 +446,7 @@ function sitepulse_uptime_tracker_page() {
 
                         if ($index === $total_checks - 1 && !empty($current_incident_duration)) {
                             $bar_title .= ' ' . sprintf(__('Incident en cours depuis %s.', 'sitepulse'), $current_incident_duration);
+                            $duration_label = sprintf(__('Durée de l’incident en cours : %s.', 'sitepulse'), $current_incident_duration);
                         } else {
                             $duration_reference = null;
 
@@ -449,14 +460,28 @@ function sitepulse_uptime_tracker_page() {
                                 $duration_text = human_time_diff($incident_start, $duration_reference);
                                 $label = $is_transition ? __('Durée estimée : %s.', 'sitepulse') : __('Durée cumulée : %s.', 'sitepulse');
                                 $bar_title .= ' ' . sprintf($label, $duration_text);
+                                $duration_label = sprintf(__('Durée de l’incident : %s.', 'sitepulse'), $duration_text);
                             }
+                        }
+
+                        if ('' === $duration_label) {
+                            $duration_label = __('Durée : incident en cours, durée non déterminée.', 'sitepulse');
                         }
                     } else {
                         $error_text = isset($entry['error']) ? $entry['error'] : __('Erreur réseau inconnue.', 'sitepulse');
                         $bar_title = sprintf(__('Statut indéterminé lors du contrôle du %1$s : %2$s', 'sitepulse'), $check_time, $error_text);
+                        $status_label = __('Statut : indéterminé.', 'sitepulse');
+                        $duration_label = __('Durée : impossible à déterminer pour ce contrôle.', 'sitepulse');
                     }
+                    $screen_reader_text = implode(' ', array_filter([
+                        sprintf(__('Contrôle du %s.', 'sitepulse'), $check_time),
+                        $status_label,
+                        $duration_label,
+                    ]));
                     ?>
-                    <div class="uptime-bar <?php echo esc_attr($bar_class); ?>" title="<?php echo esc_attr($bar_title); ?>"></div>
+                    <div class="uptime-bar <?php echo esc_attr($bar_class); ?>" title="<?php echo esc_attr($bar_title); ?>">
+                        <span class="screen-reader-text"><?php echo esc_html($screen_reader_text); ?></span>
+                    </div>
                 <?php endforeach; ?>
             <?php endif; ?>
         </div>
