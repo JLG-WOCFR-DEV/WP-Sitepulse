@@ -966,12 +966,12 @@ function sitepulse_ai_insights_page() {
                 <span class="spinner" id="sitepulse-ai-spinner" style="float: none; margin-top: 0;"></span>
             </div>
         <?php endif; ?>
-        <div id="sitepulse-ai-insight-error" class="notice notice-error" style="display: none;"><p></p></div>
-        <div id="sitepulse-ai-insight-result" style="display: none; background: #fff; border: 1px solid #ccc; padding: 15px; margin-top: 20px;">
+        <div id="sitepulse-ai-insight-error" class="notice notice-error" style="display: none;" role="alert" hidden><p></p></div>
+        <div id="sitepulse-ai-insight-result" style="display: none; background: #fff; border: 1px solid #ccc; padding: 15px; margin-top: 20px;" hidden>
             <h2><?php esc_html_e('Votre Recommandation par IA', 'sitepulse'); ?></h2>
-            <p class="sitepulse-ai-insight-status" style="display: none;"></p>
+            <p class="sitepulse-ai-insight-status" style="display: none;" role="status" aria-live="polite" hidden></p>
             <p class="sitepulse-ai-insight-text" style="white-space: pre-line;"></p>
-            <p class="sitepulse-ai-insight-timestamp" style="display: none;"></p>
+            <p class="sitepulse-ai-insight-timestamp" style="display: none;" role="note" aria-live="polite" hidden></p>
         </div>
     </div>
     <?php

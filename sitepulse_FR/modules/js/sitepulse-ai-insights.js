@@ -21,11 +21,25 @@
         return date.toLocaleString();
     }
 
+    function showElement($element) {
+        $element.show().removeAttr('hidden').removeAttr('aria-hidden');
+
+        return $element;
+    }
+
+    function hideElement($element) {
+        $element.hide().attr('hidden', 'hidden').attr('aria-hidden', 'true');
+
+        return $element;
+    }
+
     function setStatus($statusEl, message) {
         if (typeof message === 'string' && message.trim() !== '') {
-            $statusEl.text(message).show();
+            $statusEl.text(message);
+            showElement($statusEl);
         } else {
-            $statusEl.hide().text('');
+            $statusEl.text('');
+            hideElement($statusEl);
         }
     }
 
@@ -40,9 +54,10 @@
         };
 
         if (text.length === 0) {
-            $resultContainer.hide();
+            hideElement($resultContainer);
             $textEl.text('');
-            $timestampEl.hide().text('');
+            $timestampEl.text('');
+            hideElement($timestampEl);
             setStatus($statusEl, '');
             return normalized;
         }
@@ -52,9 +67,11 @@
         var formattedTimestamp = formatTimestamp(timestamp);
 
         if (formattedTimestamp) {
-            $timestampEl.text(sitepulseAIInsights.strings.cachedPrefix + ' ' + formattedTimestamp).show();
+            $timestampEl.text(sitepulseAIInsights.strings.cachedPrefix + ' ' + formattedTimestamp);
+            showElement($timestampEl);
         } else {
-            $timestampEl.hide().text('');
+            $timestampEl.text('');
+            hideElement($timestampEl);
         }
 
         setStatus(
@@ -62,7 +79,7 @@
             isCached ? sitepulseAIInsights.strings.statusCached : sitepulseAIInsights.strings.statusFresh
         );
 
-        $resultContainer.show();
+        showElement($resultContainer);
 
         return normalized;
     }
@@ -75,7 +92,7 @@
         }
 
         $errorText.text(displayMessage);
-        $errorContainer.show();
+        showElement($errorContainer);
     }
 
     function reinstateLastResult($resultContainer, $resultText, $timestampEl, $statusEl, lastResultData) {
@@ -86,7 +103,9 @@
         }
 
         setStatus($statusEl, '');
-        $resultContainer.hide();
+        hideElement($resultContainer);
+        $resultText.text('');
+        hideElement($timestampEl);
 
         return false;
     }
@@ -150,7 +169,7 @@
                             var hadPrevious = reinstateLastResult($resultContainer, $resultText, $timestampEl, $statusEl, lastResultData);
                             setStatus($statusEl, sitepulseAIInsights.strings.statusFailed);
                             if (!hadPrevious) {
-                                $resultContainer.show();
+                                showElement($resultContainer);
                             }
                             finalizeRequest();
                         } else {
@@ -161,7 +180,7 @@
                             }
 
                             setStatus($statusEl, queuedMessage);
-                            $resultContainer.show();
+                            showElement($resultContainer);
                             scheduleJobPoll(jobId, false);
                         }
                     } else {
@@ -172,7 +191,7 @@
                         var hadResult = reinstateLastResult($resultContainer, $resultText, $timestampEl, $statusEl, lastResultData);
                         setStatus($statusEl, sitepulseAIInsights.strings.statusFailed);
                         if (!hadResult) {
-                            $resultContainer.show();
+                            showElement($resultContainer);
                         }
                         finalizeRequest();
                     }
@@ -187,14 +206,14 @@
                     var hadData = reinstateLastResult($resultContainer, $resultText, $timestampEl, $statusEl, lastResultData);
                     setStatus($statusEl, sitepulseAIInsights.strings.statusFailed);
                     if (!hadData) {
-                        $resultContainer.show();
+                        showElement($resultContainer);
                     }
                     finalizeRequest();
                 });
             }, immediate ? 0 : interval);
         }
 
-        $errorContainer.hide();
+        hideElement($errorContainer);
         $spinner.removeClass('is-active');
 
         lastResultData = renderResult($resultContainer, $resultText, $timestampEl, $statusEl, {
@@ -210,11 +229,11 @@
                 return;
             }
 
-            $errorContainer.hide();
+            hideElement($errorContainer);
             $errorText.text('');
             $spinner.addClass('is-active');
             $button.prop('disabled', true);
-            $resultContainer.show();
+            showElement($resultContainer);
             setStatus($statusEl, sitepulseAIInsights.strings.statusGenerating);
 
             var requestData = {
