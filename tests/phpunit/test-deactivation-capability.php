@@ -33,4 +33,28 @@ class Sitepulse_Deactivation_Capability_Test extends WP_UnitTestCase {
 
         remove_filter('sitepulse_required_capability', $filter);
     }
+
+    /**
+     * Ensures the plugin directory scan queue is cleared on deactivation.
+     *
+     * @runInSeparateProcess
+     * @preserveGlobalState disabled
+     */
+    public function test_deactivate_site_clears_plugin_dir_scan_queue(): void {
+        require_once dirname(__DIR__, 2) . '/sitepulse_FR/sitepulse.php';
+
+        $hook = 'sitepulse_queue_plugin_dir_scan';
+        wp_clear_scheduled_hook($hook);
+
+        wp_schedule_single_event(time() + MINUTE_IN_SECONDS, $hook);
+        $this->assertNotFalse(wp_next_scheduled($hook));
+
+        update_option(SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION, ['plugin/plugin.php']);
+        $this->assertSame(['plugin/plugin.php'], get_option(SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION));
+
+        sitepulse_deactivate_site();
+
+        $this->assertFalse(wp_next_scheduled($hook));
+        $this->assertFalse(get_option(SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION));
+    }
 }

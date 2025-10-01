@@ -31,6 +31,10 @@ if (!defined('SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES')) {
     define('SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES', 'sitepulse_alert_cooldown_minutes');
 }
 
+if (!defined('SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION')) {
+    define('SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION', 'sitepulse_plugin_dir_scan_queue');
+}
+
 if (!defined('SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER')) {
     define('SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER', 'sitepulse_error_alert_log_pointer');
 }

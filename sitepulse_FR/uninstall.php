@@ -34,6 +34,7 @@ $sitepulse_constants = [
     'SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT' => 'sitepulse_resource_monitor_snapshot',
     'SITEPULSE_PLUGIN_IMPACT_OPTION'              => 'sitepulse_plugin_impact_stats',
     'SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE'    => 'sitepulse_impact_loader_signature',
+    'SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION'       => 'sitepulse_plugin_dir_scan_queue',
 ];
 
 foreach ($sitepulse_constants as $constant => $value) {
@@ -94,6 +95,7 @@ $options = [
     SITEPULSE_OPTION_CRON_WARNINGS,
     SITEPULSE_PLUGIN_IMPACT_OPTION,
     SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE,
+    SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION,
 ];
 
 $transients = [
@@ -192,6 +194,8 @@ $cron_hooks = require __DIR__ . '/includes/cron-hooks.php';
 if (!is_array($cron_hooks)) {
     $cron_hooks = [];
 }
+
+wp_clear_scheduled_hook('sitepulse_queue_plugin_dir_scan');
 
 /**
  * Removes plugin data for a single site.

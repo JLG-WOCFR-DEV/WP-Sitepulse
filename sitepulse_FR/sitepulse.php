@@ -1383,6 +1383,14 @@ function sitepulse_deactivate_site() {
         wp_clear_scheduled_hook($hook);
     }
 
+    wp_clear_scheduled_hook('sitepulse_queue_plugin_dir_scan');
+
+    $queue_option = defined('SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION')
+        ? SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION
+        : 'sitepulse_plugin_dir_scan_queue';
+
+    delete_option($queue_option);
+
     sitepulse_remove_administrator_capability();
 
     if (!sitepulse_is_plugin_active_anywhere()) {

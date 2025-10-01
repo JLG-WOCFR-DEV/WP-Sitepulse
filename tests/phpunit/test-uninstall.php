@@ -57,5 +57,20 @@ class SitePulse_Uninstall_Test extends WP_UnitTestCase {
 
         remove_filter('sitepulse_required_capability', $filter);
     }
+
+    public function test_uninstall_clears_plugin_dir_scan_queue(): void {
+        wp_clear_scheduled_hook('sitepulse_queue_plugin_dir_scan');
+
+        wp_schedule_single_event(time() + MINUTE_IN_SECONDS, 'sitepulse_queue_plugin_dir_scan');
+        $this->assertNotFalse(wp_next_scheduled('sitepulse_queue_plugin_dir_scan'));
+
+        update_option(SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION, ['plugin/plugin.php']);
+        $this->assertSame(['plugin/plugin.php'], get_option(SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION));
+
+        $this->run_uninstall();
+
+        $this->assertFalse(wp_next_scheduled('sitepulse_queue_plugin_dir_scan'));
+        $this->assertFalse(get_option(SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION));
+    }
 }
 
