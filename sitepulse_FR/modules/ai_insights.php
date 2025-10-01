@@ -957,19 +957,19 @@ function sitepulse_ai_insights_page() {
         <?php if (empty($api_key)) : ?>
             <div class="notice notice-warning"><p><?php echo wp_kses_post(sprintf(__('Veuillez <a href="%s">entrer votre clé API Google Gemini</a> pour utiliser cette fonctionnalité.', 'sitepulse'), esc_url(admin_url('admin.php?page=sitepulse-settings')))); ?></p></div>
         <?php else : ?>
-            <div class="sitepulse-ai-insight-actions">
+            <div class="sitepulse-ai-insight-actions" aria-busy="false">
                 <button type="button" id="sitepulse-ai-generate" class="button button-primary"><?php esc_html_e('Générer une Analyse', 'sitepulse'); ?></button>
                 <label for="sitepulse-ai-force-refresh" class="sitepulse-ai-force-refresh">
                     <input type="checkbox" id="sitepulse-ai-force-refresh" />
                     <?php esc_html_e('Forcer une nouvelle analyse', 'sitepulse'); ?>
                 </label>
-                <span class="spinner" id="sitepulse-ai-spinner" style="float: none; margin-top: 0;"></span>
+                <span class="spinner" id="sitepulse-ai-spinner" style="float: none; margin-top: 0;" aria-hidden="true"></span>
             </div>
         <?php endif; ?>
-        <div id="sitepulse-ai-insight-error" class="notice notice-error" style="display: none;"><p></p></div>
+        <div id="sitepulse-ai-insight-error" class="notice notice-error" style="display: none;" role="alert" tabindex="-1"><p></p></div>
         <div id="sitepulse-ai-insight-result" style="display: none; background: #fff; border: 1px solid #ccc; padding: 15px; margin-top: 20px;">
             <h2><?php esc_html_e('Votre Recommandation par IA', 'sitepulse'); ?></h2>
-            <p class="sitepulse-ai-insight-status" style="display: none;"></p>
+            <p class="sitepulse-ai-insight-status" role="status" aria-live="polite" aria-hidden="true" style="display: none;"></p>
             <p class="sitepulse-ai-insight-text" style="white-space: pre-line;"></p>
             <p class="sitepulse-ai-insight-timestamp" style="display: none;"></p>
         </div>
