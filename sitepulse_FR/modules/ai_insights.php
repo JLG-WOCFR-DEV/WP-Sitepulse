@@ -871,6 +871,13 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
         return;
     }
 
+    wp_register_style(
+        'sitepulse-ai-insights-styles',
+        SITEPULSE_URL . 'modules/css/ai-insights.css',
+        [],
+        SITEPULSE_VERSION
+    );
+
     wp_register_script(
         'sitepulse-ai-insights',
         SITEPULSE_URL . 'modules/js/sitepulse-ai-insights.js',
@@ -878,6 +885,8 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
         SITEPULSE_VERSION,
         true
     );
+
+    wp_enqueue_style('sitepulse-ai-insights-styles');
 
     $stored_insight    = sitepulse_ai_get_cached_insight();
     $insight_text      = isset($stored_insight['text']) ? $stored_insight['text'] : '';
@@ -928,7 +937,7 @@ function sitepulse_ai_insights_page() {
         <h1><span class="dashicons-before dashicons-superhero"></span> <?php esc_html_e('Analyses par IA', 'sitepulse'); ?></h1>
         <p><?php esc_html_e("Obtenez des recommandations personnalisées pour votre site en analysant ses données de performance avec l'IA Gemini de Google.", 'sitepulse'); ?></p>
         <?php if (!empty($available_models)) : ?>
-            <div class="notice notice-info" style="padding-bottom: 0;">
+            <div class="notice notice-info sitepulse-ai-info-notice">
                 <h2><?php esc_html_e('Choix du modèle IA', 'sitepulse'); ?></h2>
                 <p><?php echo wp_kses(
                     sprintf(
@@ -963,15 +972,15 @@ function sitepulse_ai_insights_page() {
                     <input type="checkbox" id="sitepulse-ai-force-refresh" />
                     <?php esc_html_e('Forcer une nouvelle analyse', 'sitepulse'); ?>
                 </label>
-                <span class="spinner" id="sitepulse-ai-spinner" style="float: none; margin-top: 0;" aria-hidden="true"></span>
+                <span class="spinner sitepulse-ai-spinner" id="sitepulse-ai-spinner" aria-hidden="true"></span>
             </div>
         <?php endif; ?>
-        <div id="sitepulse-ai-insight-error" class="notice notice-error" style="display: none;" role="alert" tabindex="-1"><p></p></div>
-        <div id="sitepulse-ai-insight-result" style="display: none; background: #fff; border: 1px solid #ccc; padding: 15px; margin-top: 20px;">
+        <div id="sitepulse-ai-insight-error" class="notice notice-error sitepulse-ai-error" role="alert" tabindex="-1"><p></p></div>
+        <div id="sitepulse-ai-insight-result" class="sitepulse-ai-result">
             <h2><?php esc_html_e('Votre Recommandation par IA', 'sitepulse'); ?></h2>
-            <p class="sitepulse-ai-insight-status" role="status" aria-live="polite" aria-hidden="true" style="display: none;"></p>
-            <p class="sitepulse-ai-insight-text" style="white-space: pre-line;"></p>
-            <p class="sitepulse-ai-insight-timestamp" style="display: none;"></p>
+            <p class="sitepulse-ai-insight-status" role="status" aria-live="polite" aria-hidden="true"></p>
+            <p class="sitepulse-ai-insight-text"></p>
+            <p class="sitepulse-ai-insight-timestamp"></p>
         </div>
     </div>
     <?php
