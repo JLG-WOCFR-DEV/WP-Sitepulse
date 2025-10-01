@@ -24,8 +24,10 @@
     function setStatus($statusEl, message) {
         if (typeof message === 'string' && message.trim() !== '') {
             $statusEl.text(message).show();
+            $statusEl.removeAttr('aria-hidden');
         } else {
             $statusEl.hide().text('');
+            $statusEl.attr('aria-hidden', 'true');
         }
     }
 
@@ -76,6 +78,10 @@
 
         $errorText.text(displayMessage);
         $errorContainer.show();
+
+        window.setTimeout(function () {
+            $errorContainer.trigger('focus');
+        }, 0);
     }
 
     function reinstateLastResult($resultContainer, $resultText, $timestampEl, $statusEl, lastResultData) {
@@ -105,9 +111,18 @@
         var $resultText = $resultContainer.find('.sitepulse-ai-insight-text');
         var $timestampEl = $resultContainer.find('.sitepulse-ai-insight-timestamp');
         var $forceRefreshToggle = $('#sitepulse-ai-force-refresh');
+        var $actionsContainer = $('.sitepulse-ai-insight-actions');
         var lastResultData = null;
         var pollTimer = null;
         var activeJobId = null;
+
+        function setActionsBusy(isBusy) {
+            if ($actionsContainer.length === 0) {
+                return;
+            }
+
+            $actionsContainer.attr('aria-busy', isBusy ? 'true' : 'false');
+        }
 
         function clearPollingTimer() {
             if (pollTimer) {
@@ -121,6 +136,7 @@
             activeJobId = null;
             $spinner.removeClass('is-active');
             $button.prop('disabled', false);
+            setActionsBusy(false);
         }
 
         function scheduleJobPoll(jobId, immediate) {
@@ -196,6 +212,7 @@
 
         $errorContainer.hide();
         $spinner.removeClass('is-active');
+        setActionsBusy(false);
 
         lastResultData = renderResult($resultContainer, $resultText, $timestampEl, $statusEl, {
             text: sitepulseAIInsights.initialInsight,
@@ -214,6 +231,7 @@
             $errorText.text('');
             $spinner.addClass('is-active');
             $button.prop('disabled', true);
+            setActionsBusy(true);
             $resultContainer.show();
             setStatus($statusEl, sitepulseAIInsights.strings.statusGenerating);
 
@@ -261,6 +279,7 @@
                 if (!activeJobId) {
                     $spinner.removeClass('is-active');
                     $button.prop('disabled', false);
+                    setActionsBusy(false);
                 }
             });
         });

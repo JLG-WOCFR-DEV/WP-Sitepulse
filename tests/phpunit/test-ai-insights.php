@@ -125,6 +125,48 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
     }
 
     /**
+     * Ensures the admin page exposes the accessibility attributes expected by the JavaScript behaviour.
+     */
+    public function test_admin_page_contains_accessibility_attributes() {
+        update_option(SITEPULSE_OPTION_GEMINI_API_KEY, 'test-api-key');
+
+        ob_start();
+        sitepulse_ai_insights_page();
+        $output = ob_get_clean();
+
+        $this->assertIsString($output);
+        $this->assertStringContainsString('sitepulse-ai-insight-actions', $output);
+
+        $internal_errors = libxml_use_internal_errors(true);
+
+        $document = new \DOMDocument();
+        $document->loadHTML('<?xml encoding="utf-8"?>' . $output);
+
+        libxml_use_internal_errors((bool) $internal_errors);
+
+        $xpath = new \DOMXPath($document);
+
+        $spinner = $xpath->query('//*[@id="sitepulse-ai-spinner"]')->item(0);
+        $this->assertInstanceOf(\DOMElement::class, $spinner, 'Spinner element should be present.');
+        $this->assertSame('true', $spinner->getAttribute('aria-hidden'));
+
+        $status = $xpath->query('//*[contains(concat(" ", normalize-space(@class), " "), " sitepulse-ai-insight-status ")]')->item(0);
+        $this->assertInstanceOf(\DOMElement::class, $status, 'Status element should be present.');
+        $this->assertSame('status', $status->getAttribute('role'));
+        $this->assertSame('polite', $status->getAttribute('aria-live'));
+        $this->assertSame('true', $status->getAttribute('aria-hidden'));
+
+        $error = $xpath->query('//*[@id="sitepulse-ai-insight-error"]')->item(0);
+        $this->assertInstanceOf(\DOMElement::class, $error, 'Error container should be present.');
+        $this->assertSame('alert', $error->getAttribute('role'));
+        $this->assertSame('-1', $error->getAttribute('tabindex'));
+
+        $actions = $xpath->query('//*[contains(concat(" ", normalize-space(@class), " "), " sitepulse-ai-insight-actions ")]')->item(0);
+        $this->assertInstanceOf(\DOMElement::class, $actions, 'Actions container should be present.');
+        $this->assertSame('false', $actions->getAttribute('aria-busy'));
+    }
+
+    /**
      * Ensures that requests missing the nonce or API key return the documented JSON error responses.
      */
     public function test_missing_nonce_and_api_key_errors() {
