@@ -1,229 +1,1570 @@
+# Copyright (C) 2025 Jérôme Le Gousse
+# This file is distributed under the GPL-2.0+.
 msgid ""
 msgstr ""
-"Project-Id-Version: SitePulse 1.0\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2024-07-06 00:00+0000\n"
-"PO-Revision-Date: 2024-07-06 00:00+0000\n"
-"Last-Translator: \n"
-"Language-Team: \n"
-"Language: \n"
+"Project-Id-Version: Sitepulse - JLG 1.0\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/sitepulse_FR\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"X-Generator: Manual\n"
+"POT-Creation-Date: 2025-10-01T19:24:15+00:00\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"X-Generator: WP-CLI 2.12.0\n"
 "X-Domain: sitepulse\n"
 
-#: modules/error_alerts.php:370
-#, php-format
-msgid "SitePulse Alert: High Server Load on %s"
+#. Plugin Name of the plugin
+#: sitepulse.php
+#: includes/admin-settings.php:75
+msgid "Sitepulse - JLG"
 msgstr ""
 
-#: modules/error_alerts.php:383
-#, php-format
-msgid "Current server load on %1$s: %2$s (detected cores: %3$d, total threshold: %4$s, load per core: %5$s, threshold per core: %6$s)"
+#. Plugin URI of the plugin
+#: sitepulse.php
+msgid "https://your-site.com/sitepulse"
 msgstr ""
 
-#: modules/error_alerts.php:408
-#, php-format
-msgid "SitePulse Alert: Fatal Error Detected on %s"
+#. Description of the plugin
+#: sitepulse.php
+msgid "Monitors website pulse: speed, database, maintenance, server, errors."
 msgstr ""
 
-#: modules/error_alerts.php:414
-#, php-format
-msgid "Review %1$s for error details affecting %2$s."
+#. Author of the plugin
+#: sitepulse.php
+msgid "Jérôme Le Gousse"
 msgstr ""
 
-#: modules/custom_dashboards.php:39
-msgid "SitePulse Dashboard"
-msgstr ""
-
-#: modules/custom_dashboards.php:40
-msgid "A real-time overview of your site's performance and health."
-msgstr ""
-
-#: modules/custom_dashboards.php:50
-msgid "ms"
-msgstr ""
-
-#: modules/custom_dashboards.php:50
-msgid "N/A"
-msgstr ""
-
-#: modules/custom_dashboards.php:51
-msgid "Speed"
-msgstr ""
-
-#: modules/custom_dashboards.php:52 modules/custom_dashboards.php:67
-msgid "Details"
-msgstr ""
-
-#: modules/custom_dashboards.php:53
-msgid "Server PHP Processing:"
-msgstr ""
-
-#: modules/custom_dashboards.php:54
-msgid "Measures the backend execution time captured at shutdown. Under 200ms indicates an excellent PHP response."
-msgstr ""
-
-#: modules/custom_dashboards.php:66
-msgid "Uptime"
-msgstr ""
-
-#: modules/custom_dashboards.php:68
-msgid "Last 30 Checks:"
-msgstr ""
-
-#: modules/custom_dashboards.php:69
-msgid "Represents your site's availability over the last 30 hours."
-msgstr ""
-
-#: modules/custom_dashboards.php:78
-msgid "Database Health"
-msgstr ""
-
-#: modules/custom_dashboards.php:79
-msgid "Optimize"
-msgstr ""
-
-#: modules/custom_dashboards.php:80
-msgid "Post Revisions:"
-msgstr ""
-
-#: modules/custom_dashboards.php:81
-msgid "Excessive revisions can slow down your database. It's safe to clean them."
-msgstr ""
-
-#: modules/custom_dashboards.php:89
-msgid "Log is clean."
-msgstr ""
-
-#: modules/custom_dashboards.php:93
-msgid "Log file not found."
-msgstr ""
-
-#: modules/custom_dashboards.php:99
-msgid "Unable to read log file."
-msgstr ""
-
-#: modules/custom_dashboards.php:101
-msgid "No recent log entries."
-msgstr ""
-
-#: modules/custom_dashboards.php:107
-msgid "Fatal Errors found!"
-msgstr ""
-
-#: modules/custom_dashboards.php:110
-msgid "Warnings present."
-msgstr ""
-
-#: modules/custom_dashboards.php:115
-msgid "Error Log"
-msgstr ""
-
-#: modules/custom_dashboards.php:116
-msgid "Analyze"
-msgstr ""
-
-#: modules/custom_dashboards.php:117
-msgid "Status:"
-msgstr ""
-
-#: modules/custom_dashboards.php:118
-msgid "Checks for critical errors in your WordPress debug log."
-msgstr ""
-
-#: modules/ai_insights.php:6 modules/ai_insights.php:7
-msgid "AI Insights"
-msgstr ""
-
-#: modules/ai_insights.php:15
+#: includes/admin-settings.php:41
+#: includes/admin-settings.php:357
+#: includes/admin-settings.php:723
+#: modules/ai_insights.php:914
+#: modules/custom_dashboards.php:233
+#: modules/database_optimizer.php:15
+#: modules/log_analyzer.php:21
+#: modules/maintenance_advisor.php:15
+#: modules/plugin_impact_scanner.php:129
+#: modules/resource_monitor.php:317
+#: modules/speed_analyzer.php:43
+#: modules/uptime_tracker.php:296
 msgid "Vous n'avez pas les permissions nécessaires pour accéder à cette page."
 msgstr ""
 
-#: modules/ai_insights.php:29
+#: includes/admin-settings.php:54
+msgid "Le module de tableau de bord est activé mais son rendu est indisponible. Vérifiez les fichiers du plugin ou les journaux d’erreurs."
+msgstr ""
+
+#. translators: %s is the URL to the SitePulse settings page.
+#: includes/admin-settings.php:58
+#, php-format
+msgid "Le module de tableau de bord est désactivé. Activez-le depuis les <a href=\"%s\">réglages de SitePulse</a>."
+msgstr ""
+
+#: includes/admin-settings.php:64
+#: includes/admin-settings.php:74
+#: modules/custom_dashboards.php:659
+msgid "SitePulse Dashboard"
+msgstr ""
+
+#: includes/admin-settings.php:85
+msgid "SitePulse Settings"
+msgstr ""
+
+#: includes/admin-settings.php:86
+msgid "Settings"
+msgstr ""
+
+#: includes/admin-settings.php:95
+msgid "SitePulse Debug"
+msgstr ""
+
+#: includes/admin-settings.php:96
+msgid "Debug"
+msgstr ""
+
+#: includes/admin-settings.php:213
+#: modules/ai_insights.php:219
+#: modules/ai_insights.php:242
+msgid "Une fois par jour"
+msgstr ""
+
+#: includes/admin-settings.php:214
+#: modules/ai_insights.php:220
+#: modules/ai_insights.php:243
+msgid "Une fois par semaine"
+msgstr ""
+
+#: includes/admin-settings.php:215
+#: modules/ai_insights.php:221
+#: modules/ai_insights.php:244
+msgid "Une fois par mois"
+msgstr ""
+
+#: includes/admin-settings.php:216
+#: modules/ai_insights.php:222
+#: modules/ai_insights.php:245
+msgid "Illimité"
+msgstr ""
+
+#: includes/admin-settings.php:361
+msgid "Log Analyzer"
+msgstr ""
+
+#: includes/admin-settings.php:362
+#: modules/resource_monitor.php:7
+msgid "Resource Monitor"
+msgstr ""
+
+#: includes/admin-settings.php:363
+msgid "Plugin Impact Scanner"
+msgstr ""
+
+#: includes/admin-settings.php:364
+#: modules/speed_analyzer.php:8
+msgid "Speed Analyzer"
+msgstr ""
+
+#: includes/admin-settings.php:365
+#: modules/database_optimizer.php:6
+#: modules/database_optimizer.php:213
+msgid "Database Optimizer"
+msgstr ""
+
+#: includes/admin-settings.php:366
+#: modules/maintenance_advisor.php:6
+msgid "Maintenance Advisor"
+msgstr ""
+
+#: includes/admin-settings.php:367
+msgid "Uptime Tracker"
+msgstr ""
+
+#: includes/admin-settings.php:368
+msgid "AI-Powered Insights"
+msgstr ""
+
+#: includes/admin-settings.php:369
+msgid "Custom Dashboards"
+msgstr ""
+
+#: includes/admin-settings.php:370
+msgid "Error Alerts"
+msgstr ""
+
+#: includes/admin-settings.php:425
+msgid "Impossible de vider le journal de débogage. Vérifiez les permissions du fichier."
+msgstr ""
+
+#: includes/admin-settings.php:427
+msgid "Journal de débogage vidé."
+msgstr ""
+
+#: includes/admin-settings.php:433
+msgid "Données stockées effacées."
+msgstr ""
+
+#: includes/admin-settings.php:527
+msgid "SitePulse a été réinitialisé."
+msgstr ""
+
+#: includes/admin-settings.php:529
+msgid "Impossible de supprimer le journal de débogage. Vérifiez les permissions du fichier."
+msgstr ""
+
+#: includes/admin-settings.php:535
+msgid "Réglages de SitePulse"
+msgstr ""
+
+#: includes/admin-settings.php:538
+msgid "Paramètres de l'API"
+msgstr ""
+
+#: includes/admin-settings.php:541
+msgid "Clé API Google Gemini"
+msgstr ""
+
+#: includes/admin-settings.php:543
+msgid "Une clé API est enregistrée"
+msgstr ""
+
+#: includes/admin-settings.php:545
+msgid "Une clé API est déjà enregistrée. Laissez le champ vide pour la conserver ou cochez la case ci-dessous pour l’effacer."
+msgstr ""
+
+#: includes/admin-settings.php:548
+msgid "Effacer la clé API enregistrée"
+msgstr ""
+
+#. translators: %s: URL to Google AI Studio.
+#: includes/admin-settings.php:554
+#, php-format
+msgid "Entrez votre clé API pour activer les analyses par IA. Obtenez une clé sur <a href=\"%s\" target=\"_blank\">Google AI Studio</a>."
+msgstr ""
+
+#: includes/admin-settings.php:562
+msgid "IA"
+msgstr ""
+
+#: includes/admin-settings.php:565
+msgid "Modèle IA"
+msgstr ""
+
+#: includes/admin-settings.php:572
+msgid "Choisissez le modèle utilisé pour générer les recommandations. Les modèles diffèrent en termes de profondeur d'analyse, de coût et de temps de réponse."
+msgstr ""
+
+#: includes/admin-settings.php:582
+msgid " (modèle actuel)"
+msgstr ""
+
+#: includes/admin-settings.php:592
+msgid "Fréquence maximale des analyses IA"
+msgstr ""
+
+#: includes/admin-settings.php:599
+msgid "Définissez la fréquence maximale des nouvelles recommandations générées automatiquement."
+msgstr ""
+
+#: includes/admin-settings.php:603
+msgid "Activer les Modules"
+msgstr ""
+
+#: includes/admin-settings.php:604
+msgid "Sélectionnez les modules de surveillance à activer."
+msgstr ""
+
+#: includes/admin-settings.php:613
+msgid "Activer le Mode Debug"
+msgstr ""
+
+#: includes/admin-settings.php:617
+msgid "Active la journalisation détaillée et le tableau de bord de débogage. À n'utiliser que pour le dépannage."
+msgstr ""
+
+#: includes/admin-settings.php:618
+#, php-format
+msgid "Sur Nginx (ou tout serveur qui ignore .htaccess / web.config), déplacez le journal via le filtre %s ou bloquez-le côté serveur."
+msgstr ""
+
+#: includes/admin-settings.php:622
+msgid "Alertes"
+msgstr ""
+
+#: includes/admin-settings.php:625
+msgid "Destinataires des alertes"
+msgstr ""
+
+#: includes/admin-settings.php:632
+msgid "Entrez une adresse par ligne (ou séparées par des virgules). L'adresse e-mail de l'administrateur sera toujours incluse si elle est valide."
+msgstr ""
+
+#: includes/admin-settings.php:636
+msgid "Seuil d'alerte de charge CPU"
+msgstr ""
+
+#: includes/admin-settings.php:639
+msgid "Une alerte e-mail est envoyée lorsque la charge moyenne sur 1 minute dépasse ce seuil multiplié par le nombre de cœurs détectés."
+msgstr ""
+
+#: includes/admin-settings.php:643
+msgid "Fenêtre anti-spam (minutes)"
+msgstr ""
+
+#: includes/admin-settings.php:646
+msgid "Empêche l'envoi de plusieurs e-mails identiques pendant la durée spécifiée."
+msgstr ""
+
+#: includes/admin-settings.php:650
+msgid "Fréquence des vérifications"
+msgstr ""
+
+#: includes/admin-settings.php:655
+msgid "Toutes les 5 minutes"
+msgstr ""
+
+#: includes/admin-settings.php:656
+msgid "Toutes les 10 minutes"
+msgstr ""
+
+#: includes/admin-settings.php:657
+msgid "Toutes les 15 minutes"
+msgstr ""
+
+#: includes/admin-settings.php:658
+msgid "Toutes les 30 minutes"
+msgstr ""
+
+#: includes/admin-settings.php:666
+msgid "Détermine la fréquence des vérifications automatisées pour les alertes."
+msgstr ""
+
+#: includes/admin-settings.php:670
+msgid "Disponibilité"
+msgstr ""
+
+#: includes/admin-settings.php:673
+msgid "URL à surveiller"
+msgstr ""
+
+#: includes/admin-settings.php:677
+msgid "Laisser vide pour utiliser automatiquement l’URL principale du site."
+msgstr ""
+
+#: includes/admin-settings.php:681
+msgid "Délai d’attente (secondes)"
+msgstr ""
+
+#: includes/admin-settings.php:685
+msgid "Nombre de secondes avant de considérer la requête comme échouée."
+msgstr ""
+
+#: includes/admin-settings.php:689
+msgid "Enregistrer les modifications"
+msgstr ""
+
+#: includes/admin-settings.php:692
+msgid "Nettoyage & Réinitialisation"
+msgstr ""
+
+#: includes/admin-settings.php:693
+msgid "Gérez les données du plugin."
+msgstr ""
+
+#: includes/admin-settings.php:698
+msgid "Vider le journal de debug"
+msgstr ""
+
+#: includes/admin-settings.php:699
+msgid "Vider le journal"
+msgstr ""
+
+#: includes/admin-settings.php:699
+msgid "Supprime le contenu du fichier de log de débogage."
+msgstr ""
+
+#: includes/admin-settings.php:702
+msgid "Vider les données stockées"
+msgstr ""
+
+#: includes/admin-settings.php:703
+msgid "Vider les données"
+msgstr ""
+
+#: includes/admin-settings.php:703
+msgid "Supprime les données stockées comme les journaux de disponibilité et les résultats de scan."
+msgstr ""
+
+#: includes/admin-settings.php:706
+msgid "Réinitialiser le plugin"
+msgstr ""
+
+#: includes/admin-settings.php:708
+msgid "Tout réinitialiser"
+msgstr ""
+
+#: includes/admin-settings.php:708
+msgid "Êtes-vous sûr ?"
+msgstr ""
+
+#: includes/admin-settings.php:709
+msgid "Réinitialise SitePulse à son état d'installation initial."
+msgstr ""
+
+#. translators: 1: number of log lines kept, 2: formatted size limit.
+#: includes/admin-settings.php:794
+#, php-format
+msgid "Seules les %1$d dernières lignes du journal (limitées à %2$s) sont chargées pour éviter toute surcharge mémoire."
+msgstr ""
+
+#: includes/functions.php:101
+msgid "Gemini 1.5 Flash"
+msgstr ""
+
+#: includes/functions.php:102
+msgid "Réponses rapides et économiques, idéales pour obtenir des recommandations synthétiques à fréquence élevée."
+msgstr ""
+
+#: includes/functions.php:103
+msgid "Fournis une synthèse claire et actionnable en te concentrant sur les gains rapides."
+msgstr ""
+
+#: includes/functions.php:106
+msgid "Gemini 1.5 Pro"
+msgstr ""
+
+#: includes/functions.php:107
+msgid "Analyse plus approfondie avec davantage de contexte et de détails, adaptée aux audits complets mais plus lente et coûteuse."
+msgstr ""
+
+#: includes/functions.php:108
+msgid "Apporte une analyse détaillée et justifie chaque recommandation avec les impacts attendus."
+msgstr ""
+
+#: modules/ai_insights.php:7
+#: modules/ai_insights.php:8
+msgid "AI Insights"
+msgstr ""
+
+#. translators: 1: Status or error code, 2: error details.
+#: modules/ai_insights.php:100
+#, php-format
+msgid "Code %1$d — %2$s"
+msgstr ""
+
+#: modules/ai_insights.php:328
 msgid "Veuillez entrer votre clé API Google Gemini dans les réglages de SitePulse."
 msgstr ""
 
-#: modules/ai_insights.php:41
+#: modules/ai_insights.php:368
 msgid "Tu es un expert en optimisation de sites WordPress."
 msgstr ""
 
 #. translators: %1$s: Site name, %2$s: Site URL
-#: modules/ai_insights.php:44
+#: modules/ai_insights.php:371
+#, php-format
 msgid "Analyse les performances du site \"%1$s\" disponible à l'adresse %2$s."
 msgstr ""
 
-#: modules/ai_insights.php:48
+#: modules/ai_insights.php:375
 msgid "Fournis trois recommandations concrètes pour améliorer la vitesse, le référencement et la conversion. Réponds en français."
 msgstr ""
 
 #. translators: %s: site description
-#: modules/ai_insights.php:53
+#: modules/ai_insights.php:387
+#, php-format
 msgid "Description du site : %s."
 msgstr ""
 
+#: modules/ai_insights.php:414
+msgid "erreur JSON inconnue"
+msgstr ""
+
+#. translators: %s: error detail
+#: modules/ai_insights.php:420
+#, php-format
+msgid "Impossible de préparer la requête pour Gemini : %s"
+msgstr ""
+
+#. translators: %s: formatted size limit
+#: modules/ai_insights.php:457
+#, php-format
+msgid "La réponse de Gemini dépasse la taille maximale autorisée (%s). Veuillez réessayer ou augmenter la limite via le filtre sitepulse_ai_response_size_limit."
+msgstr ""
+
 #. translators: %s: error message
-#: modules/ai_insights.php:81 modules/ai_insights.php:126
+#: modules/ai_insights.php:467
+#: modules/ai_insights.php:497
+#, php-format
 msgid "Erreur lors de la génération de l’analyse IA : %s"
 msgstr ""
 
-#: modules/ai_insights.php:106
-msgid "La réponse de Gemini ne contient aucun texte exploitable."
-msgstr ""
-
-#: modules/ai_insights.php:109
-msgid "Structure de réponse inattendue reçue depuis Gemini."
-msgstr ""
-
-#: modules/ai_insights.php:122
+#: modules/ai_insights.php:491
+#, php-format
 msgid "HTTP %d"
 msgstr ""
 
-#: modules/ai_insights.php:135
+#: modules/ai_insights.php:507
+msgid "Structure de réponse inattendue reçue depuis Gemini."
+msgstr ""
+
+#: modules/ai_insights.php:523
+msgid "La réponse de Gemini ne contient aucun texte exploitable."
+msgstr ""
+
+#: modules/ai_insights.php:575
+msgid "Impossible de planifier la génération de l’analyse IA. Veuillez réessayer."
+msgstr ""
+
+#: modules/ai_insights.php:583
+msgid "La planification du traitement IA a échoué. Veuillez réessayer ultérieurement."
+msgstr ""
+
+#. translators: %s: error message
+#: modules/ai_insights.php:663
+#, php-format
+msgid "Une erreur inattendue est survenue lors de la génération de l’analyse IA : %s"
+msgstr ""
+
+#. translators: %s: Average TTFB in milliseconds.
+#: modules/ai_insights.php:766
+#, php-format
+msgid "TTFB moyen observé : %s ms."
+msgstr ""
+
+#. translators: %s: Uptime percentage.
+#: modules/ai_insights.php:802
+#, php-format
+msgid "Disponibilité récemment mesurée : %s%%."
+msgstr ""
+
+#. translators: 1: Plugin name, 2: Average execution time in milliseconds.
+#: modules/ai_insights.php:853
+#, php-format
+msgid "Plugin le plus coûteux : %1$s (%2$s ms en moyenne)."
+msgstr ""
+
+#: modules/ai_insights.php:895
+msgid "Une erreur inattendue est survenue. Veuillez réessayer."
+msgstr ""
+
+#: modules/ai_insights.php:896
+msgid "Dernière mise à jour :"
+msgstr ""
+
+#: modules/ai_insights.php:897
+msgid "Résultat issu du cache."
+msgstr ""
+
+#: modules/ai_insights.php:898
+msgid "Nouvelle analyse générée."
+msgstr ""
+
+#: modules/ai_insights.php:899
+msgid "Génération en cours…"
+msgstr ""
+
+#: modules/ai_insights.php:900
+msgid "Analyse en attente de traitement…"
+msgstr ""
+
+#: modules/ai_insights.php:901
+msgid "La génération a échoué. Veuillez réessayer."
+msgstr ""
+
+#: modules/ai_insights.php:928
 msgid "Analyses par IA"
 msgstr ""
 
-#: modules/ai_insights.php:136
+#: modules/ai_insights.php:929
 msgid "Obtenez des recommandations personnalisées pour votre site en analysant ses données de performance avec l'IA Gemini de Google."
 msgstr ""
 
-#: modules/ai_insights.php:138
+#: modules/ai_insights.php:932
+msgid "Choix du modèle IA"
+msgstr ""
+
+#. translators: %s: URL to the SitePulse settings page.
+#: modules/ai_insights.php:936
+#, php-format
+msgid "Le modèle sélectionné dans les réglages (<a href=\"%s\">Réglages &gt; IA</a>) influence la granularité des recommandations et le temps de génération."
+msgstr ""
+
+#: modules/ai_insights.php:949
+msgid " (actuellement utilisé)"
+msgstr ""
+
+#: modules/ai_insights.php:958
+#, php-format
 msgid "Veuillez <a href=\"%s\">entrer votre clé API Google Gemini</a> pour utiliser cette fonctionnalité."
 msgstr ""
 
-#: modules/ai_insights.php:142
+#: modules/ai_insights.php:961
 msgid "Générer une Analyse"
 msgstr ""
 
-#: modules/ai_insights.php:149
+#: modules/ai_insights.php:964
+msgid "Forcer une nouvelle analyse"
+msgstr ""
+
+#: modules/ai_insights.php:971
 msgid "Votre Recommandation par IA"
 msgstr ""
-#: includes/admin-settings.php:207 modules/ai_insights.php:219 modules/ai_insights.php:243
-msgid "Une fois par jour"
+
+#: modules/ai_insights.php:982
+#: modules/ai_insights.php:1079
+msgid "Vous n'avez pas les permissions nécessaires pour effectuer cette action."
 msgstr ""
 
-#: includes/admin-settings.php:208 modules/ai_insights.php:220 modules/ai_insights.php:244
-msgid "Une fois par semaine"
+#: modules/ai_insights.php:992
+#: modules/ai_insights.php:1089
+msgid "Échec de la vérification de sécurité. Veuillez recharger la page et réessayer."
 msgstr ""
 
-#: includes/admin-settings.php:209 modules/ai_insights.php:221 modules/ai_insights.php:245
-msgid "Une fois par mois"
-msgstr ""
-
-#: includes/admin-settings.php:210 modules/ai_insights.php:223 modules/ai_insights.php:246
-msgid "Illimité"
-msgstr ""
-
-#: includes/admin-settings.php:553
-msgid "Fréquence maximale des analyses IA"
-msgstr ""
-
-#: includes/admin-settings.php:560
-msgid "Définissez la fréquence maximale des nouvelles recommandations générées automatiquement."
-msgstr ""
-
+#. translators: 1: Human readable delay (e.g. "5 minutes"), 2: rate limit label.
 #: modules/ai_insights.php:1040
 #, php-format
 msgid "La génération par IA est limitée à %2$s. Réessayez dans %1$s."
+msgstr ""
+
+#: modules/ai_insights.php:1099
+msgid "Identifiant de tâche manquant."
+msgstr ""
+
+#: modules/ai_insights.php:1109
+msgid "Tâche introuvable ou expirée. Veuillez relancer une génération."
+msgstr ""
+
+#: modules/ai_insights.php:1125
+msgid "La génération de l’analyse IA a échoué."
+msgstr ""
+
+#: modules/custom_dashboards.php:264
+#: modules/speed_analyzer.php:83
+msgid "Bon"
+msgstr ""
+
+#: modules/custom_dashboards.php:265
+#: modules/speed_analyzer.php:84
+msgid "Statut : bon"
+msgstr ""
+
+#: modules/custom_dashboards.php:269
+#: modules/speed_analyzer.php:88
+msgid "Attention"
+msgstr ""
+
+#: modules/custom_dashboards.php:270
+#: modules/speed_analyzer.php:89
+msgid "Statut : attention"
+msgstr ""
+
+#: modules/custom_dashboards.php:274
+#: modules/speed_analyzer.php:93
+msgid "Critique"
+msgstr ""
+
+#: modules/custom_dashboards.php:275
+#: modules/speed_analyzer.php:94
+msgid "Statut : critique"
+msgstr ""
+
+#: modules/custom_dashboards.php:318
+#: modules/custom_dashboards.php:329
+msgid "ms"
+msgstr ""
+
+#: modules/custom_dashboards.php:319
+#: modules/resource_monitor.php:41
+#: modules/resource_monitor.php:101
+#: modules/speed_analyzer.php:178
+msgid "N/A"
+msgstr ""
+
+#: modules/custom_dashboards.php:343
+#: modules/custom_dashboards.php:617
+msgid "Measured time"
+msgstr ""
+
+#: modules/custom_dashboards.php:344
+#: modules/custom_dashboards.php:358
+#: modules/custom_dashboards.php:618
+msgid "Performance budget"
+msgstr ""
+
+#: modules/custom_dashboards.php:359
+#: modules/custom_dashboards.php:619
+msgid "Over budget"
+msgstr ""
+
+#: modules/custom_dashboards.php:409
+msgid "Unknown"
+msgstr ""
+
+#: modules/custom_dashboards.php:438
+#: modules/custom_dashboards.php:723
+msgid "%"
+msgstr ""
+
+#: modules/custom_dashboards.php:467
+msgid "Stored revisions"
+msgstr ""
+
+#: modules/custom_dashboards.php:468
+msgid "Remaining before cleanup"
+msgstr ""
+
+#: modules/custom_dashboards.php:482
+msgid "Recommended maximum"
+msgstr ""
+
+#: modules/custom_dashboards.php:483
+msgid "Excess revisions"
+msgstr ""
+
+#: modules/custom_dashboards.php:510
+msgid "Log is clean."
+msgstr ""
+
+#: modules/custom_dashboards.php:521
+msgid "Debug log not configured."
+msgstr ""
+
+#: modules/custom_dashboards.php:524
+#, php-format
+msgid "Log file not found (%s)."
+msgstr ""
+
+#: modules/custom_dashboards.php:527
+#: modules/custom_dashboards.php:533
+#, php-format
+msgid "Unable to read log file (%s)."
+msgstr ""
+
+#: modules/custom_dashboards.php:535
+msgid "No recent log entries."
+msgstr ""
+
+#: modules/custom_dashboards.php:554
+msgid "Fatal errors detected in the debug log."
+msgstr ""
+
+#: modules/custom_dashboards.php:557
+msgid "Warnings present in the debug log."
+msgstr ""
+
+#: modules/custom_dashboards.php:559
+msgid "No critical events detected."
+msgstr ""
+
+#: modules/custom_dashboards.php:567
+#: modules/custom_dashboards.php:786
+msgid "Fatal errors"
+msgstr ""
+
+#: modules/custom_dashboards.php:568
+#: modules/custom_dashboards.php:790
+msgid "Warnings"
+msgstr ""
+
+#: modules/custom_dashboards.php:569
+#: modules/custom_dashboards.php:794
+#: modules/log_analyzer.php:90
+msgid "Notices"
+msgstr ""
+
+#: modules/custom_dashboards.php:570
+#: modules/custom_dashboards.php:798
+msgid "Deprecated notices"
+msgstr ""
+
+#: modules/custom_dashboards.php:613
+msgid "Not enough data to render this chart yet."
+msgstr ""
+
+#: modules/custom_dashboards.php:614
+msgid "Site operational"
+msgstr ""
+
+#: modules/custom_dashboards.php:615
+msgid "Site unavailable"
+msgstr ""
+
+#: modules/custom_dashboards.php:616
+msgid "Availability (%)"
+msgstr ""
+
+#: modules/custom_dashboards.php:620
+msgid "Revisions"
+msgstr ""
+
+#: modules/custom_dashboards.php:621
+msgid "Events"
+msgstr ""
+
+#: modules/custom_dashboards.php:660
+msgid "A real-time overview of your site's performance and health."
+msgstr ""
+
+#: modules/custom_dashboards.php:666
+#: modules/speed_analyzer.php:9
+msgid "Speed"
+msgstr ""
+
+#: modules/custom_dashboards.php:667
+#: modules/custom_dashboards.php:700
+msgid "Details"
+msgstr ""
+
+#: modules/custom_dashboards.php:669
+msgid "Backend PHP processing time captured during the latest scan."
+msgstr ""
+
+#: modules/custom_dashboards.php:692
+msgid "Under 200ms indicates an excellent PHP response. Above 500ms suggests investigating plugins or hosting performance."
+msgstr ""
+
+#: modules/custom_dashboards.php:699
+msgid "Uptime"
+msgstr ""
+
+#: modules/custom_dashboards.php:702
+msgid "Availability for the last 30 hourly checks."
+msgstr ""
+
+#: modules/custom_dashboards.php:725
+msgid "Each bar shows whether the site responded during the scheduled availability probe."
+msgstr ""
+
+#: modules/custom_dashboards.php:732
+msgid "Database Health"
+msgstr ""
+
+#: modules/custom_dashboards.php:733
+msgid "Optimize"
+msgstr ""
+
+#: modules/custom_dashboards.php:735
+msgid "Post revision volume compared to the recommended limit."
+msgstr ""
+
+#: modules/custom_dashboards.php:758
+msgid "revisions"
+msgstr ""
+
+#: modules/custom_dashboards.php:761
+#, php-format
+msgid "Keep revisions under %d to avoid bloating the posts table. Cleaning them is safe and reversible with backups."
+msgstr ""
+
+#: modules/custom_dashboards.php:768
+msgid "Error Log"
+msgstr ""
+
+#: modules/custom_dashboards.php:769
+msgid "Analyze"
+msgstr ""
+
+#: modules/custom_dashboards.php:771
+msgid "Breakdown of the most recent entries in the WordPress debug log."
+msgstr ""
+
+#: modules/custom_dashboards.php:802
+msgid "Use the analyzer to inspect full stack traces and silence recurring issues."
+msgstr ""
+
+#: modules/database_optimizer.php:7
+msgid "Database"
+msgstr ""
+
+#: modules/database_optimizer.php:118
+#, php-format
+msgid "%s révision d'article a été supprimée."
+msgid_plural "%s révisions d'articles ont été supprimées."
+msgstr[0] ""
+msgstr[1] ""
+
+#: modules/database_optimizer.php:137
+#, php-format
+msgid "%s entrées de métadonnées associées aux révisions n'ont pas pu être nettoyées automatiquement."
+msgstr ""
+
+#: modules/database_optimizer.php:167
+#: modules/database_optimizer.php:171
+msgid "Les transients expirés ont été supprimés."
+msgstr ""
+
+#: modules/database_optimizer.php:214
+msgid "Over time, your database can accumulate data that is no longer necessary. This tool helps you clean it up safely."
+msgstr ""
+
+#: modules/database_optimizer.php:221
+#, php-format
+msgid "Clean post revisions (%s found)"
+msgstr ""
+
+#: modules/database_optimizer.php:229
+msgid "<strong>What is this?</strong> WordPress stores a copy of your posts every time you edit them. These are revisions. While useful, they can bloat your database."
+msgstr ""
+
+#: modules/database_optimizer.php:236
+msgid "<strong>Is it risky?</strong> Generally not. This action removes older versions but keeps the published one. It is a common and safe maintenance task."
+msgstr ""
+
+#: modules/database_optimizer.php:242
+msgid "Clean all revisions"
+msgstr ""
+
+#: modules/database_optimizer.php:250
+#, php-format
+msgid "Clean transients (%s found)"
+msgstr ""
+
+#: modules/database_optimizer.php:258
+msgid "<strong>What is this?</strong> Transients are a form of temporary cache used by plugins and themes. Sometimes expired transients are not cleaned up properly."
+msgstr ""
+
+#: modules/database_optimizer.php:265
+msgid "<strong>Is it risky?</strong> No, this operation only removes expired transients. Your site will regenerate them automatically if needed."
+msgstr ""
+
+#: modules/database_optimizer.php:271
+msgid "Clean expired transients"
+msgstr ""
+
+#: modules/database_optimizer.php:443
+msgid "Aucun transient expiré n'a été supprimé."
+msgstr ""
+
+#: modules/database_optimizer.php:447
+#, php-format
+msgid "%s transient expiré a été supprimé."
+msgid_plural "%s transients expirés ont été supprimés."
+msgstr[0] ""
+msgstr[1] ""
+
+#: modules/error_alerts.php:302
+#, php-format
+msgid "SitePulse Error Alerts (Every %d Minutes)"
+msgstr ""
+
+#: modules/error_alerts.php:355
+#, php-format
+msgid "SitePulse Alert: High Server Load on %s"
+msgstr ""
+
+#: modules/error_alerts.php:371
+#, php-format
+msgid "Current server load on %1$s: %2$s (detected cores: %3$d, total threshold: %4$s, load per core: %5$s, threshold per core: %6$s)"
+msgstr ""
+
+#: modules/error_alerts.php:532
+#, php-format
+msgid "SitePulse Alert: Fatal Error Detected on %s"
+msgstr ""
+
+#: modules/error_alerts.php:540
+#, php-format
+msgid "Review %1$s for error details affecting %2$s."
+msgstr ""
+
+#: modules/error_alerts.php:609
+msgid "SitePulse n’a pas pu programmer les alertes d’erreurs. Vérifiez la configuration de WP-Cron."
+msgstr ""
+
+#: modules/log_analyzer.php:41
+#, php-format
+msgid "Cet outil scanne le fichier %s de WordPress pour vous aider à trouver et corriger les problèmes sur votre site."
+msgstr ""
+
+#: modules/log_analyzer.php:52
+msgid "Impossible de déterminer le fichier de journal."
+msgstr ""
+
+#: modules/log_analyzer.php:52
+msgid "Vérifiez la valeur de la constante WP_DEBUG_LOG."
+msgstr ""
+
+#: modules/log_analyzer.php:72
+msgid "Erreurs Fatales"
+msgstr ""
+
+#: modules/log_analyzer.php:73
+msgid "Une erreur critique qui casse votre site. Elle empêche votre site de se charger et doit être corrigée immédiatement."
+msgstr ""
+
+#: modules/log_analyzer.php:78
+msgid "Erreurs"
+msgstr ""
+
+#: modules/log_analyzer.php:79
+msgid "Une erreur significative qui peut empêcher une fonctionnalité de marcher. Doit être traitée en priorité."
+msgstr ""
+
+#: modules/log_analyzer.php:84
+msgid "Avertissements"
+msgstr ""
+
+#: modules/log_analyzer.php:85
+msgid "Un problème non-critique. Votre site fonctionnera, mais cela indique un problème potentiel qui devrait être corrigé."
+msgstr ""
+
+#: modules/log_analyzer.php:91
+msgid "Un message d'information pour les développeurs. C'est la plus basse priorité et généralement pas un sujet d'inquiétude."
+msgstr ""
+
+#: modules/log_analyzer.php:109
+msgid "Ce que c'est :"
+msgstr ""
+
+#: modules/log_analyzer.php:120
+msgid "Votre journal de débogage est actif et vide."
+msgstr ""
+
+#: modules/log_analyzer.php:120
+msgid "Excellent travail, aucune erreur à signaler !"
+msgstr ""
+
+#: modules/log_analyzer.php:127
+msgid "Impossible de lire les dernières lignes du journal."
+msgstr ""
+
+#: modules/log_analyzer.php:127
+#, php-format
+msgid "Veuillez vérifier les permissions du fichier %s."
+msgstr ""
+
+#: modules/log_analyzer.php:134
+msgid "Le fichier de journal n’est pas lisible."
+msgstr ""
+
+#: modules/log_analyzer.php:134
+#, php-format
+msgid "Vérifiez les permissions de %s."
+msgstr ""
+
+#: modules/log_analyzer.php:142
+msgid "Votre configuration est correcte !"
+msgstr ""
+
+#: modules/log_analyzer.php:142
+msgid "Le journal de débogage est bien activé dans votre fichier wp-config.php."
+msgstr ""
+
+#: modules/log_analyzer.php:143
+#, php-format
+msgid "Le fichier %s n’a pas encore été créé car aucune erreur ne s’est produite. Il apparaîtra automatiquement dès que WordPress aura quelque chose à y écrire."
+msgstr ""
+
+#: modules/maintenance_advisor.php:7
+msgid "Maintenance"
+msgstr ""
+
+#: modules/maintenance_advisor.php:34
+msgid "Mise à jour disponible !"
+msgstr ""
+
+#: modules/maintenance_advisor.php:35
+msgid "À jour"
+msgstr ""
+
+#: modules/maintenance_advisor.php:41
+msgid "Conseiller de Maintenance"
+msgstr ""
+
+#: modules/maintenance_advisor.php:44
+msgid "Impossible de récupérer les données de mise à jour de WordPress. Le nombre de mises à jour disponibles est inconnu."
+msgstr ""
+
+#: modules/maintenance_advisor.php:50
+msgid "Mises à jour du Coeur WP:"
+msgstr ""
+
+#: modules/maintenance_advisor.php:51
+msgid "Mises à jour des Plugins:"
+msgstr ""
+
+#: modules/maintenance_advisor.php:51
+msgid "en attente"
+msgstr ""
+
+#: modules/maintenance_advisor.php:53
+msgid "Recommandations : Faites une sauvegarde avant de mettre à jour, testez sur un site de pré-production."
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:172
+msgid "Une nouvelle série de mesures sera enregistrée à la fin de cette requête."
+msgstr ""
+
+#. translators: 1: measured plugins count, 2: total active plugins count.
+#: modules/plugin_impact_scanner.php:288
+#, php-format
+msgid "Plugins chronométrés : %1$d sur %2$d."
+msgstr ""
+
+#. translators: %s: human time diff.
+#. translators: %s: human-readable time difference.
+#: modules/plugin_impact_scanner.php:302
+#: modules/resource_monitor.php:405
+#, php-format
+msgid "il y a %s"
+msgstr ""
+
+#. translators: 1: formatted datetime, 2: human readable diff.
+#: modules/plugin_impact_scanner.php:308
+#, php-format
+msgid "Dernière actualisation : %1$s (%2$s)."
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:313
+msgid "Dernière actualisation : aucune donnée collectée pour le moment."
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:318
+#, php-format
+msgid "Prochain échantillonnage automatique possible dans %s."
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:322
+msgid "Les mesures seront mises à jour à la fin du prochain chargement de page."
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:326
+#, php-format
+msgid "Intervalle de rafraîchissement : %s maximum."
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:331
+msgid "Analyseur d'Impact des Plugins"
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:335
+msgid "Les temps affichés ci-dessous proviennent du chronométrage réel du chargement de chaque plugin actif."
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:344
+msgid "Limitations connues :"
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:346
+msgid "les mesures correspondent au temps écoulé entre le chargement de deux plugins consécutifs via le hook « plugin_loaded » ; elles reflètent donc l’impact relatif sur la phase de bootstrap."
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:347
+msgid "les plugins chargés avant SitePulse ne peuvent pas être chronométrés directement et apparaissent comme « non mesurés » tant que leur ordre de chargement n’est pas modifié."
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:348
+msgid "les valeurs sont moyennées pour lisser les variations ponctuelles ; les caches d’opcode peuvent réduire artificiellement certaines durées."
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:353
+msgid "Forcer un nouvel échantillon maintenant"
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:360
+#: modules/plugin_impact_scanner.php:415
+msgid "Plugin"
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:361
+#: modules/plugin_impact_scanner.php:416
+msgid "Durée mesurée"
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:362
+#: modules/plugin_impact_scanner.php:417
+msgid "Espace disque"
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:363
+#: modules/plugin_impact_scanner.php:426
+msgid "Poids relatif"
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:368
+msgid "Aucun plugin actif à analyser."
+msgstr ""
+
+#. translators: %s: duration in milliseconds
+#: modules/plugin_impact_scanner.php:387
+#, php-format
+msgid "Moyenne glissante : %s ms"
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:393
+#, php-format
+msgid "Dernière mesure : %s ms"
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:399
+#, php-format
+msgid "Enregistré il y a %s"
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:405
+#, php-format
+msgid "Nombre d’échantillons : %d"
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:409
+msgid "Non mesuré pour le moment."
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:420
+msgid "en cours…"
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:434
+msgid "n/d"
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:501
+msgid "immédiatement"
+msgstr ""
+
+#: modules/plugin_impact_scanner.php:508
+#, php-format
+msgid "%s seconde"
+msgid_plural "%s secondes"
+msgstr[0] ""
+msgstr[1] ""
+
+#: modules/plugin_impact_scanner.php:517
+#, php-format
+msgid "%s minute"
+msgid_plural "%s minutes"
+msgstr[0] ""
+msgstr[1] ""
+
+#: modules/plugin_impact_scanner.php:526
+#, php-format
+msgid "%s heure"
+msgid_plural "%s heures"
+msgstr[0] ""
+msgstr[1] ""
+
+#: modules/plugin_impact_scanner.php:534
+#, php-format
+msgid "%s jour"
+msgid_plural "%s jours"
+msgstr[0] ""
+msgstr[1] ""
+
+#: modules/resource_monitor.php:8
+msgid "Resources"
+msgstr ""
+
+#: modules/resource_monitor.php:122
+#: modules/resource_monitor.php:133
+msgid "Indisponible – sys_getloadavg() désactivée par votre hébergeur"
+msgstr ""
+
+#: modules/resource_monitor.php:129
+msgid "Resource Monitor: CPU load average unavailable because sys_getloadavg() is disabled by the hosting provider."
+msgstr ""
+
+#: modules/resource_monitor.php:140
+msgid "Resource Monitor: sys_getloadavg() is not available on this server."
+msgstr ""
+
+#: modules/resource_monitor.php:160
+msgid "Illimitée"
+msgstr ""
+
+#: modules/resource_monitor.php:187
+msgid "Unable to determine the available disk space for the WordPress root directory."
+msgstr ""
+
+#. translators: %s: original message.
+#: modules/resource_monitor.php:196
+#: modules/resource_monitor.php:222
+#: modules/resource_monitor.php:261
+#: modules/resource_monitor.php:287
+#, php-format
+msgid "Resource Monitor: %s"
+msgstr ""
+
+#. translators: %s: error message.
+#: modules/resource_monitor.php:203
+#: modules/resource_monitor.php:268
+#, php-format
+msgid "Error: %s"
+msgstr ""
+
+#: modules/resource_monitor.php:212
+msgid "The disk_free_space() function is not available on this server."
+msgstr ""
+
+#: modules/resource_monitor.php:252
+msgid "Unable to determine the total disk space for the WordPress root directory."
+msgstr ""
+
+#: modules/resource_monitor.php:277
+msgid "The disk_total_space() function is not available on this server."
+msgstr ""
+
+#: modules/resource_monitor.php:328
+msgid "Les mesures ont été actualisées."
+msgstr ""
+
+#: modules/resource_monitor.php:341
+msgid "Inconnue"
+msgstr ""
+
+#: modules/resource_monitor.php:350
+msgid "Moniteur de Ressources"
+msgstr ""
+
+#: modules/resource_monitor.php:370
+msgid "Charge CPU (1/5/15 min)"
+msgstr ""
+
+#: modules/resource_monitor.php:379
+msgid "Mémoire"
+msgstr ""
+
+#. translators: %s: PHP memory limit value.
+#: modules/resource_monitor.php:383
+#, php-format
+msgid "Limite PHP : %s"
+msgstr ""
+
+#: modules/resource_monitor.php:387
+msgid "Stockage disque"
+msgstr ""
+
+#. translators: %s: total disk space.
+#: modules/resource_monitor.php:391
+#, php-format
+msgid "Total : %s"
+msgstr ""
+
+#. translators: 1: formatted date, 2: relative time.
+#: modules/resource_monitor.php:401
+#, php-format
+msgid "Mesures relevées le %1$s (%2$s)."
+msgstr ""
+
+#. translators: %s: formatted date.
+#: modules/resource_monitor.php:412
+#, php-format
+msgid "Mesures relevées le %s."
+msgstr ""
+
+#: modules/resource_monitor.php:421
+msgid "Actualiser les mesures"
+msgstr ""
+
+#: modules/speed_analyzer.php:109
+msgid "Analyseur de Vitesse"
+msgstr ""
+
+#: modules/speed_analyzer.php:110
+msgid "Cet outil analyse la performance interne de votre serveur et de votre base de données à chaque chargement de page."
+msgstr ""
+
+#: modules/speed_analyzer.php:115
+msgid "Performance du Serveur (Backend)"
+msgstr ""
+
+#: modules/speed_analyzer.php:116
+msgid "Ces métriques mesurent la vitesse à laquelle votre serveur exécute le code PHP et génère la page actuelle."
+msgstr ""
+
+#: modules/speed_analyzer.php:122
+msgid "Temps de Génération de la Page"
+msgstr ""
+
+#. translators: %d: duration in milliseconds.
+#: modules/speed_analyzer.php:132
+#: modules/speed_analyzer.php:161
+#, php-format
+msgid "%d ms"
+msgstr ""
+
+#: modules/speed_analyzer.php:135
+msgid "C'est le temps total que met votre serveur pour préparer cette page. Un temps élevé (>1s) peut indiquer un hébergement lent ou un plugin qui consomme beaucoup de ressources."
+msgstr ""
+
+#: modules/speed_analyzer.php:142
+msgid "Performance de la Base de Données"
+msgstr ""
+
+#: modules/speed_analyzer.php:143
+msgid "Analyse la communication entre WordPress et votre base de données pour cette page."
+msgstr ""
+
+#: modules/speed_analyzer.php:151
+#: modules/speed_analyzer.php:170
+msgid "Temps Total des Requêtes BDD"
+msgstr ""
+
+#: modules/speed_analyzer.php:164
+msgid "Le temps total passé à attendre la base de données. S'il est élevé, cela peut indiquer des requêtes complexes ou une base de données surchargée."
+msgstr ""
+
+#. translators: 1: SAVEQUERIES constant, 2: wp-config.php file name.
+#: modules/speed_analyzer.php:185
+#, php-format
+msgid "Pour activer cette mesure, ajoutez <code>%1$s</code> à votre fichier <code>%2$s</code>. <strong>Note :</strong> N'utilisez ceci que pour le débogage, car cela peut ralentir votre site."
+msgstr ""
+
+#: modules/speed_analyzer.php:204
+msgid "Nombre de Requêtes BDD"
+msgstr ""
+
+#: modules/speed_analyzer.php:214
+msgid "Le nombre de fois que WordPress a interrogé la base de données. Un nombre élevé (>100) peut être le signe d'un plugin ou d'un thème mal optimisé."
+msgstr ""
+
+#: modules/speed_analyzer.php:220
+msgid "Configuration Serveur"
+msgstr ""
+
+#: modules/speed_analyzer.php:221
+msgid "Des réglages serveur optimaux sont essentiels pour la performance."
+msgstr ""
+
+#: modules/speed_analyzer.php:226
+msgid "Actif"
+msgstr ""
+
+#: modules/speed_analyzer.php:226
+msgid "Non détecté"
+msgstr ""
+
+#: modules/speed_analyzer.php:229
+msgid "Object Cache"
+msgstr ""
+
+#: modules/speed_analyzer.php:239
+msgid "Un cache d'objets persistant (ex: Redis, Memcached) accélère énormément les requêtes répétitives. Fortement recommandé."
+msgstr ""
+
+#: modules/speed_analyzer.php:246
+msgid "Version de PHP"
+msgstr ""
+
+#: modules/speed_analyzer.php:256
+msgid "Les versions modernes de PHP (8.0+) sont beaucoup plus rapides et sécurisées. Demandez à votre hébergeur de mettre à jour si nécessaire."
+msgstr ""
+
+#: modules/uptime_tracker.php:70
+msgid "SitePulse n’a pas pu planifier la vérification d’uptime. Vérifiez que WP-Cron est actif ou programmez manuellement la tâche."
+msgstr ""
+
+#. translators: 1: formatted date, 2: uptime percentage, 3: number of checks.
+#: modules/uptime_tracker.php:350
+#, php-format
+msgid "Disponibilité du %1$s : %2$s%% (%3$s contrôles)"
+msgstr ""
+
+#: modules/uptime_tracker.php:368
+msgid "Disponibilité 7 derniers jours"
+msgstr ""
+
+#. translators: 1: total checks, 2: incidents
+#: modules/uptime_tracker.php:373
+#: modules/uptime_tracker.php:385
+#, php-format
+msgid "Sur %1$s contrôles (%2$s incidents)"
+msgstr ""
+
+#: modules/uptime_tracker.php:380
+msgid "Disponibilité 30 derniers jours"
+msgstr ""
+
+#: modules/uptime_tracker.php:406
+msgid "Horodatage inconnu"
+msgstr ""
+
+#: modules/uptime_tracker.php:414
+#, php-format
+msgid "Site OK lors du contrôle du %s."
+msgstr ""
+
+#: modules/uptime_tracker.php:415
+msgid "Statut : site disponible."
+msgstr ""
+
+#: modules/uptime_tracker.php:421
+#, php-format
+msgid "Retour à la normale après un incident débuté le %1$s (durée : %2$s)."
+msgstr ""
+
+#: modules/uptime_tracker.php:422
+#, php-format
+msgid "Durée de l’incident résolu : %s."
+msgstr ""
+
+#: modules/uptime_tracker.php:427
+msgid "Durée : disponibilité confirmée lors de ce contrôle."
+msgstr ""
+
+#: modules/uptime_tracker.php:433
+msgid "horodatage inconnu"
+msgstr ""
+
+#: modules/uptime_tracker.php:434
+#, php-format
+msgid "Site KO lors du contrôle du %1$s. Incident commencé le %2$s."
+msgstr ""
+
+#: modules/uptime_tracker.php:435
+msgid "Statut : site indisponible."
+msgstr ""
+
+#: modules/uptime_tracker.php:441
+#, php-format
+msgid "Détails : %s."
+msgstr ""
+
+#: modules/uptime_tracker.php:448
+#, php-format
+msgid "Incident en cours depuis %s."
+msgstr ""
+
+#: modules/uptime_tracker.php:449
+#, php-format
+msgid "Durée de l’incident en cours : %s."
+msgstr ""
+
+#: modules/uptime_tracker.php:461
+#, php-format
+msgid "Durée estimée : %s."
+msgstr ""
+
+#: modules/uptime_tracker.php:461
+#, php-format
+msgid "Durée cumulée : %s."
+msgstr ""
+
+#: modules/uptime_tracker.php:463
+#, php-format
+msgid "Durée de l’incident : %s."
+msgstr ""
+
+#: modules/uptime_tracker.php:468
+msgid "Durée : incident en cours, durée non déterminée."
+msgstr ""
+
+#: modules/uptime_tracker.php:471
+msgid "Erreur réseau inconnue."
+msgstr ""
+
+#: modules/uptime_tracker.php:472
+#, php-format
+msgid "Statut indéterminé lors du contrôle du %1$s : %2$s"
+msgstr ""
+
+#: modules/uptime_tracker.php:473
+msgid "Statut : indéterminé."
+msgstr ""
+
+#: modules/uptime_tracker.php:474
+msgid "Durée : impossible à déterminer pour ce contrôle."
+msgstr ""
+
+#: modules/uptime_tracker.php:477
+#, php-format
+msgid "Contrôle du %s."
+msgstr ""
+
+#: modules/uptime_tracker.php:492
+msgid "Incident en cours"
+msgstr ""
+
+#: modules/uptime_tracker.php:497
+#, php-format
+msgid "Votre site est signalé comme indisponible depuis le %1$s (%2$s)."
+msgstr ""
+
+#: modules/uptime_tracker.php:507
+msgid "Tendance de disponibilité (30 jours)"
+msgstr ""
+
+#: modules/uptime_tracker.php:508
+#, php-format
+msgid "Disponibilité quotidienne sur %d jours."
+msgstr ""
+
+#: modules/uptime_tracker.php:514
+msgid "≥ 99% de disponibilité"
+msgstr ""
+
+#: modules/uptime_tracker.php:515
+msgid "95 – 98% de disponibilité"
+msgstr ""
+
+#: modules/uptime_tracker.php:516
+msgid "< 95% de disponibilité"
+msgstr ""
+
+#: sitepulse.php:672
+#, php-format
+msgid "SitePulse n’a pas pu installer le chargeur MU du suivi d’impact (%s). Vérifiez les permissions du dossier mu-plugins."
+msgstr ""
+
+#: sitepulse.php:1040
+msgid "SitePulse: the server appears to ignore .htaccess/web.config directives and the debug log could not be moved outside of the web root. Please customize the sitepulse_debug_log_base_dir filter or block HTTP access at the server level."
 msgstr ""
