@@ -167,6 +167,25 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
     }
 
     /**
+     * Ensures the admin page warns administrators when WP-Cron is disabled.
+     */
+    public function test_admin_page_displays_wp_cron_warning() {
+        update_option(SITEPULSE_OPTION_GEMINI_API_KEY, 'test-api-key');
+
+        add_filter('sitepulse_ai_is_wp_cron_disabled', '__return_true');
+
+        ob_start();
+        sitepulse_ai_insights_page();
+        $output = ob_get_clean();
+
+        remove_filter('sitepulse_ai_is_wp_cron_disabled', '__return_true');
+
+        $this->assertIsString($output);
+        $this->assertStringContainsString('notice-warning', $output);
+        $this->assertStringContainsString('WP-Cron est désactivé', $output);
+    }
+
+    /**
      * Ensures that requests missing the nonce or API key return the documented JSON error responses.
      */
     public function test_missing_nonce_and_api_key_errors() {
@@ -411,6 +430,37 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
     }
 
     /**
+     * Ensures that when scheduling fails the job falls back to a synchronous execution.
+     */
+    public function test_schedule_failure_triggers_synchronous_fallback() {
+        update_option(SITEPULSE_OPTION_GEMINI_API_KEY, 'test-api-key');
+
+        $this->mock_response_parts = ['Analyse générée en mode synchrone.'];
+
+        add_filter('pre_http_request', [$this, 'mock_gemini_success'], 10, 3);
+        add_filter('sitepulse_ai_is_wp_cron_disabled', '__return_true');
+        add_filter('pre_schedule_event', [$this, 'force_schedule_event_failure'], 10, 2);
+
+        $job_id = sitepulse_ai_schedule_generation_job(true);
+
+        remove_filter('pre_schedule_event', [$this, 'force_schedule_event_failure'], 10);
+        remove_filter('sitepulse_ai_is_wp_cron_disabled', '__return_true');
+        remove_filter('pre_http_request', [$this, 'mock_gemini_success'], 10);
+
+        $this->assertIsString($job_id, 'The fallback should still provide a job identifier.');
+
+        $job_data = sitepulse_ai_get_job_data($job_id);
+
+        $this->assertIsArray($job_data, 'Job metadata should be stored.');
+        $this->assertArrayHasKey('fallback', $job_data);
+        $this->assertSame('synchronous', $job_data['fallback']);
+        $this->assertArrayHasKey('status', $job_data);
+        $this->assertSame('completed', $job_data['status']);
+
+        $this->assertSame(1, $this->http_request_count, 'Synchronous fallback should execute the HTTP request once.');
+    }
+
+    /**
      * Ensures that HTTP errors trigger the AI insight logger with sanitized output.
      */
     public function test_http_error_triggers_logger() {
@@ -596,6 +646,18 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         if ($reset instanceof \Closure) {
             $reset();
         }
+    }
+
+    /**
+     * Forces wp_schedule_single_event() to return false during tests.
+     *
+     * @param bool|WP_Error $pre   Pre-schedule value.
+     * @param array         $event Event arguments.
+     *
+     * @return bool
+     */
+    public function force_schedule_event_failure($pre, $event) {
+        return false;
     }
 }
 
