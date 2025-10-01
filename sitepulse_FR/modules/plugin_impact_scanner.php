@@ -368,13 +368,13 @@ function sitepulse_plugin_impact_scanner_page() {
                 <?php else : ?>
                     <?php foreach ($impacts as $data) :
                         $weight = ($total_impact > 0 && $data['impact'] !== null) ? ($data['impact'] / $total_impact) * 100 : null;
-                        $weight_color = '#4CAF50';
+                        $weight_color = '#81C784';
 
                         if (is_numeric($weight)) {
                             if ($weight > 20) {
-                                $weight_color = '#F44336';
+                                $weight_color = '#E57373';
                             } elseif ($weight > 10) {
-                                $weight_color = '#FFC107';
+                                $weight_color = '#FAD768';
                             }
                         }
 
