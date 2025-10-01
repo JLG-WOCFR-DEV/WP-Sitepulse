@@ -1,6 +1,6 @@
 .speed-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 20px;
     margin-top: 20px;
 }
@@ -29,6 +29,9 @@
 .health-list li {
     padding: 10px 0;
     border-bottom: 1px solid #f0f0f0;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
 }
 
 .health-list li:last-child {
@@ -41,8 +44,14 @@
 }
 
 .health-list .metric-value {
-    float: right;
     font-weight: bold;
+    margin-left: auto;
+    flex-basis: auto;
+}
+
+.health-list .description {
+    flex-basis: 100%;
+    margin-top: 6px;
 }
 
 .status-ok {
