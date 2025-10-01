@@ -30,6 +30,7 @@ define('SITEPULSE_OPTION_UPTIME_LOG', 'sitepulse_uptime_log');
 define('SITEPULSE_OPTION_UPTIME_URL', 'sitepulse_uptime_url');
 define('SITEPULSE_OPTION_UPTIME_TIMEOUT', 'sitepulse_uptime_timeout');
 define('SITEPULSE_OPTION_LAST_LOAD_TIME', 'sitepulse_last_load_time');
+define('SITEPULSE_OPTION_SPEED_SCAN_HISTORY', 'sitepulse_speed_scan_history');
 define('SITEPULSE_OPTION_CPU_ALERT_THRESHOLD', 'sitepulse_cpu_alert_threshold');
 define('SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES', 'sitepulse_alert_cooldown_minutes');
 define('SITEPULSE_OPTION_ALERT_INTERVAL', 'sitepulse_alert_interval');

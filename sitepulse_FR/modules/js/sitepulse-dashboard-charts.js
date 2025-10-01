@@ -21,31 +21,64 @@
         return result;
     }
 
-    function normalizeDatasets(datasets) {
+    function normalizeDatasets(datasets, chartType) {
         if (!Array.isArray(datasets)) {
             return [];
         }
 
         return datasets.map(function (dataset) {
+            var source = dataset && typeof dataset === 'object' ? dataset : {};
             var normalized = {
-                data: Array.isArray(dataset.data) ? dataset.data : [],
-                backgroundColor: Array.isArray(dataset.backgroundColor) ? dataset.backgroundColor : [],
+                data: Array.isArray(source.data) ? source.data.slice() : [],
             };
 
-            if (typeof dataset.borderWidth === 'number') {
-                normalized.borderWidth = dataset.borderWidth;
-            } else {
+            if (Array.isArray(source.backgroundColor)) {
+                normalized.backgroundColor = source.backgroundColor.slice();
+            } else if (typeof source.backgroundColor === 'string') {
+                normalized.backgroundColor = source.backgroundColor;
+            }
+
+            if (typeof source.borderWidth === 'number') {
+                normalized.borderWidth = source.borderWidth;
+            } else if (chartType === 'doughnut' || chartType === 'pie') {
                 normalized.borderWidth = 0;
             }
 
-            if (typeof dataset.borderRadius !== 'undefined') {
-                normalized.borderRadius = dataset.borderRadius;
+            if (typeof source.borderRadius !== 'undefined') {
+                normalized.borderRadius = source.borderRadius;
             }
 
-            if (typeof dataset.hoverOffset === 'number') {
-                normalized.hoverOffset = dataset.hoverOffset;
-            } else {
+            if (typeof source.hoverOffset === 'number') {
+                normalized.hoverOffset = source.hoverOffset;
+            } else if (chartType === 'doughnut' || chartType === 'pie') {
                 normalized.hoverOffset = 6;
+            }
+
+            var passThroughKeys = [
+                'label',
+                'fill',
+                'tension',
+                'pointRadius',
+                'pointHoverRadius',
+                'pointBorderWidth',
+                'pointBackgroundColor',
+                'pointBorderColor',
+                'borderColor',
+                'type',
+            ];
+
+            passThroughKeys.forEach(function (key) {
+                var value = source[key];
+
+                if (Array.isArray(value)) {
+                    normalized[key] = value.slice();
+                } else if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+                    normalized[key] = value;
+                }
+            });
+
+            if (Array.isArray(source.borderDash)) {
+                normalized.borderDash = source.borderDash.slice();
             }
 
             return normalized;
@@ -104,9 +137,11 @@
             return null;
         }
 
+        var chartType = chartConfig.type || 'doughnut';
+
         var data = {
             labels: Array.isArray(chartConfig.labels) ? chartConfig.labels : [],
-            datasets: normalizeDatasets(chartConfig.datasets),
+            datasets: normalizeDatasets(chartConfig.datasets, chartType),
         };
 
         var baseOptions = {
@@ -121,10 +156,11 @@
             },
         };
 
-        var options = mergeOptions(baseOptions, overrides || {});
+        var options = mergeOptions(baseOptions, chartConfig.options || {});
+        options = mergeOptions(options, overrides || {});
 
         return new Chart(canvas, {
-            type: chartConfig.type || 'doughnut',
+            type: chartType,
             data: data,
             options: options,
         });
@@ -140,10 +176,63 @@
         var strings = config.strings || {};
 
         if (charts.speed) {
-            createChart(
-                'sitepulse-speed-chart',
-                charts.speed,
-                {
+            var speedOverrides;
+
+            if (charts.speed.type === 'line') {
+                speedOverrides = {
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'bottom',
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function (context) {
+                                    var datasetLabel = '';
+
+                                    if (context.dataset && typeof context.dataset.label === 'string') {
+                                        datasetLabel = context.dataset.label;
+                                    } else if (strings.speedTrendLabel) {
+                                        datasetLabel = strings.speedTrendLabel;
+                                    }
+
+                                    var value = context.parsed && typeof context.parsed.y === 'number'
+                                        ? context.parsed.y
+                                        : 0;
+                                    var unit = charts.speed.unit || 'ms';
+                                    var formatted = formatValue(value, unit, 0);
+
+                                    if (datasetLabel) {
+                                        return datasetLabel + ': ' + formatted;
+                                    }
+
+                                    return formatted;
+                                },
+                            },
+                        },
+                    },
+                    interaction: {
+                        intersect: false,
+                        mode: 'nearest',
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                autoSkip: true,
+                                maxRotation: 0,
+                            },
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: !!strings.speedAxisLabel,
+                                text: strings.speedAxisLabel || '',
+                            },
+                        },
+                    },
+                };
+            } else {
+                speedOverrides = {
                     cutout: '65%',
                     plugins: {
                         legend: {
@@ -160,9 +249,10 @@
                             },
                         },
                     },
-                },
-                strings
-            );
+                };
+            }
+
+            createChart('sitepulse-speed-chart', charts.speed, speedOverrides, strings);
         } else {
             showFallback(document.getElementById('sitepulse-speed-chart'), strings.noData || 'No data');
         }

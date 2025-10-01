@@ -11,6 +11,10 @@ if (!defined('SITEPULSE_PLUGIN_IMPACT_REFRESH_INTERVAL')) {
     define('SITEPULSE_PLUGIN_IMPACT_REFRESH_INTERVAL', 15 * MINUTE_IN_SECONDS);
 }
 
+if (!defined('SITEPULSE_OPTION_SPEED_SCAN_HISTORY')) {
+    define('SITEPULSE_OPTION_SPEED_SCAN_HISTORY', 'sitepulse_speed_scan_history');
+}
+
 if (!isset($sitepulse_plugin_impact_tracker_last_tick) || !is_float($sitepulse_plugin_impact_tracker_last_tick)) {
     $sitepulse_plugin_impact_tracker_last_tick = microtime(true);
 }
@@ -227,6 +231,81 @@ function sitepulse_plugin_impact_tracker_persist() {
             ],
             MINUTE_IN_SECONDS * 10
         );
+
+        $history = get_option(SITEPULSE_OPTION_SPEED_SCAN_HISTORY, []);
+
+        if (!is_array($history)) {
+            $history = [];
+        }
+
+        $history[] = [
+            'timestamp'            => $current_timestamp,
+            'server_processing_ms' => $request_duration_ms,
+        ];
+
+        $max_age = apply_filters('sitepulse_speed_history_max_age', DAY_IN_SECONDS * 7);
+
+        if (!is_scalar($max_age)) {
+            $max_age = 0;
+        }
+
+        $max_age = (int) $max_age;
+
+        if ($max_age > 0) {
+            $cutoff = $current_timestamp - $max_age;
+            $history = array_values(array_filter(
+                $history,
+                static function ($entry) use ($cutoff) {
+                    if (!is_array($entry)) {
+                        return false;
+                    }
+
+                    $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+
+                    return $timestamp >= $cutoff;
+                }
+            ));
+        }
+
+        $max_entries = apply_filters('sitepulse_speed_history_max_entries', 50);
+
+        if (!is_scalar($max_entries)) {
+            $max_entries = 0;
+        }
+
+        $max_entries = (int) $max_entries;
+
+        if ($max_entries > 0 && count($history) > $max_entries) {
+            $history = array_slice($history, -$max_entries);
+        }
+
+        $history = array_values(array_map(
+            static function ($entry) {
+                $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+                $value = isset($entry['server_processing_ms']) ? (float) $entry['server_processing_ms'] : 0.0;
+
+                return [
+                    'timestamp'            => max(0, $timestamp),
+                    'server_processing_ms' => max(0.0, $value),
+                ];
+            },
+            array_filter(
+                $history,
+                static function ($entry) {
+                    if (!is_array($entry)) {
+                        return false;
+                    }
+
+                    if (!isset($entry['timestamp'], $entry['server_processing_ms'])) {
+                        return false;
+                    }
+
+                    return is_numeric($entry['timestamp']) && is_numeric($entry['server_processing_ms']);
+                }
+            )
+        ));
+
+        update_option(SITEPULSE_OPTION_SPEED_SCAN_HISTORY, $history, false);
     }
 
     if (empty($sitepulse_plugin_impact_tracker_samples) || !is_array($sitepulse_plugin_impact_tracker_samples)) {
