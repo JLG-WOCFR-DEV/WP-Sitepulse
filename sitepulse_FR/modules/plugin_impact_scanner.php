@@ -353,20 +353,21 @@ function sitepulse_plugin_impact_scanner_page() {
             <?php submit_button(__('Forcer un nouvel échantillon maintenant', 'sitepulse'), 'secondary', SITEPULSE_ACTION_PLUGIN_IMPACT_REFRESH, false); ?>
         </form>
 
-        <table class="wp-list-table widefat striped">
-            <thead>
-                <tr>
-                    <th scope="col" style="width: 25%;"><?php esc_html_e('Plugin', 'sitepulse'); ?></th>
-                    <th scope="col"><?php esc_html_e('Durée mesurée', 'sitepulse'); ?></th>
-                    <th scope="col"><?php esc_html_e('Espace disque', 'sitepulse'); ?></th>
-                    <th scope="col" style="width: 35%;"><?php esc_html_e('Poids relatif', 'sitepulse'); ?></th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php if (empty($impacts)) : ?>
-                    <tr><td colspan="4"><?php esc_html_e('Aucun plugin actif à analyser.', 'sitepulse'); ?></td></tr>
-                <?php else : ?>
-                    <?php foreach ($impacts as $data) :
+        <div class="sitepulse-impact-table-wrapper">
+            <table class="wp-list-table widefat striped">
+                <thead>
+                    <tr>
+                        <th scope="col" style="width: 25%;"><?php esc_html_e('Plugin', 'sitepulse'); ?></th>
+                        <th scope="col"><?php esc_html_e('Durée mesurée', 'sitepulse'); ?></th>
+                        <th scope="col"><?php esc_html_e('Espace disque', 'sitepulse'); ?></th>
+                        <th scope="col" style="width: 35%;"><?php esc_html_e('Poids relatif', 'sitepulse'); ?></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($impacts)) : ?>
+                        <tr><td colspan="4"><?php esc_html_e('Aucun plugin actif à analyser.', 'sitepulse'); ?></td></tr>
+                    <?php else : ?>
+                        <?php foreach ($impacts as $data) :
                         $weight = ($total_impact > 0 && $data['impact'] !== null) ? ($data['impact'] / $total_impact) * 100 : null;
                         $weight_color = '#81C784';
 
@@ -410,34 +411,35 @@ function sitepulse_plugin_impact_scanner_page() {
 
                         $impact_output = implode('<br />', array_map('esc_html', $impact_lines));
                     ?>
-                    <tr>
-                        <td data-colname="<?php echo esc_attr__('Plugin', 'sitepulse'); ?>"><strong><?php echo esc_html($data['name']); ?></strong></td>
-                        <td data-colname="<?php echo esc_attr__('Durée mesurée', 'sitepulse'); ?>"><?php echo $impact_output; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></td>
-                        <td data-colname="<?php echo esc_attr__('Espace disque', 'sitepulse'); ?>">
-                            <?php
-                            if (isset($data['disk_space_status']) && $data['disk_space_status'] === 'pending') {
-                                echo esc_html__('en cours…', 'sitepulse');
-                            } else {
-                                echo wp_kses_post(size_format((float) $data['disk_space'], 2));
-                            }
-                            ?>
-                        </td>
-                        <td data-colname="<?php echo esc_attr__('Poids relatif', 'sitepulse'); ?>">
-                            <?php if ($weight !== null) : ?>
-                                <div class="impact-bar-bg">
-                                    <div class="impact-bar" style="width: <?php echo esc_attr(min(100, $weight)); ?>%; background-color: <?php echo esc_attr($weight_color); ?>;">
-                                        <?php echo esc_html(number_format_i18n($weight, 1)); ?>%
+                        <tr>
+                            <td data-colname="<?php echo esc_attr__('Plugin', 'sitepulse'); ?>"><strong><?php echo esc_html($data['name']); ?></strong></td>
+                            <td data-colname="<?php echo esc_attr__('Durée mesurée', 'sitepulse'); ?>"><?php echo $impact_output; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></td>
+                            <td data-colname="<?php echo esc_attr__('Espace disque', 'sitepulse'); ?>">
+                                <?php
+                                if (isset($data['disk_space_status']) && $data['disk_space_status'] === 'pending') {
+                                    echo esc_html__('en cours…', 'sitepulse');
+                                } else {
+                                    echo wp_kses_post(size_format((float) $data['disk_space'], 2));
+                                }
+                                ?>
+                            </td>
+                            <td data-colname="<?php echo esc_attr__('Poids relatif', 'sitepulse'); ?>">
+                                <?php if ($weight !== null) : ?>
+                                    <div class="impact-bar-bg">
+                                        <div class="impact-bar" style="width: <?php echo esc_attr(min(100, $weight)); ?>%; background-color: <?php echo esc_attr($weight_color); ?>;">
+                                            <?php echo esc_html(number_format_i18n($weight, 1)); ?>%
+                                        </div>
                                     </div>
-                                </div>
-                            <?php else : ?>
-                                <em><?php esc_html_e('n/d', 'sitepulse'); ?></em>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
-                <?php endif; ?>
-            </tbody>
-        </table>
+                                <?php else : ?>
+                                    <em><?php esc_html_e('n/d', 'sitepulse'); ?></em>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
     <?php
 }
