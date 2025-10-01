@@ -30,6 +30,25 @@ if (!defined('SITEPULSE_OPTION_AI_HISTORY')) {
 }
 
 /**
+ * Determines whether WP-Cron is disabled for the current installation.
+ *
+ * @return bool
+ */
+function sitepulse_ai_is_wp_cron_disabled() {
+    $disabled = defined('DISABLE_WP_CRON') && DISABLE_WP_CRON;
+
+    /**
+     * Filters the WP-Cron disabled detection used by SitePulse AI Insights.
+     *
+     * This allows hosting environments or tests to override the automatic
+     * detection of the DISABLE_WP_CRON constant.
+     *
+     * @param bool $disabled Whether WP-Cron is considered disabled.
+     */
+    return (bool) apply_filters('sitepulse_ai_is_wp_cron_disabled', $disabled);
+}
+
+/**
  * Returns the transient key used to store AI insight job metadata.
  *
  * @param string $job_id Job identifier.
@@ -791,14 +810,35 @@ function sitepulse_ai_schedule_generation_job($force_refresh) {
     $scheduled = wp_schedule_single_event(time(), 'sitepulse_run_ai_insight_job', [$job_id]);
 
     if (false === $scheduled) {
-        $error_message = esc_html__('La planification du traitement IA a échoué. Veuillez réessayer ultérieurement.', 'sitepulse');
+        $guidance_message = esc_html__('WP-Cron semble désactivé sur ce site. L’analyse IA sera exécutée immédiatement, mais pensez à réactiver WP-Cron (retirez DISABLE_WP_CRON de wp-config.php ou planifiez une tâche serveur).', 'sitepulse');
+        $fallback_message = esc_html__('La planification du traitement IA a échoué. L’analyse est exécutée immédiatement.', 'sitepulse');
 
         sitepulse_ai_save_job_data($job_id, array_merge($job_data, [
-            'status'  => 'failed',
-            'message' => $error_message,
+            'fallback' => 'synchronous',
         ]));
 
-        return sitepulse_ai_create_wp_error('sitepulse_ai_job_schedule_failed', $error_message, 500);
+        if (sitepulse_ai_is_wp_cron_disabled()) {
+            sitepulse_ai_record_critical_error($guidance_message);
+        } else {
+            sitepulse_ai_record_critical_error($fallback_message);
+        }
+
+        sitepulse_run_ai_insight_job($job_id);
+
+        $job_state = sitepulse_ai_get_job_data($job_id);
+
+        if (!is_array($job_state) || !isset($job_state['status'])) {
+            return sitepulse_ai_create_wp_error('sitepulse_ai_job_schedule_failed', $fallback_message, 500);
+        }
+
+        if ('completed' === $job_state['status']) {
+            return $job_id;
+        }
+
+        $error_message = isset($job_state['message']) ? (string) $job_state['message'] : $fallback_message;
+        $status_code   = isset($job_state['code']) ? (int) $job_state['code'] : 500;
+
+        return sitepulse_ai_create_wp_error('sitepulse_ai_job_schedule_failed', $error_message, $status_code);
     }
 
     return $job_id;
@@ -1177,6 +1217,8 @@ function sitepulse_ai_insights_page() {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
+    $wp_cron_disabled = sitepulse_ai_is_wp_cron_disabled();
+
     $api_key = get_option(SITEPULSE_OPTION_GEMINI_API_KEY);
     $available_models = sitepulse_get_ai_models();
     $default_model = sitepulse_get_default_ai_model();
@@ -1193,6 +1235,14 @@ function sitepulse_ai_insights_page() {
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-superhero"></span> <?php esc_html_e('Analyses par IA', 'sitepulse'); ?></h1>
         <p><?php esc_html_e("Obtenez des recommandations personnalisées pour votre site en analysant ses données de performance avec l'IA Gemini de Google.", 'sitepulse'); ?></p>
+        <?php if ($wp_cron_disabled) : ?>
+            <div class="notice notice-warning">
+                <p><?php echo wp_kses(
+                    __('WP-Cron est désactivé. SitePulse exécutera les analyses à la demande, mais réactivez-le pour automatiser les traitements (retirez la constante <code>DISABLE_WP_CRON</code> de wp-config.php ou configurez une tâche cron serveur).', 'sitepulse'),
+                    ['code' => []]
+                ); ?></p>
+            </div>
+        <?php endif; ?>
         <?php if (!empty($available_models)) : ?>
             <div class="notice notice-info sitepulse-ai-info-notice">
                 <h2><?php esc_html_e('Choix du modèle IA', 'sitepulse'); ?></h2>
