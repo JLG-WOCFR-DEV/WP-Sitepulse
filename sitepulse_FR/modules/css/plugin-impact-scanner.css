@@ -30,3 +30,11 @@
     list-style: disc;
     margin-left: 1.5em;
 }
+
+.sitepulse-impact-table-wrapper {
+    overflow-x: auto;
+}
+
+.sitepulse-impact-table-wrapper table {
+    min-width: 640px;
+}
