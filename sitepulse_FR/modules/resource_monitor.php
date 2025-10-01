@@ -2,7 +2,14 @@
 if (!defined('ABSPATH')) exit;
 
 add_action('admin_menu', function() {
-    add_submenu_page('sitepulse-dashboard', 'Resource Monitor', 'Resources', sitepulse_get_capability(), 'sitepulse-resources', 'sitepulse_resource_monitor_page');
+    add_submenu_page(
+        'sitepulse-dashboard',
+        __('Resource Monitor', 'sitepulse'),
+        __('Resources', 'sitepulse'),
+        sitepulse_get_capability(),
+        'sitepulse-resources',
+        'sitepulse_resource_monitor_page'
+    );
 });
 
 add_action('admin_enqueue_scripts', 'sitepulse_resource_monitor_enqueue_assets');
@@ -31,14 +38,14 @@ function sitepulse_resource_monitor_enqueue_assets($hook_suffix) {
  * @return string
  */
 function sitepulse_resource_monitor_format_load_display($load_values) {
-    $not_available_label = __('N/A', 'sitepulse');
+    $not_available_label = esc_html__('N/A', 'sitepulse');
 
     if (!is_array($load_values) || empty($load_values)) {
         $load_values = [$not_available_label, $not_available_label, $not_available_label];
     }
 
     $normalized_values = array_map(
-        static function ($value) {
+        static function ($value) use ($not_available_label) {
             if (is_numeric($value)) {
                 return number_format_i18n((float) $value, 2);
             }
@@ -91,7 +98,7 @@ function sitepulse_resource_monitor_get_snapshot() {
     }
 
     $notices = [];
-    $not_available_label = __('N/A', 'sitepulse');
+    $not_available_label = esc_html__('N/A', 'sitepulse');
     $load = [$not_available_label, $not_available_label, $not_available_label];
     $load_display = sitepulse_resource_monitor_format_load_display($load);
 
@@ -119,7 +126,7 @@ function sitepulse_resource_monitor_get_snapshot() {
             ];
 
             if (function_exists('sitepulse_log')) {
-                sitepulse_log('Resource Monitor: CPU load average unavailable because sys_getloadavg() is disabled by the hosting provider.', 'WARNING');
+                sitepulse_log(__('Resource Monitor: CPU load average unavailable because sys_getloadavg() is disabled by the hosting provider.', 'sitepulse'), 'WARNING');
             }
         }
     } else {
@@ -130,7 +137,7 @@ function sitepulse_resource_monitor_get_snapshot() {
         ];
 
         if (function_exists('sitepulse_log')) {
-            sitepulse_log('Resource Monitor: sys_getloadavg() is not available on this server.', 'WARNING');
+            sitepulse_log(__('Resource Monitor: sys_getloadavg() is not available on this server.', 'sitepulse'), 'WARNING');
         }
     }
 
@@ -177,31 +184,46 @@ function sitepulse_resource_monitor_get_snapshot() {
         if ($free_space !== false) {
             $disk_free = size_format($free_space);
         } else {
-            $message = __('Unable to determine the available disk space for the WordPress root directory.', 'sitepulse');
+            $message = esc_html__('Unable to determine the available disk space for the WordPress root directory.', 'sitepulse');
             $notices[] = [
                 'type'    => 'warning',
                 'message' => $message,
             ];
 
             if (function_exists('sitepulse_log')) {
-                $log_message = 'Resource Monitor: ' . $message;
+                $log_message = sprintf(
+                    /* translators: %s: original message. */
+                    __('Resource Monitor: %s', 'sitepulse'),
+                    $message
+                );
 
                 if (is_string($disk_free_error) && $disk_free_error !== '') {
-                    $log_message .= ' Error: ' . $disk_free_error;
+                    $log_message .= ' ' . sprintf(
+                        /* translators: %s: error message. */
+                        __('Error: %s', 'sitepulse'),
+                        $disk_free_error
+                    );
                 }
 
                 sitepulse_log($log_message, 'ERROR');
             }
         }
     } else {
-        $message = __('The disk_free_space() function is not available on this server.', 'sitepulse');
+        $message = esc_html__('The disk_free_space() function is not available on this server.', 'sitepulse');
         $notices[] = [
             'type'    => 'warning',
             'message' => $message,
         ];
 
         if (function_exists('sitepulse_log')) {
-            sitepulse_log('Resource Monitor: ' . $message, 'WARNING');
+            sitepulse_log(
+                sprintf(
+                    /* translators: %s: original message. */
+                    __('Resource Monitor: %s', 'sitepulse'),
+                    $message
+                ),
+                'WARNING'
+            );
         }
     }
 
@@ -227,31 +249,46 @@ function sitepulse_resource_monitor_get_snapshot() {
         if ($total_space !== false) {
             $disk_total = size_format($total_space);
         } else {
-            $message = __('Unable to determine the total disk space for the WordPress root directory.', 'sitepulse');
+            $message = esc_html__('Unable to determine the total disk space for the WordPress root directory.', 'sitepulse');
             $notices[] = [
                 'type'    => 'warning',
                 'message' => $message,
             ];
 
             if (function_exists('sitepulse_log')) {
-                $log_message = 'Resource Monitor: ' . $message;
+                $log_message = sprintf(
+                    /* translators: %s: original message. */
+                    __('Resource Monitor: %s', 'sitepulse'),
+                    $message
+                );
 
                 if (is_string($disk_total_error) && $disk_total_error !== '') {
-                    $log_message .= ' Error: ' . $disk_total_error;
+                    $log_message .= ' ' . sprintf(
+                        /* translators: %s: error message. */
+                        __('Error: %s', 'sitepulse'),
+                        $disk_total_error
+                    );
                 }
 
                 sitepulse_log($log_message, 'ERROR');
             }
         }
     } else {
-        $message = __('The disk_total_space() function is not available on this server.', 'sitepulse');
+        $message = esc_html__('The disk_total_space() function is not available on this server.', 'sitepulse');
         $notices[] = [
             'type'    => 'warning',
             'message' => $message,
         ];
 
         if (function_exists('sitepulse_log')) {
-            sitepulse_log('Resource Monitor: ' . $message, 'WARNING');
+            sitepulse_log(
+                sprintf(
+                    /* translators: %s: original message. */
+                    __('Resource Monitor: %s', 'sitepulse'),
+                    $message
+                ),
+                'WARNING'
+            );
         }
     }
 
@@ -288,7 +325,7 @@ function sitepulse_resource_monitor_page() {
 
         $resource_monitor_notices[] = [
             'type'    => 'success',
-            'message' => __('Les mesures ont été actualisées.', 'sitepulse'),
+            'message' => esc_html__('Les mesures ont été actualisées.', 'sitepulse'),
         ];
     }
 
@@ -301,7 +338,7 @@ function sitepulse_resource_monitor_page() {
     $generated_at = isset($snapshot['generated_at']) ? (int) $snapshot['generated_at'] : 0;
     $generated_label = $generated_at > 0
         ? wp_date(get_option('date_format') . ' ' . get_option('time_format'), $generated_at)
-        : __('Inconnue', 'sitepulse');
+        : esc_html__('Inconnue', 'sitepulse');
 
     $age = '';
 
@@ -310,7 +347,7 @@ function sitepulse_resource_monitor_page() {
     }
     ?>
     <div class="wrap sitepulse-resource-monitor">
-        <h1><span class="dashicons-before dashicons-performance"></span> Moniteur de Ressources</h1>
+        <h1><span class="dashicons-before dashicons-performance"></span> <?php esc_html_e('Moniteur de Ressources', 'sitepulse'); ?></h1>
         <?php if (!empty($resource_monitor_notices)) : ?>
             <?php foreach ($resource_monitor_notices as $notice) : ?>
                 <?php
@@ -341,12 +378,18 @@ function sitepulse_resource_monitor_page() {
             <div class="sitepulse-resource-card">
                 <h2><?php esc_html_e('Mémoire', 'sitepulse'); ?></h2>
                 <p class="sitepulse-resource-value"><?php echo wp_kses_post($snapshot['memory_usage']); ?></p>
-                <p class="sitepulse-resource-subvalue"><?php printf(esc_html__('Limite PHP : %s', 'sitepulse'), esc_html((string) $snapshot['memory_limit'])); ?></p>
+                <p class="sitepulse-resource-subvalue"><?php
+                /* translators: %s: PHP memory limit value. */
+                printf(esc_html__('Limite PHP : %s', 'sitepulse'), esc_html((string) $snapshot['memory_limit']));
+                ?></p>
             </div>
             <div class="sitepulse-resource-card">
                 <h2><?php esc_html_e('Stockage disque', 'sitepulse'); ?></h2>
                 <p class="sitepulse-resource-value"><?php echo wp_kses_post($snapshot['disk_free']); ?></p>
-                <p class="sitepulse-resource-subvalue"><?php printf(esc_html__('Total : %s', 'sitepulse'), esc_html((string) $snapshot['disk_total'])); ?></p>
+                <p class="sitepulse-resource-subvalue"><?php
+                /* translators: %s: total disk space. */
+                printf(esc_html__('Total : %s', 'sitepulse'), esc_html((string) $snapshot['disk_total']));
+                ?></p>
             </div>
         </div>
         <div class="sitepulse-resource-meta">
@@ -354,12 +397,21 @@ function sitepulse_resource_monitor_page() {
                 <?php
                 if ($age !== '') {
                     printf(
+                        /* translators: 1: formatted date, 2: relative time. */
                         esc_html__('Mesures relevées le %1$s (%2$s).', 'sitepulse'),
                         esc_html($generated_label),
-                        sprintf(esc_html__('il y a %s', 'sitepulse'), esc_html($age))
+                        sprintf(
+                            /* translators: %s: human-readable time difference. */
+                            esc_html__('il y a %s', 'sitepulse'),
+                            esc_html($age)
+                        )
                     );
                 } else {
-                    printf(esc_html__('Mesures relevées le %s.', 'sitepulse'), esc_html($generated_label));
+                    printf(
+                        /* translators: %s: formatted date. */
+                        esc_html__('Mesures relevées le %s.', 'sitepulse'),
+                        esc_html($generated_label)
+                    );
                 }
                 ?>
             </p>
