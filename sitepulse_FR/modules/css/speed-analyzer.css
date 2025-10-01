@@ -73,3 +73,10 @@
 .status-bad {
     color: #F44336;
 }
+
+@media (max-width: 782px) {
+    .speed-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+}
