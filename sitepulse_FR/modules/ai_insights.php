@@ -25,6 +25,10 @@ if (!defined('SITEPULSE_OPTION_AI_INSIGHT_ERRORS')) {
     define('SITEPULSE_OPTION_AI_INSIGHT_ERRORS', 'sitepulse_ai_insight_errors');
 }
 
+if (!defined('SITEPULSE_OPTION_AI_HISTORY')) {
+    define('SITEPULSE_OPTION_AI_HISTORY', 'sitepulse_ai_history');
+}
+
 /**
  * Returns the transient key used to store AI insight job metadata.
  *
@@ -77,6 +81,213 @@ function sitepulse_ai_save_job_data($job_id, array $job_data, $expiration = null
     $expiration = null === $expiration ? HOUR_IN_SECONDS : (int) $expiration;
 
     return set_transient($key, $job_data, $expiration);
+}
+
+/**
+ * Returns the maximum number of AI history entries to keep.
+ *
+ * @return int
+ */
+function sitepulse_ai_get_history_max_entries() {
+    $max_entries = (int) apply_filters('sitepulse_ai_history_max_entries', 20);
+
+    if ($max_entries <= 0) {
+        $max_entries = 20;
+    }
+
+    return $max_entries;
+}
+
+/**
+ * Normalizes a raw AI history entry.
+ *
+ * @param array<string,mixed> $entry Raw history entry data.
+ *
+ * @return array{text:string,timestamp:int,model:array{key:string,label:string},rate_limit:array{key:string,label:string}}|null
+ */
+function sitepulse_ai_normalize_history_entry($entry) {
+    if (!is_array($entry)) {
+        return null;
+    }
+
+    $text = isset($entry['text']) ? sanitize_textarea_field((string) $entry['text']) : '';
+
+    if ('' === $text) {
+        return null;
+    }
+
+    $timestamp = isset($entry['timestamp']) ? absint($entry['timestamp']) : 0;
+
+    $model_key   = '';
+    $model_label = '';
+
+    if (isset($entry['model']) && is_array($entry['model'])) {
+        if (isset($entry['model']['key'])) {
+            $model_key = sanitize_text_field((string) $entry['model']['key']);
+        }
+
+        if (isset($entry['model']['label'])) {
+            $model_label = sanitize_text_field((string) $entry['model']['label']);
+        }
+    } else {
+        if (isset($entry['model_key'])) {
+            $model_key = sanitize_text_field((string) $entry['model_key']);
+        }
+
+        if (isset($entry['model_label'])) {
+            $model_label = sanitize_text_field((string) $entry['model_label']);
+        }
+    }
+
+    if ('' === $model_label) {
+        $model_label = $model_key;
+    }
+
+    $rate_limit_key   = '';
+    $rate_limit_label = '';
+
+    if (isset($entry['rate_limit']) && is_array($entry['rate_limit'])) {
+        if (isset($entry['rate_limit']['key'])) {
+            $rate_limit_key = sanitize_text_field((string) $entry['rate_limit']['key']);
+        }
+
+        if (isset($entry['rate_limit']['label'])) {
+            $rate_limit_label = sanitize_text_field((string) $entry['rate_limit']['label']);
+        }
+    } else {
+        if (isset($entry['rate_limit_key'])) {
+            $rate_limit_key = sanitize_text_field((string) $entry['rate_limit_key']);
+        }
+
+        if (isset($entry['rate_limit_label'])) {
+            $rate_limit_label = sanitize_text_field((string) $entry['rate_limit_label']);
+        }
+    }
+
+    if ('' === $rate_limit_label) {
+        $rate_limit_label = $rate_limit_key;
+    }
+
+    return [
+        'text'      => $text,
+        'timestamp' => $timestamp,
+        'model'     => [
+            'key'   => $model_key,
+            'label' => $model_label,
+        ],
+        'rate_limit' => [
+            'key'   => $rate_limit_key,
+            'label' => $rate_limit_label,
+        ],
+    ];
+}
+
+/**
+ * Appends an AI insight result to the persistent history option.
+ *
+ * @param array<string,mixed> $entry History entry data.
+ *
+ * @return void
+ */
+function sitepulse_ai_record_history_entry(array $entry) {
+    if (!function_exists('get_option') || !function_exists('update_option')) {
+        return;
+    }
+
+    $normalized_entry = sitepulse_ai_normalize_history_entry($entry);
+
+    if (null === $normalized_entry) {
+        return;
+    }
+
+    $history = get_option(SITEPULSE_OPTION_AI_HISTORY, []);
+
+    if (!is_array($history)) {
+        $history = [];
+    }
+
+    $history[]    = $normalized_entry;
+    $max_entries  = sitepulse_ai_get_history_max_entries();
+    $history_size = count($history);
+
+    if ($max_entries > 0 && $history_size > $max_entries) {
+        $history = array_slice($history, -$max_entries, $max_entries, true);
+    }
+
+    update_option(SITEPULSE_OPTION_AI_HISTORY, array_values($history));
+}
+
+/**
+ * Retrieves the stored AI insight history entries ordered from newest to oldest.
+ *
+ * @return array<int,array{text:string,timestamp:int,model:array{key:string,label:string},rate_limit:array{key:string,label:string}}>
+ */
+function sitepulse_ai_get_history_entries() {
+    $history = function_exists('get_option') ? get_option(SITEPULSE_OPTION_AI_HISTORY, []) : [];
+
+    if (!is_array($history)) {
+        $history = [];
+    }
+
+    $normalized = [];
+
+    foreach ($history as $entry) {
+        $normalized_entry = sitepulse_ai_normalize_history_entry($entry);
+
+        if (null === $normalized_entry) {
+            continue;
+        }
+
+        $normalized[] = $normalized_entry;
+    }
+
+    if (!empty($normalized)) {
+        usort($normalized, function ($a, $b) {
+            $a_time = isset($a['timestamp']) ? (int) $a['timestamp'] : 0;
+            $b_time = isset($b['timestamp']) ? (int) $b['timestamp'] : 0;
+
+            if ($a_time === $b_time) {
+                return 0;
+            }
+
+            return ($a_time < $b_time) ? 1 : -1;
+        });
+    }
+
+    return array_values($normalized);
+}
+
+/**
+ * Extracts unique filter options from the AI history entries.
+ *
+ * @param array<int,array<string,mixed>> $entries History entries.
+ * @param string                         $key     Nested key to extract (e.g. 'model').
+ *
+ * @return array<int,array{key:string,label:string}>
+ */
+function sitepulse_ai_get_history_filter_options(array $entries, $key) {
+    $options = [];
+
+    foreach ($entries as $entry) {
+        if (!is_array($entry) || !isset($entry[$key]) || !is_array($entry[$key])) {
+            continue;
+        }
+
+        $value = isset($entry[$key]['key']) ? (string) $entry[$key]['key'] : '';
+
+        if ('' === $value || isset($options[$value])) {
+            continue;
+        }
+
+        $label = isset($entry[$key]['label']) ? (string) $entry[$key]['label'] : $value;
+
+        $options[$value] = [
+            'key'   => $value,
+            'label' => $label,
+        ];
+    }
+
+    return array_values($options);
 }
 
 /**
@@ -650,11 +861,43 @@ function sitepulse_run_ai_insight_job($job_id) {
             return;
         }
 
+        $selected_model = isset($environment['selected_model']) ? (string) $environment['selected_model'] : '';
+        $model_label    = '';
+
+        if (
+            $selected_model !== ''
+            && isset($environment['available_models'][$selected_model]['label'])
+            && is_scalar($environment['available_models'][$selected_model]['label'])
+        ) {
+            $model_label = (string) $environment['available_models'][$selected_model]['label'];
+        }
+
+        $rate_limit_value = sitepulse_ai_get_current_rate_limit_value();
+        $history_entry    = [
+            'text'       => isset($result['text']) ? $result['text'] : '',
+            'timestamp'  => isset($result['timestamp']) ? (int) $result['timestamp'] : absint(current_time('timestamp', true)),
+            'model'      => [
+                'key'   => $selected_model,
+                'label' => $model_label,
+            ],
+            'rate_limit' => [
+                'key'   => $rate_limit_value,
+                'label' => sitepulse_ai_get_rate_limit_label($rate_limit_value),
+            ],
+        ];
+
+        $result_with_context = array_merge($result, [
+            'model'      => $history_entry['model'],
+            'rate_limit' => $history_entry['rate_limit'],
+        ]);
+
         sitepulse_ai_save_job_data($job_id, array_merge($job_data, [
             'status'     => 'completed',
-            'result'     => $result,
+            'result'     => $result_with_context,
             'finished'   => time(),
         ]));
+
+        sitepulse_ai_record_history_entry($history_entry);
 
         update_option(SITEPULSE_OPTION_AI_LAST_RUN, absint(current_time('timestamp', true)));
     } catch (Throwable $throwable) {
@@ -888,9 +1131,13 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
 
     wp_enqueue_style('sitepulse-ai-insights-styles');
 
-    $stored_insight    = sitepulse_ai_get_cached_insight();
-    $insight_text      = isset($stored_insight['text']) ? $stored_insight['text'] : '';
-    $insight_timestamp = isset($stored_insight['timestamp']) ? absint($stored_insight['timestamp']) : null;
+    $stored_insight     = sitepulse_ai_get_cached_insight();
+    $insight_text       = isset($stored_insight['text']) ? $stored_insight['text'] : '';
+    $insight_timestamp  = isset($stored_insight['timestamp']) ? absint($stored_insight['timestamp']) : null;
+    $history_entries    = sitepulse_ai_get_history_entries();
+    $history_models     = sitepulse_ai_get_history_filter_options($history_entries, 'model');
+    $history_rate_limits = sitepulse_ai_get_history_filter_options($history_entries, 'rate_limit');
+    $history_max_entries = sitepulse_ai_get_history_max_entries();
 
     wp_localize_script(
         'sitepulse-ai-insights',
@@ -900,6 +1147,12 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
             'nonce'             => wp_create_nonce(SITEPULSE_NONCE_ACTION_AI_INSIGHT),
             'initialInsight'    => $insight_text,
             'initialTimestamp'  => null !== $insight_timestamp ? absint($insight_timestamp) : null,
+            'historyEntries'    => $history_entries,
+            'historyFilters'    => [
+                'models'     => $history_models,
+                'rateLimits' => $history_rate_limits,
+            ],
+            'historyMaxEntries' => $history_max_entries,
             'strings'           => [
                 'defaultError'    => esc_html__('Une erreur inattendue est survenue. Veuillez réessayer.', 'sitepulse'),
                 'cachedPrefix'    => esc_html__('Dernière mise à jour :', 'sitepulse'),
@@ -908,6 +1161,7 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
                 'statusGenerating' => esc_html__('Génération en cours…', 'sitepulse'),
                 'statusQueued'    => esc_html__('Analyse en attente de traitement…', 'sitepulse'),
                 'statusFailed'    => esc_html__('La génération a échoué. Veuillez réessayer.', 'sitepulse'),
+                'historyEmpty'    => esc_html__('Aucun historique disponible pour le moment.', 'sitepulse'),
             ],
             'initialCached'     => '' !== $insight_text,
             'statusAction'      => 'sitepulse_get_ai_insight_status',
@@ -927,6 +1181,9 @@ function sitepulse_ai_insights_page() {
     $available_models = sitepulse_get_ai_models();
     $default_model = sitepulse_get_default_ai_model();
     $selected_model = (string) get_option(SITEPULSE_OPTION_AI_MODEL, $default_model);
+    $history_entries = sitepulse_ai_get_history_entries();
+    $history_model_filters = sitepulse_ai_get_history_filter_options($history_entries, 'model');
+    $history_rate_filters = sitepulse_ai_get_history_filter_options($history_entries, 'rate_limit');
 
     if (!isset($available_models[$selected_model])) {
         $selected_model = $default_model;
@@ -982,6 +1239,79 @@ function sitepulse_ai_insights_page() {
             <p class="sitepulse-ai-insight-text"></p>
             <p class="sitepulse-ai-insight-timestamp"></p>
         </div>
+        <div id="sitepulse-ai-history" class="sitepulse-ai-history">
+            <h2><?php esc_html_e('Historique des recommandations', 'sitepulse'); ?></h2>
+            <div class="sitepulse-ai-history-filters">
+                <label for="sitepulse-ai-history-filter-model">
+                    <?php esc_html_e('Modèle', 'sitepulse'); ?>
+                    <select id="sitepulse-ai-history-filter-model">
+                        <option value=""><?php esc_html_e('Tous les modèles', 'sitepulse'); ?></option>
+                        <?php foreach ($history_model_filters as $filter_option) :
+                            $option_value = isset($filter_option['key']) ? (string) $filter_option['key'] : '';
+                            $option_label = isset($filter_option['label']) ? (string) $filter_option['label'] : $option_value;
+                            if ('' === $option_value) {
+                                continue;
+                            }
+                        ?>
+                            <option value="<?php echo esc_attr($option_value); ?>"><?php echo esc_html($option_label); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label for="sitepulse-ai-history-filter-rate">
+                    <?php esc_html_e('Limitation', 'sitepulse'); ?>
+                    <select id="sitepulse-ai-history-filter-rate">
+                        <option value=""><?php esc_html_e('Toutes les limitations', 'sitepulse'); ?></option>
+                        <?php foreach ($history_rate_filters as $filter_option) :
+                            $option_value = isset($filter_option['key']) ? (string) $filter_option['key'] : '';
+                            $option_label = isset($filter_option['label']) ? (string) $filter_option['label'] : $option_value;
+                            if ('' === $option_value) {
+                                continue;
+                            }
+                        ?>
+                            <option value="<?php echo esc_attr($option_value); ?>"><?php echo esc_html($option_label); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+            </div>
+            <p id="sitepulse-ai-history-empty" class="sitepulse-ai-history-empty"<?php if (!empty($history_entries)) : ?> style="display:none;"<?php endif; ?>>
+                <?php esc_html_e('Aucun historique disponible pour le moment.', 'sitepulse'); ?>
+            </p>
+            <ul id="sitepulse-ai-history-list" class="sitepulse-ai-history-list">
+                <?php foreach ($history_entries as $entry) :
+                    $model_key = isset($entry['model']['key']) ? (string) $entry['model']['key'] : '';
+                    $model_label = isset($entry['model']['label']) ? (string) $entry['model']['label'] : '';
+                    $rate_key = isset($entry['rate_limit']['key']) ? (string) $entry['rate_limit']['key'] : '';
+                    $rate_label = isset($entry['rate_limit']['label']) ? (string) $entry['rate_limit']['label'] : '';
+                    $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+                    $meta_parts = [];
+
+                    if ($timestamp > 0) {
+                        if (function_exists('date_i18n')) {
+                            $meta_parts[] = date_i18n(get_option('date_format') . ' ' . get_option('time_format'), $timestamp);
+                        } else {
+                            $meta_parts[] = gmdate('Y-m-d H:i:s', $timestamp);
+                        }
+                    }
+
+                    if ('' !== $model_label) {
+                        $meta_parts[] = $model_label;
+                    }
+
+                    if ('' !== $rate_label) {
+                        $meta_parts[] = $rate_label;
+                    }
+
+                    $meta_parts = array_filter(array_map('trim', $meta_parts), 'strlen');
+                ?>
+                    <li class="sitepulse-ai-history-item" data-model="<?php echo esc_attr($model_key); ?>" data-rate-limit="<?php echo esc_attr($rate_key); ?>">
+                        <?php if (!empty($meta_parts)) : ?>
+                            <p class="sitepulse-ai-history-meta"><?php echo esc_html(implode(' • ', $meta_parts)); ?></p>
+                        <?php endif; ?>
+                        <p class="sitepulse-ai-history-text"><?php echo esc_html($entry['text']); ?></p>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+        </div>
     </div>
     <?php
 }
@@ -1014,6 +1344,20 @@ function sitepulse_generate_ai_insight() {
     $cached_payload = sitepulse_ai_get_cached_insight();
 
     if (!$force_refresh && !empty($cached_payload)) {
+        $history_entries = sitepulse_ai_get_history_entries();
+
+        if (!empty($history_entries)) {
+            $latest_entry = $history_entries[0];
+
+            if (isset($latest_entry['model'])) {
+                $cached_payload['model'] = $latest_entry['model'];
+            }
+
+            if (isset($latest_entry['rate_limit'])) {
+                $cached_payload['rate_limit'] = $latest_entry['rate_limit'];
+            }
+        }
+
         $cached_payload['cached'] = true;
         wp_send_json_success($cached_payload);
     }
