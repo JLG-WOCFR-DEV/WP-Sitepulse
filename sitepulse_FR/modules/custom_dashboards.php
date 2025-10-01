@@ -89,6 +89,15 @@ function sitepulse_custom_dashboard_enqueue_assets($hook_suffix) {
         }
     }
 
+    wp_register_style(
+        'sitepulse-custom-dashboard',
+        SITEPULSE_URL . 'modules/css/custom-dashboard.css',
+        [],
+        SITEPULSE_VERSION
+    );
+
+    wp_enqueue_style('sitepulse-custom-dashboard');
+
     wp_register_script(
         'sitepulse-chartjs',
         $chartjs_src,
@@ -627,34 +636,6 @@ function sitepulse_custom_dashboards_page() {
     }
 
     ?>
-    <style>
-        .sitepulse-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-top: 20px; }
-        .sitepulse-card { background: #fff; padding: 20px; border: 1px solid #ddd; box-shadow: 0 1px 1px rgba(0,0,0,.04); border-radius: 6px; display: flex; flex-direction: column; }
-        .sitepulse-card-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 6px; }
-        .sitepulse-card h2 { font-size: 16px; margin: 0; display: flex; align-items: center; gap: 8px; }
-        .sitepulse-card .button { margin-left: auto; }
-        .sitepulse-card-subtitle { margin: 0 0 12px; color: #616161; font-size: 13px; }
-        .sitepulse-chart-container { position: relative; height: 220px; margin: 0 0 16px; }
-        .sitepulse-chart-container canvas { width: 100% !important; height: 100% !important; }
-        .sitepulse-chart-empty { text-align: center; color: #666; padding: 48px 16px; border: 1px dashed #d9d9d9; border-radius: 6px; font-size: 13px; }
-        .sitepulse-metric { margin: 0; font-size: 28px; font-weight: 600; display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-        .sitepulse-metric-value { display: inline-flex; align-items: baseline; gap: 6px; }
-        .sitepulse-metric-unit { font-size: 12px; text-transform: uppercase; color: #757575; letter-spacing: 0.05em; }
-        .status-badge { display: inline-flex; align-items: center; gap: 0.35em; padding: 0.2em 0.75em; border-radius: 999px; font-size: 13px; font-weight: 600; line-height: 1.4; color: #fff; }
-        .status-icon { font-size: 1em; line-height: 1; }
-        .status-badge.status-ok { background-color: <?php echo esc_attr($palette['green']); ?>; }
-        .status-badge.status-warn { background-color: <?php echo esc_attr($palette['amber']); ?>; }
-        .status-badge.status-bad { background-color: <?php echo esc_attr($palette['red']); ?>; }
-        .screen-reader-text { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-        .sitepulse-chart-summary { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; list-style: none; }
-        .sitepulse-chart-summary li { margin: 0; list-style: none; }
-        .sitepulse-legend { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
-        .sitepulse-legend li { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-        .sitepulse-legend .label { display: flex; align-items: center; gap: 8px; }
-        .sitepulse-legend .badge { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
-        .sitepulse-legend .value { font-weight: 600; }
-        .sitepulse-card .description { margin-top: 12px; color: #616161; }
-    </style>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-dashboard"></span> <?php esc_html_e('SitePulse Dashboard', 'sitepulse'); ?></h1>
         <p><?php esc_html_e("A real-time overview of your site's performance and health.", 'sitepulse'); ?></p>
