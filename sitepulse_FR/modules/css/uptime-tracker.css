@@ -110,6 +110,21 @@
     background-color: #F44336;
 }
 
+.uptime-timeline__labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.9em;
+    color: #555;
+}
+
+.uptime-notice--error {
+    margin-top: 15px;
+}
+
+.uptime-notice--info {
+    margin-top: 20px;
+}
+
 .screen-reader-text {
     position: absolute;
     width: 1px;
