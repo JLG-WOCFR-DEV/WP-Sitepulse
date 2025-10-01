@@ -167,8 +167,8 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
             'Failure to calculate total disk space should add a warning notice.'
         );
 
-        $this->assertSame('N/A', $snapshot['disk_free'], 'Disk free display should remain N/A after failure.');
-        $this->assertSame('N/A', $snapshot['disk_total'], 'Disk total display should remain N/A after failure.');
+        $this->assertSame(__('N/A', 'sitepulse'), $snapshot['disk_free'], 'Disk free display should remain N/A after failure.');
+        $this->assertSame(__('N/A', 'sitepulse'), $snapshot['disk_total'], 'Disk total display should remain N/A after failure.');
 
         $this->assertNotEmpty($GLOBALS['sitepulse_logger'], 'Failures should be logged as notices.');
         $logged_messages = wp_list_pluck($GLOBALS['sitepulse_logger'], 'message');
@@ -205,13 +205,16 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
 
         $generated_at = gmmktime(12, 0, 0, 1, 1, 2024);
 
+        $not_available_label = __('N/A', 'sitepulse');
+        $load_placeholder = [$not_available_label, $not_available_label, $not_available_label];
+
         $snapshot = [
-            'load'         => ['N/A', 'N/A', 'N/A'],
-            'load_display' => 'N/A / N/A / N/A',
+            'load'         => $load_placeholder,
+            'load_display' => sitepulse_resource_monitor_format_load_display($load_placeholder),
             'memory_usage' => '0 MB',
             'memory_limit' => '128M',
-            'disk_free'    => 'N/A',
-            'disk_total'   => 'N/A',
+            'disk_free'    => $not_available_label,
+            'disk_total'   => $not_available_label,
             'notices'      => [],
             'generated_at' => $generated_at,
         ];
