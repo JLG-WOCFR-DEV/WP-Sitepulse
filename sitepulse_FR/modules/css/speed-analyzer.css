@@ -45,8 +45,9 @@
 
 .health-list .metric-value {
     font-weight: bold;
-    margin-left: auto;
-    flex-basis: auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
 }
 
 .health-list .description {
@@ -64,4 +65,11 @@
 
 .status-bad {
     color: #F44336;
+}
+
+@media (max-width: 782px) {
+    .speed-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
 }
