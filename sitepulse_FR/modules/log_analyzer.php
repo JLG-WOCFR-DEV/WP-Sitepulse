@@ -150,20 +150,18 @@ function sitepulse_log_analyzer_page() {
         else {
         ?>
             <div class="notice notice-warning" style="padding-bottom: 10px;">
-                <h2><span class="dashicons dashicons-info-outline" style="padding-top: 4px;"></span> Journal de débogage non activé</h2>
-                <p>Pour que cet outil fonctionne, WordPress doit être configuré pour enregistrer les erreurs dans un fichier. Cela se fait en modifiant votre fichier <code>wp-config.php</code>.</p>
-                
-                <h4>Comment activer le journal de débogage :</h4>
+                <h2><span class="dashicons dashicons-info-outline" style="padding-top: 4px;"></span> <?php esc_html_e('Journal de débogage non activé', 'sitepulse'); ?></h2>
+                <p><?php echo wp_kses_post(sprintf(__('Pour que cet outil fonctionne, WordPress doit être configuré pour enregistrer les erreurs dans un fichier. Cela se fait en modifiant votre fichier <code>%s</code>.', 'sitepulse'), 'wp-config.php')); ?></p>
+
+                <h4><?php esc_html_e('Comment activer le journal de débogage :', 'sitepulse'); ?></h4>
                 <ol>
-                    <li>Connectez-vous à votre site via FTP ou le gestionnaire de fichiers de votre hébergeur.</li>
-                    <li>Trouvez le fichier <code>wp-config.php</code> à la racine de votre installation WordPress.</li>
-                    <li>Ouvrez ce fichier et cherchez la ligne : <br><code>/* C’est tout, ne touchez pas à ce qui suit ! Joyeuses publications. */</code></li>
-                    <li><strong>Juste avant</strong> cette ligne, ajoutez le code suivant :</li>
+                    <li><?php esc_html_e('Connectez-vous à votre site via FTP ou le gestionnaire de fichiers de votre hébergeur.', 'sitepulse'); ?></li>
+                    <li><?php echo wp_kses_post(sprintf(__('Trouvez le fichier <code>%s</code> à la racine de votre installation WordPress.', 'sitepulse'), 'wp-config.php')); ?></li>
+                    <li><?php echo wp_kses_post(sprintf(__('Ouvrez ce fichier et cherchez la ligne : <br><code>%s</code>', 'sitepulse'), '/* C’est tout, ne touchez pas à ce qui suit ! Joyeuses publications. */')); ?></li>
+                    <li><?php echo wp_kses_post(__('<strong>Juste avant</strong> cette ligne, ajoutez le code suivant :', 'sitepulse')); ?></li>
                 </ol>
-                <pre style="background: #f7f7f7; padding: 15px; border-radius: 4px;">define( 'WP_DEBUG', true );
-define( 'WP_DEBUG_LOG', true );
-define( 'WP_DEBUG_DISPLAY', false );</pre>
-                <p><strong>Important :</strong> Une fois que vous avez résolu les problèmes, il est recommandé de repasser <code>WP_DEBUG</code> à <code>false</code> sur un site en production.</p>
+                <pre style="background: #f7f7f7; padding: 15px; border-radius: 4px;"><?php echo esc_html__("define( 'WP_DEBUG', true );\ndefine( 'WP_DEBUG_LOG', true );\ndefine( 'WP_DEBUG_DISPLAY', false );", 'sitepulse'); ?></pre>
+                <p><?php echo wp_kses_post(sprintf(__('<strong>Important :</strong> Une fois que vous avez résolu les problèmes, il est recommandé de repasser <code>%1$s</code> à <code>%2$s</code> sur un site en production.', 'sitepulse'), 'WP_DEBUG', 'false')); ?></p>
             </div>
         <?php
         }
