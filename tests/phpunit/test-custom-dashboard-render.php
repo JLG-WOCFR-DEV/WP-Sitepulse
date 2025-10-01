@@ -13,6 +13,10 @@ if (!defined('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS')) {
     define('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS', 'sitepulse_speed_scan_results');
 }
 
+if (!defined('SITEPULSE_OPTION_SPEED_SCAN_HISTORY')) {
+    define('SITEPULSE_OPTION_SPEED_SCAN_HISTORY', 'sitepulse_speed_scan_history');
+}
+
 if (!function_exists('sitepulse_get_capability')) {
     function sitepulse_get_capability() {
         return 'manage_options';
@@ -32,6 +36,7 @@ class Sitepulse_Custom_Dashboard_Render_Test extends WP_UnitTestCase {
 
         wp_set_current_user($this->factory->user->create(['role' => 'administrator']));
         delete_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
+        delete_option(SITEPULSE_OPTION_SPEED_SCAN_HISTORY);
         delete_option(SITEPULSE_OPTION_UPTIME_LOG);
         delete_option(SITEPULSE_OPTION_ACTIVE_MODULES);
 
@@ -41,6 +46,34 @@ class Sitepulse_Custom_Dashboard_Render_Test extends WP_UnitTestCase {
 
         $this->logFile = tempnam(sys_get_temp_dir(), 'sitepulse-log');
         $GLOBALS['sitepulse_test_log_path'] = $this->logFile;
+    }
+
+    public function test_speed_chart_contains_history_dataset(): void {
+        $this->seedModuleData();
+        update_option(SITEPULSE_OPTION_ACTIVE_MODULES, ['custom_dashboards', 'speed_analyzer']);
+
+        sitepulse_custom_dashboard_enqueue_assets('toplevel_page_sitepulse-dashboard');
+
+        ob_start();
+        sitepulse_custom_dashboards_page();
+        ob_end_clean();
+
+        $charts = $this->getLocalizedCharts();
+
+        $this->assertArrayHasKey('speed', $charts);
+
+        $speed_chart = $charts['speed'];
+
+        $this->assertIsArray($speed_chart);
+        $this->assertArrayHasKey('type', $speed_chart);
+        $this->assertSame('line', $speed_chart['type']);
+        $this->assertArrayHasKey('labels', $speed_chart);
+        $this->assertNotEmpty($speed_chart['labels']);
+        $this->assertIsArray($speed_chart['datasets']);
+        $this->assertNotEmpty($speed_chart['datasets']);
+        $this->assertIsArray($speed_chart['datasets'][0]['data']);
+        $this->assertGreaterThanOrEqual(2, count($speed_chart['datasets'][0]['data']));
+        $this->assertSame('Server processing time', $speed_chart['datasets'][0]['label']);
     }
 
     protected function tearDown(): void {
@@ -60,6 +93,20 @@ class Sitepulse_Custom_Dashboard_Render_Test extends WP_UnitTestCase {
             SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS,
             [
                 'server_processing_ms' => 150,
+            ]
+        );
+
+        update_option(
+            SITEPULSE_OPTION_SPEED_SCAN_HISTORY,
+            [
+                [
+                    'timestamp' => time() - HOUR_IN_SECONDS,
+                    'server_processing_ms' => 225,
+                ],
+                [
+                    'timestamp' => time(),
+                    'server_processing_ms' => 150,
+                ],
             ]
         );
 

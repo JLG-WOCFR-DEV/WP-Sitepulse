@@ -11,6 +11,28 @@ if (!defined('SITEPULSE_PLUGIN_IMPACT_REFRESH_INTERVAL')) {
     define('SITEPULSE_PLUGIN_IMPACT_REFRESH_INTERVAL', 15 * MINUTE_IN_SECONDS);
 }
 
+if (!defined('SITEPULSE_OPTION_SPEED_SCAN_HISTORY')) {
+    define('SITEPULSE_OPTION_SPEED_SCAN_HISTORY', 'sitepulse_speed_scan_history');
+}
+
+if (!defined('SITEPULSE_SPEED_SCAN_HISTORY_MAX_ENTRIES')) {
+    define('SITEPULSE_SPEED_SCAN_HISTORY_MAX_ENTRIES', 50);
+}
+
+if (!defined('SITEPULSE_SPEED_SCAN_HISTORY_TTL')) {
+    $sitepulse_speed_scan_default_ttl = 0;
+
+    if (defined('WEEK_IN_SECONDS')) {
+        $sitepulse_speed_scan_default_ttl = WEEK_IN_SECONDS;
+    } elseif (defined('DAY_IN_SECONDS')) {
+        $sitepulse_speed_scan_default_ttl = 7 * DAY_IN_SECONDS;
+    } else {
+        $sitepulse_speed_scan_default_ttl = 7 * 24 * 60 * 60;
+    }
+
+    define('SITEPULSE_SPEED_SCAN_HISTORY_TTL', $sitepulse_speed_scan_default_ttl);
+}
+
 if (!isset($sitepulse_plugin_impact_tracker_last_tick) || !is_float($sitepulse_plugin_impact_tracker_last_tick)) {
     $sitepulse_plugin_impact_tracker_last_tick = microtime(true);
 }
@@ -123,6 +145,102 @@ function sitepulse_plugin_impact_get_plugin_name($plugin_file, array $existing_s
 }
 
 /**
+ * Appends the current speed scan measurement to the historical dataset.
+ *
+ * @param int   $timestamp       Unix timestamp for the measurement.
+ * @param float $duration_ms     Duration in milliseconds.
+ *
+ * @return void
+ */
+function sitepulse_plugin_impact_append_speed_scan_history($timestamp, $duration_ms) {
+    if (!defined('SITEPULSE_OPTION_SPEED_SCAN_HISTORY')) {
+        return;
+    }
+
+    $timestamp = (int) $timestamp;
+
+    if ($timestamp <= 0 || !is_numeric($duration_ms)) {
+        return;
+    }
+
+    $duration_ms = max(0.0, (float) $duration_ms);
+    $history = get_option(SITEPULSE_OPTION_SPEED_SCAN_HISTORY, []);
+
+    if (!is_array($history)) {
+        $history = [];
+    }
+
+    $max_age = (int) SITEPULSE_SPEED_SCAN_HISTORY_TTL;
+
+    if ($max_age <= 0) {
+        $max_age = (defined('WEEK_IN_SECONDS') ? WEEK_IN_SECONDS : 7 * 24 * 60 * 60);
+    }
+
+    $min_timestamp = $max_age > 0 ? max(0, $timestamp - $max_age) : 0;
+    $normalized_history = [];
+
+    foreach ($history as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+
+        $entry_timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+
+        if ($entry_timestamp < $min_timestamp) {
+            continue;
+        }
+
+        $entry_duration = null;
+
+        if (isset($entry['server_processing_ms']) && is_numeric($entry['server_processing_ms'])) {
+            $entry_duration = max(0.0, (float) $entry['server_processing_ms']);
+        } elseif (isset($entry['value']) && is_numeric($entry['value'])) {
+            $entry_duration = max(0.0, (float) $entry['value']);
+        }
+
+        if ($entry_duration === null) {
+            continue;
+        }
+
+        $normalized_history[] = [
+            'timestamp'            => $entry_timestamp,
+            'server_processing_ms' => $entry_duration,
+        ];
+    }
+
+    $normalized_history[] = [
+        'timestamp'            => $timestamp,
+        'server_processing_ms' => $duration_ms,
+    ];
+
+    usort(
+        $normalized_history,
+        static function ($a, $b) {
+            if (!is_array($a) || !is_array($b)) {
+                return 0;
+            }
+
+            $a_time = isset($a['timestamp']) ? (int) $a['timestamp'] : 0;
+            $b_time = isset($b['timestamp']) ? (int) $b['timestamp'] : 0;
+
+            if ($a_time === $b_time) {
+                return 0;
+            }
+
+            return ($a_time < $b_time) ? -1 : 1;
+        }
+    );
+
+    $max_entries = (int) SITEPULSE_SPEED_SCAN_HISTORY_MAX_ENTRIES;
+
+    if ($max_entries > 0 && count($normalized_history) > $max_entries) {
+        $normalized_history = array_slice($normalized_history, -$max_entries);
+    }
+
+    update_option(SITEPULSE_OPTION_SPEED_SCAN_HISTORY, array_values($normalized_history), false);
+}
+
+/**
  * Persists the collected plugin load measurements when appropriate.
  *
  * @return void
@@ -227,6 +345,8 @@ function sitepulse_plugin_impact_tracker_persist() {
             ],
             MINUTE_IN_SECONDS * 10
         );
+
+        sitepulse_plugin_impact_append_speed_scan_history($current_timestamp, $request_duration_ms);
     }
 
     if (empty($sitepulse_plugin_impact_tracker_samples) || !is_array($sitepulse_plugin_impact_tracker_samples)) {

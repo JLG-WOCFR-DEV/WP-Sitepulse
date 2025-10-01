@@ -298,18 +298,98 @@ function sitepulse_custom_dashboards_page() {
     $speed_card = null;
 
     if ($is_speed_enabled) {
-        $results = get_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
-        $processing_time = null;
+        $history_entries = [];
 
-        if (is_array($results)) {
-            if (isset($results['server_processing_ms']) && is_numeric($results['server_processing_ms'])) {
-                $processing_time = (float) $results['server_processing_ms'];
-            } elseif (isset($results['ttfb']) && is_numeric($results['ttfb'])) {
-                $processing_time = (float) $results['ttfb'];
-            } elseif (isset($results['data']['server_processing_ms']) && is_numeric($results['data']['server_processing_ms'])) {
-                $processing_time = (float) $results['data']['server_processing_ms'];
-            } elseif (isset($results['data']['ttfb']) && is_numeric($results['data']['ttfb'])) {
-                $processing_time = (float) $results['data']['ttfb'];
+        if (defined('SITEPULSE_OPTION_SPEED_SCAN_HISTORY')) {
+            $raw_history = get_option(SITEPULSE_OPTION_SPEED_SCAN_HISTORY, []);
+
+            if (is_array($raw_history)) {
+                foreach ($raw_history as $entry) {
+                    if (!is_array($entry)) {
+                        continue;
+                    }
+
+                    $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+
+                    if ($timestamp <= 0) {
+                        continue;
+                    }
+
+                    $value = null;
+
+                    if (isset($entry['server_processing_ms']) && is_numeric($entry['server_processing_ms'])) {
+                        $value = max(0.0, (float) $entry['server_processing_ms']);
+                    } elseif (isset($entry['value']) && is_numeric($entry['value'])) {
+                        $value = max(0.0, (float) $entry['value']);
+                    }
+
+                    if ($value === null) {
+                        continue;
+                    }
+
+                    $history_entries[] = [
+                        'timestamp' => $timestamp,
+                        'value'     => $value,
+                    ];
+                }
+            }
+        }
+
+        usort($history_entries, static function ($a, $b) {
+            $a_time = isset($a['timestamp']) ? (int) $a['timestamp'] : 0;
+            $b_time = isset($b['timestamp']) ? (int) $b['timestamp'] : 0;
+
+            if ($a_time === $b_time) {
+                return 0;
+            }
+
+            return ($a_time < $b_time) ? -1 : 1;
+        });
+
+        $processing_time = null;
+        $processing_timestamp = null;
+
+        if (!empty($history_entries)) {
+            $latest_entry = $history_entries[count($history_entries) - 1];
+            $processing_time = isset($latest_entry['value']) ? (float) $latest_entry['value'] : null;
+            $processing_timestamp = isset($latest_entry['timestamp']) ? (int) $latest_entry['timestamp'] : null;
+        }
+
+        if ($processing_time === null) {
+            $results = get_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
+
+            if (is_array($results)) {
+                if (isset($results['server_processing_ms']) && is_numeric($results['server_processing_ms'])) {
+                    $processing_time = (float) $results['server_processing_ms'];
+                } elseif (isset($results['ttfb']) && is_numeric($results['ttfb'])) {
+                    $processing_time = (float) $results['ttfb'];
+                } elseif (isset($results['data']['server_processing_ms']) && is_numeric($results['data']['server_processing_ms'])) {
+                    $processing_time = (float) $results['data']['server_processing_ms'];
+                } elseif (isset($results['data']['ttfb']) && is_numeric($results['data']['ttfb'])) {
+                    $processing_time = (float) $results['data']['ttfb'];
+                }
+
+                if ($processing_time !== null) {
+                    $processing_timestamp = isset($results['timestamp']) && is_numeric($results['timestamp'])
+                        ? (int) $results['timestamp']
+                        : current_time('timestamp');
+
+                    $history_entries[] = [
+                        'timestamp' => $processing_timestamp,
+                        'value'     => max(0.0, (float) $processing_time),
+                    ];
+
+                    usort($history_entries, static function ($a, $b) {
+                        $a_time = isset($a['timestamp']) ? (int) $a['timestamp'] : 0;
+                        $b_time = isset($b['timestamp']) ? (int) $b['timestamp'] : 0;
+
+                        if ($a_time === $b_time) {
+                            return 0;
+                        }
+
+                        return ($a_time < $b_time) ? -1 : 1;
+                    });
+                }
             }
         }
 
@@ -327,63 +407,52 @@ function sitepulse_custom_dashboards_page() {
             ? round($processing_time) . ' ' . esc_html__('ms', 'sitepulse')
             : esc_html__('N/A', 'sitepulse');
 
-        $speed_reference = 1000;
+        $date_format = get_option('date_format');
+        $time_format = get_option('time_format');
+        $label_format = trim($date_format . ' ' . $time_format);
+        $speed_labels = [];
+        $speed_values = [];
+
+        foreach ($history_entries as $entry) {
+            $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+            $value = isset($entry['value']) ? (float) $entry['value'] : null;
+
+            if ($timestamp <= 0 || $value === null) {
+                continue;
+            }
+
+            $speed_labels[] = date_i18n($label_format, $timestamp);
+            $speed_values[] = round(max(0, $value), 2);
+        }
+
         $speed_chart = [
-            'type'     => 'doughnut',
-            'labels'   => [],
+            'type'     => 'line',
+            'labels'   => $speed_labels,
             'datasets' => [],
-            'empty'    => true,
+            'empty'    => empty($speed_labels),
             'status'   => $processing_status,
             'value'    => $processing_time !== null ? round($processing_time, 2) : null,
             'unit'     => __('ms', 'sitepulse'),
         ];
 
-        if ($processing_time !== null) {
-            $speed_chart['empty'] = false;
-            $speed_color_map = [
-                'status-ok'   => $palette['green'],
-                'status-warn' => $palette['amber'],
-                'status-bad'  => $palette['red'],
+        if (!empty($speed_labels)) {
+            $speed_chart['datasets'][] = [
+                'label'            => __('Server processing time', 'sitepulse'),
+                'data'             => $speed_values,
+                'borderColor'      => $palette['blue'],
+                'backgroundColor'  => $palette['blue'],
+                'tension'          => 0.3,
+                'pointRadius'      => 3,
+                'pointHoverRadius' => 5,
+                'fill'             => false,
             ];
-            $speed_primary_color = isset($speed_color_map[$processing_status]) ? $speed_color_map[$processing_status] : $palette['blue'];
-
-            if ($processing_time <= $speed_reference) {
-                $speed_chart['labels'] = [
-                    __('Measured time', 'sitepulse'),
-                    __('Performance budget', 'sitepulse'),
-                ];
-                $speed_chart['datasets'][] = [
-                    'data' => [
-                        round($processing_time, 2),
-                        round(max(0, $speed_reference - $processing_time), 2),
-                    ],
-                    'backgroundColor' => [
-                        $speed_primary_color,
-                        $palette['grey'],
-                    ],
-                ];
-            } else {
-                $speed_chart['labels'] = [
-                    __('Performance budget', 'sitepulse'),
-                    __('Over budget', 'sitepulse'),
-                ];
-                $speed_chart['datasets'][] = [
-                    'data' => [
-                        $speed_reference,
-                        round($processing_time - $speed_reference, 2),
-                    ],
-                    'backgroundColor' => [
-                        $speed_primary_color,
-                        $palette['deep_red'],
-                    ],
-                ];
-            }
         }
 
         $charts_payload['speed'] = $speed_chart;
         $speed_card = [
-            'status'  => $processing_status,
-            'display' => $processing_display,
+            'status'     => $processing_status,
+            'display'    => $processing_display,
+            'timestamp'  => $processing_timestamp,
         ];
     }
 
@@ -623,9 +692,8 @@ function sitepulse_custom_dashboards_page() {
             'uptimeTooltipUp'     => __('Site operational', 'sitepulse'),
             'uptimeTooltipDown'   => __('Site unavailable', 'sitepulse'),
             'uptimeAxisLabel'     => __('Availability (%)', 'sitepulse'),
-            'speedTooltipLabel'   => __('Measured time', 'sitepulse'),
-            'speedBudgetLabel'    => __('Performance budget', 'sitepulse'),
-            'speedOverBudgetLabel'=> __('Over budget', 'sitepulse'),
+            'speedTooltipLabel'   => __('Server processing time', 'sitepulse'),
+            'speedAxisLabel'      => __('Processing time (ms)', 'sitepulse'),
             'revisionsTooltip'    => __('Revisions', 'sitepulse'),
             'logEventsLabel'      => __('Events', 'sitepulse'),
         ],
@@ -647,7 +715,7 @@ function sitepulse_custom_dashboards_page() {
                         <h2><span class="dashicons dashicons-performance"></span> <?php esc_html_e('Speed', 'sitepulse'); ?></h2>
                         <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-speed')); ?>" class="button button-secondary"><?php esc_html_e('Details', 'sitepulse'); ?></a>
                     </div>
-                    <p class="sitepulse-card-subtitle"><?php esc_html_e('Backend PHP processing time captured during the latest scan.', 'sitepulse'); ?></p>
+                    <p class="sitepulse-card-subtitle"><?php esc_html_e('Backend PHP processing time observed during recent scans.', 'sitepulse'); ?></p>
                     <?php
                         $speed_summary_html = sitepulse_render_chart_summary('sitepulse-speed-chart', $speed_chart);
                         $speed_summary_id = sitepulse_get_chart_summary_id('sitepulse-speed-chart');

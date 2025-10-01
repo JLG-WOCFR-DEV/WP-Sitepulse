@@ -27,25 +27,20 @@
         }
 
         return datasets.map(function (dataset) {
-            var normalized = {
-                data: Array.isArray(dataset.data) ? dataset.data : [],
-                backgroundColor: Array.isArray(dataset.backgroundColor) ? dataset.backgroundColor : [],
-            };
+            var normalized = {};
 
-            if (typeof dataset.borderWidth === 'number') {
-                normalized.borderWidth = dataset.borderWidth;
-            } else {
-                normalized.borderWidth = 0;
+            if (dataset && typeof dataset === 'object') {
+                normalized = Object.assign({}, dataset);
             }
 
-            if (typeof dataset.borderRadius !== 'undefined') {
-                normalized.borderRadius = dataset.borderRadius;
+            normalized.data = Array.isArray(dataset && dataset.data) ? dataset.data.slice() : [];
+
+            if (Array.isArray(normalized.backgroundColor)) {
+                normalized.backgroundColor = normalized.backgroundColor.slice();
             }
 
-            if (typeof dataset.hoverOffset === 'number') {
-                normalized.hoverOffset = dataset.hoverOffset;
-            } else {
-                normalized.hoverOffset = 6;
+            if (Array.isArray(normalized.borderColor)) {
+                normalized.borderColor = normalized.borderColor.slice();
             }
 
             return normalized;
@@ -144,20 +139,78 @@
                 'sitepulse-speed-chart',
                 charts.speed,
                 {
-                    cutout: '65%',
                     plugins: {
                         legend: {
                             display: false,
                         },
                         tooltip: {
                             callbacks: {
+                                title: function (tooltipItems) {
+                                    if (!Array.isArray(tooltipItems) || tooltipItems.length === 0) {
+                                        return '';
+                                    }
+
+                                    return tooltipItems[0].label || '';
+                                },
                                 label: function (context) {
-                                    var label = context.label || strings.speedTooltipLabel || '';
-                                    var raw = typeof context.raw === 'number' ? context.raw : 0;
+                                    var datasetLabel = '';
+
+                                    if (context.dataset && context.dataset.label) {
+                                        datasetLabel = context.dataset.label;
+                                    } else if (strings.speedTooltipLabel) {
+                                        datasetLabel = strings.speedTooltipLabel;
+                                    }
+
                                     var unit = charts.speed.unit || 'ms';
-                                    return label + ': ' + formatValue(raw, unit, 0);
+                                    var value = 0;
+
+                                    if (context.parsed && typeof context.parsed.y === 'number') {
+                                        value = context.parsed.y;
+                                    } else if (typeof context.raw === 'number') {
+                                        value = context.raw;
+                                    }
+
+                                    if (datasetLabel) {
+                                        return datasetLabel + ': ' + formatValue(value, unit, 0);
+                                    }
+
+                                    return formatValue(value, unit, 0);
                                 },
                             },
+                        },
+                    },
+                    interaction: {
+                        intersect: false,
+                        mode: 'index',
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                maxRotation: 0,
+                                autoSkip: true,
+                                maxTicksLimit: 8,
+                            },
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function (value) {
+                                    return formatValue(value, charts.speed.unit || 'ms', 0);
+                                },
+                            },
+                            title: {
+                                display: !!strings.speedAxisLabel,
+                                text: strings.speedAxisLabel || '',
+                            },
+                        },
+                    },
+                    elements: {
+                        line: {
+                            tension: 0.3,
+                        },
+                        point: {
+                            radius: 3,
+                            hoverRadius: 5,
                         },
                     },
                 },
