@@ -31,3 +31,64 @@
 .sitepulse-ai-insight-text {
     white-space: pre-line;
 }
+
+.sitepulse-ai-history {
+    margin-top: 20px;
+    background-color: #fff;
+    border: 1px solid #ccc;
+    padding: 15px;
+}
+
+.sitepulse-ai-history h2 {
+    margin-top: 0;
+}
+
+.sitepulse-ai-history-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.sitepulse-ai-history-filters label {
+    display: flex;
+    flex-direction: column;
+    font-weight: 600;
+}
+
+.sitepulse-ai-history-filters select {
+    margin-top: 5px;
+    min-width: 180px;
+}
+
+.sitepulse-ai-history-empty {
+    margin: 0 0 10px;
+    color: #555;
+}
+
+.sitepulse-ai-history-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.sitepulse-ai-history-item {
+    border-top: 1px solid #e2e2e2;
+    padding: 12px 0;
+}
+
+.sitepulse-ai-history-item:first-child {
+    border-top: 0;
+    padding-top: 0;
+}
+
+.sitepulse-ai-history-meta {
+    margin: 0 0 6px;
+    color: #555;
+    font-size: 13px;
+}
+
+.sitepulse-ai-history-text {
+    margin: 0;
+    white-space: pre-line;
+}

@@ -31,14 +31,100 @@
         }
     }
 
+    function normalizeHistoryEntry(entry) {
+        if (!entry || typeof entry !== 'object') {
+            return null;
+        }
+
+        var text = typeof entry.text === 'string' ? entry.text.trim() : '';
+
+        if (text.length === 0) {
+            return null;
+        }
+
+        var timestamp = entry.timestamp;
+
+        if (typeof timestamp === 'string') {
+            timestamp = parseInt(timestamp, 10);
+        }
+
+        if (!isFinite(timestamp) || timestamp <= 0) {
+            timestamp = null;
+        }
+
+        var model = entry.model && typeof entry.model === 'object' ? entry.model : {};
+        var rateLimit = entry.rate_limit && typeof entry.rate_limit === 'object' ? entry.rate_limit : {};
+
+        return {
+            text: text,
+            timestamp: timestamp,
+            model: {
+                key: typeof model.key === 'string' ? model.key : '',
+                label: typeof model.label === 'string' ? model.label : '',
+            },
+            rate_limit: {
+                key: typeof rateLimit.key === 'string' ? rateLimit.key : '',
+                label: typeof rateLimit.label === 'string' ? rateLimit.label : '',
+            },
+        };
+    }
+
+    function buildHistoryListItem(entry) {
+        var normalized = entry && typeof entry === 'object' && typeof entry.text === 'string'
+            ? entry
+            : normalizeHistoryEntry(entry);
+
+        if (!normalized) {
+            return null;
+        }
+
+        var $item = $('<li/>')
+            .addClass('sitepulse-ai-history-item')
+            .attr('data-model', normalized.model && normalized.model.key ? normalized.model.key : '')
+            .attr('data-rate-limit', normalized.rate_limit && normalized.rate_limit.key ? normalized.rate_limit.key : '');
+
+        var metaParts = [];
+        var formattedTimestamp = formatTimestamp(normalized.timestamp);
+
+        if (formattedTimestamp) {
+            metaParts.push(formattedTimestamp);
+        }
+
+        if (normalized.model && normalized.model.label) {
+            metaParts.push(normalized.model.label);
+        }
+
+        if (normalized.rate_limit && normalized.rate_limit.label) {
+            metaParts.push(normalized.rate_limit.label);
+        }
+
+        if (metaParts.length > 0) {
+            $('<p/>')
+                .addClass('sitepulse-ai-history-meta')
+                .text(metaParts.join(' • '))
+                .appendTo($item);
+        }
+
+        $('<p/>')
+            .addClass('sitepulse-ai-history-text')
+            .text(normalized.text)
+            .appendTo($item);
+
+        return $item;
+    }
+
     function renderResult($resultContainer, $textEl, $timestampEl, $statusEl, data) {
         var text = data && typeof data.text === 'string' ? data.text.trim() : '';
         var timestamp = data && data.timestamp ? data.timestamp : null;
         var isCached = data && typeof data.cached !== 'undefined' ? !!data.cached : false;
+        var model = data && data.model ? data.model : null;
+        var rateLimit = data && data.rate_limit ? data.rate_limit : null;
         var normalized = {
             text: text,
             timestamp: timestamp,
-            cached: isCached
+            cached: isCached,
+            model: model,
+            rate_limit: rateLimit
         };
 
         if (text.length === 0) {
@@ -112,9 +198,33 @@
         var $timestampEl = $resultContainer.find('.sitepulse-ai-insight-timestamp');
         var $forceRefreshToggle = $('#sitepulse-ai-force-refresh');
         var $actionsContainer = $('.sitepulse-ai-insight-actions');
+        var $historyList = $('#sitepulse-ai-history-list');
+        var $historyEmpty = $('#sitepulse-ai-history-empty');
+        var $modelFilter = $('#sitepulse-ai-history-filter-model');
+        var $rateFilter = $('#sitepulse-ai-history-filter-rate');
+        var historyEntries = [];
+        var historyMaxEntries = parseInt(sitepulseAIInsights.historyMaxEntries, 10);
         var lastResultData = null;
         var pollTimer = null;
         var activeJobId = null;
+
+        if (!isFinite(historyMaxEntries) || historyMaxEntries <= 0) {
+            historyMaxEntries = 20;
+        }
+
+        if (Array.isArray(sitepulseAIInsights.historyEntries)) {
+            sitepulseAIInsights.historyEntries.forEach(function (entry) {
+                var normalizedEntry = normalizeHistoryEntry(entry);
+
+                if (normalizedEntry) {
+                    historyEntries.push(normalizedEntry);
+                }
+            });
+        }
+
+        if (historyMaxEntries > 0 && historyEntries.length > historyMaxEntries) {
+            historyEntries = historyEntries.slice(historyEntries.length - historyMaxEntries);
+        }
 
         function setActionsBusy(isBusy) {
             if ($actionsContainer.length === 0) {
@@ -139,6 +249,136 @@
             setActionsBusy(false);
         }
 
+        function ensureFilterOption($select, data) {
+            if (!$select.length || !data || typeof data.key === 'undefined') {
+                return;
+            }
+
+            var value = typeof data.key === 'string' ? data.key : String(data.key || '');
+
+            if (!value) {
+                return;
+            }
+
+            var label = typeof data.label === 'string' && data.label.trim() !== '' ? data.label : value;
+            var exists = false;
+
+            $select.find('option').each(function () {
+                if ($(this).val() === value) {
+                    exists = true;
+                    return false;
+                }
+            });
+
+            if (exists) {
+                return;
+            }
+
+            $select.append($('<option/>').attr('value', value).text(label));
+        }
+
+        function initializeHistoryFilters() {
+            if (!sitepulseAIInsights.historyFilters) {
+                return;
+            }
+
+            if ($modelFilter.length && Array.isArray(sitepulseAIInsights.historyFilters.models)) {
+                sitepulseAIInsights.historyFilters.models.forEach(function (option) {
+                    ensureFilterOption($modelFilter, option);
+                });
+            }
+
+            if ($rateFilter.length && Array.isArray(sitepulseAIInsights.historyFilters.rateLimits)) {
+                sitepulseAIInsights.historyFilters.rateLimits.forEach(function (option) {
+                    ensureFilterOption($rateFilter, option);
+                });
+            }
+        }
+
+        function renderHistoryEntriesList(entries) {
+            if ($historyList.length === 0) {
+                return;
+            }
+
+            var selectedModel = $modelFilter.length ? $modelFilter.val() : '';
+            var selectedRate = $rateFilter.length ? $rateFilter.val() : '';
+            var filtered = [];
+
+            if (Array.isArray(entries)) {
+                entries.forEach(function (entry) {
+                    if (!entry || typeof entry !== 'object') {
+                        return;
+                    }
+
+                    if (selectedModel && entry.model && entry.model.key !== selectedModel) {
+                        return;
+                    }
+
+                    if (selectedRate && entry.rate_limit && entry.rate_limit.key !== selectedRate) {
+                        return;
+                    }
+
+                    filtered.push(entry);
+                });
+            }
+
+            filtered.sort(function (a, b) {
+                var aTime = a && a.timestamp ? a.timestamp : 0;
+                var bTime = b && b.timestamp ? b.timestamp : 0;
+
+                return bTime - aTime;
+            });
+
+            $historyList.empty();
+
+            if (filtered.length === 0) {
+                if ($historyEmpty.length) {
+                    var emptyText = sitepulseAIInsights.strings && sitepulseAIInsights.strings.historyEmpty
+                        ? sitepulseAIInsights.strings.historyEmpty
+                        : $historyEmpty.text();
+
+                    $historyEmpty.text(emptyText).show();
+                }
+
+                return;
+            }
+
+            if ($historyEmpty.length) {
+                $historyEmpty.hide();
+            }
+
+            filtered.forEach(function (entry) {
+                var $item = buildHistoryListItem(entry);
+
+                if ($item) {
+                    $historyList.append($item);
+                }
+            });
+        }
+
+        function addHistoryEntryFromResult(result) {
+            var entry = normalizeHistoryEntry({
+                text: result && typeof result.text === 'string' ? result.text : '',
+                timestamp: result ? result.timestamp : null,
+                model: result ? result.model : null,
+                rate_limit: result ? result.rate_limit : null,
+            });
+
+            if (!entry) {
+                return;
+            }
+
+            historyEntries.push(entry);
+
+            if (historyMaxEntries > 0 && historyEntries.length > historyMaxEntries) {
+                historyEntries = historyEntries.slice(historyEntries.length - historyMaxEntries);
+            }
+
+            ensureFilterOption($modelFilter, entry.model);
+            ensureFilterOption($rateFilter, entry.rate_limit);
+            renderHistoryEntriesList(historyEntries);
+        }
+
         function scheduleJobPoll(jobId, immediate) {
             clearPollingTimer();
 
@@ -159,6 +399,7 @@
 
                         if (status === 'completed' && response.data.result) {
                             lastResultData = renderResult($resultContainer, $resultText, $timestampEl, $statusEl, response.data.result);
+                            addHistoryEntryFromResult(response.data.result);
                             finalizeRequest();
                         } else if (status === 'failed') {
                             var failureMessage = response.data.message || sitepulseAIInsights.strings.defaultError;
@@ -220,6 +461,26 @@
             cached: !!sitepulseAIInsights.initialCached
         });
 
+        initializeHistoryFilters();
+
+        if ($historyEmpty.length && sitepulseAIInsights.strings && sitepulseAIInsights.strings.historyEmpty) {
+            $historyEmpty.text(sitepulseAIInsights.strings.historyEmpty);
+        }
+
+        renderHistoryEntriesList(historyEntries);
+
+        if ($modelFilter.length) {
+            $modelFilter.on('change', function () {
+                renderHistoryEntriesList(historyEntries);
+            });
+        }
+
+        if ($rateFilter.length) {
+            $rateFilter.on('change', function () {
+                renderHistoryEntriesList(historyEntries);
+            });
+        }
+
         $button.on('click', function (event) {
             event.preventDefault();
 
@@ -254,6 +515,9 @@
                         scheduleJobPoll(activeJobId, true);
                     } else {
                         lastResultData = renderResult($resultContainer, $resultText, $timestampEl, $statusEl, response.data);
+                        if (response.data && !response.data.cached) {
+                            addHistoryEntryFromResult(response.data);
+                        }
                         finalizeRequest();
                     }
                 } else if (response && response.data && response.data.message) {
