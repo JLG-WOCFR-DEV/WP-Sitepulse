@@ -1015,6 +1015,46 @@ msgstr ""
 msgid "Le fichier %s n’a pas encore été créé car aucune erreur ne s’est produite. Il apparaîtra automatiquement dès que WordPress aura quelque chose à y écrire."
 msgstr ""
 
+#: modules/log_analyzer.php:153
+msgid "Journal de débogage non activé"
+msgstr ""
+
+#: modules/log_analyzer.php:154
+#, php-format
+msgid "Pour que cet outil fonctionne, WordPress doit être configuré pour enregistrer les erreurs dans un fichier. Cela se fait en modifiant votre fichier <code>%s</code>."
+msgstr ""
+
+#: modules/log_analyzer.php:156
+msgid "Comment activer le journal de débogage :"
+msgstr ""
+
+#: modules/log_analyzer.php:158
+msgid "Connectez-vous à votre site via FTP ou le gestionnaire de fichiers de votre hébergeur."
+msgstr ""
+
+#: modules/log_analyzer.php:159
+#, php-format
+msgid "Trouvez le fichier <code>%s</code> à la racine de votre installation WordPress."
+msgstr ""
+
+#: modules/log_analyzer.php:160
+#, php-format
+msgid "Ouvrez ce fichier et cherchez la ligne : <br><code>%s</code>"
+msgstr ""
+
+#: modules/log_analyzer.php:161
+msgid "<strong>Juste avant</strong> cette ligne, ajoutez le code suivant :"
+msgstr ""
+
+#: modules/log_analyzer.php:163
+msgid "define( 'WP_DEBUG', true );\ndefine( 'WP_DEBUG_LOG', true );\ndefine( 'WP_DEBUG_DISPLAY', false );"
+msgstr ""
+
+#: modules/log_analyzer.php:164
+#, php-format
+msgid "<strong>Important :</strong> Une fois que vous avez résolu les problèmes, il est recommandé de repasser <code>%1$s</code> à <code>%2$s</code> sur un site en production."
+msgstr ""
+
 #: modules/maintenance_advisor.php:7
 msgid "Maintenance"
 msgstr ""
