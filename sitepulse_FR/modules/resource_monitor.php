@@ -38,7 +38,7 @@ function sitepulse_resource_monitor_format_load_display($load_values) {
     }
 
     $normalized_values = array_map(
-        static function ($value) {
+        function ($value) use ($not_available_label) {
             if (is_numeric($value)) {
                 return number_format_i18n((float) $value, 2);
             }
