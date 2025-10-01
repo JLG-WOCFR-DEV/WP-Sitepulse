@@ -31,8 +31,10 @@ function sitepulse_resource_monitor_enqueue_assets($hook_suffix) {
  * @return string
  */
 function sitepulse_resource_monitor_format_load_display($load_values) {
+    $not_available_label = __('N/A', 'sitepulse');
+
     if (!is_array($load_values) || empty($load_values)) {
-        $load_values = ['N/A', 'N/A', 'N/A'];
+        $load_values = [$not_available_label, $not_available_label, $not_available_label];
     }
 
     $normalized_values = array_map(
@@ -50,19 +52,19 @@ function sitepulse_resource_monitor_format_load_display($load_values) {
             }
 
             if (is_null($value)) {
-                return 'N/A';
+                return $not_available_label;
             }
 
             if (is_scalar($value)) {
                 return (string) $value;
             }
 
-            return 'N/A';
+            return $not_available_label;
         },
         array_slice(array_values((array) $load_values), 0, 3)
     );
 
-    $normalized_values = array_pad($normalized_values, 3, 'N/A');
+    $normalized_values = array_pad($normalized_values, 3, $not_available_label);
 
     return implode(' / ', $normalized_values);
 }
@@ -89,7 +91,8 @@ function sitepulse_resource_monitor_get_snapshot() {
     }
 
     $notices = [];
-    $load = ['N/A', 'N/A', 'N/A'];
+    $not_available_label = __('N/A', 'sitepulse');
+    $load = [$not_available_label, $not_available_label, $not_available_label];
     $load_display = sitepulse_resource_monitor_format_load_display($load);
 
     if (function_exists('sys_getloadavg')) {
@@ -152,7 +155,7 @@ function sitepulse_resource_monitor_get_snapshot() {
         }
     }
 
-    $disk_free = 'N/A';
+    $disk_free = $not_available_label;
 
     if (function_exists('disk_free_space')) {
         $disk_free_error = null;
@@ -202,7 +205,7 @@ function sitepulse_resource_monitor_get_snapshot() {
         }
     }
 
-    $disk_total = 'N/A';
+    $disk_total = $not_available_label;
 
     if (function_exists('disk_total_space')) {
         $disk_total_error = null;
