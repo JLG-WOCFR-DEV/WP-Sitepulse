@@ -118,6 +118,108 @@ function sitepulse_custom_dashboard_enqueue_assets($hook_suffix) {
 }
 
 /**
+ * Retrieves the summary element ID for a chart.
+ *
+ * @param string $chart_id Chart identifier.
+ *
+ * @return string Summary element identifier.
+ */
+function sitepulse_get_chart_summary_id($chart_id) {
+    $sanitized_id = is_string($chart_id) ? sanitize_html_class($chart_id) : '';
+
+    if ('' === $sanitized_id) {
+        $sanitized_id = 'sitepulse-chart';
+    }
+
+    return $sanitized_id . '-summary';
+}
+
+/**
+ * Builds an accessible summary list for a chart dataset.
+ *
+ * @param string $chart_id    Base identifier for the chart.
+ * @param array  $chart_data  Chart configuration array containing labels and datasets.
+ *
+ * @return string Rendered HTML list or an empty string when no data is available.
+ */
+function sitepulse_render_chart_summary($chart_id, $chart_data) {
+    if (!is_string($chart_id) || $chart_id === '' || !is_array($chart_data)) {
+        return '';
+    }
+
+    $labels = isset($chart_data['labels']) ? (array) $chart_data['labels'] : [];
+    $datasets = isset($chart_data['datasets']) && is_array($chart_data['datasets'])
+        ? $chart_data['datasets']
+        : [];
+
+    if (empty($labels) || empty($datasets)) {
+        return '';
+    }
+
+    $unit = '';
+
+    if (isset($chart_data['unit']) && is_string($chart_data['unit']) && $chart_data['unit'] !== '') {
+        $unit = $chart_data['unit'];
+    }
+
+    $items = [];
+
+    foreach ($labels as $index => $label) {
+        $values = [];
+
+        foreach ($datasets as $dataset) {
+            if (!is_array($dataset) || !isset($dataset['data']) || !is_array($dataset['data'])) {
+                continue;
+            }
+
+            if (!array_key_exists($index, $dataset['data'])) {
+                continue;
+            }
+
+            $value = $dataset['data'][$index];
+
+            if (is_numeric($value)) {
+                $numeric_value = (float) $value;
+                $precision = floor($numeric_value) === $numeric_value ? 0 : 2;
+                $formatted_value = number_format_i18n($numeric_value, $precision);
+            } elseif (is_scalar($value)) {
+                $formatted_value = (string) $value;
+            } else {
+                continue;
+            }
+
+            if ('' !== $unit) {
+                $formatted_value .= ' ' . $unit;
+            }
+
+            $values[] = $formatted_value;
+        }
+
+        if (empty($values)) {
+            continue;
+        }
+
+        $items[] = sprintf(
+            '<li>%1$s: %2$s</li>',
+            esc_html(wp_strip_all_tags((string) $label)),
+            esc_html(implode(', ', $values))
+        );
+    }
+
+    if (empty($items)) {
+        return '';
+    }
+
+    $summary_id = sitepulse_get_chart_summary_id($chart_id);
+
+    return sprintf(
+        '<ul id="%1$s" class="sitepulse-chart-summary">%2$s</ul>',
+        esc_attr($summary_id),
+        implode('', $items)
+    );
+}
+
+/**
  * Renders the HTML for the main SitePulse dashboard page.
  *
  * This page provides a visual overview of the site's key metrics,
@@ -544,6 +646,8 @@ function sitepulse_custom_dashboards_page() {
         .status-badge.status-warn { background-color: <?php echo esc_attr($palette['amber']); ?>; }
         .status-badge.status-bad { background-color: <?php echo esc_attr($palette['red']); ?>; }
         .screen-reader-text { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+        .sitepulse-chart-summary { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; list-style: none; }
+        .sitepulse-chart-summary li { margin: 0; list-style: none; }
         .sitepulse-legend { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
         .sitepulse-legend li { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
         .sitepulse-legend .label { display: flex; align-items: center; gap: 8px; }
@@ -563,8 +667,18 @@ function sitepulse_custom_dashboards_page() {
                         <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-speed')); ?>" class="button button-secondary"><?php esc_html_e('Details', 'sitepulse'); ?></a>
                     </div>
                     <p class="sitepulse-card-subtitle"><?php esc_html_e('Backend PHP processing time captured during the latest scan.', 'sitepulse'); ?></p>
+                    <?php
+                        $speed_summary_html = sitepulse_render_chart_summary('sitepulse-speed-chart', $speed_chart);
+                        $speed_summary_id = sitepulse_get_chart_summary_id('sitepulse-speed-chart');
+                        $speed_canvas_describedby = ['sitepulse-speed-description'];
+
+                        if ('' !== $speed_summary_html) {
+                            $speed_canvas_describedby[] = $speed_summary_id;
+                        }
+                    ?>
                     <div class="sitepulse-chart-container">
-                        <canvas id="sitepulse-speed-chart" aria-describedby="sitepulse-speed-description"></canvas>
+                        <canvas id="sitepulse-speed-chart" aria-describedby="<?php echo esc_attr(implode(' ', $speed_canvas_describedby)); ?>"></canvas>
+                        <?php echo $speed_summary_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
                     </div>
                     <?php $speed_status_meta = $get_status_meta($speed_card['status']); ?>
                     <p class="sitepulse-metric">
@@ -586,8 +700,18 @@ function sitepulse_custom_dashboards_page() {
                         <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-uptime')); ?>" class="button button-secondary"><?php esc_html_e('Details', 'sitepulse'); ?></a>
                     </div>
                     <p class="sitepulse-card-subtitle"><?php esc_html_e('Availability for the last 30 hourly checks.', 'sitepulse'); ?></p>
+                    <?php
+                        $uptime_summary_html = sitepulse_render_chart_summary('sitepulse-uptime-chart', $uptime_chart);
+                        $uptime_summary_id = sitepulse_get_chart_summary_id('sitepulse-uptime-chart');
+                        $uptime_canvas_describedby = ['sitepulse-uptime-description'];
+
+                        if ('' !== $uptime_summary_html) {
+                            $uptime_canvas_describedby[] = $uptime_summary_id;
+                        }
+                    ?>
                     <div class="sitepulse-chart-container">
-                        <canvas id="sitepulse-uptime-chart" aria-describedby="sitepulse-uptime-description"></canvas>
+                        <canvas id="sitepulse-uptime-chart" aria-describedby="<?php echo esc_attr(implode(' ', $uptime_canvas_describedby)); ?>"></canvas>
+                        <?php echo $uptime_summary_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
                     </div>
                     <?php $uptime_status_meta = $get_status_meta($uptime_card['status']); ?>
                     <p class="sitepulse-metric">
@@ -609,8 +733,18 @@ function sitepulse_custom_dashboards_page() {
                         <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-db')); ?>" class="button button-secondary"><?php esc_html_e('Optimize', 'sitepulse'); ?></a>
                     </div>
                     <p class="sitepulse-card-subtitle"><?php esc_html_e('Post revision volume compared to the recommended limit.', 'sitepulse'); ?></p>
+                    <?php
+                        $database_summary_html = sitepulse_render_chart_summary('sitepulse-database-chart', $database_chart);
+                        $database_summary_id = sitepulse_get_chart_summary_id('sitepulse-database-chart');
+                        $database_canvas_describedby = ['sitepulse-database-description'];
+
+                        if ('' !== $database_summary_html) {
+                            $database_canvas_describedby[] = $database_summary_id;
+                        }
+                    ?>
                     <div class="sitepulse-chart-container">
-                        <canvas id="sitepulse-database-chart" aria-describedby="sitepulse-database-description"></canvas>
+                        <canvas id="sitepulse-database-chart" aria-describedby="<?php echo esc_attr(implode(' ', $database_canvas_describedby)); ?>"></canvas>
+                        <?php echo $database_summary_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
                     </div>
                     <?php $database_status_meta = $get_status_meta($database_card['status']); ?>
                     <p class="sitepulse-metric">

@@ -105,21 +105,25 @@ class Sitepulse_Custom_Dashboard_Render_Test extends WP_UnitTestCase {
                 'chart_id'  => 'sitepulse-speed-chart',
                 'link'      => 'admin.php?page=sitepulse-speed',
                 'chart_key' => 'speed',
+                'summary_id' => sitepulse_get_chart_summary_id('sitepulse-speed-chart'),
             ],
             'uptime_tracker'     => [
                 'chart_id'  => 'sitepulse-uptime-chart',
                 'link'      => 'admin.php?page=sitepulse-uptime',
                 'chart_key' => 'uptime',
+                'summary_id' => sitepulse_get_chart_summary_id('sitepulse-uptime-chart'),
             ],
             'database_optimizer' => [
                 'chart_id'  => 'sitepulse-database-chart',
                 'link'      => 'admin.php?page=sitepulse-db',
                 'chart_key' => 'database',
+                'summary_id' => sitepulse_get_chart_summary_id('sitepulse-database-chart'),
             ],
             'log_analyzer'       => [
                 'chart_id'  => 'sitepulse-log-chart',
                 'link'      => 'admin.php?page=sitepulse-logs',
                 'chart_key' => 'logs',
+                'summary_id' => null,
             ],
         ];
     }
@@ -152,10 +156,13 @@ class Sitepulse_Custom_Dashboard_Render_Test extends WP_UnitTestCase {
 
         $this->assertStringNotContainsString('sitepulse-speed-chart', $output);
         $this->assertStringNotContainsString('admin.php?page=sitepulse-speed', $output);
+        $this->assertStringNotContainsString(sitepulse_get_chart_summary_id('sitepulse-speed-chart'), $output);
         $this->assertStringNotContainsString('sitepulse-uptime-chart', $output);
         $this->assertStringNotContainsString('admin.php?page=sitepulse-uptime', $output);
+        $this->assertStringNotContainsString(sitepulse_get_chart_summary_id('sitepulse-uptime-chart'), $output);
         $this->assertStringNotContainsString('sitepulse-database-chart', $output);
         $this->assertStringNotContainsString('admin.php?page=sitepulse-db', $output);
+        $this->assertStringNotContainsString(sitepulse_get_chart_summary_id('sitepulse-database-chart'), $output);
         $this->assertStringNotContainsString('sitepulse-log-chart', $output);
         $this->assertStringNotContainsString('admin.php?page=sitepulse-logs', $output);
 
@@ -202,6 +209,9 @@ class Sitepulse_Custom_Dashboard_Render_Test extends WP_UnitTestCase {
         $disabled = $module_expectations[$config['module']];
         $this->assertStringNotContainsString($disabled['chart_id'], $output);
         $this->assertStringNotContainsString($disabled['link'], $output);
+        if (!empty($disabled['summary_id'])) {
+            $this->assertStringNotContainsString($disabled['summary_id'], $output);
+        }
 
         foreach ($module_expectations as $module_key => $details) {
             if ($module_key === $config['module']) {
@@ -210,6 +220,9 @@ class Sitepulse_Custom_Dashboard_Render_Test extends WP_UnitTestCase {
 
             $this->assertStringContainsString($details['chart_id'], $output);
             $this->assertStringContainsString($details['link'], $output);
+            if (!empty($details['summary_id'])) {
+                $this->assertStringContainsString($details['summary_id'], $output);
+            }
         }
 
         $charts = $this->getLocalizedCharts();
