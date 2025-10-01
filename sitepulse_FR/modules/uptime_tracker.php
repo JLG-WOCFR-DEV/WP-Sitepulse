@@ -485,9 +485,9 @@ function sitepulse_uptime_tracker_page() {
                 <?php endforeach; ?>
             <?php endif; ?>
         </div>
-        <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #555;"><span>Il y a <?php echo esc_html($total_checks); ?> heures</span><span>Maintenant</span></div>
+        <div class="uptime-timeline__labels"><span><?php echo sprintf(esc_html__('Il y a %d heures', 'sitepulse'), absint($total_checks)); ?></span><span><?php esc_html_e('Maintenant', 'sitepulse'); ?></span></div>
         <?php if (!empty($current_incident_duration) && null !== $current_incident_start): ?>
-            <div class="notice notice-error" style="margin-top: 15px;">
+            <div class="notice notice-error uptime-notice--error">
                 <p>
                     <strong><?php esc_html_e('Incident en cours', 'sitepulse'); ?> :</strong>
                     <?php
@@ -516,7 +516,7 @@ function sitepulse_uptime_tracker_page() {
                 <span class="uptime-trend__legend-item uptime-trend__legend-item--low"><?php esc_html_e('< 95% de disponibilité', 'sitepulse'); ?></span>
             </p>
         <?php endif; ?>
-        <div class="notice notice-info" style="margin-top: 20px;"><p><strong>Comment ça marche :</strong> Une barre verte indique que votre site était en ligne. Une barre rouge indique un possible incident où votre site était inaccessible.</p></div>
+        <div class="notice notice-info uptime-notice--info"><p><strong><?php esc_html_e('Comment ça marche :', 'sitepulse'); ?></strong> <?php echo esc_html__('Une barre verte indique que votre site était en ligne. Une barre rouge indique un possible incident où votre site était inaccessible.', 'sitepulse'); ?></p></div>
     </div>
     <?php
 }
