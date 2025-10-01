@@ -1,0 +1,33 @@
+/**
+ * Styles for the AI Insights admin module.
+ */
+
+.sitepulse-ai-info-notice {
+    padding-bottom: 0;
+}
+
+.sitepulse-ai-spinner {
+    float: none;
+    margin-top: 0;
+}
+
+.sitepulse-ai-error {
+    display: none;
+}
+
+.sitepulse-ai-result {
+    display: none;
+    background-color: #fff;
+    border: 1px solid #ccc;
+    padding: 15px;
+    margin-top: 20px;
+}
+
+.sitepulse-ai-insight-status,
+.sitepulse-ai-insight-timestamp {
+    display: none;
+}
+
+.sitepulse-ai-insight-text {
+    white-space: pre-line;
+}
