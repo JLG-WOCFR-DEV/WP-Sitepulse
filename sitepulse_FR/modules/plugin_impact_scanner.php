@@ -36,6 +36,53 @@ function sitepulse_plugin_impact_enqueue_assets($hook_suffix) {
         [],
         SITEPULSE_VERSION
     );
+
+    wp_enqueue_script(
+        'sitepulse-plugin-impact',
+        SITEPULSE_URL . 'modules/js/plugin-impact-scanner.js',
+        [],
+        SITEPULSE_VERSION,
+        true
+    );
+
+    $default_thresholds = [
+        'impactWarning'  => 30.0,
+        'impactCritical' => 60.0,
+        'weightWarning'  => 10.0,
+        'weightCritical' => 20.0,
+    ];
+
+    $thresholds = apply_filters('sitepulse_plugin_impact_highlight_thresholds', $default_thresholds);
+
+    if (!is_array($thresholds)) {
+        $thresholds = $default_thresholds;
+    }
+
+    $thresholds = wp_parse_args($thresholds, $default_thresholds);
+
+    foreach ($thresholds as $key => $value) {
+        $thresholds[$key] = is_numeric($value) ? (float) $value : $default_thresholds[$key];
+    }
+
+    wp_localize_script(
+        'sitepulse-plugin-impact',
+        'sitepulsePluginImpactScanner',
+        [
+            'thresholds' => $thresholds,
+            'i18n'       => [
+                'sortImpactDesc' => esc_html__('Tri : impact décroissant', 'sitepulse'),
+                'sortImpactAsc'  => esc_html__('Tri : impact croissant', 'sitepulse'),
+                'sortNameAsc'    => esc_html__('Tri : nom (A → Z)', 'sitepulse'),
+                'sortWeightDesc' => esc_html__('Tri : poids décroissant', 'sitepulse'),
+                'weightMinLabel' => esc_html__('Poids min (%)', 'sitepulse'),
+                'weightMaxLabel' => esc_html__('Poids max (%)', 'sitepulse'),
+                'resetFilters'   => esc_html__('Réinitialiser', 'sitepulse'),
+                'exportCsv'      => esc_html__('Exporter CSV', 'sitepulse'),
+                'noResult'       => esc_html__('Aucun plugin ne correspond aux filtres.', 'sitepulse'),
+                'fileName'       => esc_html__('sitepulse-plugin-impact.csv', 'sitepulse'),
+            ],
+        ]
+    );
 }
 
 add_action('upgrader_process_complete', 'sitepulse_plugin_impact_clear_dir_cache_on_upgrade', 10, 2);
@@ -216,15 +263,24 @@ function sitepulse_plugin_impact_scanner_page() {
             $disk_space_status = isset($dir_size['status']) ? $dir_size['status'] : 'complete';
         }
 
+        $is_network_active = function_exists('is_plugin_active_for_network')
+            ? is_plugin_active_for_network($plugin_file)
+            : false;
+        $is_site_active = function_exists('is_plugin_active') ? is_plugin_active($plugin_file) : true;
+
         $impact_data = [
-            'file'          => $plugin_file,
-            'name'          => $plugin_name,
-            'impact'        => null,
-            'last_ms'       => null,
-            'samples'       => 0,
-            'last_recorded' => null,
-            'disk_space'    => $disk_space,
+            'file'              => $plugin_file,
+            'name'              => $plugin_name,
+            'impact'            => null,
+            'last_ms'           => null,
+            'samples'           => 0,
+            'last_recorded'     => null,
+            'disk_space'        => $disk_space,
             'disk_space_status' => $disk_space_status,
+            'is_active'         => ($is_network_active || $is_site_active),
+            'is_network_active' => $is_network_active,
+            'plugin_uri'        => isset($plugin_data['PluginURI']) ? $plugin_data['PluginURI'] : '',
+            'slug'              => sitepulse_plugin_impact_guess_slug($plugin_file, $plugin_data),
         ];
 
         if (isset($samples[$plugin_file]) && is_array($samples[$plugin_file])) {
@@ -354,18 +410,42 @@ function sitepulse_plugin_impact_scanner_page() {
         </form>
 
         <div class="sitepulse-impact-table-wrapper">
-            <table class="wp-list-table widefat striped">
+            <div class="sitepulse-impact-controls" data-sitepulse-impact-controls>
+                <div class="sitepulse-impact-controls__group">
+                    <label for="sitepulse-impact-sort" class="screen-reader-text"><?php esc_html_e('Choisir un tri', 'sitepulse'); ?></label>
+                    <select id="sitepulse-impact-sort" class="sitepulse-impact-controls__select" data-sitepulse-impact-sort>
+                        <option value="impact-desc"><?php esc_html_e('Tri : impact décroissant', 'sitepulse'); ?></option>
+                        <option value="impact-asc"><?php esc_html_e('Tri : impact croissant', 'sitepulse'); ?></option>
+                        <option value="weight-desc"><?php esc_html_e('Tri : poids décroissant', 'sitepulse'); ?></option>
+                        <option value="name-asc"><?php esc_html_e('Tri : nom (A → Z)', 'sitepulse'); ?></option>
+                    </select>
+                </div>
+                <div class="sitepulse-impact-controls__group">
+                    <label for="sitepulse-impact-weight-min"><?php esc_html_e('Poids min (%)', 'sitepulse'); ?></label>
+                    <input type="number" id="sitepulse-impact-weight-min" class="sitepulse-impact-controls__input" min="0" max="100" step="0.1" data-sitepulse-impact-weight-min />
+                </div>
+                <div class="sitepulse-impact-controls__group">
+                    <label for="sitepulse-impact-weight-max"><?php esc_html_e('Poids max (%)', 'sitepulse'); ?></label>
+                    <input type="number" id="sitepulse-impact-weight-max" class="sitepulse-impact-controls__input" min="0" max="100" step="0.1" data-sitepulse-impact-weight-max />
+                </div>
+                <div class="sitepulse-impact-controls__group sitepulse-impact-controls__group--buttons">
+                    <button type="button" class="button" data-sitepulse-impact-reset><?php esc_html_e('Réinitialiser', 'sitepulse'); ?></button>
+                    <button type="button" class="button button-primary" data-sitepulse-impact-export><?php esc_html_e('Exporter CSV', 'sitepulse'); ?></button>
+                </div>
+            </div>
+            <table class="wp-list-table widefat striped" data-sitepulse-impact-table>
                 <thead>
                     <tr>
                         <th scope="col" style="width: 25%;"><?php esc_html_e('Plugin', 'sitepulse'); ?></th>
                         <th scope="col"><?php esc_html_e('Durée mesurée', 'sitepulse'); ?></th>
                         <th scope="col"><?php esc_html_e('Espace disque', 'sitepulse'); ?></th>
                         <th scope="col" style="width: 35%;"><?php esc_html_e('Poids relatif', 'sitepulse'); ?></th>
+                        <th scope="col" class="column-actions"><?php esc_html_e('Actions rapides', 'sitepulse'); ?></th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if (empty($impacts)) : ?>
-                        <tr><td colspan="4"><?php esc_html_e('Aucun plugin actif à analyser.', 'sitepulse'); ?></td></tr>
+                        <tr><td colspan="5"><?php esc_html_e('Aucun plugin actif à analyser.', 'sitepulse'); ?></td></tr>
                     <?php else : ?>
                         <?php foreach ($impacts as $data) :
                         $weight = ($total_impact > 0 && $data['impact'] !== null) ? ($data['impact'] / $total_impact) * 100 : null;
@@ -410,8 +490,65 @@ function sitepulse_plugin_impact_scanner_page() {
                         }
 
                         $impact_output = implode('<br />', array_map('esc_html', $impact_lines));
+
+                        $weight_value = $weight !== null ? number_format((float) $weight, 4, '.', '') : '';
+                        $impact_value = $data['impact'] !== null ? number_format((float) $data['impact'], 4, '.', '') : '';
+                        $last_value = $data['last_ms'] !== null ? number_format((float) $data['last_ms'], 4, '.', '') : '';
+                        $samples_value = number_format((float) max(0, (int) $data['samples']), 0, '.', '');
+                        $disk_space_value = number_format((float) $data['disk_space'], 0, '.', '');
+                        $last_recorded_value = $data['last_recorded'] ? (int) $data['last_recorded'] : '';
+                        $plugin_slug = $data['slug'];
+                        $plugin_uri = $data['plugin_uri'];
+                        $is_active = !empty($data['is_active']);
+                        $is_network_active = !empty($data['is_network_active']);
+
+                        $deactivate_url = '';
+                        $deactivate_label = $is_network_active
+                            ? __('Désactiver sur le réseau', 'sitepulse')
+                            : __('Désactiver', 'sitepulse');
+
+                        if ($is_active) {
+                            $base_url = $is_network_active ? network_admin_url('plugins.php') : admin_url('plugins.php');
+                            $deactivate_args = [
+                                'action'        => 'deactivate',
+                                'plugin'        => $data['file'],
+                                'plugin_status' => 'all',
+                            ];
+
+                            if ($is_network_active) {
+                                $deactivate_args['networkwide'] = 1;
+                            }
+
+                            $deactivate_url = add_query_arg($deactivate_args, $base_url);
+                            $deactivate_url = wp_nonce_url($deactivate_url, 'deactivate-plugin_' . $data['file']);
+                        }
+
+                        $plugin_card_url = '';
+
+                        if ($plugin_slug !== '') {
+                            $plugin_card_url = add_query_arg(
+                                [
+                                    'tab'         => 'plugin-information',
+                                    'plugin'      => $plugin_slug,
+                                    'TB_iframe'   => 'true',
+                                    'width'       => 600,
+                                    'height'      => 550,
+                                ],
+                                self_admin_url('plugin-install.php')
+                            );
+                        }
                     ?>
-                        <tr>
+                        <tr
+                            data-plugin-file="<?php echo esc_attr($data['file']); ?>"
+                            data-plugin-name="<?php echo esc_attr($data['name']); ?>"
+                            data-impact="<?php echo esc_attr($impact_value); ?>"
+                            data-last-ms="<?php echo esc_attr($last_value); ?>"
+                            data-weight="<?php echo esc_attr($weight_value); ?>"
+                            data-samples="<?php echo esc_attr($samples_value); ?>"
+                            data-disk-space="<?php echo esc_attr($disk_space_value); ?>"
+                            data-last-recorded="<?php echo esc_attr($last_recorded_value); ?>"
+                            data-is-measured="<?php echo $data['impact'] !== null ? '1' : '0'; ?>"
+                        >
                             <td data-colname="<?php echo esc_attr__('Plugin', 'sitepulse'); ?>"><strong><?php echo esc_html($data['name']); ?></strong></td>
                             <td data-colname="<?php echo esc_attr__('Durée mesurée', 'sitepulse'); ?>"><?php echo $impact_output; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></td>
                             <td data-colname="<?php echo esc_attr__('Espace disque', 'sitepulse'); ?>">
@@ -433,6 +570,25 @@ function sitepulse_plugin_impact_scanner_page() {
                                 <?php else : ?>
                                     <em><?php esc_html_e('n/d', 'sitepulse'); ?></em>
                                 <?php endif; ?>
+                            </td>
+                            <td data-colname="<?php echo esc_attr__('Actions rapides', 'sitepulse'); ?>">
+                                <div class="sitepulse-impact-actions">
+                                    <?php if ($deactivate_url !== '') : ?>
+                                        <a class="button button-small" href="<?php echo esc_url($deactivate_url); ?>" data-action="deactivate">
+                                            <?php echo esc_html($deactivate_label); ?>
+                                        </a>
+                                    <?php endif; ?>
+                                    <?php if ($plugin_card_url !== '') : ?>
+                                        <a class="button button-small" href="<?php echo esc_url($plugin_card_url); ?>" data-action="details" target="_blank" rel="noopener noreferrer">
+                                            <?php esc_html_e('Fiche plugin', 'sitepulse'); ?>
+                                        </a>
+                                    <?php endif; ?>
+                                    <?php if (!empty($plugin_uri)) : ?>
+                                        <a class="button button-small" href="<?php echo esc_url($plugin_uri); ?>" data-action="docs" target="_blank" rel="noopener noreferrer">
+                                            <?php esc_html_e('Documentation', 'sitepulse'); ?>
+                                        </a>
+                                    <?php endif; ?>
+                                </div>
                             </td>
                         </tr>
                         <?php endforeach; ?>
@@ -735,6 +891,32 @@ function sitepulse_get_plugin_dir_size_threshold($dir) {
     $threshold['max_files'] = isset($threshold['max_files']) ? max(0, (int) $threshold['max_files']) : 0;
 
     return $threshold;
+}
+
+function sitepulse_plugin_impact_guess_slug($plugin_file, $plugin_data = []) {
+    $plugin_file = (string) $plugin_file;
+
+    if ($plugin_file === '') {
+        return '';
+    }
+
+    if (is_array($plugin_data) && !empty($plugin_data['slug'])) {
+        return sanitize_key($plugin_data['slug']);
+    }
+
+    $plugin_dir = dirname($plugin_file);
+
+    if ($plugin_dir !== '.' && $plugin_dir !== '' && $plugin_dir !== DIRECTORY_SEPARATOR) {
+        return sanitize_title($plugin_dir);
+    }
+
+    $plugin_basename = basename($plugin_file, '.php');
+
+    if ($plugin_basename !== '') {
+        return sanitize_title($plugin_basename);
+    }
+
+    return '';
 }
 
 function sitepulse_plugin_dir_scan_enqueue($dir) {
