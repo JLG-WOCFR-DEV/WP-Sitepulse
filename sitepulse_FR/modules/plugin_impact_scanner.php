@@ -411,9 +411,9 @@ function sitepulse_plugin_impact_scanner_page() {
                         $impact_output = implode('<br />', array_map('esc_html', $impact_lines));
                     ?>
                     <tr>
-                        <td><strong><?php echo esc_html($data['name']); ?></strong></td>
-                        <td><?php echo $impact_output; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></td>
-                        <td>
+                        <td data-colname="<?php echo esc_attr__('Plugin', 'sitepulse'); ?>"><strong><?php echo esc_html($data['name']); ?></strong></td>
+                        <td data-colname="<?php echo esc_attr__('Durée mesurée', 'sitepulse'); ?>"><?php echo $impact_output; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></td>
+                        <td data-colname="<?php echo esc_attr__('Espace disque', 'sitepulse'); ?>">
                             <?php
                             if (isset($data['disk_space_status']) && $data['disk_space_status'] === 'pending') {
                                 echo esc_html__('en cours…', 'sitepulse');
@@ -422,7 +422,7 @@ function sitepulse_plugin_impact_scanner_page() {
                             }
                             ?>
                         </td>
-                        <td>
+                        <td data-colname="<?php echo esc_attr__('Poids relatif', 'sitepulse'); ?>">
                             <?php if ($weight !== null) : ?>
                                 <div class="impact-bar-bg">
                                     <div class="impact-bar" style="width: <?php echo esc_attr(min(100, $weight)); ?>%; background-color: <?php echo esc_attr($weight_color); ?>;">
