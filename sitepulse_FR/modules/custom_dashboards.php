@@ -157,6 +157,32 @@ function sitepulse_custom_dashboards_page() {
         'purple'   => '#9C27B0',
     ];
 
+    $status_labels = [
+        'status-ok'   => [
+            'label' => __('Bon', 'sitepulse'),
+            'sr'    => __('Statut : bon', 'sitepulse'),
+            'icon'  => '✔️',
+        ],
+        'status-warn' => [
+            'label' => __('Attention', 'sitepulse'),
+            'sr'    => __('Statut : attention', 'sitepulse'),
+            'icon'  => '⚠️',
+        ],
+        'status-bad'  => [
+            'label' => __('Critique', 'sitepulse'),
+            'sr'    => __('Statut : critique', 'sitepulse'),
+            'icon'  => '⛔',
+        ],
+    ];
+
+    $get_status_meta = static function ($status) use ($status_labels) {
+        if (isset($status_labels[$status])) {
+            return $status_labels[$status];
+        }
+
+        return $status_labels['status-warn'];
+    };
+
     $charts_payload = [];
     $speed_card = null;
 
@@ -509,22 +535,15 @@ function sitepulse_custom_dashboards_page() {
         .sitepulse-chart-container { position: relative; height: 220px; margin: 0 0 16px; }
         .sitepulse-chart-container canvas { width: 100% !important; height: 100% !important; }
         .sitepulse-chart-empty { text-align: center; color: #666; padding: 48px 16px; border: 1px dashed #d9d9d9; border-radius: 6px; font-size: 13px; }
-        .sitepulse-metric { margin: 0; font-size: 28px; font-weight: 600; display: inline-flex; align-items: baseline; }
-        .sitepulse-metric-unit { font-size: 12px; text-transform: uppercase; margin-left: 6px; color: #757575; letter-spacing: 0.05em; }
-        .sitepulse-card .status-ok,
-        .sitepulse-card .status-warn,
-        .sitepulse-card .status-bad {
-            display: inline-flex;
-            align-items: baseline;
-            padding: 0.2em 0.75em;
-            border-radius: 999px;
-            font-weight: 600;
-            line-height: 1.4;
-            color: #fff;
-        }
-        .sitepulse-card .status-ok { background-color: <?php echo esc_attr($palette['green']); ?>; }
-        .sitepulse-card .status-warn { background-color: <?php echo esc_attr($palette['amber']); ?>; }
-        .sitepulse-card .status-bad { background-color: <?php echo esc_attr($palette['red']); ?>; }
+        .sitepulse-metric { margin: 0; font-size: 28px; font-weight: 600; display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .sitepulse-metric-value { display: inline-flex; align-items: baseline; gap: 6px; }
+        .sitepulse-metric-unit { font-size: 12px; text-transform: uppercase; color: #757575; letter-spacing: 0.05em; }
+        .status-badge { display: inline-flex; align-items: center; gap: 0.35em; padding: 0.2em 0.75em; border-radius: 999px; font-size: 13px; font-weight: 600; line-height: 1.4; color: #fff; }
+        .status-icon { font-size: 1em; line-height: 1; }
+        .status-badge.status-ok { background-color: <?php echo esc_attr($palette['green']); ?>; }
+        .status-badge.status-warn { background-color: <?php echo esc_attr($palette['amber']); ?>; }
+        .status-badge.status-bad { background-color: <?php echo esc_attr($palette['red']); ?>; }
+        .screen-reader-text { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
         .sitepulse-legend { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
         .sitepulse-legend li { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
         .sitepulse-legend .label { display: flex; align-items: center; gap: 8px; }
@@ -547,7 +566,15 @@ function sitepulse_custom_dashboards_page() {
                     <div class="sitepulse-chart-container">
                         <canvas id="sitepulse-speed-chart" aria-describedby="sitepulse-speed-description"></canvas>
                     </div>
-                    <p class="sitepulse-metric <?php echo esc_attr($speed_card['status']); ?>"><?php echo esc_html($speed_card['display']); ?></p>
+                    <?php $speed_status_meta = $get_status_meta($speed_card['status']); ?>
+                    <p class="sitepulse-metric">
+                        <span class="status-badge <?php echo esc_attr($speed_card['status']); ?>" aria-hidden="true">
+                            <span class="status-icon"><?php echo esc_html($speed_status_meta['icon']); ?></span>
+                            <span class="status-text"><?php echo esc_html($speed_status_meta['label']); ?></span>
+                        </span>
+                        <span class="screen-reader-text"><?php echo esc_html($speed_status_meta['sr']); ?></span>
+                        <span class="sitepulse-metric-value"><?php echo esc_html($speed_card['display']); ?></span>
+                    </p>
                     <p id="sitepulse-speed-description" class="description"><?php esc_html_e('Under 200ms indicates an excellent PHP response. Above 500ms suggests investigating plugins or hosting performance.', 'sitepulse'); ?></p>
                 </div>
             <?php endif; ?>
@@ -562,7 +589,15 @@ function sitepulse_custom_dashboards_page() {
                     <div class="sitepulse-chart-container">
                         <canvas id="sitepulse-uptime-chart" aria-describedby="sitepulse-uptime-description"></canvas>
                     </div>
-                    <p class="sitepulse-metric <?php echo esc_attr($uptime_card['status']); ?>"><?php echo esc_html(round($uptime_card['percentage'], 2)); ?>%</p>
+                    <?php $uptime_status_meta = $get_status_meta($uptime_card['status']); ?>
+                    <p class="sitepulse-metric">
+                        <span class="status-badge <?php echo esc_attr($uptime_card['status']); ?>" aria-hidden="true">
+                            <span class="status-icon"><?php echo esc_html($uptime_status_meta['icon']); ?></span>
+                            <span class="status-text"><?php echo esc_html($uptime_status_meta['label']); ?></span>
+                        </span>
+                        <span class="screen-reader-text"><?php echo esc_html($uptime_status_meta['sr']); ?></span>
+                        <span class="sitepulse-metric-value"><?php echo esc_html(round($uptime_card['percentage'], 2)); ?><span class="sitepulse-metric-unit"><?php esc_html_e('%', 'sitepulse'); ?></span></span>
+                    </p>
                     <p id="sitepulse-uptime-description" class="description"><?php esc_html_e('Each bar shows whether the site responded during the scheduled availability probe.', 'sitepulse'); ?></p>
                 </div>
             <?php endif; ?>
@@ -577,9 +612,17 @@ function sitepulse_custom_dashboards_page() {
                     <div class="sitepulse-chart-container">
                         <canvas id="sitepulse-database-chart" aria-describedby="sitepulse-database-description"></canvas>
                     </div>
-                    <p class="sitepulse-metric <?php echo esc_attr($database_card['status']); ?>">
-                        <?php echo esc_html(number_format_i18n($database_card['revisions'])); ?>
-                        <span class="sitepulse-metric-unit"><?php esc_html_e('revisions', 'sitepulse'); ?></span>
+                    <?php $database_status_meta = $get_status_meta($database_card['status']); ?>
+                    <p class="sitepulse-metric">
+                        <span class="status-badge <?php echo esc_attr($database_card['status']); ?>" aria-hidden="true">
+                            <span class="status-icon"><?php echo esc_html($database_status_meta['icon']); ?></span>
+                            <span class="status-text"><?php echo esc_html($database_status_meta['label']); ?></span>
+                        </span>
+                        <span class="screen-reader-text"><?php echo esc_html($database_status_meta['sr']); ?></span>
+                        <span class="sitepulse-metric-value">
+                            <?php echo esc_html(number_format_i18n($database_card['revisions'])); ?>
+                            <span class="sitepulse-metric-unit"><?php esc_html_e('revisions', 'sitepulse'); ?></span>
+                        </span>
                     </p>
                     <p id="sitepulse-database-description" class="description"><?php printf(esc_html__('Keep revisions under %d to avoid bloating the posts table. Cleaning them is safe and reversible with backups.', 'sitepulse'), (int) $database_card['limit']); ?></p>
                 </div>
@@ -595,7 +638,15 @@ function sitepulse_custom_dashboards_page() {
                     <div class="sitepulse-chart-container">
                         <canvas id="sitepulse-log-chart" aria-describedby="sitepulse-log-description"></canvas>
                     </div>
-                    <p class="sitepulse-metric <?php echo esc_attr($logs_card['status']); ?>"><?php echo esc_html($logs_card['summary']); ?></p>
+                    <?php $logs_status_meta = $get_status_meta($logs_card['status']); ?>
+                    <p class="sitepulse-metric">
+                        <span class="status-badge <?php echo esc_attr($logs_card['status']); ?>" aria-hidden="true">
+                            <span class="status-icon"><?php echo esc_html($logs_status_meta['icon']); ?></span>
+                            <span class="status-text"><?php echo esc_html($logs_status_meta['label']); ?></span>
+                        </span>
+                        <span class="screen-reader-text"><?php echo esc_html($logs_status_meta['sr']); ?></span>
+                        <span class="sitepulse-metric-value"><?php echo esc_html($logs_card['summary']); ?></span>
+                    </p>
                     <ul class="sitepulse-legend">
                         <li>
                             <span class="label"><span class="badge" style="background-color: <?php echo esc_attr($palette['red']); ?>;"></span><?php esc_html_e('Fatal errors', 'sitepulse'); ?></span>
