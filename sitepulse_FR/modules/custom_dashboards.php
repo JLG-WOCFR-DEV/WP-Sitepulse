@@ -148,10 +148,10 @@ function sitepulse_custom_dashboards_page() {
     }
 
     $palette = [
-        'green'    => '#4CAF50',
-        'amber'    => '#FFC107',
-        'red'      => '#F44336',
-        'deep_red' => '#D32F2F',
+        'green'    => '#0b6d2a',
+        'amber'    => '#8a6100',
+        'red'      => '#a0141e',
+        'deep_red' => '#7f1018',
         'blue'     => '#2196F3',
         'grey'     => '#E0E0E0',
         'purple'   => '#9C27B0',
@@ -509,11 +509,22 @@ function sitepulse_custom_dashboards_page() {
         .sitepulse-chart-container { position: relative; height: 220px; margin: 0 0 16px; }
         .sitepulse-chart-container canvas { width: 100% !important; height: 100% !important; }
         .sitepulse-chart-empty { text-align: center; color: #666; padding: 48px 16px; border: 1px dashed #d9d9d9; border-radius: 6px; font-size: 13px; }
-        .sitepulse-metric { margin: 0; font-size: 28px; font-weight: 600; }
+        .sitepulse-metric { margin: 0; font-size: 28px; font-weight: 600; display: inline-flex; align-items: baseline; }
         .sitepulse-metric-unit { font-size: 12px; text-transform: uppercase; margin-left: 6px; color: #757575; letter-spacing: 0.05em; }
-        .sitepulse-card .status-ok { color: <?php echo esc_attr($palette['green']); ?>; }
-        .sitepulse-card .status-warn { color: <?php echo esc_attr($palette['amber']); ?>; }
-        .sitepulse-card .status-bad { color: <?php echo esc_attr($palette['red']); ?>; }
+        .sitepulse-card .status-ok,
+        .sitepulse-card .status-warn,
+        .sitepulse-card .status-bad {
+            display: inline-flex;
+            align-items: baseline;
+            padding: 0.2em 0.75em;
+            border-radius: 999px;
+            font-weight: 600;
+            line-height: 1.4;
+            color: #fff;
+        }
+        .sitepulse-card .status-ok { background-color: <?php echo esc_attr($palette['green']); ?>; }
+        .sitepulse-card .status-warn { background-color: <?php echo esc_attr($palette['amber']); ?>; }
+        .sitepulse-card .status-bad { background-color: <?php echo esc_attr($palette['red']); ?>; }
         .sitepulse-legend { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
         .sitepulse-legend li { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
         .sitepulse-legend .label { display: flex; align-items: center; gap: 8px; }
