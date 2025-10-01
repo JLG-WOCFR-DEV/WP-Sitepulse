@@ -12,6 +12,20 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
     private $http_queue = [];
 
     /**
+     * Last captured HTTP arguments.
+     *
+     * @var array
+     */
+    private $last_http_args = [];
+
+    /**
+     * Last captured HTTP URL.
+     *
+     * @var string
+     */
+    private $last_http_url = '';
+
+    /**
      * Registers the module under test.
      */
     public static function wpSetUpBeforeClass($factory) {
@@ -24,6 +38,8 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         parent::set_up();
 
         $this->http_queue = [];
+        $this->last_http_args = [];
+        $this->last_http_url = '';
         $GLOBALS['sitepulse_logger'] = [];
 
         add_filter('pre_http_request', [$this, 'mock_http_request'], 10, 3);
@@ -32,6 +48,8 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         delete_option(SITEPULSE_OPTION_UPTIME_LOG);
         delete_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK);
         delete_option(SITEPULSE_OPTION_UPTIME_ARCHIVE);
+        delete_option(SITEPULSE_OPTION_UPTIME_URL);
+        delete_option(SITEPULSE_OPTION_UPTIME_TIMEOUT);
     }
 
     protected function tear_down(): void {
@@ -41,6 +59,8 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         delete_option(SITEPULSE_OPTION_UPTIME_LOG);
         delete_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK);
         delete_option(SITEPULSE_OPTION_UPTIME_ARCHIVE);
+        delete_option(SITEPULSE_OPTION_UPTIME_URL);
+        delete_option(SITEPULSE_OPTION_UPTIME_TIMEOUT);
 
         parent::tear_down();
     }
@@ -64,6 +84,9 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         if (empty($this->http_queue)) {
             $this->fail('Unexpected HTTP request; the queue is empty.');
         }
+
+        $this->last_http_args = $args;
+        $this->last_http_url = $url;
 
         return array_shift($this->http_queue);
     }
@@ -131,6 +154,20 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
         $this->assertFalse($log[2]['status']);
         $this->assertSame($incident_start, $log[2]['incident_start']);
+    }
+
+    public function test_custom_uptime_settings_are_used_when_defined() {
+        update_option(SITEPULSE_OPTION_UPTIME_URL, 'https://status.example.test/ping');
+        update_option(SITEPULSE_OPTION_UPTIME_TIMEOUT, 25);
+
+        $this->enqueue_response(['response' => ['code' => 200]]);
+        sitepulse_run_uptime_check();
+
+        $this->assertSame('https://status.example.test/ping', $this->last_http_url);
+        $this->assertIsArray($this->last_http_args);
+        $this->assertArrayHasKey('timeout', $this->last_http_args);
+        $this->assertSame(25, $this->last_http_args['timeout']);
+        $this->assertArrayHasKey('sslverify', $this->last_http_args);
     }
 
     public function test_run_updates_daily_archive() {

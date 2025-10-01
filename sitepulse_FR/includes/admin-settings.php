@@ -133,6 +133,12 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_ALERT_RECIPIENTS, [
         'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_alert_recipients', 'default' => []
     ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_URL, [
+        'type' => 'string', 'sanitize_callback' => 'esc_url_raw', 'default' => ''
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_TIMEOUT, [
+        'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_uptime_timeout', 'default' => SITEPULSE_DEFAULT_UPTIME_TIMEOUT
+    ]);
 }
 add_action('admin_init', 'sitepulse_register_settings');
 
@@ -322,6 +328,28 @@ function sitepulse_sanitize_alert_recipients($value) {
 }
 
 /**
+ * Sanitizes the timeout (in seconds) used for uptime checks.
+ *
+ * @param mixed $value Raw user input value.
+ * @return int Validated timeout value.
+ */
+function sitepulse_sanitize_uptime_timeout($value) {
+    $default = defined('SITEPULSE_DEFAULT_UPTIME_TIMEOUT') ? (int) SITEPULSE_DEFAULT_UPTIME_TIMEOUT : 10;
+
+    if (!is_scalar($value)) {
+        return $default;
+    }
+
+    $value = (int) $value;
+
+    if ($value < 1) {
+        return $default;
+    }
+
+    return $value;
+}
+
+/**
  * Renders the settings page.
  */
 function sitepulse_settings_page() {
@@ -360,6 +388,15 @@ function sitepulse_settings_page() {
     $active_modules = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
     $debug_mode_option = get_option(SITEPULSE_OPTION_DEBUG_MODE);
     $is_debug_mode_enabled = rest_sanitize_boolean($debug_mode_option);
+    $uptime_url_option = get_option(SITEPULSE_OPTION_UPTIME_URL, '');
+    $uptime_url = '';
+
+    if (is_string($uptime_url_option)) {
+        $uptime_url = trim($uptime_url_option);
+    }
+
+    $uptime_timeout_option = get_option(SITEPULSE_OPTION_UPTIME_TIMEOUT, SITEPULSE_DEFAULT_UPTIME_TIMEOUT);
+    $uptime_timeout = sitepulse_sanitize_uptime_timeout($uptime_timeout_option);
 
     if (isset($_POST[SITEPULSE_NONCE_FIELD_CLEANUP]) && wp_verify_nonce($_POST[SITEPULSE_NONCE_FIELD_CLEANUP], SITEPULSE_NONCE_ACTION_CLEANUP)) {
         $filesystem = sitepulse_get_filesystem();
@@ -403,6 +440,8 @@ function sitepulse_settings_page() {
                 SITEPULSE_OPTION_DEBUG_MODE,
                 SITEPULSE_OPTION_GEMINI_API_KEY,
                 SITEPULSE_OPTION_UPTIME_LOG,
+                SITEPULSE_OPTION_UPTIME_URL,
+                SITEPULSE_OPTION_UPTIME_TIMEOUT,
                 SITEPULSE_OPTION_LAST_LOAD_TIME,
                 SITEPULSE_OPTION_CPU_ALERT_THRESHOLD,
                 SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES,
@@ -625,6 +664,25 @@ function sitepulse_settings_page() {
                             <?php endforeach; ?>
                         </select>
                         <p class="description"><?php esc_html_e('Détermine la fréquence des vérifications automatisées pour les alertes.', 'sitepulse'); ?></p>
+                    </td>
+                </tr>
+            </table>
+            <h2><?php esc_html_e('Disponibilité', 'sitepulse'); ?></h2>
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_URL); ?>"><?php esc_html_e('URL à surveiller', 'sitepulse'); ?></label></th>
+                    <td>
+                        <?php $uptime_url_description_id = 'sitepulse-uptime-url-description'; ?>
+                        <input type="url" id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_URL); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_URL); ?>" value="<?php echo esc_attr($uptime_url); ?>" class="regular-text" aria-describedby="<?php echo esc_attr($uptime_url_description_id); ?>">
+                        <p class="description" id="<?php echo esc_attr($uptime_url_description_id); ?>"><?php esc_html_e('Laisser vide pour utiliser automatiquement l’URL principale du site.', 'sitepulse'); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TIMEOUT); ?>"><?php esc_html_e('Délai d’attente (secondes)', 'sitepulse'); ?></label></th>
+                    <td>
+                        <?php $uptime_timeout_description_id = 'sitepulse-uptime-timeout-description'; ?>
+                        <input type="number" min="1" id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TIMEOUT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TIMEOUT); ?>" value="<?php echo esc_attr($uptime_timeout); ?>" class="small-text" aria-describedby="<?php echo esc_attr($uptime_timeout_description_id); ?>">
+                        <p class="description" id="<?php echo esc_attr($uptime_timeout_description_id); ?>"><?php esc_html_e('Nombre de secondes avant de considérer la requête comme échouée.', 'sitepulse'); ?></p>
                     </td>
                 </tr>
             </table>

@@ -521,10 +521,40 @@ function sitepulse_uptime_tracker_page() {
     <?php
 }
 function sitepulse_run_uptime_check() {
+    $default_timeout = defined('SITEPULSE_DEFAULT_UPTIME_TIMEOUT') ? (int) SITEPULSE_DEFAULT_UPTIME_TIMEOUT : 10;
+    $timeout_option = get_option(SITEPULSE_OPTION_UPTIME_TIMEOUT, $default_timeout);
+    $timeout = $default_timeout;
+
+    if (is_numeric($timeout_option)) {
+        $timeout = (int) $timeout_option;
+    }
+
+    if ($timeout < 1) {
+        $timeout = $default_timeout;
+    }
+
+    $configured_url = get_option(SITEPULSE_OPTION_UPTIME_URL, '');
+    $custom_url = '';
+
+    if (is_string($configured_url)) {
+        $configured_url = trim($configured_url);
+
+        if ($configured_url !== '') {
+            $validated_url = wp_http_validate_url($configured_url);
+
+            if ($validated_url) {
+                $custom_url = $validated_url;
+            }
+        }
+    }
+
+    $default_url = home_url();
+    $request_url_default = $custom_url !== '' ? $custom_url : $default_url;
+
     $defaults = [
-        'timeout'   => 10,
+        'timeout'   => $timeout,
         'sslverify' => true,
-        'url'       => home_url(),
+        'url'       => $request_url_default,
     ];
 
     /**
@@ -546,6 +576,19 @@ function sitepulse_run_uptime_check() {
     }
 
     $request_url = isset($request_args['url']) ? $request_args['url'] : $defaults['url'];
+
+    if (!is_string($request_url) || $request_url === '') {
+        $request_url = $defaults['url'];
+    } else {
+        $validated_request_url = wp_http_validate_url($request_url);
+
+        if ($validated_request_url) {
+            $request_url = $validated_request_url;
+        } else {
+            $request_url = $defaults['url'];
+        }
+    }
+
     unset($request_args['url']);
 
     $response = wp_remote_get($request_url, $request_args);

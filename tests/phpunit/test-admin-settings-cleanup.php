@@ -38,6 +38,15 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
         if (!defined('SITEPULSE_OPTION_LAST_LOAD_TIME')) {
             define('SITEPULSE_OPTION_LAST_LOAD_TIME', 'sitepulse_last_load_time');
         }
+        if (!defined('SITEPULSE_OPTION_UPTIME_URL')) {
+            define('SITEPULSE_OPTION_UPTIME_URL', 'sitepulse_uptime_url');
+        }
+        if (!defined('SITEPULSE_OPTION_UPTIME_TIMEOUT')) {
+            define('SITEPULSE_OPTION_UPTIME_TIMEOUT', 'sitepulse_uptime_timeout');
+        }
+        if (!defined('SITEPULSE_DEFAULT_UPTIME_TIMEOUT')) {
+            define('SITEPULSE_DEFAULT_UPTIME_TIMEOUT', 10);
+        }
         if (!defined('SITEPULSE_OPTION_CPU_ALERT_THRESHOLD')) {
             define('SITEPULSE_OPTION_CPU_ALERT_THRESHOLD', 'sitepulse_cpu_alert_threshold');
         }
@@ -137,6 +146,8 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
             SITEPULSE_OPTION_DEBUG_MODE             => '1',
             SITEPULSE_OPTION_GEMINI_API_KEY         => 'key',
             SITEPULSE_OPTION_UPTIME_LOG             => ['bar'],
+            SITEPULSE_OPTION_UPTIME_URL             => 'https://status.example.test/ping',
+            SITEPULSE_OPTION_UPTIME_TIMEOUT         => 42,
             SITEPULSE_OPTION_LAST_LOAD_TIME         => 123,
             SITEPULSE_OPTION_CPU_ALERT_THRESHOLD    => 42,
             SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES => 15,
