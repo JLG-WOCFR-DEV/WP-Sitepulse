@@ -8,13 +8,14 @@
 .impact-bar {
     height: 18px;
     border-radius: 3px;
-    background-color: #FFC107;
+    background-color: #FAD768;
     text-align: right;
-    color: #fff;
+    color: #1F2933;
     padding-right: 5px;
     white-space: nowrap;
     font-size: 12px;
     line-height: 18px;
+    font-weight: 600;
 }
 
 .sitepulse-impact-meta {
