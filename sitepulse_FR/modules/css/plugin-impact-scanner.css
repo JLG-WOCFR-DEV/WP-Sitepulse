@@ -38,3 +38,49 @@
 .sitepulse-impact-table-wrapper table {
     min-width: 640px;
 }
+
+@media (max-width: 782px) {
+    .sitepulse-impact-table-wrapper {
+        overflow-x: visible;
+    }
+
+    .sitepulse-impact-table-wrapper table,
+    .sitepulse-impact-table-wrapper tbody,
+    .sitepulse-impact-table-wrapper tr {
+        display: block;
+        width: auto;
+    }
+
+    .sitepulse-impact-table-wrapper table {
+        min-width: 0;
+    }
+
+    .sitepulse-impact-table-wrapper thead {
+        display: none;
+    }
+
+    .sitepulse-impact-table-wrapper tr {
+        padding: 16px;
+        margin-bottom: 16px;
+        border: 1px solid #E4E7EB;
+        border-radius: 6px;
+        background: #FFFFFF;
+    }
+
+    .sitepulse-impact-table-wrapper td {
+        display: block;
+        padding: 0;
+        margin: 12px 0 0;
+    }
+
+    .sitepulse-impact-table-wrapper td:first-child {
+        margin-top: 0;
+    }
+
+    .sitepulse-impact-table-wrapper td::before {
+        content: attr(data-colname);
+        font-weight: 600;
+        display: block;
+        margin-bottom: 4px;
+    }
+}
