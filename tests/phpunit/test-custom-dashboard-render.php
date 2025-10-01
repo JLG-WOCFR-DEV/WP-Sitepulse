@@ -13,6 +13,10 @@ if (!defined('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS')) {
     define('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS', 'sitepulse_speed_scan_results');
 }
 
+if (!defined('SITEPULSE_OPTION_SPEED_SCAN_HISTORY')) {
+    define('SITEPULSE_OPTION_SPEED_SCAN_HISTORY', 'sitepulse_speed_scan_history');
+}
+
 if (!function_exists('sitepulse_get_capability')) {
     function sitepulse_get_capability() {
         return 'manage_options';
@@ -34,6 +38,7 @@ class Sitepulse_Custom_Dashboard_Render_Test extends WP_UnitTestCase {
         delete_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
         delete_option(SITEPULSE_OPTION_UPTIME_LOG);
         delete_option(SITEPULSE_OPTION_ACTIVE_MODULES);
+        delete_option(SITEPULSE_OPTION_SPEED_SCAN_HISTORY);
 
         $scripts = wp_scripts();
         $scripts->remove('sitepulse-chartjs');
@@ -60,6 +65,25 @@ class Sitepulse_Custom_Dashboard_Render_Test extends WP_UnitTestCase {
             SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS,
             [
                 'server_processing_ms' => 150,
+                'timestamp'            => time(),
+            ]
+        );
+
+        update_option(
+            SITEPULSE_OPTION_SPEED_SCAN_HISTORY,
+            [
+                [
+                    'timestamp'            => time() - HOUR_IN_SECONDS * 3,
+                    'server_processing_ms' => 220,
+                ],
+                [
+                    'timestamp'            => time() - HOUR_IN_SECONDS * 2,
+                    'server_processing_ms' => 180,
+                ],
+                [
+                    'timestamp'            => time() - HOUR_IN_SECONDS,
+                    'server_processing_ms' => 150,
+                ],
             ]
         );
 

@@ -16,6 +16,10 @@ class Sitepulse_Plugin_Impact_Tracker_Test extends WP_UnitTestCase {
         if (!defined('SITEPULSE_OPTION_LAST_LOAD_TIME')) {
             define('SITEPULSE_OPTION_LAST_LOAD_TIME', 'sitepulse_last_load_time');
         }
+
+        if (!defined('SITEPULSE_OPTION_SPEED_SCAN_HISTORY')) {
+            define('SITEPULSE_OPTION_SPEED_SCAN_HISTORY', 'sitepulse_speed_scan_history');
+        }
     }
 
     protected function setUp(): void {
@@ -28,6 +32,7 @@ class Sitepulse_Plugin_Impact_Tracker_Test extends WP_UnitTestCase {
 
         delete_option(SITEPULSE_PLUGIN_IMPACT_OPTION);
         delete_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
+        delete_option(SITEPULSE_OPTION_SPEED_SCAN_HISTORY);
     }
 
     public function test_persist_sanitizes_interval_from_filter(): void {
@@ -110,6 +115,68 @@ class Sitepulse_Plugin_Impact_Tracker_Test extends WP_UnitTestCase {
             $results['timestamp'],
             'A backwards time change should still result in refreshed speed scan results.'
         );
+    }
+
+    public function test_speed_scan_history_respects_window_constraints(): void {
+        global $sitepulse_plugin_impact_tracker_samples, $sitepulse_plugin_impact_tracker_force_persist;
+
+        $sitepulse_plugin_impact_tracker_force_persist = true;
+        $sitepulse_plugin_impact_tracker_samples = [];
+
+        $current_timestamp = 5_000;
+        $initial_history = [
+            [
+                'timestamp'            => $current_timestamp - 400,
+                'server_processing_ms' => 250,
+            ],
+            [
+                'timestamp'            => $current_timestamp - 50,
+                'server_processing_ms' => 180,
+            ],
+        ];
+
+        update_option(SITEPULSE_OPTION_SPEED_SCAN_HISTORY, $initial_history);
+
+        $age_filter = static function () {
+            return 300;
+        };
+
+        $entries_filter = static function () {
+            return 2;
+        };
+
+        add_filter('sitepulse_speed_history_max_age', $age_filter);
+        add_filter('sitepulse_speed_history_max_entries', $entries_filter);
+
+        $current_time_filter = static function ($timestamp, $type, $gmt) use ($current_timestamp) {
+            if ($type === 'timestamp') {
+                return $current_timestamp;
+            }
+
+            return $timestamp;
+        };
+
+        add_filter('current_time', $current_time_filter, 10, 3);
+
+        try {
+            sitepulse_plugin_impact_tracker_persist();
+        } finally {
+            remove_filter('current_time', $current_time_filter, 10);
+            remove_filter('sitepulse_speed_history_max_age', $age_filter);
+            remove_filter('sitepulse_speed_history_max_entries', $entries_filter);
+        }
+
+        $history = get_option(SITEPULSE_OPTION_SPEED_SCAN_HISTORY, []);
+
+        $this->assertIsArray($history, 'Speed scan history should persist as an array.');
+        $this->assertCount(2, $history, 'Speed scan history should respect the configured maximum length.');
+
+        $timestamps = wp_list_pluck($history, 'timestamp');
+
+        sort($timestamps);
+
+        $this->assertSame($current_timestamp - 50, $timestamps[0], 'Entries older than the configured TTL should be purged.');
+        $this->assertSame($current_timestamp, $timestamps[1], 'The latest measurement should be appended to the history.');
     }
 }
 
