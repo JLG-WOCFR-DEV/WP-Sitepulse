@@ -11,6 +11,18 @@
     margin-top: 0;
 }
 
+.sitepulse-ai-insight-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.sitepulse-ai-force-refresh {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .sitepulse-ai-error {
     display: none;
 }
@@ -122,5 +134,22 @@
     .sitepulse-ai-result,
     .sitepulse-ai-history {
         border-width: 2px;
+    }
+}
+
+@media (max-width: 600px) {
+    .sitepulse-ai-insight-actions {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .sitepulse-ai-insight-actions .button,
+    .sitepulse-ai-insight-actions .button-primary,
+    .sitepulse-ai-insight-actions .button-secondary {
+        width: 100%;
+    }
+
+    .sitepulse-ai-force-refresh {
+        width: 100%;
     }
 }
