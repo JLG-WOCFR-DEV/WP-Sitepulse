@@ -154,6 +154,22 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
             SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES => 15,
             SITEPULSE_OPTION_ALERT_INTERVAL         => 10,
             SITEPULSE_OPTION_ALERT_RECIPIENTS       => ['test@example.com'],
+            SITEPULSE_OPTION_IMPACT_THRESHOLDS      => [
+                'default' => [
+                    'impactWarning'  => 30.0,
+                    'impactCritical' => 60.0,
+                    'weightWarning'  => 10.0,
+                    'weightCritical' => 20.0,
+                ],
+                'roles'   => [
+                    'editor' => [
+                        'impactWarning'  => 25.0,
+                        'impactCritical' => 55.0,
+                        'weightWarning'  => 8.0,
+                        'weightCritical' => 18.0,
+                    ],
+                ],
+            ],
             SITEPULSE_PLUGIN_IMPACT_OPTION          => ['payload'],
         ];
 
