@@ -60,20 +60,35 @@ function sitepulse_speed_analyzer_page() {
 
     $default_speed_warning = defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200;
     $default_speed_critical = defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? (int) SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500;
+    $speed_warning_threshold = $default_speed_warning;
+    $speed_critical_threshold = $default_speed_critical;
 
     if (function_exists('sitepulse_get_speed_thresholds')) {
-        $speed_thresholds = sitepulse_get_speed_thresholds();
-        $speed_warning_threshold = isset($speed_thresholds['warning']) ? (int) $speed_thresholds['warning'] : $default_speed_warning;
-        $speed_critical_threshold = isset($speed_thresholds['critical']) ? (int) $speed_thresholds['critical'] : $default_speed_critical;
+        $fetched_thresholds = sitepulse_get_speed_thresholds();
+
+        if (is_array($fetched_thresholds)) {
+            if (isset($fetched_thresholds['warning']) && is_numeric($fetched_thresholds['warning'])) {
+                $speed_warning_threshold = (int) $fetched_thresholds['warning'];
+            }
+
+            if (isset($fetched_thresholds['critical']) && is_numeric($fetched_thresholds['critical'])) {
+                $speed_critical_threshold = (int) $fetched_thresholds['critical'];
+            }
+        }
     } else {
-        $speed_warning_threshold = (int) get_option(
-            defined('SITEPULSE_OPTION_SPEED_WARNING_MS') ? SITEPULSE_OPTION_SPEED_WARNING_MS : 'sitepulse_speed_warning_ms',
-            $default_speed_warning
-        );
-        $speed_critical_threshold = (int) get_option(
-            defined('SITEPULSE_OPTION_SPEED_CRITICAL_MS') ? SITEPULSE_OPTION_SPEED_CRITICAL_MS : 'sitepulse_speed_critical_ms',
-            $default_speed_critical
-        );
+        $warning_option_key = defined('SITEPULSE_OPTION_SPEED_WARNING_MS') ? SITEPULSE_OPTION_SPEED_WARNING_MS : 'sitepulse_speed_warning_ms';
+        $critical_option_key = defined('SITEPULSE_OPTION_SPEED_CRITICAL_MS') ? SITEPULSE_OPTION_SPEED_CRITICAL_MS : 'sitepulse_speed_critical_ms';
+
+        $stored_warning = get_option($warning_option_key, $default_speed_warning);
+        $stored_critical = get_option($critical_option_key, $default_speed_critical);
+
+        if (is_numeric($stored_warning)) {
+            $speed_warning_threshold = (int) $stored_warning;
+        }
+
+        if (is_numeric($stored_critical)) {
+            $speed_critical_threshold = (int) $stored_critical;
+        }
     }
 
     if ($speed_warning_threshold < 1) {

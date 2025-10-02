@@ -398,12 +398,36 @@ function sitepulse_custom_dashboards_page() {
             'critical' => defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? (int) SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500,
         ];
 
-        $speed_thresholds = function_exists('sitepulse_get_speed_thresholds')
-            ? sitepulse_get_speed_thresholds()
-            : $default_speed_thresholds;
+        $speed_warning_threshold = $default_speed_thresholds['warning'];
+        $speed_critical_threshold = $default_speed_thresholds['critical'];
 
-        $speed_warning_threshold = isset($speed_thresholds['warning']) ? (int) $speed_thresholds['warning'] : $default_speed_thresholds['warning'];
-        $speed_critical_threshold = isset($speed_thresholds['critical']) ? (int) $speed_thresholds['critical'] : $default_speed_thresholds['critical'];
+        if (function_exists('sitepulse_get_speed_thresholds')) {
+            $fetched_thresholds = sitepulse_get_speed_thresholds();
+
+            if (is_array($fetched_thresholds)) {
+                if (isset($fetched_thresholds['warning']) && is_numeric($fetched_thresholds['warning'])) {
+                    $speed_warning_threshold = (int) $fetched_thresholds['warning'];
+                }
+
+                if (isset($fetched_thresholds['critical']) && is_numeric($fetched_thresholds['critical'])) {
+                    $speed_critical_threshold = (int) $fetched_thresholds['critical'];
+                }
+            }
+        } else {
+            $warning_option_key = defined('SITEPULSE_OPTION_SPEED_WARNING_MS') ? SITEPULSE_OPTION_SPEED_WARNING_MS : 'sitepulse_speed_warning_ms';
+            $critical_option_key = defined('SITEPULSE_OPTION_SPEED_CRITICAL_MS') ? SITEPULSE_OPTION_SPEED_CRITICAL_MS : 'sitepulse_speed_critical_ms';
+
+            $stored_warning = get_option($warning_option_key, $default_speed_thresholds['warning']);
+            $stored_critical = get_option($critical_option_key, $default_speed_thresholds['critical']);
+
+            if (is_numeric($stored_warning)) {
+                $speed_warning_threshold = (int) $stored_warning;
+            }
+
+            if (is_numeric($stored_critical)) {
+                $speed_critical_threshold = (int) $stored_critical;
+            }
+        }
 
         if ($speed_warning_threshold < 1) {
             $speed_warning_threshold = $default_speed_thresholds['warning'];
@@ -521,13 +545,17 @@ function sitepulse_custom_dashboards_page() {
         }));
         $uptime_percentage = $evaluated_checks > 0 ? ($up_checks / $evaluated_checks) * 100 : 100;
         $default_uptime_warning = defined('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT') ? (float) SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT : 99.0;
+        $uptime_warning_threshold = $default_uptime_warning;
 
         if (function_exists('sitepulse_get_uptime_warning_percentage')) {
             $uptime_warning_threshold = (float) sitepulse_get_uptime_warning_percentage();
         } else {
             $uptime_warning_key = defined('SITEPULSE_OPTION_UPTIME_WARNING_PERCENT') ? SITEPULSE_OPTION_UPTIME_WARNING_PERCENT : 'sitepulse_uptime_warning_percent';
             $stored_threshold = get_option($uptime_warning_key, $default_uptime_warning);
-            $uptime_warning_threshold = is_scalar($stored_threshold) ? (float) $stored_threshold : $default_uptime_warning;
+
+            if (is_scalar($stored_threshold)) {
+                $uptime_warning_threshold = (float) $stored_threshold;
+            }
         }
 
         if ($uptime_warning_threshold < 0) {
@@ -599,13 +627,17 @@ function sitepulse_custom_dashboards_page() {
     if ($is_database_enabled) {
         $revisions = (int) $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->posts WHERE post_type = 'revision'");
         $default_revision_limit = defined('SITEPULSE_DEFAULT_REVISION_LIMIT') ? (int) SITEPULSE_DEFAULT_REVISION_LIMIT : 100;
+        $revision_limit = $default_revision_limit;
 
         if (function_exists('sitepulse_get_revision_limit')) {
             $revision_limit = (int) sitepulse_get_revision_limit();
         } else {
             $revision_option_key = defined('SITEPULSE_OPTION_REVISION_LIMIT') ? SITEPULSE_OPTION_REVISION_LIMIT : 'sitepulse_revision_limit';
             $stored_limit = get_option($revision_option_key, $default_revision_limit);
-            $revision_limit = is_scalar($stored_limit) ? (int) $stored_limit : $default_revision_limit;
+
+            if (is_scalar($stored_limit)) {
+                $revision_limit = (int) $stored_limit;
+            }
         }
 
         if ($revision_limit < 1) {
