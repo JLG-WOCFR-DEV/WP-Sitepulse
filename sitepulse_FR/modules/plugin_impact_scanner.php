@@ -45,23 +45,71 @@ function sitepulse_plugin_impact_enqueue_assets($hook_suffix) {
         true
     );
 
-    $default_thresholds = [
-        'impactWarning'  => 30.0,
-        'impactCritical' => 60.0,
-        'weightWarning'  => 10.0,
-        'weightCritical' => 20.0,
+    $default_thresholds = function_exists('sitepulse_get_default_plugin_impact_thresholds')
+        ? sitepulse_get_default_plugin_impact_thresholds()
+        : [
+            'impactWarning'  => 30.0,
+            'impactCritical' => 60.0,
+            'weightWarning'  => 10.0,
+            'weightCritical' => 20.0,
+        ];
+
+    $stored_thresholds = [
+        'default' => $default_thresholds,
+        'roles'   => [],
     ];
 
-    $thresholds = apply_filters('sitepulse_plugin_impact_highlight_thresholds', $default_thresholds);
+    if (defined('SITEPULSE_OPTION_IMPACT_THRESHOLDS')) {
+        $option_value = get_option(
+            SITEPULSE_OPTION_IMPACT_THRESHOLDS,
+            [
+                'default' => $default_thresholds,
+                'roles'   => [],
+            ]
+        );
 
-    if (!is_array($thresholds)) {
-        $thresholds = $default_thresholds;
+        if (is_array($option_value)) {
+            $stored_thresholds = $option_value;
+        }
     }
 
-    $thresholds = wp_parse_args($thresholds, $default_thresholds);
+    if (function_exists('sitepulse_sanitize_impact_thresholds')) {
+        $stored_thresholds = sitepulse_sanitize_impact_thresholds($stored_thresholds);
+    }
 
-    foreach ($thresholds as $key => $value) {
-        $thresholds[$key] = is_numeric($value) ? (float) $value : $default_thresholds[$key];
+    $effective_thresholds = isset($stored_thresholds['default']) && is_array($stored_thresholds['default'])
+        ? $stored_thresholds['default']
+        : $default_thresholds;
+
+    if (isset($stored_thresholds['roles']) && is_array($stored_thresholds['roles'])) {
+        $current_user = function_exists('wp_get_current_user') ? wp_get_current_user() : null;
+
+        if ($current_user instanceof WP_User) {
+            foreach ((array) $current_user->roles as $role) {
+                $role_key = sanitize_key($role);
+
+                if ($role_key !== '' && isset($stored_thresholds['roles'][$role_key])) {
+                    $effective_thresholds = $stored_thresholds['roles'][$role_key];
+                    break;
+                }
+            }
+        }
+    }
+
+    $thresholds = apply_filters('sitepulse_plugin_impact_highlight_thresholds', $effective_thresholds);
+
+    if (function_exists('sitepulse_normalize_impact_threshold_set')) {
+        $thresholds = sitepulse_normalize_impact_threshold_set($thresholds, $default_thresholds);
+    } else {
+        if (!is_array($thresholds)) {
+            $thresholds = $default_thresholds;
+        }
+
+        $thresholds = wp_parse_args($thresholds, $default_thresholds);
+
+        foreach ($thresholds as $key => $value) {
+            $thresholds[$key] = is_numeric($value) ? (float) $value : $default_thresholds[$key];
+        }
     }
 
     wp_localize_script(

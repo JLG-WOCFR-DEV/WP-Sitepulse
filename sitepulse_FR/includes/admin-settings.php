@@ -174,6 +174,14 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_SPEED_CRITICAL_MS, [
         'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_speed_critical_threshold', 'default' => SITEPULSE_DEFAULT_SPEED_CRITICAL_MS
     ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_IMPACT_THRESHOLDS, [
+        'type'              => 'array',
+        'sanitize_callback' => 'sitepulse_sanitize_impact_thresholds',
+        'default'           => [
+            'default' => sitepulse_get_default_plugin_impact_thresholds(),
+            'roles'   => [],
+        ],
+    ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_WARNING_PERCENT, [
         'type' => 'number', 'sanitize_callback' => 'sitepulse_sanitize_uptime_warning_percent', 'default' => SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT
     ]);
@@ -456,6 +464,164 @@ function sitepulse_sanitize_speed_critical_threshold($value) {
 }
 
 /**
+ * Returns the default thresholds used for plugin impact highlighting.
+ *
+ * @return array<string,float>
+ */
+function sitepulse_get_default_plugin_impact_thresholds() {
+    return [
+        'impactWarning'  => 30.0,
+        'impactCritical' => 60.0,
+        'weightWarning'  => 10.0,
+        'weightCritical' => 20.0,
+    ];
+}
+
+/**
+ * Normalizes a single set of impact thresholds.
+ *
+ * @param mixed $thresholds Raw user input.
+ * @param array $fallback   Fallback values when entries are missing.
+ *
+ * @return array<string,float>
+ */
+function sitepulse_normalize_impact_threshold_set($thresholds, $fallback = []) {
+    $defaults = sitepulse_get_default_plugin_impact_thresholds();
+    $fallback = wp_parse_args(is_array($fallback) ? $fallback : [], $defaults);
+    $thresholds = is_array($thresholds) ? $thresholds : [];
+
+    $impact_warning = sitepulse_sanitize_impact_threshold_number(
+        array_key_exists('impactWarning', $thresholds) ? $thresholds['impactWarning'] : $fallback['impactWarning'],
+        $fallback['impactWarning'],
+        $defaults['impactWarning']
+    );
+
+    $impact_critical = sitepulse_sanitize_impact_threshold_number(
+        array_key_exists('impactCritical', $thresholds) ? $thresholds['impactCritical'] : $fallback['impactCritical'],
+        $fallback['impactCritical'],
+        $defaults['impactCritical']
+    );
+
+    if ($impact_critical <= $impact_warning) {
+        $impact_critical = max($impact_warning + 0.1, $fallback['impactCritical'], $defaults['impactCritical']);
+        $impact_critical = round($impact_critical, 2);
+    }
+
+    $weight_warning = sitepulse_sanitize_impact_threshold_number(
+        array_key_exists('weightWarning', $thresholds) ? $thresholds['weightWarning'] : $fallback['weightWarning'],
+        $fallback['weightWarning'],
+        $defaults['weightWarning']
+    );
+
+    $weight_critical = sitepulse_sanitize_impact_threshold_number(
+        array_key_exists('weightCritical', $thresholds) ? $thresholds['weightCritical'] : $fallback['weightCritical'],
+        $fallback['weightCritical'],
+        $defaults['weightCritical']
+    );
+
+    if ($weight_critical <= $weight_warning) {
+        $weight_critical = max($weight_warning + 0.1, $fallback['weightCritical'], $defaults['weightCritical']);
+        $weight_critical = round($weight_critical, 2);
+    }
+
+    $normalized = [
+        'impactWarning'  => (float) min(max($impact_warning, 0.0), 100.0),
+        'impactCritical' => (float) min(max($impact_critical, 0.0), 100.0),
+        'weightWarning'  => (float) min(max($weight_warning, 0.0), 100.0),
+        'weightCritical' => (float) min(max($weight_critical, 0.0), 100.0),
+    ];
+
+    if ($normalized['impactCritical'] <= $normalized['impactWarning']) {
+        $normalized['impactCritical'] = min(100.0, round($normalized['impactWarning'] + 0.1, 2));
+    }
+
+    if ($normalized['weightCritical'] <= $normalized['weightWarning']) {
+        $normalized['weightCritical'] = min(100.0, round($normalized['weightWarning'] + 0.1, 2));
+    }
+
+    return $normalized;
+}
+
+/**
+ * Sanitizes an individual impact threshold value.
+ *
+ * @param mixed $value    Raw input.
+ * @param float $fallback Fallback value when input is invalid.
+ * @param float $default  Hard default value.
+ * @param float $minimum  Minimum accepted value.
+ * @param float $maximum  Maximum accepted value.
+ *
+ * @return float
+ */
+function sitepulse_sanitize_impact_threshold_number($value, $fallback, $default, $minimum = 0.0, $maximum = 100.0) {
+    if (!is_scalar($value) || $value === '') {
+        $value = $fallback;
+    }
+
+    if (!is_scalar($value) || $value === '') {
+        $value = $default;
+    }
+
+    $number = (float) $value;
+
+    if (!is_finite($number)) {
+        $number = (float) $default;
+    }
+
+    if ($number < $minimum) {
+        $number = max($minimum, (float) $default, (float) $fallback);
+    }
+
+    if ($maximum !== null && $number > $maximum) {
+        $number = (float) $maximum;
+    }
+
+    return (float) round($number, 2);
+}
+
+/**
+ * Sanitizes the per-role impact thresholds option.
+ *
+ * @param mixed $value Raw user input value.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_sanitize_impact_thresholds($value) {
+    $defaults = sitepulse_get_default_plugin_impact_thresholds();
+    $value = is_array($value) ? $value : [];
+
+    $sanitized_default = sitepulse_normalize_impact_threshold_set(
+        array_key_exists('default', $value) ? $value['default'] : [],
+        $defaults
+    );
+
+    $sanitized = [
+        'default' => $sanitized_default,
+        'roles'   => [],
+    ];
+
+    if (isset($value['roles']) && is_array($value['roles'])) {
+        foreach ($value['roles'] as $role => $thresholds) {
+            $role_key = sanitize_key($role);
+
+            if ($role_key === '') {
+                continue;
+            }
+
+            $role_thresholds = sitepulse_normalize_impact_threshold_set($thresholds, $sanitized_default);
+
+            if ($role_thresholds === $sanitized_default) {
+                continue;
+            }
+
+            $sanitized['roles'][$role_key] = $role_thresholds;
+        }
+    }
+
+    return $sanitized;
+}
+
+/**
  * Sanitizes the uptime warning threshold percentage.
  *
  * @param mixed $value Raw user input value.
@@ -615,6 +781,57 @@ function sitepulse_settings_page() {
         $speed_critical_threshold = max($speed_warning_threshold + 1, $default_speed_thresholds['critical']);
     }
 
+    $default_plugin_impact_thresholds = sitepulse_get_default_plugin_impact_thresholds();
+    $stored_plugin_impact_thresholds = get_option(
+        SITEPULSE_OPTION_IMPACT_THRESHOLDS,
+        [
+            'default' => $default_plugin_impact_thresholds,
+            'roles'   => [],
+        ]
+    );
+    $plugin_impact_threshold_settings = sitepulse_sanitize_impact_thresholds($stored_plugin_impact_thresholds);
+    $plugin_impact_default_thresholds = isset($plugin_impact_threshold_settings['default'])
+        ? $plugin_impact_threshold_settings['default']
+        : $default_plugin_impact_thresholds;
+    $plugin_impact_role_thresholds = isset($plugin_impact_threshold_settings['roles']) && is_array($plugin_impact_threshold_settings['roles'])
+        ? $plugin_impact_threshold_settings['roles']
+        : [];
+
+    $wp_roles = function_exists('wp_roles') ? wp_roles() : null;
+    $available_roles = [];
+
+    if ($wp_roles instanceof WP_Roles) {
+        $available_roles = $wp_roles->roles;
+    } elseif (function_exists('get_editable_roles')) {
+        $available_roles = get_editable_roles();
+    }
+
+    $plugin_impact_threshold_rows = [
+        [
+            'key'        => 'default',
+            'label'      => esc_html__('Administrateur (valeurs par défaut)', 'sitepulse'),
+            'thresholds' => $plugin_impact_default_thresholds,
+            'is_default' => true,
+        ],
+    ];
+
+    foreach ($available_roles as $role_key => $role_data) {
+        $role_key = sanitize_key($role_key);
+
+        if ($role_key === '' || $role_key === 'administrator') {
+            continue;
+        }
+
+        $role_label = isset($role_data['name']) ? translate_user_role($role_data['name']) : $role_key;
+
+        $plugin_impact_threshold_rows[] = [
+            'key'        => $role_key,
+            'label'      => $role_label,
+            'thresholds' => isset($plugin_impact_role_thresholds[$role_key]) ? $plugin_impact_role_thresholds[$role_key] : $plugin_impact_default_thresholds,
+            'is_default' => false,
+        ];
+    }
+
     $uptime_warning_percent = function_exists('sitepulse_get_uptime_warning_percentage')
         ? (float) sitepulse_get_uptime_warning_percentage()
         : (float) (defined('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT') ? SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT : 99.0);
@@ -685,6 +902,7 @@ function sitepulse_settings_page() {
                 SITEPULSE_OPTION_ALERT_RECIPIENTS,
                 SITEPULSE_OPTION_SPEED_WARNING_MS,
                 SITEPULSE_OPTION_SPEED_CRITICAL_MS,
+                SITEPULSE_OPTION_IMPACT_THRESHOLDS,
                 SITEPULSE_OPTION_UPTIME_WARNING_PERCENT,
                 SITEPULSE_OPTION_REVISION_LIMIT,
                 SITEPULSE_PLUGIN_IMPACT_OPTION,
@@ -906,6 +1124,84 @@ function sitepulse_settings_page() {
                                 esc_html__('Temps de traitement à partir duquel les cartes passent en statut critique. Valeur par défaut : %d ms.', 'sitepulse'),
                                 (int) (defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500)
                             ); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Seuils d’impact des plugins', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <p class="sitepulse-card-description"><?php esc_html_e('Définissez les seuils d’avertissement et critiques utilisés pour mettre en évidence les plugins selon le rôle de l’utilisateur connecté.', 'sitepulse'); ?></p>
+                            <?php
+                            $impact_threshold_field_definitions = [
+                                'impactWarning' => [
+                                    'label'       => __('Impact – avertissement (%)', 'sitepulse'),
+                                    'description' => __('Pourcentage d’impact à partir duquel un plugin passe en statut « attention ».', 'sitepulse'),
+                                ],
+                                'impactCritical' => [
+                                    'label'       => __('Impact – critique (%)', 'sitepulse'),
+                                    'description' => __('Pourcentage d’impact à partir duquel un plugin est marqué critique.', 'sitepulse'),
+                                ],
+                                'weightWarning' => [
+                                    'label'       => __('Poids – avertissement (%)', 'sitepulse'),
+                                    'description' => __('Part du poids total à partir de laquelle un plugin est signalé en attention.', 'sitepulse'),
+                                ],
+                                'weightCritical' => [
+                                    'label'       => __('Poids – critique (%)', 'sitepulse'),
+                                    'description' => __('Part du poids total à partir de laquelle un plugin est signalé critique.', 'sitepulse'),
+                                ],
+                            ];
+                            ?>
+                            <?php foreach ($plugin_impact_threshold_rows as $threshold_row) :
+                                $scope_key = $threshold_row['key'];
+                                $thresholds = $threshold_row['thresholds'];
+                                $fieldset_id = 'sitepulse-impact-thresholds-' . $scope_key;
+                            ?>
+                                <fieldset class="sitepulse-impact-threshold-group" id="<?php echo esc_attr($fieldset_id); ?>">
+                                    <legend><?php echo esc_html($threshold_row['label']); ?></legend>
+                                    <?php if (!empty($threshold_row['is_default'])) : ?>
+                                        <p class="sitepulse-card-note"><?php esc_html_e('Ces valeurs servent de référence et s’appliquent à tous les rôles ne disposant pas d’override.', 'sitepulse'); ?></p>
+                                    <?php else : ?>
+                                        <p class="sitepulse-card-note"><?php esc_html_e('Modifiez ces valeurs pour personnaliser les surlignages pour ce rôle. Si elles correspondent aux valeurs par défaut, aucun override n’est conservé.', 'sitepulse'); ?></p>
+                                    <?php endif; ?>
+                                    <?php foreach ($impact_threshold_field_definitions as $field_key => $field_definition) :
+                                        $field_name = SITEPULSE_OPTION_IMPACT_THRESHOLDS . ($scope_key === 'default' ? '[default]' : '[roles][' . $scope_key . ']') . '[' . $field_key . ']';
+                                        $input_id = SITEPULSE_OPTION_IMPACT_THRESHOLDS . '-' . $scope_key . '-' . $field_key;
+                                        $slider_id = $input_id . '-slider';
+                                        $value = isset($thresholds[$field_key]) ? $thresholds[$field_key] : $plugin_impact_default_thresholds[$field_key];
+                                    ?>
+                                        <div class="sitepulse-impact-threshold-field">
+                                            <label class="sitepulse-field-label" for="<?php echo esc_attr($input_id); ?>"><?php echo esc_html($field_definition['label']); ?></label>
+                                            <div class="sitepulse-impact-threshold-inputs">
+                                                <input
+                                                    type="range"
+                                                    class="sitepulse-impact-threshold-slider"
+                                                    id="<?php echo esc_attr($slider_id); ?>"
+                                                    min="0"
+                                                    max="100"
+                                                    step="0.1"
+                                                    value="<?php echo esc_attr($value); ?>"
+                                                    oninput="document.getElementById('<?php echo esc_js($input_id); ?>').value = this.value;"
+                                                >
+                                                <input
+                                                    type="number"
+                                                    class="small-text"
+                                                    id="<?php echo esc_attr($input_id); ?>"
+                                                    name="<?php echo esc_attr($field_name); ?>"
+                                                    min="0"
+                                                    max="100"
+                                                    step="0.1"
+                                                    value="<?php echo esc_attr($value); ?>"
+                                                    oninput="document.getElementById('<?php echo esc_js($slider_id); ?>').value = this.value;"
+                                                >
+                                            </div>
+                                            <?php if (!empty($field_definition['description'])) : ?>
+                                                <p class="sitepulse-card-description"><?php echo esc_html($field_definition['description']); ?></p>
+                                            <?php endif; ?>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </fieldset>
+                            <?php endforeach; ?>
                         </div>
                     </div>
                     <div class="sitepulse-module-card sitepulse-module-card--setting">
