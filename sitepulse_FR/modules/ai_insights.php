@@ -1378,6 +1378,11 @@ function sitepulse_ai_insights_page() {
     }
 
     ?>
+    <?php
+    if (function_exists('sitepulse_render_module_selector')) {
+        sitepulse_render_module_selector('sitepulse-ai');
+    }
+    ?>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-superhero"></span> <?php esc_html_e('Analyses par IA', 'sitepulse'); ?></h1>
         <p><?php esc_html_e("Obtenez des recommandations personnalisées pour votre site en analysant ses données de performance avec l'IA Gemini de Google.", 'sitepulse'); ?></p>

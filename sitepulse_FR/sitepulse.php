@@ -1149,6 +1149,7 @@ sitepulse_log('SitePulse loaded. Version: ' . SITEPULSE_VERSION);
 
 // Include core files
 require_once SITEPULSE_PATH . 'includes/functions.php';
+require_once SITEPULSE_PATH . 'includes/module-selector.php';
 require_once SITEPULSE_PATH . 'includes/admin-settings.php';
 require_once SITEPULSE_PATH . 'includes/integrations.php';
 require_once SITEPULSE_PATH . 'blocks/dashboard-preview/render.php';

@@ -146,6 +146,11 @@ function sitepulse_speed_analyzer_page() {
     };
 
     ?>
+    <?php
+    if (function_exists('sitepulse_render_module_selector')) {
+        sitepulse_render_module_selector('sitepulse-speed');
+    }
+    ?>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-performance"></span> <?php esc_html_e('Analyseur de Vitesse', 'sitepulse'); ?></h1>
         <p><?php esc_html_e('Cet outil analyse la performance interne de votre serveur et de votre base de données à chaque chargement de page.', 'sitepulse'); ?></p>

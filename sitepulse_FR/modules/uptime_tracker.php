@@ -359,6 +359,11 @@ function sitepulse_uptime_tracker_page() {
     $thirty_day_metrics = sitepulse_calculate_uptime_window_metrics($uptime_archive, 30);
 
     ?>
+    <?php
+    if (function_exists('sitepulse_render_module_selector')) {
+        sitepulse_render_module_selector('sitepulse-uptime');
+    }
+    ?>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-chart-bar"></span> Suivi de Disponibilité</h1>
         <p>Cet outil vérifie la disponibilité de votre site toutes les heures. Voici le statut des <?php echo esc_html($total_checks); ?> dernières vérifications.</p>

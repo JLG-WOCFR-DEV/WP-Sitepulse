@@ -208,7 +208,12 @@ function sitepulse_database_optimizer_page() {
         );
         $transients += $network_transients;
     }
-  ?>
+    ?>
+    <?php
+    if (function_exists('sitepulse_render_module_selector')) {
+        sitepulse_render_module_selector('sitepulse-db');
+    }
+    ?>
       <div class="wrap">
         <h1><span class="dashicons-before dashicons-database"></span> <?php esc_html_e('Database Optimizer', 'sitepulse'); ?></h1>
         <p><?php esc_html_e('Over time, your database can accumulate data that is no longer necessary. This tool helps you clean it up safely.', 'sitepulse'); ?></p>
