@@ -25,6 +25,24 @@ Toggle modules in the admin panel to keep it lightweight. Includes debug mode an
 2. Activate the plugin through the 'Plugins' menu in WordPress.
 3. Visit 'SitePulse' in your admin menu to configure the modules.
 
+## Sécuriser la clé API Gemini
+
+Pour éviter de stocker votre clé API Gemini dans la base de données, vous pouvez la définir directement dans `wp-config.php` :
+
+```php
+define('SITEPULSE_GEMINI_API_KEY', 'votre-cle-secrete');
+```
+
+Lorsque cette constante est présente, SitePulse utilise automatiquement cette valeur, désactive le champ de saisie dans l’interface d’administration et ignore les tentatives d’enregistrement. Vous pouvez également fournir la clé dynamiquement via le filtre `sitepulse_gemini_api_key` si vous la récupérez depuis un gestionnaire de secrets :
+
+```php
+add_filter('sitepulse_gemini_api_key', function () {
+    return getenv('SITEPULSE_GEMINI_API_KEY');
+});
+```
+
+Dans les deux cas, aucune donnée sensible n’est conservée dans la base WordPress.
+
 ## WordPress Compatibility
 
 - Requires at least: 5.0

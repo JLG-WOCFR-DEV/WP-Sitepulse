@@ -552,7 +552,7 @@ function sitepulse_ai_get_error_status_code(WP_Error $error, $default_code = 500
  * @return array{api_key:string,available_models:array<string,mixed>,selected_model:string}|WP_Error
  */
 function sitepulse_ai_prepare_environment() {
-    $api_key = trim((string) get_option(SITEPULSE_OPTION_GEMINI_API_KEY));
+    $api_key = sitepulse_get_gemini_api_key();
 
     if ('' === $api_key) {
         $error_message = esc_html__('Veuillez entrer votre clé API Google Gemini dans les réglages de SitePulse.', 'sitepulse');
@@ -1219,7 +1219,7 @@ function sitepulse_ai_insights_page() {
 
     $wp_cron_disabled = sitepulse_ai_is_wp_cron_disabled();
 
-    $api_key = get_option(SITEPULSE_OPTION_GEMINI_API_KEY);
+    $api_key = sitepulse_get_gemini_api_key();
     $available_models = sitepulse_get_ai_models();
     $default_model = sitepulse_get_default_ai_model();
     $selected_model = (string) get_option(SITEPULSE_OPTION_AI_MODEL, $default_model);
