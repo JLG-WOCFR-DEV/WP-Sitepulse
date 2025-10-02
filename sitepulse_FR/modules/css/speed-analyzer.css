@@ -13,14 +13,14 @@
 }
 
 .speed-card {
-    background: #fff;
+    background: var(--wp-admin-color-gray-0, #ffffff);
     padding: 20px;
-    border: 1px solid #ddd;
+    border: 1px solid var(--wp-admin-color-gray-200, #c3c4c7);
 }
 
 .speed-card h3 {
     margin-top: 0;
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid var(--wp-admin-color-gray-100, #dcdcde);
     padding-bottom: 10px;
     font-size: 16px;
     display: flex;
@@ -35,7 +35,7 @@
 
 .health-list li {
     padding: 10px 0;
-    border-bottom: 1px solid #f0f0f0;
+    border-bottom: 1px solid var(--wp-admin-color-gray-50, #f0f0f1);
     display: flex;
     justify-content: space-between;
     flex-wrap: wrap;
@@ -65,7 +65,7 @@
     border-radius: 999px;
     font-weight: 600;
     line-height: 1.4;
-    color: #fff;
+    color: var(--wp-admin-color-gray-0, #ffffff);
 }
 
 .status-icon {
@@ -83,15 +83,15 @@
 }
 
 .status-badge.status-ok {
-    background-color: #0b6d2a;
+    background-color: var(--wp-admin-color-success, #0b6d2a);
 }
 
 .status-badge.status-warn {
-    background-color: #8a6100;
+    background-color: var(--wp-admin-color-warning, #8a6100);
 }
 
 .status-badge.status-bad {
-    background-color: #a0141e;
+    background-color: var(--wp-admin-color-error, #a0141e);
 }
 
 .screen-reader-text {
@@ -110,5 +110,63 @@
     .speed-grid {
         grid-template-columns: 1fr;
         gap: 16px;
+    }
+}
+
+.is-dark .speed-card {
+    background: var(--wp-admin-color-gray-900, #1d2327);
+    border-color: var(--wp-admin-color-gray-700, #50575e);
+}
+
+.is-dark .speed-card h3 {
+    border-color: var(--wp-admin-color-gray-700, #50575e);
+}
+
+.is-dark .health-list li {
+    border-color: var(--wp-admin-color-gray-700, #50575e);
+}
+
+.is-dark .status-badge {
+    color: var(--wp-admin-color-gray-0, #ffffff);
+}
+
+.is-dark .health-list .description,
+.is-dark .health-list .metric-name,
+.is-dark .health-list .metric-value {
+    color: var(--wp-admin-color-gray-0, #ffffff);
+}
+
+@media (prefers-color-scheme: dark) {
+    .speed-card {
+        background: var(--wp-admin-color-gray-900, #1d2327);
+        border-color: var(--wp-admin-color-gray-700, #50575e);
+    }
+
+    .speed-card h3 {
+        border-color: var(--wp-admin-color-gray-700, #50575e);
+    }
+
+    .health-list li {
+        border-color: var(--wp-admin-color-gray-700, #50575e);
+    }
+
+    .health-list .description,
+    .health-list .metric-name,
+    .health-list .metric-value {
+        color: var(--wp-admin-color-gray-0, #ffffff);
+    }
+}
+
+@media (prefers-contrast: more) {
+    .speed-card {
+        border-width: 2px;
+    }
+
+    .speed-card h3 {
+        border-bottom-width: 2px;
+    }
+
+    .health-list li {
+        border-bottom-width: 2px;
     }
 }
