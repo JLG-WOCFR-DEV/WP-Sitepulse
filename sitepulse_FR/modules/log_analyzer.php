@@ -36,6 +36,11 @@ function sitepulse_log_analyzer_page() {
         $recent_log_lines = sitepulse_get_recent_log_lines($log_file, 100, 131072);
     }
     ?>
+    <?php
+    if (function_exists('sitepulse_render_module_selector')) {
+        sitepulse_render_module_selector('sitepulse-logs');
+    }
+    ?>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-hammer"></span> Analyseur de Logs</h1>
         <p><?php printf(esc_html__('Cet outil scanne le fichier %s de WordPress pour vous aider à trouver et corriger les problèmes sur votre site.', 'sitepulse'), $log_file_display); ?></p>

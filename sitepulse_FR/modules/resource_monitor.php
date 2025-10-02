@@ -346,6 +346,11 @@ function sitepulse_resource_monitor_page() {
         $age = human_time_diff($generated_at, (int) current_time('timestamp', true));
     }
     ?>
+    <?php
+    if (function_exists('sitepulse_render_module_selector')) {
+        sitepulse_render_module_selector('sitepulse-resources');
+    }
+    ?>
     <div class="wrap sitepulse-resource-monitor">
         <h1><span class="dashicons-before dashicons-performance"></span> <?php esc_html_e('Moniteur de Ressources', 'sitepulse'); ?></h1>
         <?php if (!empty($resource_monitor_notices)) : ?>

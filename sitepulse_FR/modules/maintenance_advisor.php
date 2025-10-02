@@ -37,6 +37,11 @@ function sitepulse_maintenance_advisor_page() {
         $plugin_updates_count = count($plugin_updates);
     }
     ?>
+    <?php
+    if (function_exists('sitepulse_render_module_selector')) {
+        sitepulse_render_module_selector('sitepulse-maintenance');
+    }
+    ?>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-update"></span> <?php esc_html_e('Conseiller de Maintenance', 'sitepulse'); ?></h1>
         <?php if (!$has_update_data) : ?>
