@@ -18,6 +18,14 @@ Sitepulse - JLG takes the pulse of your WordPress site, offering modules for:
 - Custom dashboards and multisite support
 - Customisable thresholds for speed alerts, uptime targets and revision cleanup suggestions
 
+### Key performance defaults
+
+- **Alerte de vitesse (avertissement / critique)** : 200 ms / 500 ms tant que vous n’avez pas défini vos propres seuils.
+- **Disponibilité minimale avant alerte** : 99 % par défaut, ajustable au dixième de point près.
+- **Limite de révisions recommandée** : 100 révisions avant que SitePulse ne signale un nettoyage.
+
+Ces valeurs peuvent être modifiées dans la page « Réglages » de SitePulse. Elles sont automatiquement utilisées par les modules concernés (analyseur de vitesse, tableaux de bord personnalisés, vérification de base de données) tout en conservant les anciennes valeurs si elles existent déjà.
+
 Toggle modules in the admin panel to keep it lightweight. Includes debug mode and cleanup options.
 
 ## Installation
