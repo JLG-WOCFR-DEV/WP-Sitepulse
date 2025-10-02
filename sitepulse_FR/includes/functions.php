@@ -47,6 +47,76 @@ if (!function_exists('sitepulse_delete_transients_by_prefix')) {
     }
 }
 
+if (!function_exists('sitepulse_get_gemini_api_key')) {
+    /**
+     * Retrieves the Gemini API key while honoring code-level overrides.
+     *
+     * The lookup order is:
+     * 1. Constant override via SITEPULSE_GEMINI_API_KEY.
+     * 2. Filter override via `sitepulse_gemini_api_key`.
+     * 3. Stored option fallback.
+     *
+     * @return string Sanitized Gemini API key.
+     */
+    function sitepulse_get_gemini_api_key() {
+        $api_key = '';
+
+        if (defined('SITEPULSE_GEMINI_API_KEY')) {
+            $api_key = (string) SITEPULSE_GEMINI_API_KEY;
+        }
+
+        if (function_exists('apply_filters')) {
+            $filtered = apply_filters('sitepulse_gemini_api_key', $api_key);
+
+            if (is_string($filtered)) {
+                $api_key = $filtered;
+            } elseif (is_scalar($filtered)) {
+                $api_key = (string) $filtered;
+            }
+        }
+
+        $api_key = trim($api_key);
+
+        if ($api_key === '') {
+            $option_value = get_option(SITEPULSE_OPTION_GEMINI_API_KEY, '');
+            $api_key      = is_string($option_value) ? trim($option_value) : '';
+        }
+
+        return $api_key;
+    }
+}
+
+if (!function_exists('sitepulse_is_gemini_api_key_overridden')) {
+    /**
+     * Determines whether the Gemini API key is overridden via code.
+     *
+     * @return bool
+     */
+    function sitepulse_is_gemini_api_key_overridden() {
+        if (defined('SITEPULSE_GEMINI_API_KEY') && trim((string) SITEPULSE_GEMINI_API_KEY) !== '') {
+            return true;
+        }
+
+        if (
+            function_exists('has_filter')
+            && function_exists('apply_filters')
+            && has_filter('sitepulse_gemini_api_key')
+        ) {
+            $filtered = apply_filters('sitepulse_gemini_api_key', '');
+
+            if (is_string($filtered)) {
+                return trim($filtered) !== '';
+            }
+
+            if (is_scalar($filtered)) {
+                return trim((string) $filtered) !== '';
+            }
+        }
+
+        return false;
+    }
+}
+
 if (!function_exists('sitepulse_delete_site_transients_by_prefix')) {
     /**
      * Deletes all site transients whose names start with the provided prefix.

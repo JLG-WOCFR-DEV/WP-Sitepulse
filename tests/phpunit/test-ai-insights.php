@@ -33,6 +33,7 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
     private $last_http_args = null;
 
     public static function wpSetUpBeforeClass($factory) {
+        require_once dirname(__DIR__, 2) . '/sitepulse_FR/includes/functions.php';
         require_once dirname(__DIR__, 2) . '/sitepulse_FR/modules/ai_insights.php';
     }
 
@@ -219,6 +220,26 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
             'Veuillez entrer votre clé API Google Gemini dans les réglages de SitePulse.',
             $response['data']['message']
         );
+    }
+
+    /**
+     * Ensures code-level overrides provide the Gemini API key ahead of the stored option.
+     */
+    public function test_environment_prefers_filter_override_over_option() {
+        update_option(SITEPULSE_OPTION_GEMINI_API_KEY, '');
+
+        $callback = static function () {
+            return 'override-api-key';
+        };
+
+        add_filter('sitepulse_gemini_api_key', $callback);
+
+        $environment = sitepulse_ai_prepare_environment();
+
+        remove_filter('sitepulse_gemini_api_key', $callback);
+
+        $this->assertIsArray($environment);
+        $this->assertSame('override-api-key', $environment['api_key']);
     }
 
     /**

@@ -30,6 +30,7 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
      */
     public static function wpSetUpBeforeClass($factory) {
         $module = dirname(__DIR__, 2) . '/sitepulse_FR/modules/uptime_tracker.php';
+        require_once dirname(__DIR__, 2) . '/sitepulse_FR/includes/functions.php';
         require_once dirname(__DIR__, 2) . '/sitepulse_FR/includes/admin-settings.php';
         require_once $module;
     }

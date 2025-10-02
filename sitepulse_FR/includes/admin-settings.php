@@ -156,6 +156,10 @@ add_action('admin_init', 'sitepulse_register_settings');
 function sitepulse_sanitize_gemini_api_key($value) {
     $current_value = (string) get_option(SITEPULSE_OPTION_GEMINI_API_KEY, '');
 
+    if (function_exists('sitepulse_is_gemini_api_key_overridden') && sitepulse_is_gemini_api_key_overridden()) {
+        return $current_value;
+    }
+
     $should_delete = !empty($_POST['sitepulse_delete_gemini_api_key']);
     if ($should_delete) {
         return '';
@@ -369,8 +373,11 @@ function sitepulse_settings_page() {
         'custom_dashboards'     => __('Custom Dashboards', 'sitepulse'),
         'error_alerts'          => __('Error Alerts', 'sitepulse'),
     ];
-    $gemini_api_key = (string) get_option(SITEPULSE_OPTION_GEMINI_API_KEY, '');
-    $has_gemini_api_key = $gemini_api_key !== '';
+    $stored_gemini_api_key = (string) get_option(SITEPULSE_OPTION_GEMINI_API_KEY, '');
+    $has_stored_gemini_api_key = $stored_gemini_api_key !== '';
+    $effective_gemini_api_key = function_exists('sitepulse_get_gemini_api_key') ? sitepulse_get_gemini_api_key() : $stored_gemini_api_key;
+    $has_effective_gemini_api_key = $effective_gemini_api_key !== '';
+    $is_gemini_api_key_constant = defined('SITEPULSE_GEMINI_API_KEY') && trim((string) SITEPULSE_GEMINI_API_KEY) !== '';
     $available_ai_models = sitepulse_get_ai_models();
     $default_ai_model = sitepulse_get_default_ai_model();
     $selected_ai_model = (string) get_option(SITEPULSE_OPTION_AI_MODEL, $default_ai_model);
@@ -540,13 +547,17 @@ function sitepulse_settings_page() {
                 <tr valign="top">
                     <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>"><?php esc_html_e('Clé API Google Gemini', 'sitepulse'); ?></label></th>
                     <td>
-                        <input type="password" id="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>" value="" class="regular-text" autocomplete="new-password"<?php echo $has_gemini_api_key ? ' placeholder="' . esc_attr__('Une clé API est enregistrée', 'sitepulse') . '"' : ''; ?> />
-                        <?php if ($has_gemini_api_key): ?>
+                        <input type="password" id="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>" value="" class="regular-text" autocomplete="new-password"<?php echo $has_effective_gemini_api_key && !$is_gemini_api_key_constant ? ' placeholder="' . esc_attr__('Une clé API est enregistrée', 'sitepulse') . '"' : ''; ?> <?php disabled($is_gemini_api_key_constant); ?> />
+                        <?php if ($is_gemini_api_key_constant): ?>
+                            <p class="description"><?php esc_html_e('Cette clé est définie dans wp-config.php via la constante SITEPULSE_GEMINI_API_KEY. Mettez à jour ce fichier pour la modifier.', 'sitepulse'); ?></p>
+                        <?php elseif ($has_effective_gemini_api_key): ?>
                             <p class="description"><?php esc_html_e('Une clé API est déjà enregistrée. Laissez le champ vide pour la conserver ou cochez la case ci-dessous pour l’effacer.', 'sitepulse'); ?></p>
-                            <label for="sitepulse_delete_gemini_api_key">
-                                <input type="checkbox" id="sitepulse_delete_gemini_api_key" name="sitepulse_delete_gemini_api_key" value="1">
-                                <?php esc_html_e('Effacer la clé API enregistrée', 'sitepulse'); ?>
-                            </label>
+                            <?php if ($has_stored_gemini_api_key): ?>
+                                <label for="sitepulse_delete_gemini_api_key">
+                                    <input type="checkbox" id="sitepulse_delete_gemini_api_key" name="sitepulse_delete_gemini_api_key" value="1">
+                                    <?php esc_html_e('Effacer la clé API enregistrée', 'sitepulse'); ?>
+                                </label>
+                            <?php endif; ?>
                         <?php endif; ?>
                         <p class="description"><?php printf(
                             wp_kses(

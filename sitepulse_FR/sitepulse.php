@@ -1200,7 +1200,9 @@ function sitepulse_activate_site() {
     // **FIX:** Activate the dashboard by default to prevent fatal errors on first load.
     add_option(SITEPULSE_OPTION_ACTIVE_MODULES, ['custom_dashboards'], '', false);
     add_option(SITEPULSE_OPTION_DEBUG_MODE, false, '', false);
-    add_option(SITEPULSE_OPTION_GEMINI_API_KEY, '', '', false);
+    if (!function_exists('sitepulse_is_gemini_api_key_overridden') || !sitepulse_is_gemini_api_key_overridden()) {
+        add_option(SITEPULSE_OPTION_GEMINI_API_KEY, '', '', false);
+    }
     add_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 5, '', false);
     add_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60, '', false);
     add_option(SITEPULSE_OPTION_ALERT_INTERVAL, 5, '', false);

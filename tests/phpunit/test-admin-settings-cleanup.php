@@ -75,6 +75,7 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
             define('SITEPULSE_DEBUG_LOG', self::$debug_log_path);
         }
 
+        require_once dirname(__DIR__, 2) . '/sitepulse_FR/includes/functions.php';
         require_once dirname(__DIR__, 2) . '/sitepulse_FR/includes/admin-settings.php';
     }
 
@@ -194,5 +195,21 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
         $this->assertFalse(wp_next_scheduled('sitepulse_fake_cron'));
         $this->assertSame(1, $GLOBALS['sitepulse_activate_site_calls']);
         $this->assertStringContainsString('SitePulse a été réinitialisé.', $output);
+    }
+
+    public function test_sanitize_gemini_api_key_preserves_value_when_override_active(): void {
+        update_option(SITEPULSE_OPTION_GEMINI_API_KEY, 'stored-value');
+
+        $callback = static function () {
+            return 'override-value';
+        };
+
+        add_filter('sitepulse_gemini_api_key', $callback);
+
+        $sanitized = sitepulse_sanitize_gemini_api_key('new-value');
+
+        remove_filter('sitepulse_gemini_api_key', $callback);
+
+        $this->assertSame('stored-value', $sanitized);
     }
 }
