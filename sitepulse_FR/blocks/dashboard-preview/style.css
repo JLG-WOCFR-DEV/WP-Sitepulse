@@ -1,0 +1,87 @@
+.wp-block-sitepulse-dashboard-preview {
+    margin: 0 auto;
+}
+
+.wp-block-sitepulse-dashboard-preview .sitepulse-grid {
+    margin-top: 0;
+}
+
+.wp-block-sitepulse-dashboard-preview .sitepulse-card {
+    height: 100%;
+}
+
+.sitepulse-dashboard-preview-block__notice {
+    margin-bottom: 16px;
+}
+
+.wp-block-sitepulse-dashboard-preview .sitepulse-chart-container {
+    min-height: 180px;
+}
+
+.wp-block-sitepulse-dashboard-preview .sitepulse-chart-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    text-align: center;
+    padding: 32px 16px;
+    border: 1px dashed var(--wp-admin-color-gray-200, #c3c4c7);
+    border-radius: 6px;
+    color: var(--wp-admin-color-gray-700, #50575e);
+    font-size: 13px;
+    background: rgba(255, 255, 255, 0.7);
+}
+
+.wp-block-sitepulse-dashboard-preview .sitepulse-chart-container canvas + .sitepulse-preview-list {
+    margin-top: 12px;
+}
+
+.wp-block-sitepulse-dashboard-preview .sitepulse-dashboard-preview__header {
+    text-align: center;
+    margin-bottom: 24px;
+}
+
+.wp-block-sitepulse-dashboard-preview .sitepulse-dashboard-preview__header h3 {
+    margin: 0;
+}
+
+.wp-block-sitepulse-dashboard-preview .sitepulse-dashboard-preview__empty {
+    text-align: center;
+    padding: 24px;
+    border: 1px dashed var(--wp-admin-color-gray-200, #c3c4c7);
+    border-radius: 6px;
+    color: var(--wp-admin-color-gray-700, #50575e);
+    background: var(--wp-admin-color-gray-0, #ffffff);
+}
+
+.wp-block-sitepulse-dashboard-preview .sitepulse-preview-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 13px;
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid var(--wp-admin-color-gray-200, #c3c4c7);
+    border-radius: 6px;
+}
+
+.wp-block-sitepulse-dashboard-preview .sitepulse-preview-list li {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--wp-admin-color-gray-100, #dcdcde);
+}
+
+.wp-block-sitepulse-dashboard-preview .sitepulse-preview-list li:last-child {
+    border-bottom: none;
+}
+
+.wp-block-sitepulse-dashboard-preview .sitepulse-preview-list__label {
+    font-weight: 600;
+    color: var(--wp-admin-color-gray-700, #50575e);
+}
+
+.wp-block-sitepulse-dashboard-preview .sitepulse-preview-list__value {
+    color: var(--wp-admin-color-gray-800, #2c3338);
+}

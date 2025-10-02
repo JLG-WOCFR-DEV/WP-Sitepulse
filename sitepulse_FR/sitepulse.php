@@ -1151,6 +1151,128 @@ sitepulse_log('SitePulse loaded. Version: ' . SITEPULSE_VERSION);
 require_once SITEPULSE_PATH . 'includes/functions.php';
 require_once SITEPULSE_PATH . 'includes/admin-settings.php';
 require_once SITEPULSE_PATH . 'includes/integrations.php';
+require_once SITEPULSE_PATH . 'blocks/dashboard-preview/render.php';
+
+/**
+ * Registers the SitePulse dashboard preview block and its assets.
+ *
+ * @return void
+ */
+function sitepulse_register_dashboard_preview_block() {
+    $block_dir = SITEPULSE_PATH . 'blocks/dashboard-preview';
+    $style_base_handle = 'sitepulse-dashboard-preview-base';
+    $style_handle = 'sitepulse-dashboard-preview-style';
+    $editor_handle = 'sitepulse-dashboard-preview-editor';
+
+    wp_register_style(
+        $style_base_handle,
+        SITEPULSE_URL . 'modules/css/custom-dashboard.css',
+        [],
+        SITEPULSE_VERSION
+    );
+
+    wp_register_style(
+        $style_handle,
+        SITEPULSE_URL . 'blocks/dashboard-preview/style.css',
+        [$style_base_handle],
+        SITEPULSE_VERSION
+    );
+
+    wp_register_script(
+        $editor_handle,
+        SITEPULSE_URL . 'blocks/dashboard-preview/editor.js',
+        ['wp-blocks', 'wp-element', 'wp-components', 'wp-i18n', 'wp-block-editor', 'wp-editor', 'wp-server-side-render'],
+        SITEPULSE_VERSION,
+        true
+    );
+
+    if (function_exists('wp_set_script_translations')) {
+        wp_set_script_translations($editor_handle, 'sitepulse');
+    }
+
+    register_block_type(
+        $block_dir,
+        [
+            'style'           => $style_handle,
+            'editor_script'   => $editor_handle,
+            'render_callback' => 'sitepulse_render_dashboard_preview_block',
+        ]
+    );
+}
+add_action('init', 'sitepulse_register_dashboard_preview_block');
+
+/**
+ * Exposes block editor configuration for the dashboard preview block.
+ *
+ * @return void
+ */
+function sitepulse_localize_dashboard_preview_block() {
+    if (!wp_script_is('sitepulse-dashboard-preview-editor', 'registered')) {
+        return;
+    }
+
+    $context = function_exists('sitepulse_get_dashboard_preview_context')
+        ? sitepulse_get_dashboard_preview_context()
+        : null;
+    $modules_context = is_array($context) && isset($context['modules']) && is_array($context['modules'])
+        ? $context['modules']
+        : [];
+
+    $module_definitions = [
+        'speed' => [
+            'module'       => 'speed_analyzer',
+            'label'        => __('Vitesse', 'sitepulse'),
+            'controlLabel' => __('Afficher la carte Vitesse', 'sitepulse'),
+        ],
+        'uptime' => [
+            'module'       => 'uptime_tracker',
+            'label'        => __('Disponibilité', 'sitepulse'),
+            'controlLabel' => __('Afficher la carte Uptime', 'sitepulse'),
+        ],
+        'database' => [
+            'module'       => 'database_optimizer',
+            'label'        => __('Base de données', 'sitepulse'),
+            'controlLabel' => __('Afficher la carte Base de données', 'sitepulse'),
+        ],
+        'logs' => [
+            'module'       => 'log_analyzer',
+            'label'        => __('Journal d’erreurs', 'sitepulse'),
+            'controlLabel' => __('Afficher la carte Journal d’erreurs', 'sitepulse'),
+        ],
+    ];
+
+    $modules_payload = [];
+
+    foreach ($module_definitions as $key => $definition) {
+        $module_state = isset($modules_context[$key]) && is_array($modules_context[$key]) ? $modules_context[$key] : [];
+
+        $modules_payload[$key] = [
+            'label'        => $definition['label'],
+            'controlLabel' => $definition['controlLabel'],
+            'enabled'      => !empty($module_state['enabled']),
+        ];
+    }
+
+    $data = [
+        'modules' => $modules_payload,
+        'strings' => [
+            'inactiveNotice' => __('Les modules suivants sont désactivés : %s', 'sitepulse'),
+        ],
+    ];
+
+    $encoded = wp_json_encode($data);
+
+    if (!is_string($encoded) || $encoded === '') {
+        return;
+    }
+
+    wp_add_inline_script(
+        'sitepulse-dashboard-preview-editor',
+        'window.SitePulseDashboardPreviewData = ' . $encoded . ';',
+        'before'
+    );
+}
+add_action('enqueue_block_editor_assets', 'sitepulse_localize_dashboard_preview_block');
 
 /**
  * Loads all active modules selected in the settings.

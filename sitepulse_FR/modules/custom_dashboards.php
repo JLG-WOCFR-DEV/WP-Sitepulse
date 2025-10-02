@@ -229,6 +229,602 @@ function sitepulse_render_chart_summary($chart_id, $chart_data) {
 }
 
 /**
+ * Builds a reusable context describing the dashboard cards and charts.
+ *
+ * @return array
+ */
+function sitepulse_get_dashboard_preview_context() {
+    static $context = null;
+
+    if (null !== $context) {
+        return $context;
+    }
+
+    $active_modules = array_map('strval', (array) get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []));
+    $active_modules = array_values(array_filter($active_modules, static function ($module) {
+        return $module !== '';
+    }));
+
+    global $wpdb;
+
+    $is_speed_enabled = in_array('speed_analyzer', $active_modules, true);
+    $is_uptime_enabled = in_array('uptime_tracker', $active_modules, true);
+    $is_database_enabled = in_array('database_optimizer', $active_modules, true);
+    $is_logs_enabled = in_array('log_analyzer', $active_modules, true);
+
+    $palette = [
+        'green'    => '#0b6d2a',
+        'amber'    => '#8a6100',
+        'red'      => '#a0141e',
+        'deep_red' => '#7f1018',
+        'blue'     => '#2196F3',
+        'grey'     => '#E0E0E0',
+        'purple'   => '#9C27B0',
+    ];
+
+    $status_labels = [
+        'status-ok'   => [
+            'label' => __('Bon', 'sitepulse'),
+            'sr'    => __('Statut : bon', 'sitepulse'),
+            'icon'  => '✔️',
+        ],
+        'status-warn' => [
+            'label' => __('Attention', 'sitepulse'),
+            'sr'    => __('Statut : attention', 'sitepulse'),
+            'icon'  => '⚠️',
+        ],
+        'status-bad'  => [
+            'label' => __('Critique', 'sitepulse'),
+            'sr'    => __('Statut : critique', 'sitepulse'),
+            'icon'  => '⛔',
+        ],
+    ];
+
+    $context = [
+        'active_modules' => $active_modules,
+        'palette'        => $palette,
+        'status_labels'  => $status_labels,
+        'modules'        => [
+            'speed' => [
+                'enabled'     => $is_speed_enabled,
+                'card'        => null,
+                'chart'       => null,
+                'thresholds'  => [
+                    'warning'  => defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200,
+                    'critical' => defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? (int) SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500,
+                ],
+            ],
+            'uptime' => [
+                'enabled' => $is_uptime_enabled,
+                'card'    => null,
+                'chart'   => null,
+            ],
+            'database' => [
+                'enabled' => $is_database_enabled,
+                'card'    => null,
+                'chart'   => null,
+            ],
+            'logs' => [
+                'enabled' => $is_logs_enabled,
+                'card'    => null,
+                'chart'   => null,
+            ],
+        ],
+        'charts_payload' => [],
+    ];
+
+    $charts_payload = [];
+
+    if ($is_speed_enabled) {
+        $results = get_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
+        $raw_processing_time = null;
+
+        if (is_array($results)) {
+            if (isset($results['server_processing_ms']) && is_numeric($results['server_processing_ms'])) {
+                $raw_processing_time = (float) $results['server_processing_ms'];
+            } elseif (isset($results['ttfb']) && is_numeric($results['ttfb'])) {
+                $raw_processing_time = (float) $results['ttfb'];
+            } elseif (isset($results['data']['server_processing_ms']) && is_numeric($results['data']['server_processing_ms'])) {
+                $raw_processing_time = (float) $results['data']['server_processing_ms'];
+            } elseif (isset($results['data']['ttfb']) && is_numeric($results['data']['ttfb'])) {
+                $raw_processing_time = (float) $results['data']['ttfb'];
+            }
+        }
+
+        $history_entries = get_option(SITEPULSE_OPTION_SPEED_SCAN_HISTORY, []);
+
+        if (!is_array($history_entries)) {
+            $history_entries = [];
+        }
+
+        $history_entries = array_values(array_filter(
+            $history_entries,
+            static function ($entry) {
+                if (!is_array($entry)) {
+                    return false;
+                }
+
+                if (!isset($entry['server_processing_ms']) || !is_numeric($entry['server_processing_ms'])) {
+                    return false;
+                }
+
+                $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+
+                return $timestamp > 0;
+            }
+        ));
+
+        if (!empty($history_entries)) {
+            usort(
+                $history_entries,
+                static function ($a, $b) {
+                    $a_timestamp = isset($a['timestamp']) ? (int) $a['timestamp'] : 0;
+                    $b_timestamp = isset($b['timestamp']) ? (int) $b['timestamp'] : 0;
+
+                    if ($a_timestamp === $b_timestamp) {
+                        return 0;
+                    }
+
+                    return ($a_timestamp < $b_timestamp) ? -1 : 1;
+                }
+            );
+        }
+
+        $history_point_limit = apply_filters('sitepulse_speed_history_chart_points', 30);
+
+        if (!is_scalar($history_point_limit)) {
+            $history_point_limit = 30;
+        }
+
+        $history_point_limit = max(1, (int) $history_point_limit);
+
+        if (count($history_entries) > $history_point_limit) {
+            $history_entries = array_slice($history_entries, -$history_point_limit);
+        }
+
+        if (empty($history_entries) && $raw_processing_time !== null) {
+            $fallback_timestamp = null;
+
+            if (isset($results['timestamp']) && is_numeric($results['timestamp'])) {
+                $fallback_timestamp = (int) $results['timestamp'];
+            } elseif (isset($results['data']['timestamp']) && is_numeric($results['data']['timestamp'])) {
+                $fallback_timestamp = (int) $results['data']['timestamp'];
+            }
+
+            if ($fallback_timestamp === null || $fallback_timestamp <= 0) {
+                $fallback_timestamp = current_time('timestamp');
+            }
+
+            $history_entries[] = [
+                'timestamp'            => $fallback_timestamp,
+                'server_processing_ms' => (float) $raw_processing_time,
+            ];
+        }
+
+        $latest_entry = !empty($history_entries)
+            ? $history_entries[count($history_entries) - 1]
+            : null;
+
+        $processing_time = $raw_processing_time;
+
+        if (is_array($latest_entry) && isset($latest_entry['server_processing_ms']) && is_numeric($latest_entry['server_processing_ms'])) {
+            $processing_time = (float) $latest_entry['server_processing_ms'];
+        }
+
+        $default_speed_thresholds = [
+            'warning'  => defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200,
+            'critical' => defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? (int) SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500,
+        ];
+
+        $speed_thresholds = function_exists('sitepulse_get_speed_thresholds')
+            ? sitepulse_get_speed_thresholds()
+            : $default_speed_thresholds;
+
+        $speed_warning_threshold = isset($speed_thresholds['warning']) ? (int) $speed_thresholds['warning'] : $default_speed_thresholds['warning'];
+        $speed_critical_threshold = isset($speed_thresholds['critical']) ? (int) $speed_thresholds['critical'] : $default_speed_thresholds['critical'];
+
+        if ($speed_warning_threshold < 1) {
+            $speed_warning_threshold = $default_speed_thresholds['warning'];
+        }
+
+        if ($speed_critical_threshold <= $speed_warning_threshold) {
+            $speed_critical_threshold = max($speed_warning_threshold + 1, $default_speed_thresholds['critical']);
+        }
+
+        $processing_status = 'status-ok';
+
+        if ($processing_time === null) {
+            $processing_status = 'status-warn';
+        } elseif ($processing_time >= $speed_critical_threshold) {
+            $processing_status = 'status-bad';
+        } elseif ($processing_time >= $speed_warning_threshold) {
+            $processing_status = 'status-warn';
+        }
+
+        $processing_display = $processing_time !== null
+            ? round($processing_time) . ' ' . esc_html__('ms', 'sitepulse')
+            : esc_html__('N/A', 'sitepulse');
+
+        $date_format = get_option('date_format');
+        $time_format = get_option('time_format');
+        $speed_labels = [];
+        $speed_values = [];
+
+        foreach ($history_entries as $entry) {
+            $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+            $value = isset($entry['server_processing_ms']) ? (float) $entry['server_processing_ms'] : null;
+
+            if ($value === null) {
+                continue;
+            }
+
+            $label = $timestamp > 0
+                ? date_i18n($date_format . ' ' . $time_format, $timestamp)
+                : __('Unknown', 'sitepulse');
+
+            $speed_labels[] = $label;
+            $speed_values[] = max(0.0, (float) $value);
+        }
+
+        $speed_values = array_map(
+            static function ($value) {
+                return round((float) $value, 2);
+            },
+            $speed_values
+        );
+
+        $speed_reference = max(1.0, (float) $speed_warning_threshold);
+        $speed_chart = [
+            'type'     => 'line',
+            'labels'   => $speed_labels,
+            'datasets' => [],
+            'empty'    => empty($speed_labels),
+            'status'   => $processing_status,
+            'value'    => $processing_time !== null ? round($processing_time, 2) : null,
+            'unit'     => __('ms', 'sitepulse'),
+            'reference'=> (float) $speed_reference,
+        ];
+
+        if (!empty($speed_labels)) {
+            $speed_color_map = [
+                'status-ok'   => $palette['green'],
+                'status-warn' => $palette['amber'],
+                'status-bad'  => $palette['red'],
+            ];
+            $speed_primary_color = isset($speed_color_map[$processing_status]) ? $speed_color_map[$processing_status] : $palette['blue'];
+
+            $speed_chart['datasets'][] = [
+                'label'               => __('Processing time', 'sitepulse'),
+                'data'                => $speed_values,
+                'borderColor'         => $speed_primary_color,
+                'pointBackgroundColor'=> $speed_primary_color,
+                'pointRadius'         => 3,
+                'tension'             => 0.3,
+                'fill'                => false,
+            ];
+
+            $budget_values = array_fill(0, count($speed_labels), (float) $speed_reference);
+
+            $speed_chart['datasets'][] = [
+                'label'       => __('Performance budget', 'sitepulse'),
+                'data'        => $budget_values,
+                'borderColor' => $palette['amber'],
+                'borderWidth' => 2,
+                'borderDash'  => [6, 6],
+                'pointRadius' => 0,
+                'fill'        => false,
+            ];
+        }
+
+        $charts_payload['speed'] = $speed_chart;
+        $context['modules']['speed']['card'] = [
+            'status'  => $processing_status,
+            'display' => $processing_display,
+        ];
+        $context['modules']['speed']['chart'] = $speed_chart;
+        $context['modules']['speed']['thresholds'] = [
+            'warning'  => $speed_warning_threshold,
+            'critical' => $speed_critical_threshold,
+        ];
+    }
+
+    if ($is_uptime_enabled) {
+        $raw_uptime_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+        $uptime_log = function_exists('sitepulse_normalize_uptime_log')
+            ? sitepulse_normalize_uptime_log($raw_uptime_log)
+            : (array) $raw_uptime_log;
+        $boolean_checks = array_values(array_filter($uptime_log, function ($entry) {
+            return is_array($entry) && array_key_exists('status', $entry) && is_bool($entry['status']);
+        }));
+        $evaluated_checks = count($boolean_checks);
+        $up_checks = count(array_filter($boolean_checks, function ($entry) {
+            return isset($entry['status']) && true === $entry['status'];
+        }));
+        $uptime_percentage = $evaluated_checks > 0 ? ($up_checks / $evaluated_checks) * 100 : 100;
+        $default_uptime_warning = defined('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT') ? (float) SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT : 99.0;
+
+        if (function_exists('sitepulse_get_uptime_warning_percentage')) {
+            $uptime_warning_threshold = (float) sitepulse_get_uptime_warning_percentage();
+        } else {
+            $uptime_warning_key = defined('SITEPULSE_OPTION_UPTIME_WARNING_PERCENT') ? SITEPULSE_OPTION_UPTIME_WARNING_PERCENT : 'sitepulse_uptime_warning_percent';
+            $stored_threshold = get_option($uptime_warning_key, $default_uptime_warning);
+            $uptime_warning_threshold = is_scalar($stored_threshold) ? (float) $stored_threshold : $default_uptime_warning;
+        }
+
+        if ($uptime_warning_threshold < 0) {
+            $uptime_warning_threshold = 0.0;
+        } elseif ($uptime_warning_threshold > 100) {
+            $uptime_warning_threshold = 100.0;
+        }
+
+        if ($uptime_percentage < $uptime_warning_threshold) {
+            $uptime_status = 'status-bad';
+        } elseif ($uptime_percentage < 100) {
+            $uptime_status = 'status-warn';
+        } else {
+            $uptime_status = 'status-ok';
+        }
+
+        $uptime_entries = array_slice($uptime_log, -30);
+
+        $date_format = get_option('date_format');
+        $time_format = get_option('time_format');
+        $uptime_labels = [];
+        $uptime_values = [];
+        $uptime_colors = [];
+
+        foreach ($uptime_entries as $entry) {
+            $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+            $label = $timestamp > 0
+                ? date_i18n($date_format . ' ' . $time_format, $timestamp)
+                : __('Unknown', 'sitepulse');
+            $status = is_array($entry) && array_key_exists('status', $entry) ? $entry['status'] : (!empty($entry));
+
+            $uptime_labels[] = $label;
+
+            if ($status === false) {
+                $uptime_values[] = 0;
+                $uptime_colors[] = $palette['red'];
+            } elseif ($status === true) {
+                $uptime_values[] = 100;
+                $uptime_colors[] = $palette['green'];
+            } else {
+                $uptime_values[] = 50;
+                $uptime_colors[] = $palette['grey'];
+            }
+        }
+
+        $uptime_chart = [
+            'type'     => 'bar',
+            'labels'   => $uptime_labels,
+            'datasets' => [
+                [
+                    'data'            => $uptime_values,
+                    'backgroundColor' => $uptime_colors,
+                    'borderWidth'     => 0,
+                    'borderRadius'    => 6,
+                ],
+            ],
+            'empty'    => empty($uptime_labels),
+            'status'   => $uptime_status,
+            'unit'     => __('%', 'sitepulse'),
+        ];
+
+        $charts_payload['uptime'] = $uptime_chart;
+        $context['modules']['uptime']['card'] = [
+            'status'     => $uptime_status,
+            'percentage' => $uptime_percentage,
+        ];
+        $context['modules']['uptime']['chart'] = $uptime_chart;
+    }
+
+    if ($is_database_enabled) {
+        $revisions = (int) $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->posts WHERE post_type = 'revision'");
+        $default_revision_limit = defined('SITEPULSE_DEFAULT_REVISION_LIMIT') ? (int) SITEPULSE_DEFAULT_REVISION_LIMIT : 100;
+
+        if (function_exists('sitepulse_get_revision_limit')) {
+            $revision_limit = (int) sitepulse_get_revision_limit();
+        } else {
+            $revision_option_key = defined('SITEPULSE_OPTION_REVISION_LIMIT') ? SITEPULSE_OPTION_REVISION_LIMIT : 'sitepulse_revision_limit';
+            $stored_limit = get_option($revision_option_key, $default_revision_limit);
+            $revision_limit = is_scalar($stored_limit) ? (int) $stored_limit : $default_revision_limit;
+        }
+
+        if ($revision_limit < 1) {
+            $revision_limit = $default_revision_limit;
+        }
+
+        $revision_warn_threshold = (int) floor($revision_limit * 0.5);
+        if ($revision_warn_threshold < 1) {
+            $revision_warn_threshold = 1;
+        }
+
+        if ($revision_warn_threshold >= $revision_limit) {
+            $revision_warn_threshold = max(1, $revision_limit - 1);
+        }
+
+        if ($revisions > $revision_limit) {
+            $db_status = 'status-bad';
+        } elseif ($revisions > $revision_warn_threshold) {
+            $db_status = 'status-warn';
+        } else {
+            $db_status = 'status-ok';
+        }
+
+        $database_chart = [
+            'type'     => 'doughnut',
+            'labels'   => [],
+            'datasets' => [],
+            'empty'    => false,
+            'status'   => $db_status,
+            'value'    => $revisions,
+            'limit'    => $revision_limit,
+        ];
+
+        if ($revisions <= $revision_limit) {
+            $database_chart['labels'] = [
+                __('Stored revisions', 'sitepulse'),
+                __('Remaining before cleanup', 'sitepulse'),
+            ];
+            $database_chart['datasets'][] = [
+                'data' => [
+                    $revisions,
+                    max(0, $revision_limit - $revisions),
+                ],
+                'backgroundColor' => [
+                    $palette['blue'],
+                    $palette['grey'],
+                ],
+                'borderWidth' => 0,
+            ];
+        } else {
+            $database_chart['labels'] = [
+                __('Recommended maximum', 'sitepulse'),
+                __('Excess revisions', 'sitepulse'),
+            ];
+            $database_chart['datasets'][] = [
+                'data' => [
+                    $revision_limit,
+                    $revisions - $revision_limit,
+                ],
+                'backgroundColor' => [
+                    $palette['amber'],
+                    $palette['red'],
+                ],
+                'borderWidth' => 0,
+            ];
+        }
+
+        $charts_payload['database'] = $database_chart;
+        $context['modules']['database']['card'] = [
+            'status'    => $db_status,
+            'revisions' => $revisions,
+            'limit'     => $revision_limit,
+        ];
+        $context['modules']['database']['chart'] = $database_chart;
+    }
+
+    if ($is_logs_enabled) {
+        $log_file = function_exists('sitepulse_get_wp_debug_log_path') ? sitepulse_get_wp_debug_log_path() : null;
+        $log_status_class = 'status-ok';
+        $log_summary = __('Log is clean.', 'sitepulse');
+        $log_counts = [
+            'fatal'      => 0,
+            'warning'    => 0,
+            'notice'     => 0,
+            'deprecated' => 0,
+        ];
+        $log_chart_empty = true;
+
+        if ($log_file === null) {
+            $log_status_class = 'status-warn';
+            $log_summary = __('Debug log not configured.', 'sitepulse');
+        } elseif (!file_exists($log_file)) {
+            $log_status_class = 'status-warn';
+            $log_summary = sprintf(__('Log file not found (%s).', 'sitepulse'), esc_html($log_file));
+        } elseif (!is_readable($log_file)) {
+            $log_status_class = 'status-warn';
+            $log_summary = sprintf(__('Unable to read log file (%s).', 'sitepulse'), esc_html($log_file));
+        } else {
+            $recent_logs = sitepulse_get_recent_log_lines($log_file, 200, 131072);
+
+            if ($recent_logs === null) {
+                $log_status_class = 'status-warn';
+                $log_summary = sprintf(__('Unable to read log file (%s).', 'sitepulse'), esc_html($log_file));
+            } elseif (empty($recent_logs)) {
+                $log_summary = __('No recent log entries.', 'sitepulse');
+            } else {
+                $log_chart_empty = false;
+                $log_content = implode("\n", $recent_logs);
+
+                $patterns = [
+                    'fatal'      => '/PHP (Fatal error|Parse error|Uncaught)/i',
+                    'warning'    => '/PHP Warning/i',
+                    'notice'     => '/PHP Notice/i',
+                    'deprecated' => '/PHP Deprecated/i',
+                ];
+
+                foreach ($patterns as $type => $pattern) {
+                    $matches = preg_match_all($pattern, $log_content, $ignore_matches);
+                    $log_counts[$type] = $matches ? (int) $matches : 0;
+                }
+
+                if ($log_counts['fatal'] > 0) {
+                    $log_status_class = 'status-bad';
+                    $log_summary = __('Fatal errors detected in the debug log.', 'sitepulse');
+                } elseif ($log_counts['warning'] > 0 || $log_counts['deprecated'] > 0) {
+                    $log_status_class = 'status-warn';
+                    $log_summary = __('Warnings present in the debug log.', 'sitepulse');
+                } else {
+                    $log_summary = __('No critical events detected.', 'sitepulse');
+                }
+            }
+        }
+
+        $log_chart = [
+            'type'     => 'doughnut',
+            'labels'   => [
+                __('Fatal errors', 'sitepulse'),
+                __('Warnings', 'sitepulse'),
+                __('Notices', 'sitepulse'),
+                __('Deprecated notices', 'sitepulse'),
+            ],
+            'datasets' => $log_chart_empty ? [] : [
+                [
+                    'data' => array_values($log_counts),
+                    'backgroundColor' => [
+                        $palette['red'],
+                        $palette['amber'],
+                        $palette['blue'],
+                        $palette['purple'],
+                    ],
+                    'borderWidth' => 0,
+                ],
+            ],
+            'empty'   => $log_chart_empty,
+            'status'  => $log_status_class,
+        ];
+
+        $charts_payload['logs'] = $log_chart;
+        $context['modules']['logs']['card'] = [
+            'status'  => $log_status_class,
+            'summary' => $log_summary,
+            'counts'  => $log_counts,
+        ];
+        $context['modules']['logs']['chart'] = $log_chart;
+    }
+
+    $get_status_meta = static function ($status) use ($status_labels, $default_status_labels) {
+        if (isset($status_labels[$status])) {
+            return $status_labels[$status];
+        }
+
+        if (isset($status_labels['status-warn'])) {
+            return $status_labels['status-warn'];
+        }
+
+        return $default_status_labels['status-warn'];
+    };
+
+    $module_chart_keys = [
+        'speed_analyzer'     => 'speed',
+        'uptime_tracker'     => 'uptime',
+        'database_optimizer' => 'database',
+        'log_analyzer'       => 'logs',
+    ];
+
+    foreach ($module_chart_keys as $module_key => $chart_key) {
+        if (!in_array($module_key, $active_modules, true) || !isset($charts_payload[$chart_key])) {
+            unset($charts_payload[$chart_key]);
+        }
+    }
+
+    $context['charts_payload'] = $charts_payload;
+
+    return $context;
+}
+
+/**
  * Renders the HTML for the main SitePulse dashboard page.
  *
  * This page provides a visual overview of the site's key metrics,
@@ -242,13 +838,6 @@ function sitepulse_custom_dashboards_page() {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
-    $active_modules = array_map('strval', (array) get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []));
-    global $wpdb;
-    $is_speed_enabled = in_array('speed_analyzer', $active_modules, true);
-    $is_uptime_enabled = in_array('uptime_tracker', $active_modules, true);
-    $is_database_enabled = in_array('database_optimizer', $active_modules, true);
-    $is_logs_enabled = in_array('log_analyzer', $active_modules, true);
-
     if (!wp_script_is('sitepulse-dashboard-charts', 'registered')) {
         sitepulse_custom_dashboard_enqueue_assets('toplevel_page_sitepulse-dashboard');
     }
@@ -257,6 +846,109 @@ function sitepulse_custom_dashboards_page() {
         wp_enqueue_script('sitepulse-chartjs');
         wp_enqueue_script('sitepulse-dashboard-charts');
     }
+
+    $default_palette = [
+        'green'    => '#0b6d2a',
+        'amber'    => '#8a6100',
+        'red'      => '#a0141e',
+        'deep_red' => '#7f1018',
+        'blue'     => '#2196F3',
+        'grey'     => '#E0E0E0',
+        'purple'   => '#9C27B0',
+    ];
+
+    $default_status_labels = [
+        'status-ok'   => [
+            'label' => __('Bon', 'sitepulse'),
+            'sr'    => __('Statut : bon', 'sitepulse'),
+            'icon'  => '✔️',
+        ],
+        'status-warn' => [
+            'label' => __('Attention', 'sitepulse'),
+            'sr'    => __('Statut : attention', 'sitepulse'),
+            'icon'  => '⚠️',
+        ],
+        'status-bad'  => [
+            'label' => __('Critique', 'sitepulse'),
+            'sr'    => __('Statut : critique', 'sitepulse'),
+            'icon'  => '⛔',
+        ],
+    ];
+
+    $context = sitepulse_get_dashboard_preview_context();
+
+    $palette = $default_palette;
+    $status_labels = $default_status_labels;
+    $charts_payload = [];
+    $speed_card = null;
+    $speed_chart = null;
+    $uptime_card = null;
+    $uptime_chart = null;
+    $database_card = null;
+    $database_chart = null;
+    $logs_card = null;
+    $log_chart = null;
+    $speed_warning_threshold = defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200;
+    $speed_critical_threshold = defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? (int) SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500;
+    $is_speed_enabled = false;
+    $is_uptime_enabled = false;
+    $is_database_enabled = false;
+    $is_logs_enabled = false;
+    $active_modules = [];
+
+    if (is_array($context) && !empty($context)) {
+        if (isset($context['palette']) && is_array($context['palette'])) {
+            $palette = array_merge($default_palette, $context['palette']);
+        }
+
+        if (isset($context['status_labels']) && is_array($context['status_labels'])) {
+            $status_labels = array_merge($default_status_labels, $context['status_labels']);
+        }
+
+        $active_modules = isset($context['active_modules']) && is_array($context['active_modules']) ? $context['active_modules'] : [];
+        $modules = isset($context['modules']) && is_array($context['modules']) ? $context['modules'] : [];
+
+        $speed_data = isset($modules['speed']) && is_array($modules['speed']) ? $modules['speed'] : [];
+        $uptime_data = isset($modules['uptime']) && is_array($modules['uptime']) ? $modules['uptime'] : [];
+        $database_data = isset($modules['database']) && is_array($modules['database']) ? $modules['database'] : [];
+        $logs_data = isset($modules['logs']) && is_array($modules['logs']) ? $modules['logs'] : [];
+
+        $is_speed_enabled = !empty($speed_data['enabled']);
+        $is_uptime_enabled = !empty($uptime_data['enabled']);
+        $is_database_enabled = !empty($database_data['enabled']);
+        $is_logs_enabled = !empty($logs_data['enabled']);
+
+        $speed_card = isset($speed_data['card']) && is_array($speed_data['card']) ? $speed_data['card'] : null;
+        $speed_chart = isset($speed_data['chart']) && is_array($speed_data['chart']) ? $speed_data['chart'] : null;
+        $speed_thresholds = isset($speed_data['thresholds']) && is_array($speed_data['thresholds']) ? $speed_data['thresholds'] : [];
+
+        if (isset($speed_thresholds['warning'])) {
+            $speed_warning_threshold = (int) $speed_thresholds['warning'];
+        }
+
+        if (isset($speed_thresholds['critical'])) {
+            $speed_critical_threshold = (int) $speed_thresholds['critical'];
+        }
+
+        $uptime_card = isset($uptime_data['card']) && is_array($uptime_data['card']) ? $uptime_data['card'] : null;
+        $uptime_chart = isset($uptime_data['chart']) && is_array($uptime_data['chart']) ? $uptime_data['chart'] : null;
+
+        $database_card = isset($database_data['card']) && is_array($database_data['card']) ? $database_data['card'] : null;
+        $database_chart = isset($database_data['chart']) && is_array($database_data['chart']) ? $database_data['chart'] : null;
+
+        $logs_card = isset($logs_data['card']) && is_array($logs_data['card']) ? $logs_data['card'] : null;
+        $log_chart = isset($logs_data['chart']) && is_array($logs_data['chart']) ? $logs_data['chart'] : null;
+
+        $charts_payload = isset($context['charts_payload']) && is_array($context['charts_payload'])
+            ? $context['charts_payload']
+            : [];
+    } else {
+        $active_modules = array_map('strval', (array) get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []));
+        global $wpdb;
+        $is_speed_enabled = in_array('speed_analyzer', $active_modules, true);
+        $is_uptime_enabled = in_array('uptime_tracker', $active_modules, true);
+        $is_database_enabled = in_array('database_optimizer', $active_modules, true);
+        $is_logs_enabled = in_array('log_analyzer', $active_modules, true);
 
     $palette = [
         'green'    => '#0b6d2a',
@@ -770,6 +1462,8 @@ function sitepulse_custom_dashboards_page() {
             'summary' => $log_summary,
             'counts'  => $log_counts,
         ];
+    }
+
     }
 
     $module_chart_keys = [
