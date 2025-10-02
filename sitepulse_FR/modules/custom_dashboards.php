@@ -1534,10 +1534,113 @@ function sitepulse_custom_dashboards_page() {
         wp_localize_script('sitepulse-dashboard-charts', 'SitePulseDashboardData', $localization_payload);
     }
 
+    $module_page_definitions = [
+        'custom_dashboards'     => [
+            'label' => __('Dashboard', 'sitepulse'),
+            'page'  => 'sitepulse-dashboard',
+            'icon'  => 'dashicons-dashboard',
+        ],
+        'speed_analyzer'        => [
+            'label' => __('Speed', 'sitepulse'),
+            'page'  => 'sitepulse-speed',
+            'icon'  => 'dashicons-performance',
+        ],
+        'uptime_tracker'        => [
+            'label' => __('Uptime', 'sitepulse'),
+            'page'  => 'sitepulse-uptime',
+            'icon'  => 'dashicons-chart-bar',
+        ],
+        'database_optimizer'    => [
+            'label' => __('Database', 'sitepulse'),
+            'page'  => 'sitepulse-db',
+            'icon'  => 'dashicons-database',
+        ],
+        'log_analyzer'          => [
+            'label' => __('Logs', 'sitepulse'),
+            'page'  => 'sitepulse-logs',
+            'icon'  => 'dashicons-hammer',
+        ],
+        'resource_monitor'      => [
+            'label' => __('Resources', 'sitepulse'),
+            'page'  => 'sitepulse-resources',
+            'icon'  => 'dashicons-chart-area',
+        ],
+        'plugin_impact_scanner' => [
+            'label' => __('Plugins', 'sitepulse'),
+            'page'  => 'sitepulse-plugins',
+            'icon'  => 'dashicons-admin-plugins',
+        ],
+        'maintenance_advisor'   => [
+            'label' => __('Maintenance', 'sitepulse'),
+            'page'  => 'sitepulse-maintenance',
+            'icon'  => 'dashicons-admin-tools',
+        ],
+        'ai_insights'           => [
+            'label' => __('AI Insights', 'sitepulse'),
+            'page'  => 'sitepulse-ai',
+            'icon'  => 'dashicons-lightbulb',
+        ],
+    ];
+
+    $current_page = isset($_GET['page']) ? sanitize_title((string) wp_unslash($_GET['page'])) : 'sitepulse-dashboard';
+
+    if ($current_page === '') {
+        $current_page = 'sitepulse-dashboard';
+    }
+
+    $user_can_manage_modules = current_user_can(sitepulse_get_capability());
+    $module_navigation = [];
+
+    foreach ($module_page_definitions as $module_key => $definition) {
+        $page_slug = isset($definition['page']) ? sanitize_title((string) $definition['page']) : '';
+
+        if ($page_slug === '') {
+            continue;
+        }
+
+        $is_module_active = ('custom_dashboards' === $module_key)
+            ? true
+            : in_array($module_key, $active_modules, true);
+
+        if (!$is_module_active || !$user_can_manage_modules) {
+            continue;
+        }
+
+        $module_navigation[] = [
+            'label'   => isset($definition['label']) ? $definition['label'] : '',
+            'icon'    => isset($definition['icon']) ? $definition['icon'] : '',
+            'url'     => admin_url('admin.php?page=' . $page_slug),
+            'current' => ($current_page === $page_slug),
+        ];
+    }
+
     ?>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-dashboard"></span> <?php esc_html_e('SitePulse Dashboard', 'sitepulse'); ?></h1>
         <p><?php esc_html_e("A real-time overview of your site's performance and health.", 'sitepulse'); ?></p>
+
+        <?php if (!empty($module_navigation)) : ?>
+            <nav class="sitepulse-module-nav" aria-label="<?php esc_attr_e('SitePulse sections', 'sitepulse'); ?>">
+                <ul class="sitepulse-module-nav__list">
+                    <?php foreach ($module_navigation as $item) :
+                        $link_classes = ['sitepulse-module-nav__link'];
+
+                        if (!empty($item['current'])) {
+                            $link_classes[] = 'is-current';
+                        }
+                    ?>
+                        <li class="sitepulse-module-nav__item">
+                            <a class="<?php echo esc_attr(implode(' ', $link_classes)); ?>" href="<?php echo esc_url($item['url']); ?>"<?php echo !empty($item['current']) ? ' aria-current="page"' : ''; ?>>
+                                <?php if (!empty($item['icon'])) : ?>
+                                    <span class="sitepulse-module-nav__icon dashicons <?php echo esc_attr($item['icon']); ?>" aria-hidden="true"></span>
+                                <?php endif; ?>
+                                <span class="sitepulse-module-nav__label"><?php echo esc_html($item['label']); ?></span>
+                            </a>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+            </nav>
+        <?php endif; ?>
 
         <div class="sitepulse-grid">
             <?php if ($is_speed_enabled && $speed_card !== null): ?>
