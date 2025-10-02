@@ -36,9 +36,17 @@
             return null;
         }
 
-        var text = typeof entry.text === 'string' ? entry.text.trim() : '';
+        var text = typeof entry.text === 'string' ? entry.text : '';
+        var html = typeof entry.html === 'string' ? entry.html : '';
+        var trimmedText = text.trim();
+        var trimmedHtml = html.trim();
 
-        if (text.length === 0) {
+        if (trimmedText.length === 0 && trimmedHtml.length > 0) {
+            var temp = $('<div/>').html(trimmedHtml);
+            trimmedText = temp.text().trim();
+        }
+
+        if (trimmedText.length === 0) {
             return null;
         }
 
@@ -56,7 +64,8 @@
         var rateLimit = entry.rate_limit && typeof entry.rate_limit === 'object' ? entry.rate_limit : {};
 
         return {
-            text: text,
+            text: trimmedText,
+            html: trimmedHtml,
             timestamp: timestamp,
             model: {
                 key: typeof model.key === 'string' ? model.key : '',
@@ -105,37 +114,55 @@
                 .appendTo($item);
         }
 
-        $('<p/>')
-            .addClass('sitepulse-ai-history-text')
-            .text(normalized.text)
-            .appendTo($item);
+        var $textEl = $('<div/>').addClass('sitepulse-ai-history-text');
+
+        if (normalized.html && normalized.html.trim() !== '') {
+            $textEl.html(normalized.html);
+        } else {
+            $textEl.text(normalized.text);
+        }
+
+        $item.append($textEl);
 
         return $item;
     }
 
     function renderResult($resultContainer, $textEl, $timestampEl, $statusEl, data) {
-        var text = data && typeof data.text === 'string' ? data.text.trim() : '';
+        var text = data && typeof data.text === 'string' ? data.text : '';
+        var html = data && typeof data.html === 'string' ? data.html : '';
+        var trimmedText = text.trim();
+        var trimmedHtml = html.trim();
+
+        if (trimmedText.length === 0 && trimmedHtml.length > 0) {
+            trimmedText = $('<div/>').html(trimmedHtml).text().trim();
+        }
+
         var timestamp = data && data.timestamp ? data.timestamp : null;
         var isCached = data && typeof data.cached !== 'undefined' ? !!data.cached : false;
         var model = data && data.model ? data.model : null;
         var rateLimit = data && data.rate_limit ? data.rate_limit : null;
         var normalized = {
-            text: text,
+            text: trimmedText,
+            html: trimmedHtml,
             timestamp: timestamp,
             cached: isCached,
             model: model,
             rate_limit: rateLimit
         };
 
-        if (text.length === 0) {
+        if (trimmedText.length === 0 && trimmedHtml.length === 0) {
             $resultContainer.hide();
-            $textEl.text('');
+            $textEl.empty();
             $timestampEl.hide().text('');
             setStatus($statusEl, '');
             return normalized;
         }
 
-        $textEl.text(text);
+        if (trimmedHtml.length > 0) {
+            $textEl.html(trimmedHtml);
+        } else {
+            $textEl.text(trimmedText);
+        }
 
         var formattedTimestamp = formatTimestamp(timestamp);
 
@@ -171,7 +198,10 @@
     }
 
     function reinstateLastResult($resultContainer, $resultText, $timestampEl, $statusEl, lastResultData) {
-        if (lastResultData && lastResultData.text) {
+        var hasText = lastResultData && typeof lastResultData.text === 'string' && lastResultData.text.trim() !== '';
+        var hasHtml = lastResultData && typeof lastResultData.html === 'string' && lastResultData.html.trim() !== '';
+
+        if (hasText || hasHtml) {
             renderResult($resultContainer, $resultText, $timestampEl, $statusEl, lastResultData);
 
             return true;
@@ -359,6 +389,7 @@
         function addHistoryEntryFromResult(result) {
             var entry = normalizeHistoryEntry({
                 text: result && typeof result.text === 'string' ? result.text : '',
+                html: result && typeof result.html === 'string' ? result.html : '',
                 timestamp: result ? result.timestamp : null,
                 model: result ? result.model : null,
                 rate_limit: result ? result.rate_limit : null,
@@ -457,6 +488,7 @@
 
         lastResultData = renderResult($resultContainer, $resultText, $timestampEl, $statusEl, {
             text: sitepulseAIInsights.initialInsight,
+            html: sitepulseAIInsights.initialInsightHtml,
             timestamp: sitepulseAIInsights.initialTimestamp,
             cached: !!sitepulseAIInsights.initialCached
         });

@@ -30,6 +30,115 @@ if (!defined('SITEPULSE_OPTION_AI_HISTORY')) {
 }
 
 /**
+ * Returns the HTML tags allowed in AI insight content.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_ai_get_allowed_insight_html_tags() {
+    $allowed_tags = [
+        'p'          => [],
+        'br'         => [],
+        'strong'     => [],
+        'em'         => [],
+        'ul'         => [],
+        'ol'         => [],
+        'li'         => [],
+        'blockquote' => [],
+        'code'       => [],
+        'pre'        => [],
+        'a'          => [
+            'href'   => true,
+            'rel'    => true,
+            'target' => true,
+            'title'  => true,
+        ],
+    ];
+
+    /**
+     * Filters the HTML tags allowed when sanitizing AI insight content.
+     *
+     * @param array<string,mixed> $allowed_tags Allowed HTML tags.
+     */
+    return (array) apply_filters('sitepulse_ai_insight_allowed_tags', $allowed_tags);
+}
+
+/**
+ * Sanitizes AI insight HTML content.
+ *
+ * @param string $html Raw HTML content.
+ *
+ * @return string Sanitized HTML.
+ */
+function sitepulse_ai_sanitize_insight_html($html) {
+    $html = (string) $html;
+
+    if ('' === $html) {
+        return '';
+    }
+
+    $sanitized = wp_kses($html, sitepulse_ai_get_allowed_insight_html_tags());
+
+    return trim($sanitized);
+}
+
+/**
+ * Sanitizes AI insight plain text content.
+ *
+ * @param string $text Raw text content.
+ *
+ * @return string Sanitized plain text.
+ */
+function sitepulse_ai_sanitize_insight_text($text) {
+    $text = (string) $text;
+
+    if ('' === $text) {
+        return '';
+    }
+
+    $text = str_replace(["\r\n", "\r"], "\n", $text);
+    $text = wp_strip_all_tags($text, true);
+    $text = preg_replace('/[ \t]+\n/', "\n", $text);
+    $text = preg_replace('/\n{3,}/', "\n\n", $text);
+
+    return trim($text);
+}
+
+/**
+ * Builds sanitized HTML and text variants for AI insights.
+ *
+ * @param string $text Raw text content.
+ * @param string $html Optional raw HTML content.
+ *
+ * @return array{text:string,html:string}
+ */
+function sitepulse_ai_prepare_insight_variants($text, $html = '') {
+    $raw_text = (string) $text;
+    $raw_html = (string) $html;
+
+    if ('' === $raw_html && '' !== $raw_text) {
+        $raw_html = wpautop($raw_text);
+    }
+
+    $sanitized_html = sitepulse_ai_sanitize_insight_html($raw_html);
+
+    $text_source = '' !== $raw_text ? $raw_text : $sanitized_html;
+    $sanitized_text = sitepulse_ai_sanitize_insight_text($text_source);
+
+    if ('' === $sanitized_text && '' !== $sanitized_html) {
+        $sanitized_text = sitepulse_ai_sanitize_insight_text($sanitized_html);
+    }
+
+    if ('' === $sanitized_html && '' !== $sanitized_text) {
+        $sanitized_html = sitepulse_ai_sanitize_insight_html(wpautop($sanitized_text));
+    }
+
+    return [
+        'text' => $sanitized_text,
+        'html' => $sanitized_html,
+    ];
+}
+
+/**
  * Determines whether WP-Cron is disabled for the current installation.
  *
  * @return bool
@@ -122,16 +231,25 @@ function sitepulse_ai_get_history_max_entries() {
  *
  * @param array<string,mixed> $entry Raw history entry data.
  *
- * @return array{text:string,timestamp:int,model:array{key:string,label:string},rate_limit:array{key:string,label:string}}|null
+ * @return array{
+ *     text:string,
+ *     html:string,
+ *     timestamp:int,
+ *     model:array{key:string,label:string},
+ *     rate_limit:array{key:string,label:string}
+ * }|null
  */
 function sitepulse_ai_normalize_history_entry($entry) {
     if (!is_array($entry)) {
         return null;
     }
 
-    $text = isset($entry['text']) ? sanitize_textarea_field((string) $entry['text']) : '';
+    $variants = sitepulse_ai_prepare_insight_variants(
+        isset($entry['text']) ? (string) $entry['text'] : '',
+        isset($entry['html']) ? (string) $entry['html'] : ''
+    );
 
-    if ('' === $text) {
+    if ('' === $variants['text']) {
         return null;
     }
 
@@ -188,7 +306,8 @@ function sitepulse_ai_normalize_history_entry($entry) {
     }
 
     return [
-        'text'      => $text,
+        'text'      => $variants['text'],
+        'html'      => $variants['html'],
         'timestamp' => $timestamp,
         'model'     => [
             'key'   => $model_key,
@@ -239,7 +358,13 @@ function sitepulse_ai_record_history_entry(array $entry) {
 /**
  * Retrieves the stored AI insight history entries ordered from newest to oldest.
  *
- * @return array<int,array{text:string,timestamp:int,model:array{key:string,label:string},rate_limit:array{key:string,label:string}}>
+ * @return array<int,array{
+ *     text:string,
+ *     html:string,
+ *     timestamp:int,
+ *     model:array{key:string,label:string},
+ *     rate_limit:array{key:string,label:string}
+ * }>
  */
 function sitepulse_ai_get_history_entries() {
     $history = function_exists('get_option') ? get_option(SITEPULSE_OPTION_AI_HISTORY, []) : [];
@@ -582,7 +707,7 @@ function sitepulse_ai_prepare_environment() {
  * @param string               $selected_model   Selected model identifier.
  * @param array<string,mixed>  $available_models Available model metadata.
  *
- * @return array{text:string,timestamp:int,cached:bool}|WP_Error
+ * @return array{text:string,html:string,timestamp:int,cached:bool}|WP_Error
  */
 function sitepulse_ai_execute_generation($api_key, $selected_model, array $available_models) {
     $endpoint = sprintf(
@@ -755,13 +880,21 @@ function sitepulse_ai_execute_generation($api_key, $selected_model, array $avail
         return sitepulse_ai_create_wp_error('sitepulse_ai_empty_response', $error_message, 500);
     }
 
-    $generated_text = sanitize_textarea_field($generated_text);
-    $timestamp      = absint(current_time('timestamp', true));
+    $variants = sitepulse_ai_prepare_insight_variants($generated_text);
+
+    if ('' === $variants['text']) {
+        $error_message = esc_html__('La réponse de Gemini ne contient aucun texte exploitable.', 'sitepulse');
+
+        return sitepulse_ai_create_wp_error('sitepulse_ai_empty_response', $error_message, 500);
+    }
+
+    $timestamp = absint(current_time('timestamp', true));
 
     set_transient(
         SITEPULSE_TRANSIENT_AI_INSIGHT,
         [
-            'text'      => $generated_text,
+            'text'      => $variants['text'],
+            'html'      => $variants['html'],
             'timestamp' => $timestamp,
         ],
         HOUR_IN_SECONDS
@@ -773,13 +906,15 @@ function sitepulse_ai_execute_generation($api_key, $selected_model, array $avail
 
     if (empty($fresh_payload)) {
         $fresh_payload = [
-            'text'      => $generated_text,
+            'text'      => $variants['text'],
+            'html'      => $variants['html'],
             'timestamp' => $timestamp,
         ];
     }
 
     return [
-        'text'      => isset($fresh_payload['text']) ? $fresh_payload['text'] : $generated_text,
+        'text'      => isset($fresh_payload['text']) ? $fresh_payload['text'] : $variants['text'],
+        'html'      => isset($fresh_payload['html']) ? $fresh_payload['html'] : $variants['html'],
         'timestamp' => isset($fresh_payload['timestamp']) ? $fresh_payload['timestamp'] : $timestamp,
         'cached'    => false,
     ];
@@ -915,6 +1050,7 @@ function sitepulse_run_ai_insight_job($job_id) {
         $rate_limit_value = sitepulse_ai_get_current_rate_limit_value();
         $history_entry    = [
             'text'       => isset($result['text']) ? $result['text'] : '',
+            'html'       => isset($result['html']) ? $result['html'] : '',
             'timestamp'  => isset($result['timestamp']) ? (int) $result['timestamp'] : absint(current_time('timestamp', true)),
             'model'      => [
                 'key'   => $selected_model,
@@ -963,7 +1099,7 @@ function sitepulse_run_ai_insight_job($job_id) {
  *
  * @param bool $force_refresh When true, clears the transient cache and resets the in-request cache.
  *
- * @return array{text?:string,timestamp?:int}
+ * @return array{text?:string,html?:string,timestamp?:int}
  */
 function sitepulse_ai_get_cached_insight($force_refresh = false) {
     static $cached_insight = null;
@@ -981,21 +1117,29 @@ function sitepulse_ai_get_cached_insight($force_refresh = false) {
     $cached_insight = [];
     $stored_insight = get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
 
-    if (is_array($stored_insight) && isset($stored_insight['text'])) {
-        $cached_text = sanitize_textarea_field($stored_insight['text']);
+    $variants = [
+        'text' => '',
+        'html' => '',
+    ];
 
-        if ('' !== $cached_text) {
-            $cached_insight['text'] = $cached_text;
+    if (is_array($stored_insight)) {
+        $variants = sitepulse_ai_prepare_insight_variants(
+            isset($stored_insight['text']) ? (string) $stored_insight['text'] : '',
+            isset($stored_insight['html']) ? (string) $stored_insight['html'] : ''
+        );
 
-            if (isset($stored_insight['timestamp'])) {
-                $cached_insight['timestamp'] = (int) $stored_insight['timestamp'];
-            }
+        if (isset($stored_insight['timestamp'])) {
+            $cached_insight['timestamp'] = (int) $stored_insight['timestamp'];
         }
     } elseif (is_string($stored_insight) && '' !== $stored_insight) {
-        $cached_text = sanitize_textarea_field($stored_insight);
+        $variants = sitepulse_ai_prepare_insight_variants($stored_insight);
+    }
 
-        if ('' !== $cached_text) {
-            $cached_insight['text'] = $cached_text;
+    if ('' !== $variants['text']) {
+        $cached_insight['text'] = $variants['text'];
+
+        if ('' !== $variants['html']) {
+            $cached_insight['html'] = $variants['html'];
         }
     }
 
@@ -1173,6 +1317,7 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
 
     $stored_insight     = sitepulse_ai_get_cached_insight();
     $insight_text       = isset($stored_insight['text']) ? $stored_insight['text'] : '';
+    $insight_html       = isset($stored_insight['html']) ? $stored_insight['html'] : '';
     $insight_timestamp  = isset($stored_insight['timestamp']) ? absint($stored_insight['timestamp']) : null;
     $history_entries    = sitepulse_ai_get_history_entries();
     $history_models     = sitepulse_ai_get_history_filter_options($history_entries, 'model');
@@ -1186,6 +1331,7 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
             'ajaxUrl'           => admin_url('admin-ajax.php'),
             'nonce'             => wp_create_nonce(SITEPULSE_NONCE_ACTION_AI_INSIGHT),
             'initialInsight'    => $insight_text,
+            'initialInsightHtml' => $insight_html,
             'initialTimestamp'  => null !== $insight_timestamp ? absint($insight_timestamp) : null,
             'historyEntries'    => $history_entries,
             'historyFilters'    => [
@@ -1286,7 +1432,7 @@ function sitepulse_ai_insights_page() {
         <div id="sitepulse-ai-insight-result" class="sitepulse-ai-result">
             <h2><?php esc_html_e('Votre Recommandation par IA', 'sitepulse'); ?></h2>
             <p class="sitepulse-ai-insight-status" role="status" aria-live="polite" aria-hidden="true"></p>
-            <p class="sitepulse-ai-insight-text"></p>
+            <div class="sitepulse-ai-insight-text"></div>
             <p class="sitepulse-ai-insight-timestamp"></p>
         </div>
         <div id="sitepulse-ai-history" class="sitepulse-ai-history">
@@ -1357,7 +1503,15 @@ function sitepulse_ai_insights_page() {
                         <?php if (!empty($meta_parts)) : ?>
                             <p class="sitepulse-ai-history-meta"><?php echo esc_html(implode(' • ', $meta_parts)); ?></p>
                         <?php endif; ?>
-                        <p class="sitepulse-ai-history-text"><?php echo esc_html($entry['text']); ?></p>
+                        <div class="sitepulse-ai-history-text">
+                            <?php
+                            if (!empty($entry['html'])) {
+                                echo wp_kses_post($entry['html']);
+                            } else {
+                                echo esc_html($entry['text']);
+                            }
+                            ?>
+                        </div>
                     </li>
                 <?php endforeach; ?>
             </ul>
