@@ -16,6 +16,7 @@ Sitepulse - JLG takes the pulse of your WordPress site, offering modules for:
 - Plugin impact analysis
 - Maintenance checks and AI insights
 - Custom dashboards and multisite support
+- Customisable thresholds for speed alerts, uptime targets and revision cleanup suggestions
 
 Toggle modules in the admin panel to keep it lightweight. Includes debug mode and cleanup options.
 

@@ -393,13 +393,33 @@ function sitepulse_custom_dashboards_page() {
             $processing_time = (float) $latest_entry['server_processing_ms'];
         }
 
+        $default_speed_thresholds = [
+            'warning'  => defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200,
+            'critical' => defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? (int) SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500,
+        ];
+
+        $speed_thresholds = function_exists('sitepulse_get_speed_thresholds')
+            ? sitepulse_get_speed_thresholds()
+            : $default_speed_thresholds;
+
+        $speed_warning_threshold = isset($speed_thresholds['warning']) ? (int) $speed_thresholds['warning'] : $default_speed_thresholds['warning'];
+        $speed_critical_threshold = isset($speed_thresholds['critical']) ? (int) $speed_thresholds['critical'] : $default_speed_thresholds['critical'];
+
+        if ($speed_warning_threshold < 1) {
+            $speed_warning_threshold = $default_speed_thresholds['warning'];
+        }
+
+        if ($speed_critical_threshold <= $speed_warning_threshold) {
+            $speed_critical_threshold = max($speed_warning_threshold + 1, $default_speed_thresholds['critical']);
+        }
+
         $processing_status = 'status-ok';
 
         if ($processing_time === null) {
             $processing_status = 'status-warn';
-        } elseif ($processing_time > 500) {
+        } elseif ($processing_time >= $speed_critical_threshold) {
             $processing_status = 'status-bad';
-        } elseif ($processing_time > 200) {
+        } elseif ($processing_time >= $speed_warning_threshold) {
             $processing_status = 'status-warn';
         }
 
@@ -435,7 +455,7 @@ function sitepulse_custom_dashboards_page() {
             $speed_values
         );
 
-        $speed_reference = 1000;
+        $speed_reference = max(1.0, (float) $speed_warning_threshold);
         $speed_chart = [
             'type'     => 'line',
             'labels'   => $speed_labels,
@@ -500,7 +520,29 @@ function sitepulse_custom_dashboards_page() {
             return isset($entry['status']) && true === $entry['status'];
         }));
         $uptime_percentage = $evaluated_checks > 0 ? ($up_checks / $evaluated_checks) * 100 : 100;
-        $uptime_status = $uptime_percentage < 99 ? 'status-bad' : ($uptime_percentage < 100 ? 'status-warn' : 'status-ok');
+        $default_uptime_warning = defined('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT') ? (float) SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT : 99.0;
+
+        if (function_exists('sitepulse_get_uptime_warning_percentage')) {
+            $uptime_warning_threshold = (float) sitepulse_get_uptime_warning_percentage();
+        } else {
+            $uptime_warning_key = defined('SITEPULSE_OPTION_UPTIME_WARNING_PERCENT') ? SITEPULSE_OPTION_UPTIME_WARNING_PERCENT : 'sitepulse_uptime_warning_percent';
+            $stored_threshold = get_option($uptime_warning_key, $default_uptime_warning);
+            $uptime_warning_threshold = is_scalar($stored_threshold) ? (float) $stored_threshold : $default_uptime_warning;
+        }
+
+        if ($uptime_warning_threshold < 0) {
+            $uptime_warning_threshold = 0.0;
+        } elseif ($uptime_warning_threshold > 100) {
+            $uptime_warning_threshold = 100.0;
+        }
+
+        if ($uptime_percentage < $uptime_warning_threshold) {
+            $uptime_status = 'status-bad';
+        } elseif ($uptime_percentage < 100) {
+            $uptime_status = 'status-warn';
+        } else {
+            $uptime_status = 'status-ok';
+        }
         $uptime_entries = array_slice($uptime_log, -30);
 
         $date_format = get_option('date_format');
@@ -556,8 +598,36 @@ function sitepulse_custom_dashboards_page() {
 
     if ($is_database_enabled) {
         $revisions = (int) $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->posts WHERE post_type = 'revision'");
-        $db_status = $revisions > 100 ? 'status-bad' : ($revisions > 50 ? 'status-warn' : 'status-ok');
-        $revision_limit = 100;
+        $default_revision_limit = defined('SITEPULSE_DEFAULT_REVISION_LIMIT') ? (int) SITEPULSE_DEFAULT_REVISION_LIMIT : 100;
+
+        if (function_exists('sitepulse_get_revision_limit')) {
+            $revision_limit = (int) sitepulse_get_revision_limit();
+        } else {
+            $revision_option_key = defined('SITEPULSE_OPTION_REVISION_LIMIT') ? SITEPULSE_OPTION_REVISION_LIMIT : 'sitepulse_revision_limit';
+            $stored_limit = get_option($revision_option_key, $default_revision_limit);
+            $revision_limit = is_scalar($stored_limit) ? (int) $stored_limit : $default_revision_limit;
+        }
+
+        if ($revision_limit < 1) {
+            $revision_limit = $default_revision_limit;
+        }
+
+        $revision_warn_threshold = (int) floor($revision_limit * 0.5);
+        if ($revision_warn_threshold < 1) {
+            $revision_warn_threshold = 1;
+        }
+
+        if ($revision_warn_threshold >= $revision_limit) {
+            $revision_warn_threshold = max(1, $revision_limit - 1);
+        }
+
+        if ($revisions > $revision_limit) {
+            $db_status = 'status-bad';
+        } elseif ($revisions > $revision_warn_threshold) {
+            $db_status = 'status-warn';
+        } else {
+            $db_status = 'status-ok';
+        }
 
         $database_chart = [
             'type'     => 'doughnut',
@@ -773,7 +843,11 @@ function sitepulse_custom_dashboards_page() {
                         <span class="screen-reader-text"><?php echo esc_html($speed_status_meta['sr']); ?></span>
                         <span class="sitepulse-metric-value"><?php echo esc_html($speed_card['display']); ?></span>
                     </p>
-                    <p id="sitepulse-speed-description" class="description"><?php esc_html_e('Under 200ms indicates an excellent PHP response. Above 500ms suggests investigating plugins or hosting performance.', 'sitepulse'); ?></p>
+                    <p id="sitepulse-speed-description" class="description"><?php printf(
+                        esc_html__('Des temps inférieurs à %1$d ms indiquent une excellente réponse PHP. Au-delà de %2$d ms, envisagez d’auditer vos plugins ou votre hébergement.', 'sitepulse'),
+                        (int) $speed_warning_threshold,
+                        (int) $speed_critical_threshold
+                    ); ?></p>
                 </div>
             <?php endif; ?>
 

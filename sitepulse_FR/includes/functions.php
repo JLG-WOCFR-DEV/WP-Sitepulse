@@ -117,6 +117,124 @@ if (!function_exists('sitepulse_is_gemini_api_key_overridden')) {
     }
 }
 
+if (!function_exists('sitepulse_get_speed_thresholds')) {
+    /**
+     * Retrieves the configured speed thresholds for warning and critical states.
+     *
+     * @return array{warning:int,critical:int}
+     */
+    function sitepulse_get_speed_thresholds() {
+        $default_warning = defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200;
+        $default_critical = defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? (int) SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500;
+
+        $option_warning_key = defined('SITEPULSE_OPTION_SPEED_WARNING_MS') ? SITEPULSE_OPTION_SPEED_WARNING_MS : 'sitepulse_speed_warning_ms';
+        $option_critical_key = defined('SITEPULSE_OPTION_SPEED_CRITICAL_MS') ? SITEPULSE_OPTION_SPEED_CRITICAL_MS : 'sitepulse_speed_critical_ms';
+
+        $warning_value = get_option($option_warning_key, $default_warning);
+        $critical_value = get_option($option_critical_key, $default_critical);
+
+        $warning_ms = is_scalar($warning_value) ? (int) $warning_value : 0;
+        $critical_ms = is_scalar($critical_value) ? (int) $critical_value : 0;
+
+        if ($warning_ms <= 0) {
+            $warning_ms = $default_warning;
+        }
+
+        if ($critical_ms <= 0) {
+            $critical_ms = $default_critical;
+        }
+
+        if ($critical_ms <= $warning_ms) {
+            $critical_ms = max($warning_ms + 1, $default_critical);
+        }
+
+        return [
+            'warning'  => $warning_ms,
+            'critical' => $critical_ms,
+        ];
+    }
+}
+
+if (!function_exists('sitepulse_get_speed_warning_threshold')) {
+    /**
+     * Returns the configured warning speed threshold in milliseconds.
+     *
+     * @return int
+     */
+    function sitepulse_get_speed_warning_threshold() {
+        $thresholds = sitepulse_get_speed_thresholds();
+
+        return isset($thresholds['warning']) ? (int) $thresholds['warning'] : 0;
+    }
+}
+
+if (!function_exists('sitepulse_get_speed_critical_threshold')) {
+    /**
+     * Returns the configured critical speed threshold in milliseconds.
+     *
+     * @return int
+     */
+    function sitepulse_get_speed_critical_threshold() {
+        $thresholds = sitepulse_get_speed_thresholds();
+
+        return isset($thresholds['critical']) ? (int) $thresholds['critical'] : 0;
+    }
+}
+
+if (!function_exists('sitepulse_get_uptime_warning_percentage')) {
+    /**
+     * Returns the uptime warning threshold as a percentage.
+     *
+     * @return float
+     */
+    function sitepulse_get_uptime_warning_percentage() {
+        $default_percentage = defined('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT') ? (float) SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT : 99.0;
+        $option_key = defined('SITEPULSE_OPTION_UPTIME_WARNING_PERCENT') ? SITEPULSE_OPTION_UPTIME_WARNING_PERCENT : 'sitepulse_uptime_warning_percent';
+        $value = get_option($option_key, $default_percentage);
+
+        if (!is_scalar($value)) {
+            return $default_percentage;
+        }
+
+        $percentage = (float) $value;
+
+        if ($percentage <= 0) {
+            return $default_percentage;
+        }
+
+        if ($percentage > 100) {
+            return 100.0;
+        }
+
+        return $percentage;
+    }
+}
+
+if (!function_exists('sitepulse_get_revision_limit')) {
+    /**
+     * Returns the configured revision limit used for database health checks.
+     *
+     * @return int
+     */
+    function sitepulse_get_revision_limit() {
+        $default_limit = defined('SITEPULSE_DEFAULT_REVISION_LIMIT') ? (int) SITEPULSE_DEFAULT_REVISION_LIMIT : 100;
+        $option_key = defined('SITEPULSE_OPTION_REVISION_LIMIT') ? SITEPULSE_OPTION_REVISION_LIMIT : 'sitepulse_revision_limit';
+        $value = get_option($option_key, $default_limit);
+
+        if (!is_scalar($value)) {
+            return $default_limit;
+        }
+
+        $limit = (int) $value;
+
+        if ($limit < 1) {
+            return $default_limit;
+        }
+
+        return $limit;
+    }
+}
+
 if (!function_exists('sitepulse_delete_site_transients_by_prefix')) {
     /**
      * Deletes all site transients whose names start with the provided prefix.
