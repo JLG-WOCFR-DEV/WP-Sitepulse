@@ -139,6 +139,18 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_TIMEOUT, [
         'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_uptime_timeout', 'default' => SITEPULSE_DEFAULT_UPTIME_TIMEOUT
     ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_SPEED_WARNING_MS, [
+        'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_speed_warning_threshold', 'default' => SITEPULSE_DEFAULT_SPEED_WARNING_MS
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_SPEED_CRITICAL_MS, [
+        'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_speed_critical_threshold', 'default' => SITEPULSE_DEFAULT_SPEED_CRITICAL_MS
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_WARNING_PERCENT, [
+        'type' => 'number', 'sanitize_callback' => 'sitepulse_sanitize_uptime_warning_percent', 'default' => SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_REVISION_LIMIT, [
+        'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_revision_limit', 'default' => SITEPULSE_DEFAULT_REVISION_LIMIT
+    ]);
 }
 add_action('admin_init', 'sitepulse_register_settings');
 
@@ -354,6 +366,115 @@ function sitepulse_sanitize_uptime_timeout($value) {
 }
 
 /**
+ * Sanitizes the configured warning threshold for speed (in milliseconds).
+ *
+ * @param mixed $value Raw user input value.
+ * @return int
+ */
+function sitepulse_sanitize_speed_warning_threshold($value) {
+    $default = defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200;
+
+    if (!is_scalar($value)) {
+        return $default;
+    }
+
+    $sanitized = absint($value);
+
+    if ($sanitized < 1) {
+        return $default;
+    }
+
+    return $sanitized;
+}
+
+/**
+ * Sanitizes the configured critical threshold for speed (in milliseconds).
+ *
+ * @param mixed $value Raw user input value.
+ * @return int
+ */
+function sitepulse_sanitize_speed_critical_threshold($value) {
+    $default = defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? (int) SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500;
+    $minimum_warning = defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200;
+
+    if (!is_scalar($value)) {
+        $value = $default;
+    }
+
+    $sanitized = absint($value);
+
+    if ($sanitized < 1) {
+        $sanitized = $default;
+    }
+
+    $warning_value = $minimum_warning;
+    $warning_field_key = defined('SITEPULSE_OPTION_SPEED_WARNING_MS') ? SITEPULSE_OPTION_SPEED_WARNING_MS : 'sitepulse_speed_warning_ms';
+
+    if (isset($_POST[$warning_field_key])) { // phpcs:ignore WordPress.Security.NonceVerification.Missing
+        $warning_value = sitepulse_sanitize_speed_warning_threshold($_POST[$warning_field_key]); // phpcs:ignore WordPress.Security.NonceVerification.Missing
+    } else {
+        $stored_warning = get_option($warning_field_key, $minimum_warning);
+        if (is_scalar($stored_warning)) {
+            $warning_value = max($minimum_warning, absint($stored_warning));
+        }
+    }
+
+    if ($sanitized <= $warning_value) {
+        $sanitized = max($warning_value + 1, $default);
+    }
+
+    return $sanitized;
+}
+
+/**
+ * Sanitizes the uptime warning threshold percentage.
+ *
+ * @param mixed $value Raw user input value.
+ * @return float
+ */
+function sitepulse_sanitize_uptime_warning_percent($value) {
+    $default = defined('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT') ? (float) SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT : 99.0;
+
+    if (!is_scalar($value)) {
+        return $default;
+    }
+
+    $sanitized = (float) $value;
+
+    if ($sanitized <= 0) {
+        return $default;
+    }
+
+    if ($sanitized > 100) {
+        return 100.0;
+    }
+
+    return $sanitized;
+}
+
+/**
+ * Sanitizes the revision limit used in database health checks.
+ *
+ * @param mixed $value Raw user input value.
+ * @return int
+ */
+function sitepulse_sanitize_revision_limit($value) {
+    $default = defined('SITEPULSE_DEFAULT_REVISION_LIMIT') ? (int) SITEPULSE_DEFAULT_REVISION_LIMIT : 100;
+
+    if (!is_scalar($value)) {
+        return $default;
+    }
+
+    $sanitized = absint($value);
+
+    if ($sanitized < 1) {
+        return $default;
+    }
+
+    return $sanitized;
+}
+
+/**
  * Renders the settings page.
  */
 function sitepulse_settings_page() {
@@ -405,6 +526,44 @@ function sitepulse_settings_page() {
     $uptime_timeout_option = get_option(SITEPULSE_OPTION_UPTIME_TIMEOUT, SITEPULSE_DEFAULT_UPTIME_TIMEOUT);
     $uptime_timeout = sitepulse_sanitize_uptime_timeout($uptime_timeout_option);
 
+    $default_speed_thresholds = [
+        'warning'  => defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200,
+        'critical' => defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? (int) SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500,
+    ];
+
+    $speed_thresholds = function_exists('sitepulse_get_speed_thresholds')
+        ? sitepulse_get_speed_thresholds()
+        : $default_speed_thresholds;
+
+    $speed_warning_threshold = isset($speed_thresholds['warning']) ? (int) $speed_thresholds['warning'] : $default_speed_thresholds['warning'];
+    $speed_critical_threshold = isset($speed_thresholds['critical']) ? (int) $speed_thresholds['critical'] : $default_speed_thresholds['critical'];
+
+    if ($speed_warning_threshold < 1) {
+        $speed_warning_threshold = $default_speed_thresholds['warning'];
+    }
+
+    if ($speed_critical_threshold <= $speed_warning_threshold) {
+        $speed_critical_threshold = max($speed_warning_threshold + 1, $default_speed_thresholds['critical']);
+    }
+
+    $uptime_warning_percent = function_exists('sitepulse_get_uptime_warning_percentage')
+        ? (float) sitepulse_get_uptime_warning_percentage()
+        : (float) (defined('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT') ? SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT : 99.0);
+
+    if ($uptime_warning_percent < 0) {
+        $uptime_warning_percent = 0.0;
+    } elseif ($uptime_warning_percent > 100) {
+        $uptime_warning_percent = 100.0;
+    }
+
+    $revision_limit = function_exists('sitepulse_get_revision_limit')
+        ? (int) sitepulse_get_revision_limit()
+        : (int) (defined('SITEPULSE_DEFAULT_REVISION_LIMIT') ? SITEPULSE_DEFAULT_REVISION_LIMIT : 100);
+
+    if ($revision_limit < 1) {
+        $revision_limit = (int) (defined('SITEPULSE_DEFAULT_REVISION_LIMIT') ? SITEPULSE_DEFAULT_REVISION_LIMIT : 100);
+    }
+
     if (isset($_POST[SITEPULSE_NONCE_FIELD_CLEANUP]) && wp_verify_nonce($_POST[SITEPULSE_NONCE_FIELD_CLEANUP], SITEPULSE_NONCE_ACTION_CLEANUP)) {
         $filesystem = sitepulse_get_filesystem();
         $log_exists = defined('SITEPULSE_DEBUG_LOG') && (
@@ -455,6 +614,10 @@ function sitepulse_settings_page() {
                 SITEPULSE_OPTION_ALERT_INTERVAL,
                 // Clear stored alert recipients so the default (empty) list is restored on activation.
                 SITEPULSE_OPTION_ALERT_RECIPIENTS,
+                SITEPULSE_OPTION_SPEED_WARNING_MS,
+                SITEPULSE_OPTION_SPEED_CRITICAL_MS,
+                SITEPULSE_OPTION_UPTIME_WARNING_PERCENT,
+                SITEPULSE_OPTION_REVISION_LIMIT,
                 SITEPULSE_PLUGIN_IMPACT_OPTION,
             ];
 
@@ -608,6 +771,90 @@ function sitepulse_settings_page() {
                             <?php endforeach; ?>
                         </select>
                         <p class="description"><?php esc_html_e('Définissez la fréquence maximale des nouvelles recommandations générées automatiquement.', 'sitepulse'); ?></p>
+                    </td>
+                </tr>
+            </table>
+            <h2><?php esc_html_e('Seuils de performance', 'sitepulse'); ?></h2>
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_WARNING_MS); ?>"><?php esc_html_e('Seuil d’avertissement (ms)', 'sitepulse'); ?></label></th>
+                    <td>
+                        <?php $speed_warning_description_id = 'sitepulse-speed-warning-description'; ?>
+                        <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            id="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_WARNING_MS); ?>"
+                            name="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_WARNING_MS); ?>"
+                            value="<?php echo esc_attr($speed_warning_threshold); ?>"
+                            class="small-text"
+                            aria-describedby="<?php echo esc_attr($speed_warning_description_id); ?>"
+                        >
+                        <p class="description" id="<?php echo esc_attr($speed_warning_description_id); ?>"><?php printf(
+                            esc_html__('Temps de traitement au-delà duquel un statut « attention » est affiché pour la vitesse. Valeur par défaut : %d ms.', 'sitepulse'),
+                            (int) (defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200)
+                        ); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_CRITICAL_MS); ?>"><?php esc_html_e('Seuil critique (ms)', 'sitepulse'); ?></label></th>
+                    <td>
+                        <?php $speed_critical_description_id = 'sitepulse-speed-critical-description'; ?>
+                        <input
+                            type="number"
+                            min="<?php echo esc_attr($speed_warning_threshold + 1); ?>"
+                            step="1"
+                            id="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_CRITICAL_MS); ?>"
+                            name="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_CRITICAL_MS); ?>"
+                            value="<?php echo esc_attr($speed_critical_threshold); ?>"
+                            class="small-text"
+                            aria-describedby="<?php echo esc_attr($speed_critical_description_id); ?>"
+                        >
+                        <p class="description" id="<?php echo esc_attr($speed_critical_description_id); ?>"><?php printf(
+                            esc_html__('Temps de traitement à partir duquel les cartes passent en statut critique. Valeur par défaut : %d ms.', 'sitepulse'),
+                            (int) (defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500)
+                        ); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_WARNING_PERCENT); ?>"><?php esc_html_e('Seuil de disponibilité (%)', 'sitepulse'); ?></label></th>
+                    <td>
+                        <?php $uptime_warning_description_id = 'sitepulse-uptime-warning-description'; ?>
+                        <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_WARNING_PERCENT); ?>"
+                            name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_WARNING_PERCENT); ?>"
+                            value="<?php echo esc_attr($uptime_warning_percent); ?>"
+                            class="small-text"
+                            aria-describedby="<?php echo esc_attr($uptime_warning_description_id); ?>"
+                        >
+                        <p class="description" id="<?php echo esc_attr($uptime_warning_description_id); ?>"><?php printf(
+                            esc_html__('Pourcentage minimal de disponibilité avant de signaler une alerte. Valeur par défaut : %s %%.', 'sitepulse'),
+                            number_format_i18n(defined('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT') ? SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT : 99)
+                        ); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_REVISION_LIMIT); ?>"><?php esc_html_e('Limite de révisions', 'sitepulse'); ?></label></th>
+                    <td>
+                        <?php $revision_limit_description_id = 'sitepulse-revision-limit-description'; ?>
+                        <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            id="<?php echo esc_attr(SITEPULSE_OPTION_REVISION_LIMIT); ?>"
+                            name="<?php echo esc_attr(SITEPULSE_OPTION_REVISION_LIMIT); ?>"
+                            value="<?php echo esc_attr($revision_limit); ?>"
+                            class="small-text"
+                            aria-describedby="<?php echo esc_attr($revision_limit_description_id); ?>"
+                        >
+                        <p class="description" id="<?php echo esc_attr($revision_limit_description_id); ?>"><?php printf(
+                            esc_html__('Nombre maximal de révisions recommandé avant de proposer un nettoyage. Valeur par défaut : %d.', 'sitepulse'),
+                            (int) (defined('SITEPULSE_DEFAULT_REVISION_LIMIT') ? SITEPULSE_DEFAULT_REVISION_LIMIT : 100)
+                        ); ?></p>
                     </td>
                 </tr>
             </table>

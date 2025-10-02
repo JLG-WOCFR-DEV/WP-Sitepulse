@@ -40,8 +40,16 @@ define('SITEPULSE_OPTION_PLUGIN_BASENAME', 'sitepulse_plugin_basename');
 define('SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER', 'sitepulse_error_alert_log_pointer');
 define('SITEPULSE_OPTION_CRON_WARNINGS', 'sitepulse_cron_warnings');
 define('SITEPULSE_OPTION_DEBUG_NOTICES', 'sitepulse_debug_notices');
+define('SITEPULSE_OPTION_SPEED_WARNING_MS', 'sitepulse_speed_warning_ms');
+define('SITEPULSE_OPTION_SPEED_CRITICAL_MS', 'sitepulse_speed_critical_ms');
+define('SITEPULSE_OPTION_UPTIME_WARNING_PERCENT', 'sitepulse_uptime_warning_percent');
+define('SITEPULSE_OPTION_REVISION_LIMIT', 'sitepulse_revision_limit');
 
 define('SITEPULSE_DEFAULT_UPTIME_TIMEOUT', 10);
+define('SITEPULSE_DEFAULT_SPEED_WARNING_MS', 200);
+define('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS', 500);
+define('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT', 99);
+define('SITEPULSE_DEFAULT_REVISION_LIMIT', 100);
 
 define('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS', 'sitepulse_speed_scan_results');
 define('SITEPULSE_TRANSIENT_AI_INSIGHT', 'sitepulse_ai_insight');
@@ -1209,6 +1217,10 @@ function sitepulse_activate_site() {
     add_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, [], '', false);
     add_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER, [], '', false);
     add_option(SITEPULSE_OPTION_CRON_WARNINGS, [], '', false);
+    add_option(SITEPULSE_OPTION_SPEED_WARNING_MS, SITEPULSE_DEFAULT_SPEED_WARNING_MS, '', false);
+    add_option(SITEPULSE_OPTION_SPEED_CRITICAL_MS, SITEPULSE_DEFAULT_SPEED_CRITICAL_MS, '', false);
+    add_option(SITEPULSE_OPTION_UPTIME_WARNING_PERCENT, SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT, '', false);
+    add_option(SITEPULSE_OPTION_REVISION_LIMIT, SITEPULSE_DEFAULT_REVISION_LIMIT, '', false);
 
     sitepulse_plugin_impact_install_mu_loader();
 

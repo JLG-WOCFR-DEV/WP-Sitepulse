@@ -58,6 +58,32 @@ function sitepulse_speed_analyzer_page() {
     }
     $page_generation_time = (microtime(true) - $timestart) * 1000.0; // in milliseconds
 
+    $default_speed_warning = defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200;
+    $default_speed_critical = defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? (int) SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500;
+
+    if (function_exists('sitepulse_get_speed_thresholds')) {
+        $speed_thresholds = sitepulse_get_speed_thresholds();
+        $speed_warning_threshold = isset($speed_thresholds['warning']) ? (int) $speed_thresholds['warning'] : $default_speed_warning;
+        $speed_critical_threshold = isset($speed_thresholds['critical']) ? (int) $speed_thresholds['critical'] : $default_speed_critical;
+    } else {
+        $speed_warning_threshold = (int) get_option(
+            defined('SITEPULSE_OPTION_SPEED_WARNING_MS') ? SITEPULSE_OPTION_SPEED_WARNING_MS : 'sitepulse_speed_warning_ms',
+            $default_speed_warning
+        );
+        $speed_critical_threshold = (int) get_option(
+            defined('SITEPULSE_OPTION_SPEED_CRITICAL_MS') ? SITEPULSE_OPTION_SPEED_CRITICAL_MS : 'sitepulse_speed_critical_ms',
+            $default_speed_critical
+        );
+    }
+
+    if ($speed_warning_threshold < 1) {
+        $speed_warning_threshold = $default_speed_warning;
+    }
+
+    if ($speed_critical_threshold <= $speed_warning_threshold) {
+        $speed_critical_threshold = max($speed_warning_threshold + 1, $default_speed_critical);
+    }
+
     // 2. Database Query Time & Count
     $db_query_total_time = 0;
     $savequeries_enabled = defined('SAVEQUERIES') && SAVEQUERIES;
@@ -116,7 +142,13 @@ function sitepulse_speed_analyzer_page() {
                 <p><?php esc_html_e('Ces métriques mesurent la vitesse à laquelle votre serveur exécute le code PHP et génère la page actuelle.', 'sitepulse'); ?></p>
                 <ul class="health-list">
                     <?php
-                    $gen_time_status = $page_generation_time < 1000 ? 'status-ok' : ($page_generation_time < 2000 ? 'status-warn' : 'status-bad');
+                    if ($page_generation_time >= $speed_critical_threshold) {
+                        $gen_time_status = 'status-bad';
+                    } elseif ($page_generation_time >= $speed_warning_threshold) {
+                        $gen_time_status = 'status-warn';
+                    } else {
+                        $gen_time_status = 'status-ok';
+                    }
                     ?>
                     <li>
                         <span class="metric-name"><?php esc_html_e('Temps de Génération de la Page', 'sitepulse'); ?></span>
@@ -132,7 +164,10 @@ function sitepulse_speed_analyzer_page() {
                             printf(esc_html__('%d ms', 'sitepulse'), round($page_generation_time));
                             ?></span>
                         </span>
-                        <p class="description"><?php esc_html_e("C'est le temps total que met votre serveur pour préparer cette page. Un temps élevé (>1s) peut indiquer un hébergement lent ou un plugin qui consomme beaucoup de ressources.", 'sitepulse'); ?></p>
+                        <p class="description"><?php printf(
+                            esc_html__("C'est le temps total que met votre serveur pour préparer cette page. Un temps élevé (>%d ms) peut indiquer un hébergement lent ou un plugin qui consomme beaucoup de ressources.", 'sitepulse'),
+                            (int) $speed_critical_threshold
+                        ); ?></p>
                     </li>
                 </ul>
             </div>
@@ -145,7 +180,13 @@ function sitepulse_speed_analyzer_page() {
                     <?php
                     // Database Query Time Analysis
                     if ($savequeries_enabled) {
-                        $db_time_status = $db_query_total_time < 500 ? 'status-ok' : 'status-bad';
+                        if ($db_query_total_time >= $speed_critical_threshold) {
+                            $db_time_status = 'status-bad';
+                        } elseif ($db_query_total_time >= $speed_warning_threshold) {
+                            $db_time_status = 'status-warn';
+                        } else {
+                            $db_time_status = 'status-ok';
+                        }
                         ?>
                         <li>
                             <span class="metric-name"><?php esc_html_e('Temps Total des Requêtes BDD', 'sitepulse'); ?></span>

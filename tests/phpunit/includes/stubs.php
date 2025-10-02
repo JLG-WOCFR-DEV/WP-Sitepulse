@@ -15,6 +15,38 @@ if (!defined('SITEPULSE_OPTION_UPTIME_FAILURE_STREAK')) {
     define('SITEPULSE_OPTION_UPTIME_FAILURE_STREAK', 'sitepulse_uptime_failure_streak');
 }
 
+if (!defined('SITEPULSE_OPTION_SPEED_WARNING_MS')) {
+    define('SITEPULSE_OPTION_SPEED_WARNING_MS', 'sitepulse_speed_warning_ms');
+}
+
+if (!defined('SITEPULSE_OPTION_SPEED_CRITICAL_MS')) {
+    define('SITEPULSE_OPTION_SPEED_CRITICAL_MS', 'sitepulse_speed_critical_ms');
+}
+
+if (!defined('SITEPULSE_OPTION_UPTIME_WARNING_PERCENT')) {
+    define('SITEPULSE_OPTION_UPTIME_WARNING_PERCENT', 'sitepulse_uptime_warning_percent');
+}
+
+if (!defined('SITEPULSE_OPTION_REVISION_LIMIT')) {
+    define('SITEPULSE_OPTION_REVISION_LIMIT', 'sitepulse_revision_limit');
+}
+
+if (!defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS')) {
+    define('SITEPULSE_DEFAULT_SPEED_WARNING_MS', 200);
+}
+
+if (!defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS')) {
+    define('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS', 500);
+}
+
+if (!defined('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT')) {
+    define('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT', 99);
+}
+
+if (!defined('SITEPULSE_DEFAULT_REVISION_LIMIT')) {
+    define('SITEPULSE_DEFAULT_REVISION_LIMIT', 100);
+}
+
 if (!defined('SITEPULSE_OPTION_DEBUG_NOTICES')) {
     define('SITEPULSE_OPTION_DEBUG_NOTICES', 'sitepulse_debug_notices');
 }

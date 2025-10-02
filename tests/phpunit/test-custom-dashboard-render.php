@@ -39,6 +39,10 @@ class Sitepulse_Custom_Dashboard_Render_Test extends WP_UnitTestCase {
         delete_option(SITEPULSE_OPTION_UPTIME_LOG);
         delete_option(SITEPULSE_OPTION_ACTIVE_MODULES);
         delete_option(SITEPULSE_OPTION_SPEED_SCAN_HISTORY);
+        delete_option(SITEPULSE_OPTION_SPEED_WARNING_MS);
+        delete_option(SITEPULSE_OPTION_SPEED_CRITICAL_MS);
+        delete_option(SITEPULSE_OPTION_UPTIME_WARNING_PERCENT);
+        delete_option(SITEPULSE_OPTION_REVISION_LIMIT);
 
         $scripts = wp_scripts();
         $scripts->remove('sitepulse-chartjs');
