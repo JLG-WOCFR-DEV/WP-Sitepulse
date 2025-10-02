@@ -103,6 +103,35 @@ function sitepulse_admin_menu() {
 add_action('admin_menu', 'sitepulse_admin_menu');
 
 /**
+ * Registers the assets used on the SitePulse settings screen.
+ *
+ * @param string $hook_suffix Current admin page identifier.
+ * @return void
+ */
+function sitepulse_admin_settings_enqueue_assets($hook_suffix) {
+    $allowed_hooks = [
+        'toplevel_page_sitepulse-settings',
+        'sitepulse-dashboard_page_sitepulse-settings',
+    ];
+
+    if (!in_array($hook_suffix, $allowed_hooks, true)) {
+        return;
+    }
+
+    $style_handle = 'sitepulse-admin-settings';
+    $style_src    = SITEPULSE_URL . 'modules/css/admin-settings.css';
+    $style_deps   = [];
+    $style_ver    = defined('SITEPULSE_VERSION') ? SITEPULSE_VERSION : false;
+
+    if (!wp_style_is($style_handle, 'registered')) {
+        wp_register_style($style_handle, $style_src, $style_deps, $style_ver);
+    }
+
+    wp_enqueue_style($style_handle);
+}
+add_action('admin_enqueue_scripts', 'sitepulse_admin_settings_enqueue_assets');
+
+/**
  * Registers the settings fields.
  */
 function sitepulse_register_settings() {
@@ -483,16 +512,56 @@ function sitepulse_settings_page() {
     }
 
     $modules = [
-        'log_analyzer'          => __('Log Analyzer', 'sitepulse'),
-        'resource_monitor'      => __('Resource Monitor', 'sitepulse'),
-        'plugin_impact_scanner' => __('Plugin Impact Scanner', 'sitepulse'),
-        'speed_analyzer'        => __('Speed Analyzer', 'sitepulse'),
-        'database_optimizer'    => __('Database Optimizer', 'sitepulse'),
-        'maintenance_advisor'   => __('Maintenance Advisor', 'sitepulse'),
-        'uptime_tracker'        => __('Uptime Tracker', 'sitepulse'),
-        'ai_insights'           => __('AI-Powered Insights', 'sitepulse'),
-        'custom_dashboards'     => __('Custom Dashboards', 'sitepulse'),
-        'error_alerts'          => __('Error Alerts', 'sitepulse'),
+        'log_analyzer'          => [
+            'label'       => __('Log Analyzer', 'sitepulse'),
+            'description' => __('Analyse les journaux WordPress et met en évidence les erreurs critiques détectées.', 'sitepulse'),
+            'page'        => 'sitepulse-logs',
+        ],
+        'resource_monitor'      => [
+            'label'       => __('Resource Monitor', 'sitepulse'),
+            'description' => __('Surveille l’utilisation des ressources serveur pour repérer les pics de charge.', 'sitepulse'),
+            'page'        => 'sitepulse-resources',
+        ],
+        'plugin_impact_scanner' => [
+            'label'       => __('Plugin Impact Scanner', 'sitepulse'),
+            'description' => __('Évalue l’impact de chaque extension sur les performances et la stabilité.', 'sitepulse'),
+            'page'        => 'sitepulse-plugins',
+        ],
+        'speed_analyzer'        => [
+            'label'       => __('Speed Analyzer', 'sitepulse'),
+            'description' => __('Mesure la vitesse de chargement pour identifier les ralentissements critiques.', 'sitepulse'),
+            'page'        => 'sitepulse-speed',
+        ],
+        'database_optimizer'    => [
+            'label'       => __('Database Optimizer', 'sitepulse'),
+            'description' => __('Suggère des actions de nettoyage et d’optimisation de la base de données.', 'sitepulse'),
+            'page'        => 'sitepulse-db',
+        ],
+        'maintenance_advisor'   => [
+            'label'       => __('Maintenance Advisor', 'sitepulse'),
+            'description' => __('Suit les mises à jour WordPress, extensions et thèmes pour garder le site à jour.', 'sitepulse'),
+            'page'        => 'sitepulse-maintenance',
+        ],
+        'uptime_tracker'        => [
+            'label'       => __('Uptime Tracker', 'sitepulse'),
+            'description' => __('Vérifie régulièrement la disponibilité du site et alerte en cas d’incident.', 'sitepulse'),
+            'page'        => 'sitepulse-uptime',
+        ],
+        'ai_insights'           => [
+            'label'       => __('AI-Powered Insights', 'sitepulse'),
+            'description' => __('Génère automatiquement des recommandations basées sur l’intelligence artificielle.', 'sitepulse'),
+            'page'        => 'sitepulse-ai',
+        ],
+        'custom_dashboards'     => [
+            'label'       => __('Custom Dashboards', 'sitepulse'),
+            'description' => __('Propose une vue d’ensemble personnalisable de vos indicateurs clés.', 'sitepulse'),
+            'page'        => 'sitepulse-dashboard',
+        ],
+        'error_alerts'          => [
+            'label'       => __('Error Alerts', 'sitepulse'),
+            'description' => __('Surveille les erreurs critiques et déclenche des notifications ciblées.', 'sitepulse'),
+            'page'        => '#sitepulse-section-alerts',
+        ],
     ];
     $stored_gemini_api_key = (string) get_option(SITEPULSE_OPTION_GEMINI_API_KEY, '');
     $has_stored_gemini_api_key = $stored_gemini_api_key !== '';
@@ -701,274 +770,390 @@ function sitepulse_settings_page() {
         }
     }
     ?>
-    <div class="wrap">
+    <div class="wrap sitepulse-settings-wrap">
         <h1><?php esc_html_e('Réglages de SitePulse', 'sitepulse'); ?></h1>
-        <form method="post" action="options.php">
+        <p class="sitepulse-settings-intro"><?php esc_html_e('Activez les modules qui vous intéressent et ajustez les seuils clés pour votre surveillance.', 'sitepulse'); ?></p>
+        <form method="post" action="options.php" class="sitepulse-settings-form">
             <?php settings_fields('sitepulse_settings'); do_settings_sections('sitepulse_settings'); ?>
-            <h2><?php esc_html_e("Paramètres de l'API", 'sitepulse'); ?></h2>
-            <table class="form-table">
-                <tr valign="top">
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>"><?php esc_html_e('Clé API Google Gemini', 'sitepulse'); ?></label></th>
-                    <td>
-                        <input type="password" id="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>" value="" class="regular-text" autocomplete="new-password"<?php echo $has_effective_gemini_api_key && !$is_gemini_api_key_constant ? ' placeholder="' . esc_attr__('Une clé API est enregistrée', 'sitepulse') . '"' : ''; ?> <?php disabled($is_gemini_api_key_constant); ?> />
-                        <?php if ($is_gemini_api_key_constant): ?>
-                            <p class="description"><?php esc_html_e('Cette clé est définie dans wp-config.php via la constante SITEPULSE_GEMINI_API_KEY. Mettez à jour ce fichier pour la modifier.', 'sitepulse'); ?></p>
-                        <?php elseif ($has_effective_gemini_api_key): ?>
-                            <p class="description"><?php esc_html_e('Une clé API est déjà enregistrée. Laissez le champ vide pour la conserver ou cochez la case ci-dessous pour l’effacer.', 'sitepulse'); ?></p>
-                            <?php if ($has_stored_gemini_api_key): ?>
-                                <label for="sitepulse_delete_gemini_api_key">
-                                    <input type="checkbox" id="sitepulse_delete_gemini_api_key" name="sitepulse_delete_gemini_api_key" value="1">
-                                    <?php esc_html_e('Effacer la clé API enregistrée', 'sitepulse'); ?>
-                                </label>
+            <div class="sitepulse-settings-section" id="sitepulse-section-api">
+                <h2><?php esc_html_e("Paramètres de l'API", 'sitepulse'); ?></h2>
+                <div class="sitepulse-settings-grid">
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Connexion à Google Gemini', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>"><?php esc_html_e('Clé API Google Gemini', 'sitepulse'); ?></label>
+                            <input type="password" id="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>" value="" class="regular-text" autocomplete="new-password"<?php echo $has_effective_gemini_api_key && !$is_gemini_api_key_constant ? ' placeholder="' . esc_attr__('Une clé API est enregistrée', 'sitepulse') . '"' : ''; ?> <?php disabled($is_gemini_api_key_constant); ?> />
+                            <?php if ($is_gemini_api_key_constant): ?>
+                                <p class="sitepulse-card-description"><?php esc_html_e('Cette clé est définie dans wp-config.php via la constante SITEPULSE_GEMINI_API_KEY. Mettez à jour ce fichier pour la modifier.', 'sitepulse'); ?></p>
+                            <?php elseif ($has_effective_gemini_api_key): ?>
+                                <p class="sitepulse-card-description"><?php esc_html_e('Une clé API est déjà enregistrée. Laissez le champ vide pour la conserver ou cochez la case ci-dessous pour l’effacer.', 'sitepulse'); ?></p>
+                                <?php if ($has_stored_gemini_api_key): ?>
+                                    <label class="sitepulse-card-checkbox" for="sitepulse_delete_gemini_api_key">
+                                        <input type="checkbox" id="sitepulse_delete_gemini_api_key" name="sitepulse_delete_gemini_api_key" value="1">
+                                        <span><?php esc_html_e('Effacer la clé API enregistrée', 'sitepulse'); ?></span>
+                                    </label>
+                                <?php endif; ?>
                             <?php endif; ?>
-                        <?php endif; ?>
-                        <p class="description"><?php printf(
-                            wp_kses(
-                                /* translators: %s: URL to Google AI Studio. */
-                                __('Entrez votre clé API pour activer les analyses par IA. Obtenez une clé sur <a href="%s" target="_blank">Google AI Studio</a>.', 'sitepulse'),
-                                ['a' => ['href' => true, 'target' => true]]
-                            ),
-                            esc_url('https://aistudio.google.com/app/apikey')
-                        ); ?></p>
-                    </td>
-                </tr>
-            </table>
-            <h2><?php esc_html_e('IA', 'sitepulse'); ?></h2>
-            <table class="form-table">
-                <tr>
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_AI_MODEL); ?>"><?php esc_html_e('Modèle IA', 'sitepulse'); ?></label></th>
-                    <td>
-                        <select id="<?php echo esc_attr(SITEPULSE_OPTION_AI_MODEL); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_AI_MODEL); ?>">
-                            <?php foreach ($available_ai_models as $model_key => $model_data) : ?>
-                                <option value="<?php echo esc_attr($model_key); ?>" <?php selected($selected_ai_model, $model_key); ?>><?php echo esc_html(isset($model_data['label']) ? $model_data['label'] : $model_key); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <p class="description"><?php esc_html_e("Choisissez le modèle utilisé pour générer les recommandations. Les modèles diffèrent en termes de profondeur d'analyse, de coût et de temps de réponse.", 'sitepulse'); ?></p>
-                        <?php if (!empty($available_ai_models)) : ?>
-                            <ul class="description" style="margin-left: 1.5em; list-style: disc;">
-                                <?php foreach ($available_ai_models as $model_key => $model_data) :
-                                    $label = isset($model_data['label']) ? $model_data['label'] : $model_key;
-                                    $description = isset($model_data['description']) ? $model_data['description'] : '';
-                                ?>
-                                    <li>
-                                        <strong><?php echo esc_html($label); ?></strong>
-                                        <?php if ($selected_ai_model === $model_key) : ?>
-                                            <em><?php esc_html_e(' (modèle actuel)', 'sitepulse'); ?></em>
-                                        <?php endif; ?>
-                                        <?php if ($description !== '') : ?> — <?php echo esc_html($description); ?><?php endif; ?>
-                                    </li>
+                            <p class="sitepulse-card-description"><?php printf(
+                                wp_kses(
+                                    /* translators: %s: URL to Google AI Studio. */
+                                    __('Entrez votre clé API pour activer les analyses par IA. Obtenez une clé sur <a href="%s" target="_blank">Google AI Studio</a>.', 'sitepulse'),
+                                    ['a' => ['href' => true, 'target' => true]]
+                                ),
+                                esc_url('https://aistudio.google.com/app/apikey')
+                            ); ?></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="sitepulse-settings-section" id="sitepulse-section-ai">
+                <h2><?php esc_html_e('IA', 'sitepulse'); ?></h2>
+                <div class="sitepulse-settings-grid">
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Modèle IA', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_AI_MODEL); ?>"><?php esc_html_e('Modèle IA', 'sitepulse'); ?></label>
+                            <select id="<?php echo esc_attr(SITEPULSE_OPTION_AI_MODEL); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_AI_MODEL); ?>">
+                                <?php foreach ($available_ai_models as $model_key => $model_data) : ?>
+                                    <option value="<?php echo esc_attr($model_key); ?>" <?php selected($selected_ai_model, $model_key); ?>><?php echo esc_html(isset($model_data['label']) ? $model_data['label'] : $model_key); ?></option>
                                 <?php endforeach; ?>
-                            </ul>
-                        <?php endif; ?>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_AI_RATE_LIMIT); ?>"><?php esc_html_e('Fréquence maximale des analyses IA', 'sitepulse'); ?></label></th>
-                    <td>
-                        <select id="<?php echo esc_attr(SITEPULSE_OPTION_AI_RATE_LIMIT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_AI_RATE_LIMIT); ?>">
-                            <?php foreach ($ai_rate_limit_choices as $option_value => $option_label) : ?>
-                                <option value="<?php echo esc_attr($option_value); ?>" <?php selected($selected_ai_rate_limit, $option_value); ?>><?php echo esc_html($option_label); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <p class="description"><?php esc_html_e('Définissez la fréquence maximale des nouvelles recommandations générées automatiquement.', 'sitepulse'); ?></p>
-                    </td>
-                </tr>
-            </table>
-            <h2><?php esc_html_e('Seuils de performance', 'sitepulse'); ?></h2>
-            <table class="form-table">
-                <tr>
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_WARNING_MS); ?>"><?php esc_html_e('Seuil d’avertissement (ms)', 'sitepulse'); ?></label></th>
-                    <td>
-                        <?php $speed_warning_description_id = 'sitepulse-speed-warning-description'; ?>
-                        <input
-                            type="number"
-                            min="1"
-                            step="1"
-                            id="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_WARNING_MS); ?>"
-                            name="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_WARNING_MS); ?>"
-                            value="<?php echo esc_attr($speed_warning_threshold); ?>"
-                            class="small-text"
-                            aria-describedby="<?php echo esc_attr($speed_warning_description_id); ?>"
-                        >
-                        <p class="description" id="<?php echo esc_attr($speed_warning_description_id); ?>"><?php printf(
-                            esc_html__('Temps de traitement au-delà duquel un statut « attention » est affiché pour la vitesse. Valeur par défaut : %d ms.', 'sitepulse'),
-                            (int) (defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200)
-                        ); ?></p>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_CRITICAL_MS); ?>"><?php esc_html_e('Seuil critique (ms)', 'sitepulse'); ?></label></th>
-                    <td>
-                        <?php $speed_critical_description_id = 'sitepulse-speed-critical-description'; ?>
-                        <input
-                            type="number"
-                            min="<?php echo esc_attr($speed_warning_threshold + 1); ?>"
-                            step="1"
-                            id="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_CRITICAL_MS); ?>"
-                            name="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_CRITICAL_MS); ?>"
-                            value="<?php echo esc_attr($speed_critical_threshold); ?>"
-                            class="small-text"
-                            aria-describedby="<?php echo esc_attr($speed_critical_description_id); ?>"
-                        >
-                        <p class="description" id="<?php echo esc_attr($speed_critical_description_id); ?>"><?php printf(
-                            esc_html__('Temps de traitement à partir duquel les cartes passent en statut critique. Valeur par défaut : %d ms.', 'sitepulse'),
-                            (int) (defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500)
-                        ); ?></p>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_WARNING_PERCENT); ?>"><?php esc_html_e('Seuil de disponibilité (%)', 'sitepulse'); ?></label></th>
-                    <td>
-                        <?php $uptime_warning_description_id = 'sitepulse-uptime-warning-description'; ?>
-                        <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            step="0.1"
-                            id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_WARNING_PERCENT); ?>"
-                            name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_WARNING_PERCENT); ?>"
-                            value="<?php echo esc_attr($uptime_warning_percent); ?>"
-                            class="small-text"
-                            aria-describedby="<?php echo esc_attr($uptime_warning_description_id); ?>"
-                        >
-                        <p class="description" id="<?php echo esc_attr($uptime_warning_description_id); ?>"><?php printf(
-                            esc_html__('Pourcentage minimal de disponibilité avant de signaler une alerte. Valeur par défaut : %s %%.', 'sitepulse'),
-                            number_format_i18n(defined('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT') ? SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT : 99)
-                        ); ?></p>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_REVISION_LIMIT); ?>"><?php esc_html_e('Limite de révisions', 'sitepulse'); ?></label></th>
-                    <td>
-                        <?php $revision_limit_description_id = 'sitepulse-revision-limit-description'; ?>
-                        <input
-                            type="number"
-                            min="1"
-                            step="1"
-                            id="<?php echo esc_attr(SITEPULSE_OPTION_REVISION_LIMIT); ?>"
-                            name="<?php echo esc_attr(SITEPULSE_OPTION_REVISION_LIMIT); ?>"
-                            value="<?php echo esc_attr($revision_limit); ?>"
-                            class="small-text"
-                            aria-describedby="<?php echo esc_attr($revision_limit_description_id); ?>"
-                        >
-                        <p class="description" id="<?php echo esc_attr($revision_limit_description_id); ?>"><?php printf(
-                            esc_html__('Nombre maximal de révisions recommandé avant de proposer un nettoyage. Valeur par défaut : %d.', 'sitepulse'),
-                            (int) (defined('SITEPULSE_DEFAULT_REVISION_LIMIT') ? SITEPULSE_DEFAULT_REVISION_LIMIT : 100)
-                        ); ?></p>
-                    </td>
-                </tr>
-            </table>
-            <h2><?php esc_html_e('Activer les Modules', 'sitepulse'); ?></h2>
-            <p><?php esc_html_e('Sélectionnez les modules de surveillance à activer.', 'sitepulse'); ?></p>
-            <table class="form-table">
-                <?php foreach ($modules as $key => $name): ?>
-                <tr>
-                    <th scope="row"><label for="<?php echo esc_attr($key); ?>"><?php echo esc_html($name); ?></label></th>
-                    <td><input type="checkbox" id="<?php echo esc_attr($key); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ACTIVE_MODULES); ?>[]" value="<?php echo esc_attr($key); ?>" <?php checked(in_array($key, $active_modules, true)); ?>></td>
-                </tr>
-                <?php endforeach; ?>
-                <tr>
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>"><?php esc_html_e('Activer le Mode Debug', 'sitepulse'); ?></label></th>
-                    <td>
-                        <input type="hidden" name="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>" value="0">
-                        <input type="checkbox" id="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>" value="1" <?php checked($is_debug_mode_enabled); ?>>
-                        <p class="description"><?php esc_html_e("Active la journalisation détaillée et le tableau de bord de débogage. À n'utiliser que pour le dépannage.", 'sitepulse'); ?></p>
-                        <p class="description"><?php printf(esc_html__('Sur Nginx (ou tout serveur qui ignore .htaccess / web.config), déplacez le journal via le filtre %s ou bloquez-le côté serveur.', 'sitepulse'), 'sitepulse_debug_log_base_dir'); ?></p>
-                    </td>
-                </tr>
-            </table>
-            <h2><?php esc_html_e('Alertes', 'sitepulse'); ?></h2>
-            <table class="form-table">
-                <tr>
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_RECIPIENTS); ?>"><?php esc_html_e('Destinataires des alertes', 'sitepulse'); ?></label></th>
-                    <td>
-                        <?php
-                        $alert_recipients = (array) get_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, []);
-                        $recipients_value = implode("\n", $alert_recipients);
-                        ?>
-                        <textarea id="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_RECIPIENTS); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_RECIPIENTS); ?>" rows="4" cols="50" class="large-text code"><?php echo esc_textarea($recipients_value); ?></textarea>
-                        <p class="description"><?php esc_html_e("Entrez une adresse par ligne (ou séparées par des virgules). L'adresse e-mail de l'administrateur sera toujours incluse si elle est valide.", 'sitepulse'); ?></p>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>"><?php esc_html_e("Seuil d'alerte de charge CPU", 'sitepulse'); ?></label></th>
-                    <td>
-                        <input type="number" step="0.1" min="0" id="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>" value="<?php echo esc_attr(get_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 5)); ?>" class="small-text">
-                        <p class="description"><?php esc_html_e('Une alerte e-mail est envoyée lorsque la charge moyenne sur 1 minute dépasse ce seuil multiplié par le nombre de cœurs détectés.', 'sitepulse'); ?></p>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES); ?>"><?php esc_html_e('Fenêtre anti-spam (minutes)', 'sitepulse'); ?></label></th>
-                    <td>
-                        <input type="number" min="1" id="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES); ?>" value="<?php echo esc_attr(get_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60)); ?>" class="small-text">
-                        <p class="description"><?php esc_html_e("Empêche l'envoi de plusieurs e-mails identiques pendant la durée spécifiée.", 'sitepulse'); ?></p>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_INTERVAL); ?>"><?php esc_html_e('Fréquence des vérifications', 'sitepulse'); ?></label></th>
-                    <td>
-                        <?php
-                        $interval_value   = (int) get_option(SITEPULSE_OPTION_ALERT_INTERVAL, 5);
-                        $interval_choices = [
-                            5  => __('Toutes les 5 minutes', 'sitepulse'),
-                            10 => __('Toutes les 10 minutes', 'sitepulse'),
-                            15 => __('Toutes les 15 minutes', 'sitepulse'),
-                            30 => __('Toutes les 30 minutes', 'sitepulse'),
-                        ];
-                        ?>
-                        <select id="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_INTERVAL); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_INTERVAL); ?>">
-                            <?php foreach ($interval_choices as $minutes => $label) : ?>
-                                <option value="<?php echo esc_attr($minutes); ?>" <?php selected($interval_value, $minutes); ?>><?php echo esc_html($label); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <p class="description"><?php esc_html_e('Détermine la fréquence des vérifications automatisées pour les alertes.', 'sitepulse'); ?></p>
-                    </td>
-                </tr>
-            </table>
-            <h2><?php esc_html_e('Disponibilité', 'sitepulse'); ?></h2>
-            <table class="form-table">
-                <tr>
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_URL); ?>"><?php esc_html_e('URL à surveiller', 'sitepulse'); ?></label></th>
-                    <td>
-                        <?php $uptime_url_description_id = 'sitepulse-uptime-url-description'; ?>
-                        <input type="url" id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_URL); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_URL); ?>" value="<?php echo esc_attr($uptime_url); ?>" class="regular-text" aria-describedby="<?php echo esc_attr($uptime_url_description_id); ?>">
-                        <p class="description" id="<?php echo esc_attr($uptime_url_description_id); ?>"><?php esc_html_e('Laisser vide pour utiliser automatiquement l’URL principale du site.', 'sitepulse'); ?></p>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TIMEOUT); ?>"><?php esc_html_e('Délai d’attente (secondes)', 'sitepulse'); ?></label></th>
-                    <td>
-                        <?php $uptime_timeout_description_id = 'sitepulse-uptime-timeout-description'; ?>
-                        <input type="number" min="1" id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TIMEOUT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TIMEOUT); ?>" value="<?php echo esc_attr($uptime_timeout); ?>" class="small-text" aria-describedby="<?php echo esc_attr($uptime_timeout_description_id); ?>">
-                        <p class="description" id="<?php echo esc_attr($uptime_timeout_description_id); ?>"><?php esc_html_e('Nombre de secondes avant de considérer la requête comme échouée.', 'sitepulse'); ?></p>
-                    </td>
-                </tr>
-            </table>
-            <?php submit_button(esc_html__('Enregistrer les modifications', 'sitepulse')); ?>
+                            </select>
+                            <p class="sitepulse-card-description"><?php esc_html_e("Choisissez le modèle utilisé pour générer les recommandations. Les modèles diffèrent en termes de profondeur d'analyse, de coût et de temps de réponse.", 'sitepulse'); ?></p>
+                            <?php if (!empty($available_ai_models)) : ?>
+                                <ul class="sitepulse-card-list">
+                                    <?php foreach ($available_ai_models as $model_key => $model_data) :
+                                        $label = isset($model_data['label']) ? $model_data['label'] : $model_key;
+                                        $description = isset($model_data['description']) ? $model_data['description'] : '';
+                                    ?>
+                                        <li>
+                                            <strong><?php echo esc_html($label); ?></strong>
+                                            <?php if ($selected_ai_model === $model_key) : ?>
+                                                <span class="sitepulse-card-badge"><?php esc_html_e('Modèle actuel', 'sitepulse'); ?></span>
+                                            <?php endif; ?>
+                                            <?php if ($description !== '') : ?>
+                                                <span class="sitepulse-card-note"><?php echo esc_html($description); ?></span>
+                                            <?php endif; ?>
+                                        </li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Fréquence des analyses IA', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_AI_RATE_LIMIT); ?>"><?php esc_html_e('Fréquence maximale des analyses IA', 'sitepulse'); ?></label>
+                            <select id="<?php echo esc_attr(SITEPULSE_OPTION_AI_RATE_LIMIT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_AI_RATE_LIMIT); ?>">
+                                <?php foreach ($ai_rate_limit_choices as $option_value => $option_label) : ?>
+                                    <option value="<?php echo esc_attr($option_value); ?>" <?php selected($selected_ai_rate_limit, $option_value); ?>><?php echo esc_html($option_label); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <p class="sitepulse-card-description"><?php esc_html_e('Définissez la fréquence maximale des nouvelles recommandations générées automatiquement.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="sitepulse-settings-section" id="sitepulse-section-performance">
+                <h2><?php esc_html_e('Seuils de performance', 'sitepulse'); ?></h2>
+                <div class="sitepulse-settings-grid">
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Seuil d’avertissement (ms)', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <?php $speed_warning_description_id = 'sitepulse-speed-warning-description'; ?>
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_WARNING_MS); ?>"><?php esc_html_e('Valeur d’avertissement', 'sitepulse'); ?></label>
+                            <input
+                                type="number"
+                                min="1"
+                                step="1"
+                                id="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_WARNING_MS); ?>"
+                                name="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_WARNING_MS); ?>"
+                                value="<?php echo esc_attr($speed_warning_threshold); ?>"
+                                class="small-text"
+                                aria-describedby="<?php echo esc_attr($speed_warning_description_id); ?>"
+                            >
+                            <p class="sitepulse-card-description" id="<?php echo esc_attr($speed_warning_description_id); ?>"><?php printf(
+                                esc_html__('Temps de traitement au-delà duquel un statut « attention » est affiché pour la vitesse. Valeur par défaut : %d ms.', 'sitepulse'),
+                                (int) (defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200)
+                            ); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Seuil critique (ms)', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <?php $speed_critical_description_id = 'sitepulse-speed-critical-description'; ?>
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_CRITICAL_MS); ?>"><?php esc_html_e('Valeur critique', 'sitepulse'); ?></label>
+                            <input
+                                type="number"
+                                min="<?php echo esc_attr($speed_warning_threshold + 1); ?>"
+                                step="1"
+                                id="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_CRITICAL_MS); ?>"
+                                name="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_CRITICAL_MS); ?>"
+                                value="<?php echo esc_attr($speed_critical_threshold); ?>"
+                                class="small-text"
+                                aria-describedby="<?php echo esc_attr($speed_critical_description_id); ?>"
+                            >
+                            <p class="sitepulse-card-description" id="<?php echo esc_attr($speed_critical_description_id); ?>"><?php printf(
+                                esc_html__('Temps de traitement à partir duquel les cartes passent en statut critique. Valeur par défaut : %d ms.', 'sitepulse'),
+                                (int) (defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500)
+                            ); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Seuil de disponibilité (%)', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <?php $uptime_warning_description_id = 'sitepulse-uptime-warning-description'; ?>
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_WARNING_PERCENT); ?>"><?php esc_html_e('Pourcentage minimal', 'sitepulse'); ?></label>
+                            <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="0.1"
+                                id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_WARNING_PERCENT); ?>"
+                                name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_WARNING_PERCENT); ?>"
+                                value="<?php echo esc_attr($uptime_warning_percent); ?>"
+                                class="small-text"
+                                aria-describedby="<?php echo esc_attr($uptime_warning_description_id); ?>"
+                            >
+                            <p class="sitepulse-card-description" id="<?php echo esc_attr($uptime_warning_description_id); ?>"><?php printf(
+                                esc_html__('Pourcentage minimal de disponibilité avant de signaler une alerte. Valeur par défaut : %s %%.', 'sitepulse'),
+                                number_format_i18n(defined('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT') ? SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT : 99)
+                            ); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Limite de révisions', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <?php $revision_limit_description_id = 'sitepulse-revision-limit-description'; ?>
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_REVISION_LIMIT); ?>"><?php esc_html_e('Nombre recommandé', 'sitepulse'); ?></label>
+                            <input
+                                type="number"
+                                min="1"
+                                step="1"
+                                id="<?php echo esc_attr(SITEPULSE_OPTION_REVISION_LIMIT); ?>"
+                                name="<?php echo esc_attr(SITEPULSE_OPTION_REVISION_LIMIT); ?>"
+                                value="<?php echo esc_attr($revision_limit); ?>"
+                                class="small-text"
+                                aria-describedby="<?php echo esc_attr($revision_limit_description_id); ?>"
+                            >
+                            <p class="sitepulse-card-description" id="<?php echo esc_attr($revision_limit_description_id); ?>"><?php printf(
+                                esc_html__('Nombre maximal de révisions recommandé avant de proposer un nettoyage. Valeur par défaut : %d.', 'sitepulse'),
+                                (int) (defined('SITEPULSE_DEFAULT_REVISION_LIMIT') ? SITEPULSE_DEFAULT_REVISION_LIMIT : 100)
+                            ); ?></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="sitepulse-settings-section" id="sitepulse-section-modules">
+                <h2><?php esc_html_e('Activer les Modules', 'sitepulse'); ?></h2>
+                <p class="sitepulse-section-intro"><?php esc_html_e('Sélectionnez les modules de surveillance à activer.', 'sitepulse'); ?></p>
+                <div class="sitepulse-settings-grid">
+                    <?php foreach ($modules as $module_key => $module_data) :
+                        $module_label = isset($module_data['label']) ? $module_data['label'] : $module_key;
+                        $module_description = isset($module_data['description']) ? $module_data['description'] : '';
+                        $module_page = isset($module_data['page']) ? $module_data['page'] : '';
+                        $module_url = '';
+
+                        if ($module_page !== '') {
+                            $module_url = strpos($module_page, '#') === 0 ? $module_page : admin_url('admin.php?page=' . $module_page);
+                        }
+
+                        $checkbox_id = 'sitepulse-module-' . $module_key;
+                        $description_id = $checkbox_id . '-description';
+                        $is_active = in_array($module_key, (array) $active_modules, true);
+                        $status_class = $is_active ? 'is-active' : 'is-inactive';
+                        $status_label = $is_active ? esc_html__('Activé', 'sitepulse') : esc_html__('Désactivé', 'sitepulse');
+                    ?>
+                    <div class="sitepulse-module-card" data-module="<?php echo esc_attr($module_key); ?>">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php echo esc_html($module_label); ?></h3>
+                            <span class="sitepulse-status <?php echo esc_attr($status_class); ?>"><?php echo $status_label; ?></span>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <?php if ($module_description !== '') : ?>
+                                <p class="sitepulse-card-description" id="<?php echo esc_attr($description_id); ?>"><?php echo esc_html($module_description); ?></p>
+                            <?php endif; ?>
+                            <div class="sitepulse-card-footer">
+                                <label class="sitepulse-toggle" for="<?php echo esc_attr($checkbox_id); ?>">
+                                    <input type="checkbox" id="<?php echo esc_attr($checkbox_id); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ACTIVE_MODULES); ?>[]" value="<?php echo esc_attr($module_key); ?>" <?php checked($is_active); ?><?php if ($module_description !== '') : ?> aria-describedby="<?php echo esc_attr($description_id); ?>"<?php endif; ?>>
+                                    <span><?php esc_html_e('Activer ce module', 'sitepulse'); ?></span>
+                                </label>
+                                <?php if ($module_url !== '') : ?>
+                                    <a class="sitepulse-card-link" href="<?php echo esc_url($module_url); ?>">
+                                        <?php esc_html_e('Ouvrir le module', 'sitepulse'); ?>
+                                    </a>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting" id="sitepulse-debug-card">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Mode Debug', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <p class="sitepulse-card-description"><?php esc_html_e("Active la journalisation détaillée et le tableau de bord de débogage. À n'utiliser que pour le dépannage.", 'sitepulse'); ?></p>
+                            <input type="hidden" name="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>" value="0">
+                            <div class="sitepulse-card-footer">
+                                <label class="sitepulse-toggle" for="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>">
+                                    <input type="checkbox" id="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>" value="1" <?php checked($is_debug_mode_enabled); ?>>
+                                    <span><?php esc_html_e('Activer le Mode Debug', 'sitepulse'); ?></span>
+                                </label>
+                            </div>
+                            <p class="sitepulse-card-description"><?php printf(esc_html__('Sur Nginx (ou tout serveur qui ignore .htaccess / web.config), déplacez le journal via le filtre %s ou bloquez-le côté serveur.', 'sitepulse'), 'sitepulse_debug_log_base_dir'); ?></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="sitepulse-settings-section" id="sitepulse-section-alerts">
+                <h2><?php esc_html_e('Alertes', 'sitepulse'); ?></h2>
+                <div class="sitepulse-settings-grid">
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Destinataires des alertes', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <?php
+                            $alert_recipients = (array) get_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, []);
+                            $recipients_value = implode("\n", $alert_recipients);
+                            ?>
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_RECIPIENTS); ?>"><?php esc_html_e('Adresses e-mail', 'sitepulse'); ?></label>
+                            <textarea id="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_RECIPIENTS); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_RECIPIENTS); ?>" rows="4" class="large-text code sitepulse-textarea"><?php echo esc_textarea($recipients_value); ?></textarea>
+                            <p class="sitepulse-card-description"><?php esc_html_e("Entrez une adresse par ligne (ou séparées par des virgules). L'adresse e-mail de l'administrateur sera toujours incluse si elle est valide.", 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e("Seuil d'alerte de charge CPU", 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>"><?php esc_html_e('Valeur déclenchant une alerte', 'sitepulse'); ?></label>
+                            <input type="number" step="0.1" min="0" id="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>" value="<?php echo esc_attr(get_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 5)); ?>" class="small-text">
+                            <p class="sitepulse-card-description"><?php esc_html_e('Une alerte e-mail est envoyée lorsque la charge moyenne sur 1 minute dépasse ce seuil multiplié par le nombre de cœurs détectés.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Fenêtre anti-spam (minutes)', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES); ?>"><?php esc_html_e('Durée minimale entre deux alertes identiques', 'sitepulse'); ?></label>
+                            <input type="number" min="1" id="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES); ?>" value="<?php echo esc_attr(get_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60)); ?>" class="small-text">
+                            <p class="sitepulse-card-description"><?php esc_html_e("Empêche l'envoi de plusieurs e-mails identiques pendant la durée spécifiée.", 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Fréquence des vérifications', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <?php
+                            $interval_value   = (int) get_option(SITEPULSE_OPTION_ALERT_INTERVAL, 5);
+                            $interval_choices = [
+                                5  => __('Toutes les 5 minutes', 'sitepulse'),
+                                10 => __('Toutes les 10 minutes', 'sitepulse'),
+                                15 => __('Toutes les 15 minutes', 'sitepulse'),
+                                30 => __('Toutes les 30 minutes', 'sitepulse'),
+                            ];
+                            ?>
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_INTERVAL); ?>"><?php esc_html_e('Intervalle choisi', 'sitepulse'); ?></label>
+                            <select id="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_INTERVAL); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_INTERVAL); ?>">
+                                <?php foreach ($interval_choices as $minutes => $label) : ?>
+                                    <option value="<?php echo esc_attr($minutes); ?>" <?php selected($interval_value, $minutes); ?>><?php echo esc_html($label); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <p class="sitepulse-card-description"><?php esc_html_e('Détermine la fréquence des vérifications automatisées pour les alertes.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="sitepulse-settings-section" id="sitepulse-section-uptime">
+                <h2><?php esc_html_e('Disponibilité', 'sitepulse'); ?></h2>
+                <div class="sitepulse-settings-grid">
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('URL à surveiller', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <?php $uptime_url_description_id = 'sitepulse-uptime-url-description'; ?>
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_URL); ?>"><?php esc_html_e('Adresse du site', 'sitepulse'); ?></label>
+                            <input type="url" id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_URL); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_URL); ?>" value="<?php echo esc_attr($uptime_url); ?>" class="regular-text" aria-describedby="<?php echo esc_attr($uptime_url_description_id); ?>">
+                            <p class="sitepulse-card-description" id="<?php echo esc_attr($uptime_url_description_id); ?>"><?php esc_html_e('Laisser vide pour utiliser automatiquement l’URL principale du site.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Délai d’attente (secondes)', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <?php $uptime_timeout_description_id = 'sitepulse-uptime-timeout-description'; ?>
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TIMEOUT); ?>"><?php esc_html_e('Temps maximal avant échec', 'sitepulse'); ?></label>
+                            <input type="number" min="1" id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TIMEOUT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TIMEOUT); ?>" value="<?php echo esc_attr($uptime_timeout); ?>" class="small-text" aria-describedby="<?php echo esc_attr($uptime_timeout_description_id); ?>">
+                            <p class="sitepulse-card-description" id="<?php echo esc_attr($uptime_timeout_description_id); ?>"><?php esc_html_e('Nombre de secondes avant de considérer la requête comme échouée.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="sitepulse-settings-actions">
+                <?php submit_button(esc_html__('Enregistrer les modifications', 'sitepulse')); ?>
+            </div>
         </form>
-        <hr>
-        <h2><?php esc_html_e('Nettoyage & Réinitialisation', 'sitepulse'); ?></h2>
-        <p><?php esc_html_e('Gérez les données du plugin.', 'sitepulse'); ?></p>
-        <form method="post" action="">
-            <?php wp_nonce_field(SITEPULSE_NONCE_ACTION_CLEANUP, SITEPULSE_NONCE_FIELD_CLEANUP); ?>
-            <table class="form-table">
-                <tr>
-                    <th scope="row"><label><?php esc_html_e('Vider le journal de debug', 'sitepulse'); ?></label></th>
-                    <td><input type="submit" name="sitepulse_clear_log" value="<?php echo esc_attr__('Vider le journal', 'sitepulse'); ?>" class="button"><p class="description"><?php esc_html_e('Supprime le contenu du fichier de log de débogage.', 'sitepulse'); ?></p></td>
-                </tr>
-                <tr>
-                    <th scope="row"><label><?php esc_html_e('Vider les données stockées', 'sitepulse'); ?></label></th>
-                    <td><input type="submit" name="sitepulse_clear_data" value="<?php echo esc_attr__('Vider les données', 'sitepulse'); ?>" class="button"><p class="description"><?php esc_html_e('Supprime les données stockées comme les journaux de disponibilité et les résultats de scan.', 'sitepulse'); ?></p></td>
-                </tr>
-                <tr>
-                    <th scope="row"><label><?php esc_html_e('Réinitialiser le plugin', 'sitepulse'); ?></label></th>
-                    <td>
-                        <input type="submit" name="sitepulse_reset_all" value="<?php echo esc_attr__('Tout réinitialiser', 'sitepulse'); ?>" class="button button-danger" onclick="return confirm('<?php echo esc_js(__('Êtes-vous sûr ?', 'sitepulse')); ?>');">
-                        <p class="description"><?php esc_html_e("Réinitialise SitePulse à son état d'installation initial.", 'sitepulse'); ?></p>
-                    </td>
-                </tr>
-            </table>
-        </form>
+        <hr class="sitepulse-settings-separator">
+        <div class="sitepulse-settings-section" id="sitepulse-section-maintenance">
+            <h2><?php esc_html_e('Nettoyage & Réinitialisation', 'sitepulse'); ?></h2>
+            <p class="sitepulse-section-intro"><?php esc_html_e('Gérez les données du plugin.', 'sitepulse'); ?></p>
+            <form method="post" action="" class="sitepulse-settings-form sitepulse-settings-form--secondary">
+                <?php wp_nonce_field(SITEPULSE_NONCE_ACTION_CLEANUP, SITEPULSE_NONCE_FIELD_CLEANUP); ?>
+                <div class="sitepulse-settings-grid">
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Vider le journal de debug', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <p class="sitepulse-card-description"><?php esc_html_e('Supprime le contenu du fichier de log de débogage.', 'sitepulse'); ?></p>
+                            <div class="sitepulse-card-footer">
+                                <button type="submit" name="sitepulse_clear_log" class="button"><?php echo esc_html__('Vider le journal', 'sitepulse'); ?></button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Vider les données stockées', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <p class="sitepulse-card-description"><?php esc_html_e('Supprime les données stockées comme les journaux de disponibilité et les résultats de scan.', 'sitepulse'); ?></p>
+                            <div class="sitepulse-card-footer">
+                                <button type="submit" name="sitepulse_clear_data" class="button"><?php echo esc_html__('Vider les données', 'sitepulse'); ?></button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--danger">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Réinitialiser le plugin', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <p class="sitepulse-card-description"><?php esc_html_e("Réinitialise SitePulse à son état d'installation initial.", 'sitepulse'); ?></p>
+                            <div class="sitepulse-card-footer">
+                                <button type="submit" name="sitepulse_reset_all" class="button button-danger" onclick="return confirm('<?php echo esc_js(__('Êtes-vous sûr ?', 'sitepulse')); ?>');"><?php echo esc_html__('Tout réinitialiser', 'sitepulse'); ?></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </form>
+        </div>
     </div>
     <?php
 }

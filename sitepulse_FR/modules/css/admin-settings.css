@@ -1,0 +1,200 @@
+.sitepulse-settings-wrap {
+    max-width: 1100px;
+}
+
+.sitepulse-settings-intro,
+.sitepulse-section-intro {
+    color: #4a5568;
+    font-size: 14px;
+    line-height: 1.6;
+    margin: 0 0 16px;
+}
+
+.sitepulse-settings-form {
+    margin-top: 24px;
+}
+
+.sitepulse-settings-form--secondary {
+    margin-top: 0;
+}
+
+.sitepulse-settings-section {
+    margin-bottom: 32px;
+}
+
+.sitepulse-settings-grid {
+    display: grid;
+    gap: 20px;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    align-items: stretch;
+}
+
+.sitepulse-module-card {
+    background: #fff;
+    border: 1px solid #dcdfe5;
+    border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.sitepulse-module-card--danger {
+    border-color: #cc1818;
+}
+
+.sitepulse-module-card--setting {
+    border-color: #e2e8f0;
+}
+
+.sitepulse-card-header {
+    border-bottom: 1px solid #edf2f7;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 18px;
+}
+
+.sitepulse-card-title {
+    font-size: 16px;
+    margin: 0;
+}
+
+.sitepulse-card-body {
+    padding: 16px 18px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.sitepulse-card-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: auto;
+}
+
+.sitepulse-status {
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 10px;
+    text-transform: uppercase;
+}
+
+.sitepulse-status.is-active {
+    background: #e6fffa;
+    color: #0f766e;
+}
+
+.sitepulse-status.is-inactive {
+    background: #fef2f2;
+    color: #b91c1c;
+}
+
+.sitepulse-field-label {
+    display: block;
+    font-weight: 600;
+    font-size: 13px;
+    color: #2d3748;
+}
+
+.sitepulse-card-description {
+    color: #4a5568;
+    font-size: 13px;
+    line-height: 1.6;
+    margin: 0;
+}
+
+.sitepulse-card-checkbox,
+.sitepulse-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #2d3748;
+}
+
+.sitepulse-card-checkbox input,
+.sitepulse-toggle input {
+    margin: 0;
+}
+
+.sitepulse-card-link {
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    background: #2271b1;
+    color: #fff;
+    transition: background 0.2s ease;
+}
+
+.sitepulse-card-link:hover,
+.sitepulse-card-link:focus {
+    background: #135e96;
+    color: #fff;
+}
+
+.sitepulse-card-list {
+    list-style: disc;
+    margin: 0;
+    padding-left: 20px;
+    color: #4a5568;
+    font-size: 13px;
+}
+
+.sitepulse-card-list li {
+    margin-bottom: 6px;
+}
+
+.sitepulse-card-badge {
+    background: #edf2f7;
+    border-radius: 999px;
+    color: #1a202c;
+    font-size: 11px;
+    font-weight: 600;
+    margin-left: 8px;
+    padding: 2px 8px;
+    text-transform: uppercase;
+}
+
+.sitepulse-card-note {
+    display: inline-block;
+    margin-left: 6px;
+}
+
+.sitepulse-textarea {
+    resize: vertical;
+}
+
+.sitepulse-settings-actions {
+    margin-top: 24px;
+}
+
+.sitepulse-settings-actions .button.button-primary {
+    padding: 6px 20px;
+}
+
+.sitepulse-settings-separator {
+    border: 0;
+    border-top: 1px solid #e2e8f0;
+    margin: 40px 0;
+}
+
+@media (max-width: 782px) {
+    .sitepulse-settings-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .sitepulse-card-footer {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .sitepulse-card-link {
+        width: 100%;
+        text-align: center;
+    }
+}
