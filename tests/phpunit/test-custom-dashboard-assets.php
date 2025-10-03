@@ -17,6 +17,7 @@ class Sitepulse_Custom_Dashboard_Assets_Test extends WP_UnitTestCase {
         $scripts = wp_scripts();
         $scripts->remove('sitepulse-chartjs');
         $scripts->remove('sitepulse-dashboard-charts');
+        $scripts->remove('sitepulse-dashboard-nav');
     }
 
     public function test_invalid_chartjs_url_is_rejected(): void {
@@ -51,5 +52,19 @@ class Sitepulse_Custom_Dashboard_Assets_Test extends WP_UnitTestCase {
         $this->assertArrayHasKey('sitepulse-chartjs', $scripts->registered);
         $this->assertSame($custom_src, $scripts->registered['sitepulse-chartjs']->src);
         $this->assertEmpty($GLOBALS['sitepulse_logger']);
+    }
+
+    public function test_navigation_script_is_registered(): void {
+        sitepulse_custom_dashboard_enqueue_assets('toplevel_page_sitepulse-dashboard');
+
+        $scripts = wp_scripts();
+
+        $this->assertArrayHasKey('sitepulse-dashboard-nav', $scripts->registered);
+        $this->assertSame(
+            SITEPULSE_URL . 'modules/js/sitepulse-dashboard-nav.js',
+            $scripts->registered['sitepulse-dashboard-nav']->src
+        );
+        $this->assertSame([], $scripts->registered['sitepulse-dashboard-nav']->deps);
+        $this->assertTrue($scripts->registered['sitepulse-dashboard-nav']->args);
     }
 }
