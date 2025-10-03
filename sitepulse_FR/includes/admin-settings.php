@@ -1921,7 +1921,7 @@ function sitepulse_settings_page() {
             if (!container) {
                 return;
             }
-            const tabLinks = container.querySelectorAll('.sitepulse-settings-tabs .nav-tab');
+            const tabLinks = Array.from(container.querySelectorAll('.sitepulse-settings-tabs .nav-tab'));
             const tabPanels = document.querySelectorAll('.sitepulse-tab-panel');
             const tocLinks = document.querySelectorAll('.sitepulse-toc-link[data-tab-target]');
             if (!tabLinks.length || !tabPanels.length) {
@@ -1957,7 +1957,20 @@ function sitepulse_settings_page() {
                 }
                 return directTarget.closest('.sitepulse-tab-panel');
             }
-            tabLinks.forEach((link) => {
+            function updateHash(targetId) {
+                const panel = document.getElementById(targetId);
+                if (!panel) {
+                    window.location.hash = targetId;
+                    return;
+                }
+                const firstSection = panel.querySelector('.sitepulse-settings-section');
+                if (firstSection && firstSection.id) {
+                    window.location.hash = firstSection.id;
+                } else {
+                    window.location.hash = targetId;
+                }
+            }
+            tabLinks.forEach((link, index) => {
                 link.addEventListener('click', (event) => {
                     event.preventDefault();
                     const targetId = link.dataset.tabTarget;
@@ -1965,15 +1978,37 @@ function sitepulse_settings_page() {
                         return;
                     }
                     activateTab(targetId);
-                    const panel = document.getElementById(targetId);
-                    if (panel) {
-                        const firstSection = panel.querySelector('.sitepulse-settings-section');
-                        if (firstSection && firstSection.id) {
-                            window.location.hash = firstSection.id;
-                        } else {
-                            window.location.hash = targetId;
-                        }
+                    updateHash(targetId);
+                });
+                link.addEventListener('keydown', (event) => {
+                    const { key } = event;
+                    let targetLink = null;
+                    if (key === 'ArrowRight') {
+                        event.preventDefault();
+                        targetLink = tabLinks[(index + 1) % tabLinks.length];
+                    } else if (key === 'ArrowLeft') {
+                        event.preventDefault();
+                        targetLink = tabLinks[(index - 1 + tabLinks.length) % tabLinks.length];
+                    } else if (key === 'Home') {
+                        event.preventDefault();
+                        targetLink = tabLinks[0];
+                    } else if (key === 'End') {
+                        event.preventDefault();
+                        targetLink = tabLinks[tabLinks.length - 1];
+                    } else if (key === 'Enter' || key === ' ') {
+                        event.preventDefault();
+                        targetLink = link;
                     }
+                    if (!targetLink) {
+                        return;
+                    }
+                    const targetId = targetLink.dataset.tabTarget;
+                    if (!targetId) {
+                        return;
+                    }
+                    activateTab(targetId);
+                    updateHash(targetId);
+                    targetLink.focus();
                 });
             });
             tocLinks.forEach((link) => {
