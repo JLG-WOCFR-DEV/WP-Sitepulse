@@ -139,10 +139,13 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
         unset($content, $block);
 
         $defaults = [
-            'showSpeed'    => true,
-            'showUptime'   => true,
-            'showDatabase' => true,
-            'showLogs'     => true,
+            'showSpeed'     => true,
+            'showUptime'    => true,
+            'showDatabase'  => true,
+            'showLogs'      => true,
+            'layoutVariant' => 'grid',
+            'columns'       => 2,
+            'gridDensity'   => 'comfortable',
         ];
 
         $attributes = is_array($attributes) ? $attributes : [];
@@ -153,10 +156,54 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
         $show_database = !empty($attributes['showDatabase']);
         $show_logs = !empty($attributes['showLogs']);
 
+        $allowed_layouts = ['grid', 'list'];
+        $layout_variant = isset($attributes['layoutVariant']) && is_string($attributes['layoutVariant'])
+            ? $attributes['layoutVariant']
+            : 'grid';
+        $layout_variant = in_array($layout_variant, $allowed_layouts, true) ? $layout_variant : 'grid';
+        $layout_variant_slug = sanitize_html_class($layout_variant ?: 'grid');
+
+        $allowed_densities = ['compact', 'comfortable', 'spacious'];
+        $grid_density = isset($attributes['gridDensity']) && is_string($attributes['gridDensity'])
+            ? $attributes['gridDensity']
+            : 'comfortable';
+        $grid_density = in_array($grid_density, $allowed_densities, true) ? $grid_density : 'comfortable';
+        $grid_density_slug = sanitize_html_class($grid_density ?: 'comfortable');
+
+        $columns = isset($attributes['columns']) ? (int) $attributes['columns'] : 2;
+        if ($columns < 1) {
+            $columns = 1;
+        } elseif ($columns > 4) {
+            $columns = 4;
+        }
+
+        $base_wrapper_classes = [
+            'sitepulse-dashboard-preview',
+            'sitepulse-dashboard-preview--layout-' . $layout_variant_slug,
+            'sitepulse-dashboard-preview--density-' . $grid_density_slug,
+            'sitepulse-dashboard-preview--columns-' . $columns,
+        ];
+
+        $grid_classes = [
+            'sitepulse-grid',
+            'sitepulse-grid--cols-' . $columns,
+            'sitepulse-grid--density-' . $grid_density_slug,
+            'sitepulse-grid--variant-' . $layout_variant_slug,
+        ];
+
         if (!function_exists('sitepulse_get_dashboard_preview_context')) {
-            return '<div class="wp-block-sitepulse-dashboard-preview sitepulse-dashboard-preview__empty">'
-                . esc_html__('Activez le module « Tableaux de bord personnalisés » pour utiliser ce bloc.', 'sitepulse')
-                . '</div>';
+            $wrapper_attributes = get_block_wrapper_attributes([
+                'class' => implode(' ', array_filter(array_unique(array_merge(
+                    $base_wrapper_classes,
+                    ['sitepulse-dashboard-preview--is-empty']
+                )))),
+            ]);
+
+            return sprintf(
+                '<div %1$s><div class="sitepulse-dashboard-preview__empty">%2$s</div></div>',
+                $wrapper_attributes,
+                esc_html__('Activez le module « Tableaux de bord personnalisés » pour utiliser ce bloc.', 'sitepulse')
+            );
         }
 
         $context = sitepulse_get_dashboard_preview_context();
@@ -292,9 +339,18 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
         }
 
         if (empty($cards)) {
-            return '<div class="wp-block-sitepulse-dashboard-preview sitepulse-dashboard-preview__empty">'
-                . esc_html__('Aucune carte à afficher pour le moment. Activez les modules souhaités ou collectez davantage de données.', 'sitepulse')
-                . '</div>';
+            $wrapper_attributes = get_block_wrapper_attributes([
+                'class' => implode(' ', array_filter(array_unique(array_merge(
+                    $base_wrapper_classes,
+                    ['sitepulse-dashboard-preview--is-empty']
+                )))),
+            ]);
+
+            return sprintf(
+                '<div %1$s><div class="sitepulse-dashboard-preview__empty">%2$s</div></div>',
+                $wrapper_attributes,
+                esc_html__('Aucune carte à afficher pour le moment. Activez les modules souhaités ou collectez davantage de données.', 'sitepulse')
+            );
         }
 
         $header = sprintf(
@@ -303,7 +359,16 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
             esc_html__('Dernières mesures agrégées par vos modules actifs.', 'sitepulse')
         );
 
-        return '<div class="wp-block-sitepulse-dashboard-preview">' . $header
-            . '<div class="sitepulse-grid">' . implode('', $cards) . '</div></div>';
+        $wrapper_attributes = get_block_wrapper_attributes([
+            'class' => implode(' ', array_filter(array_unique($base_wrapper_classes))),
+        ]);
+
+        return sprintf(
+            '<div %1$s>%2$s<div class="%3$s">%4$s</div></div>',
+            $wrapper_attributes,
+            $header,
+            esc_attr(implode(' ', array_map('sanitize_html_class', $grid_classes))),
+            implode('', $cards)
+        );
     }
 }

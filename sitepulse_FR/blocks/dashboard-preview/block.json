@@ -8,7 +8,15 @@
   "description": "Affiche un résumé des cartes SitePulse directement dans le contenu.",
   "textdomain": "sitepulse",
   "supports": {
-    "html": false
+    "html": false,
+    "align": ["wide", "full"],
+    "anchor": true,
+    "className": true,
+    "spacing": {
+      "margin": true,
+      "padding": true,
+      "blockGap": true
+    }
   },
   "attributes": {
     "showSpeed": {
@@ -26,6 +34,18 @@
     "showLogs": {
       "type": "boolean",
       "default": true
+    },
+    "layoutVariant": {
+      "type": "string",
+      "default": "grid"
+    },
+    "columns": {
+      "type": "integer",
+      "default": 2
+    },
+    "gridDensity": {
+      "type": "string",
+      "default": "comfortable"
     }
   }
 }
