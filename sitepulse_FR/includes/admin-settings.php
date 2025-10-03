@@ -162,14 +162,11 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_ALERT_RECIPIENTS, [
         'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_alert_recipients', 'default' => []
     ]);
-    register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_URL, [
-        'type' => 'string', 'sanitize_callback' => 'esc_url_raw', 'default' => ''
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_TARGETS, [
+        'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_uptime_targets', 'default' => []
     ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_TIMEOUT, [
         'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_uptime_timeout', 'default' => SITEPULSE_DEFAULT_UPTIME_TIMEOUT
-    ]);
-    register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_FREQUENCY, [
-        'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_uptime_frequency', 'default' => SITEPULSE_DEFAULT_UPTIME_FREQUENCY
     ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_HTTP_METHOD, [
         'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_uptime_http_method', 'default' => SITEPULSE_DEFAULT_UPTIME_HTTP_METHOD
@@ -499,6 +496,130 @@ function sitepulse_sanitize_uptime_frequency($value) {
     }
 
     return $value;
+}
+
+/**
+ * Generates a sanitized identifier for an uptime target.
+ *
+ * @param string $seed Optional seed string used to derive the identifier.
+ * @return string
+ */
+function sitepulse_generate_uptime_target_id($seed = '') {
+    $seed = (string) $seed;
+    $hash_source = $seed !== '' ? $seed : microtime(true) . '|' . wp_rand();
+    $hash = substr(md5($hash_source), 0, 12);
+
+    return 'target_' . $hash;
+}
+
+/**
+ * Normalizes the list of uptime monitoring targets stored in the options table.
+ *
+ * @param mixed $value Raw option value.
+ * @return array<int,array<string,mixed>>
+ */
+function sitepulse_sanitize_uptime_targets($value) {
+    if (is_string($value) && $value !== '') {
+        $value = [['url' => $value]];
+    }
+
+    if (!is_array($value)) {
+        return [];
+    }
+
+    $sanitized = [];
+    $seen_ids = [];
+
+    foreach ($value as $entry) {
+        if (is_string($entry)) {
+            $entry = ['url' => $entry];
+        }
+
+        if (!is_array($entry)) {
+            continue;
+        }
+
+        $raw_url = isset($entry['url']) ? $entry['url'] : '';
+        $url = is_string($raw_url) ? trim($raw_url) : '';
+        $url = esc_url_raw($url);
+
+        if ($url === '') {
+            continue;
+        }
+
+        $raw_frequency = isset($entry['frequency']) ? $entry['frequency'] : '';
+        $frequency = sitepulse_sanitize_uptime_frequency($raw_frequency);
+
+        $raw_alerts = isset($entry['alerts']) ? $entry['alerts'] : false;
+        $alerts = is_bool($raw_alerts) ? $raw_alerts : !empty($raw_alerts);
+
+        $id_candidate = isset($entry['id']) ? (string) $entry['id'] : '';
+        $id_candidate = sanitize_key($id_candidate);
+
+        if ($id_candidate === '' || isset($seen_ids[$id_candidate])) {
+            $id_candidate = sitepulse_generate_uptime_target_id($url . '|' . $frequency . '|' . count($sanitized));
+
+            while (isset($seen_ids[$id_candidate])) {
+                $id_candidate = sitepulse_generate_uptime_target_id($id_candidate . '|' . wp_rand());
+            }
+        }
+
+        $seen_ids[$id_candidate] = true;
+
+        $sanitized_entry = [
+            'id'        => $id_candidate,
+            'url'       => $url,
+            'frequency' => $frequency,
+            'alerts'    => $alerts,
+        ];
+
+        if (isset($entry['label']) && is_string($entry['label'])) {
+            $label = sanitize_text_field($entry['label']);
+
+            if ($label !== '') {
+                $sanitized_entry['label'] = $label;
+            }
+        }
+
+        $sanitized[] = $sanitized_entry;
+    }
+
+    return $sanitized;
+}
+
+/**
+ * Retrieves the list of configured uptime targets, including legacy migrations.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function sitepulse_get_uptime_targets() {
+    $raw = get_option(SITEPULSE_OPTION_UPTIME_TARGETS, []);
+    $targets = sitepulse_sanitize_uptime_targets($raw);
+
+    if (!empty($targets)) {
+        return $targets;
+    }
+
+    $legacy_url = get_option(SITEPULSE_OPTION_UPTIME_URL, '');
+    $legacy_frequency = get_option(SITEPULSE_OPTION_UPTIME_FREQUENCY, sitepulse_get_default_uptime_frequency());
+
+    if (is_string($legacy_url) && $legacy_url !== '') {
+        $legacy_targets = sitepulse_sanitize_uptime_targets([
+            [
+                'url'       => $legacy_url,
+                'frequency' => $legacy_frequency,
+                'alerts'    => true,
+            ],
+        ]);
+
+        if (!empty($legacy_targets)) {
+            update_option(SITEPULSE_OPTION_UPTIME_TARGETS, $legacy_targets, false);
+
+            return $legacy_targets;
+        }
+    }
+
+    return [];
 }
 
 /**
@@ -983,17 +1104,9 @@ function sitepulse_settings_page() {
     $active_modules = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
     $debug_mode_option = get_option(SITEPULSE_OPTION_DEBUG_MODE);
     $is_debug_mode_enabled = rest_sanitize_boolean($debug_mode_option);
-    $uptime_url_option = get_option(SITEPULSE_OPTION_UPTIME_URL, '');
-    $uptime_url = '';
-
-    if (is_string($uptime_url_option)) {
-        $uptime_url = trim($uptime_url_option);
-    }
-
     $uptime_timeout_option = get_option(SITEPULSE_OPTION_UPTIME_TIMEOUT, SITEPULSE_DEFAULT_UPTIME_TIMEOUT);
     $uptime_timeout = sitepulse_sanitize_uptime_timeout($uptime_timeout_option);
-    $uptime_frequency_option = get_option(SITEPULSE_OPTION_UPTIME_FREQUENCY, sitepulse_get_default_uptime_frequency());
-    $uptime_frequency = sitepulse_sanitize_uptime_frequency($uptime_frequency_option);
+    $uptime_targets = sitepulse_get_uptime_targets();
     $uptime_http_method_option = get_option(SITEPULSE_OPTION_UPTIME_HTTP_METHOD, SITEPULSE_DEFAULT_UPTIME_HTTP_METHOD);
     $uptime_http_method = sitepulse_sanitize_uptime_http_method($uptime_http_method_option);
     $uptime_headers_option = get_option(SITEPULSE_OPTION_UPTIME_HTTP_HEADERS, []);
@@ -1636,13 +1749,103 @@ function sitepulse_settings_page() {
                 <div class="sitepulse-settings-grid">
                     <div class="sitepulse-module-card sitepulse-module-card--setting">
                         <div class="sitepulse-card-header">
-                            <h3 class="sitepulse-card-title"><?php esc_html_e('URL à surveiller', 'sitepulse'); ?></h3>
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Cibles surveillées', 'sitepulse'); ?></h3>
                         </div>
                         <div class="sitepulse-card-body">
-                            <?php $uptime_url_description_id = 'sitepulse-uptime-url-description'; ?>
-                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_URL); ?>"><?php esc_html_e('Adresse du site', 'sitepulse'); ?></label>
-                            <input type="url" id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_URL); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_URL); ?>" value="<?php echo esc_attr($uptime_url); ?>" class="regular-text" aria-describedby="<?php echo esc_attr($uptime_url_description_id); ?>">
-                            <p class="sitepulse-card-description" id="<?php echo esc_attr($uptime_url_description_id); ?>"><?php esc_html_e('Laisser vide pour utiliser automatiquement l’URL principale du site.', 'sitepulse'); ?></p>
+                            <?php
+                            $uptime_targets_description_id = 'sitepulse-uptime-targets-description';
+                            $uptime_frequency_choices = sitepulse_get_uptime_frequency_choices();
+                            $default_frequency = sitepulse_get_default_uptime_frequency();
+                            ?>
+                            <p class="sitepulse-card-description" id="<?php echo esc_attr($uptime_targets_description_id); ?>"><?php esc_html_e('Ajoutez chaque endpoint à surveiller, choisissez sa fréquence et activez ou non les alertes e-mail associées.', 'sitepulse'); ?></p>
+                            <div class="sitepulse-uptime-targets" data-next-index="<?php echo esc_attr(count($uptime_targets)); ?>" data-default-frequency="<?php echo esc_attr($default_frequency); ?>" aria-describedby="<?php echo esc_attr($uptime_targets_description_id); ?>">
+                                <?php if (empty($uptime_targets)) :
+                                    $uptime_targets[] = [
+                                        'id'        => sitepulse_generate_uptime_target_id('default'),
+                                        'url'       => home_url('/'),
+                                        'frequency' => $default_frequency,
+                                        'alerts'    => true,
+                                    ];
+                                endif; ?>
+                                <?php foreach ($uptime_targets as $index => $target) :
+                                    $target_id = isset($target['id']) ? $target['id'] : sitepulse_generate_uptime_target_id($index);
+                                    $target_url = isset($target['url']) ? $target['url'] : '';
+                                    $target_frequency = isset($target['frequency']) ? $target['frequency'] : $default_frequency;
+                                    $target_frequency = array_key_exists($target_frequency, $uptime_frequency_choices) ? $target_frequency : $default_frequency;
+                                    $target_alerts = !empty($target['alerts']);
+                                    $target_label = isset($target['label']) ? $target['label'] : '';
+                                    $fieldset_id = 'sitepulse-uptime-target-' . sanitize_html_class($target_id);
+                                    ?>
+                                    <fieldset class="sitepulse-uptime-target" data-index="<?php echo esc_attr($index); ?>" data-frequency="<?php echo esc_attr($target_frequency); ?>" data-alerts="<?php echo esc_attr($target_alerts ? '1' : '0'); ?>" id="<?php echo esc_attr($fieldset_id); ?>">
+                                        <legend class="screen-reader-text"><?php echo esc_html(sprintf(__('Endpoint de disponibilité %d', 'sitepulse'), $index + 1)); ?></legend>
+                                        <input type="hidden" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TARGETS); ?>[<?php echo esc_attr($index); ?>][id]" value="<?php echo esc_attr($target_id); ?>">
+                                        <div class="sitepulse-uptime-target__row">
+                                            <label>
+                                                <span class="sitepulse-field-label"><?php esc_html_e('URL', 'sitepulse'); ?></span>
+                                                <input type="url" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TARGETS); ?>[<?php echo esc_attr($index); ?>][url]" value="<?php echo esc_attr($target_url); ?>" class="regular-text" required>
+                                            </label>
+                                            <label>
+                                                <span class="sitepulse-field-label"><?php esc_html_e('Fréquence', 'sitepulse'); ?></span>
+                                                <select name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TARGETS); ?>[<?php echo esc_attr($index); ?>][frequency]">
+                                                    <?php foreach ($uptime_frequency_choices as $frequency_key => $frequency_data) :
+                                                        if (!is_array($frequency_data) || !isset($frequency_data['label'])) {
+                                                            continue;
+                                                        }
+
+                                                        $label = $frequency_data['label'];
+                                                        ?>
+                                                        <option value="<?php echo esc_attr($frequency_key); ?>" <?php selected($target_frequency, $frequency_key); ?>><?php echo esc_html($label); ?></option>
+                                                    <?php endforeach; ?>
+                                                </select>
+                                            </label>
+                                        </div>
+                                        <div class="sitepulse-uptime-target__row">
+                                            <label class="sitepulse-uptime-target__alerts">
+                                                <input type="checkbox" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TARGETS); ?>[<?php echo esc_attr($index); ?>][alerts]" value="1" <?php checked($target_alerts); ?>>
+                                                <span><?php esc_html_e('Activer les alertes e-mail pour cette URL', 'sitepulse'); ?></span>
+                                            </label>
+                                            <button type="button" class="button-link sitepulse-uptime-target__remove" data-remove-target><?php esc_html_e('Supprimer', 'sitepulse'); ?></button>
+                                        </div>
+                                        <?php if ($target_label !== '') : ?>
+                                            <input type="hidden" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TARGETS); ?>[<?php echo esc_attr($index); ?>][label]" value="<?php echo esc_attr($target_label); ?>">
+                                        <?php endif; ?>
+                                    </fieldset>
+                                <?php endforeach; ?>
+                            </div>
+                            <template id="sitepulse-uptime-target-template">
+                                <fieldset class="sitepulse-uptime-target" data-index="{{index}}" data-frequency="{{frequency}}" data-alerts="{{alerts}}" id="sitepulse-uptime-target-{{id}}">
+                                    <legend class="screen-reader-text"><?php echo esc_html(__('Nouvel endpoint de disponibilité', 'sitepulse')); ?></legend>
+                                    <input type="hidden" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TARGETS); ?>[{{index}}][id]" value="{{id}}">
+                                    <div class="sitepulse-uptime-target__row">
+                                        <label>
+                                            <span class="sitepulse-field-label"><?php esc_html_e('URL', 'sitepulse'); ?></span>
+                                            <input type="url" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TARGETS); ?>[{{index}}][url]" value="{{url}}" class="regular-text" required>
+                                        </label>
+                                        <label>
+                                            <span class="sitepulse-field-label"><?php esc_html_e('Fréquence', 'sitepulse'); ?></span>
+                                            <select name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TARGETS); ?>[{{index}}][frequency]">
+                                                <?php foreach ($uptime_frequency_choices as $frequency_key => $frequency_data) :
+                                                    if (!is_array($frequency_data) || !isset($frequency_data['label'])) {
+                                                        continue;
+                                                    }
+
+                                                    $label = $frequency_data['label'];
+                                                    ?>
+                                                    <option value="<?php echo esc_attr($frequency_key); ?>"><?php echo esc_html($label); ?></option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <div class="sitepulse-uptime-target__row">
+                                        <label class="sitepulse-uptime-target__alerts">
+                                            <input type="checkbox" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TARGETS); ?>[{{index}}][alerts]" value="1">
+                                            <span><?php esc_html_e('Activer les alertes e-mail pour cette URL', 'sitepulse'); ?></span>
+                                        </label>
+                                        <button type="button" class="button-link sitepulse-uptime-target__remove" data-remove-target><?php esc_html_e('Supprimer', 'sitepulse'); ?></button>
+                                    </div>
+                                </fieldset>
+                            </template>
+                            <p><button type="button" class="button button-secondary" data-add-uptime-target><?php esc_html_e('Ajouter une URL', 'sitepulse'); ?></button></p>
                         </div>
                     </div>
                     <div class="sitepulse-module-card sitepulse-module-card--setting">
@@ -1654,27 +1857,6 @@ function sitepulse_settings_page() {
                             <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TIMEOUT); ?>"><?php esc_html_e('Temps maximal avant échec', 'sitepulse'); ?></label>
                             <input type="number" min="1" id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TIMEOUT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TIMEOUT); ?>" value="<?php echo esc_attr($uptime_timeout); ?>" class="small-text" aria-describedby="<?php echo esc_attr($uptime_timeout_description_id); ?>">
                             <p class="sitepulse-card-description" id="<?php echo esc_attr($uptime_timeout_description_id); ?>"><?php esc_html_e('Nombre de secondes avant de considérer la requête comme échouée.', 'sitepulse'); ?></p>
-                        </div>
-                    </div>
-                    <div class="sitepulse-module-card sitepulse-module-card--setting">
-                        <div class="sitepulse-card-header">
-                            <h3 class="sitepulse-card-title"><?php esc_html_e('Fréquence des contrôles', 'sitepulse'); ?></h3>
-                        </div>
-                        <div class="sitepulse-card-body">
-                            <?php $uptime_frequency_choices = sitepulse_get_uptime_frequency_choices(); ?>
-                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_FREQUENCY); ?>"><?php esc_html_e('Intervalle entre deux vérifications', 'sitepulse'); ?></label>
-                            <select id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_FREQUENCY); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_FREQUENCY); ?>">
-                                <?php foreach ($uptime_frequency_choices as $frequency_key => $frequency_data) :
-                                    if (!is_array($frequency_data) || !isset($frequency_data['label'])) {
-                                        continue;
-                                    }
-
-                                    $label = $frequency_data['label'];
-                                    ?>
-                                    <option value="<?php echo esc_attr($frequency_key); ?>" <?php selected($uptime_frequency, $frequency_key); ?>><?php echo esc_html($label); ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                            <p class="sitepulse-card-description"><?php esc_html_e('Sélectionnez la fréquence d’exécution de la tâche de surveillance.', 'sitepulse'); ?></p>
                         </div>
                     </div>
                     <div class="sitepulse-module-card sitepulse-module-card--setting">
@@ -1762,6 +1944,107 @@ function sitepulse_settings_page() {
             </form>
         </div>
     </div>
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        var container = document.querySelector('.sitepulse-uptime-targets');
+        var templateEl = document.getElementById('sitepulse-uptime-target-template');
+
+        if (!container || !templateEl) {
+            return;
+        }
+
+        var addButton = container.parentNode.querySelector('[data-add-uptime-target]');
+        var defaultFrequency = container.getAttribute('data-default-frequency') || '';
+
+        var generateId = function () {
+            return 'target_' + Math.random().toString(36).slice(2, 10);
+        };
+
+        var applyFieldsetState = function (fieldset) {
+            if (!fieldset) {
+                return;
+            }
+
+            var frequency = fieldset.getAttribute('data-frequency');
+            var alerts = fieldset.getAttribute('data-alerts');
+            var select = fieldset.querySelector('select');
+            var checkbox = fieldset.querySelector('input[type="checkbox"]');
+
+            if (select && frequency) {
+                select.value = frequency;
+            }
+
+            if (checkbox && alerts) {
+                checkbox.checked = alerts === '1' || alerts === 'true';
+            }
+        };
+
+        container.querySelectorAll('.sitepulse-uptime-target').forEach(function (fieldset) {
+            applyFieldsetState(fieldset);
+        });
+
+        var addTarget = function (preset) {
+            preset = preset || {};
+            var index = parseInt(container.getAttribute('data-next-index'), 10);
+
+            if (!Number.isFinite(index)) {
+                index = container.querySelectorAll('.sitepulse-uptime-target').length;
+            }
+
+            var targetId = preset.id || generateId();
+            var frequency = preset.frequency || defaultFrequency;
+            var alerts = preset.alerts ? '1' : '0';
+            var url = preset.url || '';
+
+            var html = templateEl.innerHTML
+                .replace(/\{\{index\}\}/g, index)
+                .replace(/\{\{id\}\}/g, targetId)
+                .replace(/\{\{frequency\}\}/g, frequency)
+                .replace(/\{\{alerts\}\}/g, alerts)
+                .replace(/\{\{url\}\}/g, url);
+
+            var wrapper = document.createElement('div');
+            wrapper.innerHTML = html.trim();
+            var fieldset = wrapper.firstElementChild;
+
+            if (!fieldset) {
+                return;
+            }
+
+            container.appendChild(fieldset);
+            container.setAttribute('data-next-index', index + 1);
+
+            if (!preset.frequency) {
+                fieldset.setAttribute('data-frequency', defaultFrequency);
+            }
+
+            fieldset.setAttribute('data-alerts', alerts);
+            applyFieldsetState(fieldset);
+        };
+
+        if (addButton) {
+            addButton.addEventListener('click', function (event) {
+                event.preventDefault();
+                addTarget({ alerts: true });
+            });
+        }
+
+        container.addEventListener('click', function (event) {
+            var trigger = event.target.closest('[data-remove-target]');
+
+            if (!trigger) {
+                return;
+            }
+
+            event.preventDefault();
+            var fieldset = trigger.closest('.sitepulse-uptime-target');
+
+            if (fieldset) {
+                fieldset.remove();
+            }
+        });
+    });
+    </script>
     <?php
 }
 

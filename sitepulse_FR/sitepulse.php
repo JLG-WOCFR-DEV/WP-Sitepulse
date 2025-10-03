@@ -27,7 +27,8 @@ define('SITEPULSE_OPTION_AI_RATE_LIMIT', 'sitepulse_ai_rate_limit');
 define('SITEPULSE_OPTION_AI_LAST_RUN', 'sitepulse_ai_last_run');
 define('SITEPULSE_DEFAULT_AI_MODEL', 'gemini-1.5-flash');
 define('SITEPULSE_OPTION_UPTIME_LOG', 'sitepulse_uptime_log');
-define('SITEPULSE_OPTION_UPTIME_URL', 'sitepulse_uptime_url');
+define('SITEPULSE_OPTION_UPTIME_TARGETS', 'sitepulse_uptime_targets');
+define('SITEPULSE_OPTION_UPTIME_URL', 'sitepulse_uptime_url'); // Legacy single target option.
 define('SITEPULSE_OPTION_UPTIME_TIMEOUT', 'sitepulse_uptime_timeout');
 define('SITEPULSE_OPTION_UPTIME_FREQUENCY', 'sitepulse_uptime_frequency');
 define('SITEPULSE_OPTION_UPTIME_HTTP_METHOD', 'sitepulse_uptime_http_method');

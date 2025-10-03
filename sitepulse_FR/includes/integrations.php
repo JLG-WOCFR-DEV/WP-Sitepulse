@@ -15,7 +15,11 @@ add_action('plugins_loaded', function () {
 
             public function process() {
                 $this->data['load_time'] = get_option(SITEPULSE_OPTION_LAST_LOAD_TIME, 'N/A');
-                $this->data['uptime'] = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+                if (function_exists('sitepulse_get_uptime_log_store')) {
+                    $this->data['uptime'] = sitepulse_get_uptime_log_store();
+                } else {
+                    $this->data['uptime'] = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+                }
             }
         }
     }

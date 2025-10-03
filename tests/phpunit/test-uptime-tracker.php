@@ -25,6 +25,27 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
      */
     private $last_http_url = '';
 
+    private function get_target_log() {
+        $store = function_exists('sitepulse_get_uptime_log_store') ? sitepulse_get_uptime_log_store() : get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+
+        $this->assertIsArray($store, 'Log store should be an array.');
+        $this->assertArrayHasKey('target_test', $store, 'Expected log entries for target_test.');
+
+        $log = $store['target_test'];
+
+        if (function_exists('sitepulse_normalize_uptime_log')) {
+            $log = sitepulse_normalize_uptime_log($log);
+        }
+
+        return $log;
+    }
+
+    private function get_failure_streak_for_target() {
+        return function_exists('sitepulse_get_uptime_failure_streak')
+            ? sitepulse_get_uptime_failure_streak('target_test')
+            : (int) get_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0);
+    }
+
     /**
      * Registers the module under test.
      */
@@ -44,13 +65,22 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $GLOBALS['sitepulse_logger'] = [];
 
         add_filter('pre_http_request', [$this, 'mock_http_request'], 10, 3);
-        add_filter('sitepulse_uptime_consecutive_failures', [$this, 'force_failure_threshold'], 10, 2);
+        add_filter('sitepulse_uptime_consecutive_failures', [$this, 'force_failure_threshold'], 10, 6);
 
         delete_option(SITEPULSE_OPTION_UPTIME_LOG);
         delete_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK);
         delete_option(SITEPULSE_OPTION_UPTIME_ARCHIVE);
         delete_option(SITEPULSE_OPTION_UPTIME_URL);
         delete_option(SITEPULSE_OPTION_UPTIME_TIMEOUT);
+
+        update_option(SITEPULSE_OPTION_UPTIME_TARGETS, [
+            [
+                'id'        => 'target_test',
+                'url'       => 'https://example.org/status',
+                'frequency' => sitepulse_get_default_uptime_frequency(),
+                'alerts'    => true,
+            ],
+        ]);
     }
 
     protected function tear_down(): void {
@@ -62,6 +92,7 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         delete_option(SITEPULSE_OPTION_UPTIME_ARCHIVE);
         delete_option(SITEPULSE_OPTION_UPTIME_URL);
         delete_option(SITEPULSE_OPTION_UPTIME_TIMEOUT);
+        delete_option(SITEPULSE_OPTION_UPTIME_TARGETS);
 
         parent::tear_down();
     }
@@ -72,7 +103,7 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
      * @param int $default Default threshold.
      * @return int
      */
-    public function force_failure_threshold($default, $streak = 0) {
+    public function force_failure_threshold($default, $streak = 0, $response = null, $request_url = '', $request_args = [], $target = null) {
         return 2;
     }
 
@@ -105,12 +136,12 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $this->enqueue_response(new WP_Error('timeout', 'Request timeout'));
         sitepulse_run_uptime_check();
 
-        $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+        $log = $this->get_target_log();
         $this->assertCount(1, $log, 'Expected one log entry after first WP_Error.');
         $this->assertSame('unknown', $log[0]['status']);
         $this->assertSame('Request timeout', $log[0]['error']);
         $this->assertArrayNotHasKey('incident_start', $log[0], 'Unknown status should not record an incident start.');
-        $this->assertSame(1, get_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0));
+        $this->assertSame(1, $this->get_failure_streak_for_target());
 
         $last_log = end($GLOBALS['sitepulse_logger']);
         $this->assertSame('WARNING', $last_log['level']);
@@ -118,9 +149,9 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $this->enqueue_response(new WP_Error('timeout', 'Request timeout'));
         sitepulse_run_uptime_check();
 
-        $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+        $log = $this->get_target_log();
         $this->assertCount(2, $log, 'Expected two log entries after consecutive WP_Error.');
-        $this->assertSame(2, get_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0));
+        $this->assertSame(2, $this->get_failure_streak_for_target());
 
         $last_log = end($GLOBALS['sitepulse_logger']);
         $this->assertSame('ALERT', $last_log['level']);
@@ -128,16 +159,16 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $this->enqueue_response(['response' => ['code' => 200]]);
         sitepulse_run_uptime_check();
 
-        $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+        $log = $this->get_target_log();
         $this->assertTrue(end($log)['status']);
-        $this->assertSame(0, get_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0));
+        $this->assertSame(0, $this->get_failure_streak_for_target());
     }
 
     public function test_mixed_outage_preserves_incident_start_across_unknown_samples() {
         $this->enqueue_response(['response' => ['code' => 500]]);
         sitepulse_run_uptime_check();
 
-        $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+        $log = $this->get_target_log();
         $this->assertFalse($log[0]['status']);
         $this->assertArrayHasKey('incident_start', $log[0]);
         $incident_start = $log[0]['incident_start'];
@@ -145,20 +176,27 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $this->enqueue_response(new WP_Error('timeout', 'Temporary glitch'));
         sitepulse_run_uptime_check();
 
-        $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+        $log = $this->get_target_log();
         $this->assertSame('unknown', $log[1]['status']);
         $this->assertArrayNotHasKey('incident_start', $log[1]);
 
         $this->enqueue_response(['response' => ['code' => 500]]);
         sitepulse_run_uptime_check();
 
-        $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+        $log = $this->get_target_log();
         $this->assertFalse($log[2]['status']);
         $this->assertSame($incident_start, $log[2]['incident_start']);
     }
 
     public function test_custom_uptime_settings_are_used_when_defined() {
-        update_option(SITEPULSE_OPTION_UPTIME_URL, 'https://status.example.test/ping');
+        update_option(SITEPULSE_OPTION_UPTIME_TARGETS, [
+            [
+                'id'        => 'target_test',
+                'url'       => 'https://status.example.test/ping',
+                'frequency' => sitepulse_get_default_uptime_frequency(),
+                'alerts'    => true,
+            ],
+        ]);
         update_option(SITEPULSE_OPTION_UPTIME_TIMEOUT, 25);
 
         $this->enqueue_response(['response' => ['code' => 200]]);
@@ -175,18 +213,21 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $this->enqueue_response(['response' => ['code' => 200]]);
         sitepulse_run_uptime_check();
 
-        $archive = get_option(SITEPULSE_OPTION_UPTIME_ARCHIVE, []);
-        $this->assertNotEmpty($archive, 'Archive should contain the first successful check.');
-        $day_key = array_key_last($archive);
-        $this->assertSame(1, $archive[$day_key]['up']);
-        $this->assertSame(1, $archive[$day_key]['total']);
+        $archive = sitepulse_get_uptime_archive();
+        $this->assertArrayHasKey('target_test', $archive, 'Archive should contain the test target.');
+        $target_archive = $archive['target_test'];
+        $this->assertNotEmpty($target_archive, 'Archive should contain the first successful check.');
+        $day_key = array_key_last($target_archive);
+        $this->assertSame(1, $target_archive[$day_key]['up']);
+        $this->assertSame(1, $target_archive[$day_key]['total']);
 
         $this->enqueue_response(['response' => ['code' => 500]]);
         sitepulse_run_uptime_check();
 
-        $archive = get_option(SITEPULSE_OPTION_UPTIME_ARCHIVE, []);
-        $this->assertSame(1, $archive[$day_key]['down']);
-        $this->assertSame(2, $archive[$day_key]['total']);
+        $archive = sitepulse_get_uptime_archive();
+        $target_archive = $archive['target_test'];
+        $this->assertSame(1, $target_archive[$day_key]['down']);
+        $this->assertSame(2, $target_archive[$day_key]['total']);
     }
 
     public function test_uptime_tracker_page_includes_extended_metrics() {
@@ -207,11 +248,21 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
             ];
         }
 
-        update_option(SITEPULSE_OPTION_UPTIME_ARCHIVE, $archive, false);
+        update_option(SITEPULSE_OPTION_UPTIME_ARCHIVE, [
+            'target_test' => $archive,
+        ], false);
         update_option(SITEPULSE_OPTION_UPTIME_LOG, [
-            [
-                'timestamp' => $now,
-                'status'    => true,
+            'target_test' => [
+                [
+                    'timestamp'      => $now - HOUR_IN_SECONDS,
+                    'status'         => false,
+                    'incident_start' => $now - (2 * HOUR_IN_SECONDS),
+                    'error'          => '500 Internal Server Error',
+                ],
+                [
+                    'timestamp' => $now,
+                    'status'    => true,
+                ],
             ],
         ], false);
 
@@ -222,6 +273,11 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         sitepulse_uptime_tracker_page();
         $output = ob_get_clean();
 
+        $this->assertStringContainsString('sitepulse-uptime-status-list', $output);
+        $this->assertStringContainsString('status-badge status-ok', $output);
+        $this->assertStringContainsString('Fréquence : Toutes les heures', $output);
+        $this->assertStringContainsString('Alertes activées', $output);
+        $this->assertStringContainsString('id="sitepulse-uptime-target_test"', $output);
         $this->assertStringContainsString('Disponibilité 7 derniers jours', $output);
         $this->assertStringContainsString('Disponibilité 30 derniers jours', $output);
         $this->assertStringContainsString('Tendance de disponibilité (30 jours)', $output);

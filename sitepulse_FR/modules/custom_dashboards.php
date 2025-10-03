@@ -767,25 +767,23 @@ function sitepulse_get_dashboard_preview_context() {
     }
 
     if ($is_uptime_enabled) {
-        $raw_uptime_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
-        $uptime_log = function_exists('sitepulse_normalize_uptime_log')
-            ? sitepulse_normalize_uptime_log($raw_uptime_log)
-            : (array) $raw_uptime_log;
-        $boolean_checks = array_values(array_filter($uptime_log, function ($entry) {
-            return is_array($entry) && array_key_exists('status', $entry) && is_bool($entry['status']);
-        }));
-        $evaluated_checks = count($boolean_checks);
-        $up_checks = count(array_filter($boolean_checks, function ($entry) {
-            return isset($entry['status']) && true === $entry['status'];
-        }));
-        $uptime_percentage = $evaluated_checks > 0 ? ($up_checks / $evaluated_checks) * 100 : 100;
+        $targets = function_exists('sitepulse_get_uptime_targets') ? sitepulse_get_uptime_targets() : [];
+        $date_format = get_option('date_format');
+        $time_format = get_option('time_format');
+        $now = (int) current_time('timestamp');
+        $frequency_choices = sitepulse_get_uptime_frequency_choices();
+        $target_summaries = [];
+        $overall_percentages = [];
+        $overall_status = 'status-unknown';
+        $status_priority = ['status-bad' => 3, 'status-warn' => 2, 'status-ok' => 1, 'status-unknown' => 0];
+
         $default_uptime_warning = defined('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT') ? (float) SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT : 99.0;
+        $uptime_warning_threshold = $default_uptime_warning;
 
         if (function_exists('sitepulse_get_uptime_warning_percentage')) {
             $uptime_warning_threshold = (float) sitepulse_get_uptime_warning_percentage();
         } else {
-            $uptime_warning_key = defined('SITEPULSE_OPTION_UPTIME_WARNING_PERCENT') ? SITEPULSE_OPTION_UPTIME_WARNING_PERCENT : 'sitepulse_uptime_warning_percent';
-            $stored_threshold = get_option($uptime_warning_key, $default_uptime_warning);
+            $stored_threshold = get_option(SITEPULSE_OPTION_UPTIME_WARNING_PERCENT, $default_uptime_warning);
             $uptime_warning_threshold = is_scalar($stored_threshold) ? (float) $stored_threshold : $default_uptime_warning;
         }
 
@@ -795,63 +793,128 @@ function sitepulse_get_dashboard_preview_context() {
             $uptime_warning_threshold = 100.0;
         }
 
-        if ($uptime_percentage < $uptime_warning_threshold) {
-            $uptime_status = 'status-bad';
-        } elseif ($uptime_percentage < 100) {
-            $uptime_status = 'status-warn';
-        } else {
-            $uptime_status = 'status-ok';
-        }
-
-        $uptime_entries = array_slice($uptime_log, -30);
-
-        $date_format = get_option('date_format');
-        $time_format = get_option('time_format');
-        $uptime_labels = [];
-        $uptime_values = [];
-        $uptime_colors = [];
-
-        foreach ($uptime_entries as $entry) {
-            $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
-            $label = $timestamp > 0
-                ? date_i18n($date_format . ' ' . $time_format, $timestamp)
-                : __('Unknown', 'sitepulse');
-            $status = is_array($entry) && array_key_exists('status', $entry) ? $entry['status'] : (!empty($entry));
-
-            $uptime_labels[] = $label;
-
-            if ($status === false) {
-                $uptime_values[] = 0;
-                $uptime_colors[] = $palette['red'];
-            } elseif ($status === true) {
-                $uptime_values[] = 100;
-                $uptime_colors[] = $palette['green'];
-            } else {
-                $uptime_values[] = 50;
-                $uptime_colors[] = $palette['grey'];
+        foreach ($targets as $target) {
+            if (!is_array($target)) {
+                continue;
             }
+
+            $target_id = isset($target['id']) ? sanitize_key((string) $target['id']) : '';
+
+            if ($target_id === '') {
+                $target_id = sanitize_key(sitepulse_generate_uptime_target_id(microtime(true)));
+            }
+
+            $target_url = isset($target['url']) ? (string) $target['url'] : '';
+            $display_url = $target_url !== '' ? $target_url : home_url('/');
+            $target_label = isset($target['label']) && is_string($target['label']) && $target['label'] !== '' ? $target['label'] : $display_url;
+            $alerts_enabled = !empty($target['alerts']);
+            $frequency_key = isset($target['frequency']) ? $target['frequency'] : '';
+            $frequency_key = function_exists('sitepulse_sanitize_uptime_frequency') ? sitepulse_sanitize_uptime_frequency($frequency_key) : $frequency_key;
+            $frequency_label = isset($frequency_choices[$frequency_key]['label']) ? $frequency_choices[$frequency_key]['label'] : $frequency_key;
+
+            $log = sitepulse_get_uptime_log_for_target($target_id);
+            $boolean_checks = array_values(array_filter($log, function ($entry) {
+                return is_array($entry) && array_key_exists('status', $entry) && is_bool($entry['status']);
+            }));
+            $evaluated_checks = count($boolean_checks);
+            $up_checks = count(array_filter($boolean_checks, function ($entry) {
+                return isset($entry['status']) && true === $entry['status'];
+            }));
+            $uptime_percentage = $evaluated_checks > 0 ? ($up_checks / max(1, $evaluated_checks)) * 100 : 100;
+
+            $last_entry = !empty($log) ? end($log) : null;
+            if ($last_entry) {
+                reset($log);
+            }
+
+            $status = 'status-ok';
+            $current_incident_duration = '';
+            $current_incident_start = null;
+
+            if ($last_entry && isset($last_entry['status']) && false === $last_entry['status']) {
+                $status = 'status-bad';
+                $current_incident_start = isset($last_entry['incident_start']) ? (int) $last_entry['incident_start'] : (isset($last_entry['timestamp']) ? (int) $last_entry['timestamp'] : $now);
+                $current_incident_duration = human_time_diff($current_incident_start, $now);
+            } elseif ($uptime_percentage < $uptime_warning_threshold) {
+                $status = 'status-bad';
+            } elseif ($uptime_percentage < 100) {
+                $status = 'status-warn';
+            } elseif (empty($log)) {
+                $status = 'status-unknown';
+            }
+
+            if ($status_priority[$status] > $status_priority[$overall_status]) {
+                $overall_status = $status;
+            }
+
+            $overall_percentages[] = $uptime_percentage;
+
+            $target_summaries[] = [
+                'name'        => $target_label,
+                'url'         => $display_url,
+                'status'      => $status,
+                'percentage'  => round($uptime_percentage, 2),
+                'alerts'      => $alerts_enabled,
+                'frequency'   => $frequency_label,
+                'incident'    => $current_incident_duration !== '' ? [
+                    'since'    => $current_incident_start,
+                    'duration' => $current_incident_duration,
+                ] : null,
+            ];
         }
+
+        $overall_percentage = !empty($overall_percentages) ? array_sum($overall_percentages) / count($overall_percentages) : 0.0;
+
+        $labels = array_map(function ($summary) {
+            return $summary['name'];
+        }, $target_summaries);
+
+        $values = array_map(function ($summary) {
+            return $summary['percentage'];
+        }, $target_summaries);
+
+        $colors = array_map(function ($summary) use ($palette) {
+            if ($summary['status'] === 'status-bad') {
+                return $palette['red'];
+            }
+
+            if ($summary['status'] === 'status-warn') {
+                return $palette['amber'];
+            }
+
+            if ($summary['status'] === 'status-ok') {
+                return $palette['green'];
+            }
+
+            return $palette['grey'];
+        }, $target_summaries);
 
         $uptime_chart = [
             'type'     => 'bar',
-            'labels'   => $uptime_labels,
+            'labels'   => $labels,
             'datasets' => [
                 [
-                    'data'            => $uptime_values,
-                    'backgroundColor' => $uptime_colors,
+                    'data'            => $values,
+                    'backgroundColor' => $colors,
                     'borderWidth'     => 0,
                     'borderRadius'    => 6,
                 ],
             ],
-            'empty'    => empty($uptime_labels),
-            'status'   => $uptime_status,
+            'empty'    => empty($labels),
+            'status'   => $overall_status,
             'unit'     => __('%', 'sitepulse'),
         ];
 
         $charts_payload['uptime'] = $uptime_chart;
         $context['modules']['uptime']['card'] = [
-            'status'     => $uptime_status,
-            'percentage' => $uptime_percentage,
+            'status'     => $overall_status,
+            'percentage' => $overall_percentage,
+            'targets'    => $target_summaries,
+            'summary'    => sprintf(
+                /* translators: 1: number of monitored targets */
+                _n('%d cible surveillée', '%d cibles surveillées', count($target_summaries), 'sitepulse'),
+                count($target_summaries)
+            ),
         ];
         $context['modules']['uptime']['chart'] = $uptime_chart;
     }

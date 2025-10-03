@@ -9,7 +9,7 @@ if (!defined('SITEPULSE_OPTION_UPTIME_ARCHIVE')) {
     define('SITEPULSE_OPTION_UPTIME_ARCHIVE', 'sitepulse_uptime_archive');
 }
 
-$sitepulse_uptime_cron_hook = function_exists('sitepulse_get_cron_hook') ? sitepulse_get_cron_hook('uptime_tracker') : 'sitepulse_uptime_tracker_cron';
+add_action('init', 'sitepulse_uptime_tracker_boot');
 
 add_filter('cron_schedules', 'sitepulse_uptime_tracker_register_cron_schedules');
 
@@ -36,11 +36,6 @@ function sitepulse_uptime_tracker_enqueue_assets($hook_suffix) {
         [],
         SITEPULSE_VERSION
     );
-}
-
-if (!empty($sitepulse_uptime_cron_hook)) {
-    add_action('init', 'sitepulse_uptime_tracker_ensure_cron');
-    add_action($sitepulse_uptime_cron_hook, 'sitepulse_run_uptime_check');
 }
 
 /**
@@ -87,27 +82,60 @@ function sitepulse_uptime_tracker_register_cron_schedules($schedules) {
 }
 
 /**
- * Retrieves the configured cron schedule for uptime checks.
+ * Returns the cron hook name associated with a frequency identifier.
  *
+ * @param string $frequency Frequency identifier.
  * @return string
  */
-function sitepulse_uptime_tracker_get_schedule() {
-    $default = defined('SITEPULSE_DEFAULT_UPTIME_FREQUENCY') ? SITEPULSE_DEFAULT_UPTIME_FREQUENCY : 'hourly';
-    $option  = get_option(SITEPULSE_OPTION_UPTIME_FREQUENCY, $default);
+function sitepulse_get_uptime_cron_hook_for_frequency($frequency) {
+    static $hooks = [];
 
-    if (function_exists('sitepulse_sanitize_uptime_frequency')) {
-        $option = sitepulse_sanitize_uptime_frequency($option);
-    } elseif (!is_string($option) || $option === '') {
-        $option = $default;
+    $frequency = sanitize_key((string) $frequency);
+
+    if ($frequency === '') {
+        $frequency = 'hourly';
     }
 
-    $choices = function_exists('sitepulse_get_uptime_frequency_choices') ? sitepulse_get_uptime_frequency_choices() : [];
+    if (!isset($hooks[$frequency])) {
+        if (function_exists('sitepulse_get_cron_hook')) {
+            $hooks[$frequency] = sitepulse_get_cron_hook('uptime_tracker_' . $frequency);
+        }
 
-    if (!isset($choices[$option])) {
-        $option = $default;
+        if (empty($hooks[$frequency])) {
+            $hooks[$frequency] = 'sitepulse_uptime_tracker_cron_' . $frequency;
+        }
     }
 
-    return $option;
+    return $hooks[$frequency];
+}
+
+/**
+ * Registers cron hooks for each available frequency and ensures scheduling.
+ *
+ * @return void
+ */
+function sitepulse_uptime_tracker_boot() {
+    static $booted = false;
+
+    if ($booted) {
+        return;
+    }
+
+    $booted = true;
+
+    $frequency_choices = function_exists('sitepulse_get_uptime_frequency_choices')
+        ? sitepulse_get_uptime_frequency_choices()
+        : [];
+
+    foreach (array_keys($frequency_choices) as $frequency_key) {
+        $hook = sitepulse_get_uptime_cron_hook_for_frequency($frequency_key);
+
+        add_action($hook, function () use ($frequency_key) {
+            sitepulse_run_uptime_checks_for_frequency($frequency_key);
+        });
+    }
+
+    sitepulse_uptime_tracker_ensure_cron();
 }
 
 /**
@@ -116,48 +144,94 @@ function sitepulse_uptime_tracker_get_schedule() {
  * @return void
  */
 function sitepulse_uptime_tracker_ensure_cron() {
-    global $sitepulse_uptime_cron_hook;
+    $frequency_choices = function_exists('sitepulse_get_uptime_frequency_choices')
+        ? sitepulse_get_uptime_frequency_choices()
+        : [];
 
-    if (empty($sitepulse_uptime_cron_hook)) {
+    $targets = function_exists('sitepulse_get_uptime_targets')
+        ? sitepulse_get_uptime_targets()
+        : [];
+
+    $frequencies_in_use = [];
+
+    foreach ($targets as $target) {
+        if (!is_array($target)) {
+            continue;
+        }
+
+        $raw_frequency = isset($target['frequency']) ? $target['frequency'] : '';
+        $frequency = function_exists('sitepulse_sanitize_uptime_frequency')
+            ? sitepulse_sanitize_uptime_frequency($raw_frequency)
+            : (is_string($raw_frequency) && $raw_frequency !== '' ? $raw_frequency : (defined('SITEPULSE_DEFAULT_UPTIME_FREQUENCY') ? SITEPULSE_DEFAULT_UPTIME_FREQUENCY : 'hourly'));
+
+        $frequencies_in_use[$frequency] = true;
+    }
+
+    $all_frequency_keys = array_keys($frequency_choices);
+    $available_schedules = wp_get_schedules();
+
+    if (empty($frequencies_in_use)) {
+        foreach ($all_frequency_keys as $frequency_key) {
+            $hook = sitepulse_get_uptime_cron_hook_for_frequency($frequency_key);
+            wp_clear_scheduled_hook($hook);
+        }
+
+        sitepulse_clear_cron_warning('uptime_tracker');
+
         return;
     }
 
-    $desired_schedule = sitepulse_uptime_tracker_get_schedule();
-    $available_schedules = wp_get_schedules();
+    $scheduled_any = false;
 
-    if (!isset($available_schedules[$desired_schedule])) {
-        $fallback_schedule = defined('SITEPULSE_DEFAULT_UPTIME_FREQUENCY') ? SITEPULSE_DEFAULT_UPTIME_FREQUENCY : 'hourly';
-        if (isset($available_schedules[$fallback_schedule])) {
-            $desired_schedule = $fallback_schedule;
-        } elseif (isset($available_schedules['hourly'])) {
-            $desired_schedule = 'hourly';
+    foreach ($frequencies_in_use as $frequency => $_unused) {
+        $hook = sitepulse_get_uptime_cron_hook_for_frequency($frequency);
+        $schedule_key = $frequency;
+
+        if (!isset($available_schedules[$schedule_key])) {
+            $schedule_key = defined('SITEPULSE_DEFAULT_UPTIME_FREQUENCY') ? SITEPULSE_DEFAULT_UPTIME_FREQUENCY : 'hourly';
+        }
+
+        if (!isset($available_schedules[$schedule_key]) && isset($available_schedules['hourly'])) {
+            $schedule_key = 'hourly';
+        }
+
+        $current_schedule = wp_get_schedule($hook);
+
+        if ($current_schedule && $current_schedule !== $schedule_key) {
+            wp_clear_scheduled_hook($hook);
+            $current_schedule = false;
+        }
+
+        if (!$current_schedule) {
+            $next_run = (int) current_time('timestamp', true);
+            $scheduled = wp_schedule_event($next_run, $schedule_key, $hook);
+
+            if (false === $scheduled && function_exists('sitepulse_log')) {
+                sitepulse_log(sprintf('Unable to schedule uptime tracker cron hook: %s', $hook), 'ERROR');
+            }
+        }
+
+        if (wp_next_scheduled($hook)) {
+            $scheduled_any = true;
         }
     }
 
-    $current_schedule = wp_get_schedule($sitepulse_uptime_cron_hook);
-
-    if ($current_schedule && $current_schedule !== $desired_schedule) {
-        wp_clear_scheduled_hook($sitepulse_uptime_cron_hook);
-    }
-
-    $next_run = wp_next_scheduled($sitepulse_uptime_cron_hook);
-
-    if (!$next_run) {
-        $next_run = (int) current_time('timestamp', true);
-        $scheduled = wp_schedule_event($next_run, $desired_schedule, $sitepulse_uptime_cron_hook);
-
-        if (false === $scheduled && function_exists('sitepulse_log')) {
-            sitepulse_log(sprintf('Unable to schedule uptime tracker cron hook: %s', $sitepulse_uptime_cron_hook), 'ERROR');
+    foreach ($all_frequency_keys as $frequency_key) {
+        if (isset($frequencies_in_use[$frequency_key])) {
+            continue;
         }
+
+        $hook = sitepulse_get_uptime_cron_hook_for_frequency($frequency_key);
+        wp_clear_scheduled_hook($hook);
     }
 
-    if (!wp_next_scheduled($sitepulse_uptime_cron_hook)) {
+    if ($scheduled_any) {
+        sitepulse_clear_cron_warning('uptime_tracker');
+    } else {
         sitepulse_register_cron_warning(
             'uptime_tracker',
             __('SitePulse n’a pas pu planifier la vérification d’uptime. Vérifiez que WP-Cron est actif ou programmez manuellement la tâche.', 'sitepulse')
         );
-    } else {
-        sitepulse_clear_cron_warning('uptime_tracker');
     }
 }
 function sitepulse_normalize_uptime_log($log) {
@@ -255,32 +329,321 @@ function sitepulse_normalize_uptime_log($log) {
 }
 
 /**
- * Retrieves the persisted uptime archive ordered by day.
+ * Retrieves the uptime log store, upgrading legacy formats to multi-target when required.
  *
- * @return array<string,array<string,int>>
+ * @return array<string,array<int,array<string,mixed>>>
  */
-function sitepulse_get_uptime_archive() {
-    $archive = get_option(SITEPULSE_OPTION_UPTIME_ARCHIVE, []);
+function sitepulse_get_uptime_log_store() {
+    $raw = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
 
-    if (!is_array($archive)) {
+    if (!is_array($raw)) {
+        $raw = empty($raw) ? [] : [$raw];
+    }
+
+    $is_multi_target = false;
+
+    foreach ($raw as $key => $value) {
+        if (!is_int($key)) {
+            $is_multi_target = true;
+            break;
+        }
+    }
+
+    if ($is_multi_target) {
+        $store = [];
+
+        foreach ($raw as $target_id => $entries) {
+            if (!is_array($entries)) {
+                continue;
+            }
+
+            $store[$target_id] = array_values($entries);
+        }
+
+        return $store;
+    }
+
+    if (empty($raw)) {
         return [];
     }
 
-    uksort($archive, function ($a, $b) {
-        return strcmp($a, $b);
-    });
+    $targets = function_exists('sitepulse_get_uptime_targets') ? sitepulse_get_uptime_targets() : [];
+    $target_id = !empty($targets) && isset($targets[0]['id']) ? $targets[0]['id'] : 'target_legacy';
+    $store = [$target_id => array_values($raw)];
+    update_option(SITEPULSE_OPTION_UPTIME_LOG, $store, false);
 
-    return $archive;
+    return $store;
+}
+
+/**
+ * Persists the uptime log store.
+ *
+ * @param array<string,array<int,array<string,mixed>>> $store Normalized log store.
+ * @return void
+ */
+function sitepulse_save_uptime_log_store($store) {
+    if (!is_array($store)) {
+        $store = [];
+    }
+
+    update_option(SITEPULSE_OPTION_UPTIME_LOG, $store, false);
+}
+
+/**
+ * Retrieves the normalized log entries for a specific target.
+ *
+ * @param string $target_id Target identifier.
+ * @return array<int,array<string,mixed>>
+ */
+function sitepulse_get_uptime_log_for_target($target_id) {
+    $target_id = sanitize_key((string) $target_id);
+
+    if ($target_id === '') {
+        return [];
+    }
+
+    $store = sitepulse_get_uptime_log_store();
+
+    if (!isset($store[$target_id])) {
+        return [];
+    }
+
+    return sitepulse_normalize_uptime_log($store[$target_id]);
+}
+
+/**
+ * Appends an uptime entry to the log store for the provided target.
+ *
+ * @param string $target_id Target identifier.
+ * @param array  $entry     Log entry.
+ * @return void
+ */
+function sitepulse_append_uptime_log_entry($target_id, $entry) {
+    $target_id = sanitize_key((string) $target_id);
+
+    if ($target_id === '' || !is_array($entry)) {
+        return;
+    }
+
+    $store = sitepulse_get_uptime_log_store();
+
+    if (!isset($store[$target_id]) || !is_array($store[$target_id])) {
+        $store[$target_id] = [];
+    }
+
+    $store[$target_id][] = $entry;
+
+    if (count($store[$target_id]) > 30) {
+        $store[$target_id] = array_slice($store[$target_id], -30);
+    }
+
+    sitepulse_save_uptime_log_store($store);
+}
+
+/**
+ * Retrieves the failure streak store for uptime targets.
+ *
+ * @return array<string,int>
+ */
+function sitepulse_get_uptime_failure_streaks() {
+    $raw = get_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, []);
+
+    if (is_array($raw)) {
+        $streaks = [];
+
+        foreach ($raw as $target_id => $value) {
+            $target_id = sanitize_key((string) $target_id);
+
+            if ($target_id === '') {
+                continue;
+            }
+
+            $streaks[$target_id] = max(0, (int) $value);
+        }
+
+        return $streaks;
+    }
+
+    $value = (int) $raw;
+
+    if ($value <= 0) {
+        return [];
+    }
+
+    $targets = function_exists('sitepulse_get_uptime_targets') ? sitepulse_get_uptime_targets() : [];
+    $target_id = !empty($targets) && isset($targets[0]['id']) ? $targets[0]['id'] : 'target_legacy';
+    $streaks = [$target_id => $value];
+    update_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, $streaks, false);
+
+    return $streaks;
+}
+
+/**
+ * Persists the map of failure streaks.
+ *
+ * @param array<string,int> $streaks Map of target IDs to failure streak counts.
+ * @return void
+ */
+function sitepulse_save_uptime_failure_streaks($streaks) {
+    if (!is_array($streaks)) {
+        $streaks = [];
+    }
+
+    update_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, $streaks, false);
+}
+
+/**
+ * Retrieves the current failure streak for a target.
+ *
+ * @param string $target_id Target identifier.
+ * @return int
+ */
+function sitepulse_get_uptime_failure_streak($target_id) {
+    $target_id = sanitize_key((string) $target_id);
+
+    if ($target_id === '') {
+        return 0;
+    }
+
+    $streaks = sitepulse_get_uptime_failure_streaks();
+
+    return isset($streaks[$target_id]) ? (int) $streaks[$target_id] : 0;
+}
+
+/**
+ * Increments and returns the failure streak count for a target.
+ *
+ * @param string $target_id Target identifier.
+ * @return int Updated streak value.
+ */
+function sitepulse_increment_uptime_failure_streak($target_id) {
+    $target_id = sanitize_key((string) $target_id);
+
+    if ($target_id === '') {
+        return 0;
+    }
+
+    $streaks = sitepulse_get_uptime_failure_streaks();
+    $streaks[$target_id] = isset($streaks[$target_id]) ? (int) $streaks[$target_id] + 1 : 1;
+    sitepulse_save_uptime_failure_streaks($streaks);
+
+    return (int) $streaks[$target_id];
+}
+
+/**
+ * Resets the failure streak counter for a target.
+ *
+ * @param string $target_id Target identifier.
+ * @return void
+ */
+function sitepulse_reset_uptime_failure_streak($target_id) {
+    $target_id = sanitize_key((string) $target_id);
+
+    if ($target_id === '') {
+        return;
+    }
+
+    $streaks = sitepulse_get_uptime_failure_streaks();
+
+    if (isset($streaks[$target_id])) {
+        unset($streaks[$target_id]);
+        sitepulse_save_uptime_failure_streaks($streaks);
+    }
+}
+
+/**
+ * Retrieves the persisted uptime archive ordered by day for all targets.
+ *
+ * @return array<string,array<string,array<string,int>>>
+ */
+function sitepulse_get_uptime_archive() {
+    $raw = get_option(SITEPULSE_OPTION_UPTIME_ARCHIVE, []);
+
+    if (!is_array($raw)) {
+        return [];
+    }
+
+    $is_multi_target = false;
+
+    foreach ($raw as $key => $value) {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $key)) {
+            $is_multi_target = true;
+            break;
+        }
+    }
+
+    if ($is_multi_target) {
+        $archive = [];
+
+        foreach ($raw as $target_id => $days) {
+            if (!is_array($days)) {
+                continue;
+            }
+
+            ksort($days);
+            $archive[$target_id] = $days;
+        }
+
+        return $archive;
+    }
+
+    $targets = function_exists('sitepulse_get_uptime_targets') ? sitepulse_get_uptime_targets() : [];
+    $target_id = !empty($targets) && isset($targets[0]['id']) ? $targets[0]['id'] : 'target_legacy';
+    $converted = [$target_id => []];
+
+    foreach ($raw as $day_key => $payload) {
+        if (is_array($payload)) {
+            $converted[$target_id][$day_key] = $payload;
+        }
+    }
+
+    ksort($converted[$target_id]);
+    update_option(SITEPULSE_OPTION_UPTIME_ARCHIVE, $converted, false);
+
+    return $converted;
+}
+
+/**
+ * Retrieves the daily archive for a specific target.
+ *
+ * @param string $target_id Target identifier.
+ * @return array<string,array<string,int>>
+ */
+function sitepulse_get_uptime_archive_for_target($target_id) {
+    $target_id = sanitize_key((string) $target_id);
+
+    if ($target_id === '') {
+        return [];
+    }
+
+    $archive = sitepulse_get_uptime_archive();
+
+    if (!isset($archive[$target_id]) || !is_array($archive[$target_id])) {
+        return [];
+    }
+
+    ksort($archive[$target_id]);
+
+    return $archive[$target_id];
 }
 
 /**
  * Stores the provided log entry inside the daily uptime archive.
  *
- * @param array $entry Normalized uptime entry.
+ * @param string $target_id Target identifier.
+ * @param array  $entry     Normalized uptime entry.
  * @return void
  */
-function sitepulse_update_uptime_archive($entry) {
-    if (!is_array($entry) || empty($entry)) {
+function sitepulse_update_uptime_archive($target_id, $entry = null) {
+    if (is_array($target_id) && null === $entry) {
+        $entry = $target_id;
+        $targets = function_exists('sitepulse_get_uptime_targets') ? sitepulse_get_uptime_targets() : [];
+        $target_id = !empty($targets) && isset($targets[0]['id']) ? $targets[0]['id'] : 'target_legacy';
+    }
+
+    $target_id = sanitize_key((string) $target_id);
+
+    if ($target_id === '' || !is_array($entry) || empty($entry)) {
         return;
     }
 
@@ -301,8 +664,12 @@ function sitepulse_update_uptime_archive($entry) {
 
     $archive = sitepulse_get_uptime_archive();
 
-    if (!isset($archive[$day_key]) || !is_array($archive[$day_key])) {
-        $archive[$day_key] = [
+    if (!isset($archive[$target_id]) || !is_array($archive[$target_id])) {
+        $archive[$target_id] = [];
+    }
+
+    if (!isset($archive[$target_id][$day_key]) || !is_array($archive[$target_id][$day_key])) {
+        $archive[$target_id][$day_key] = [
             'date'            => $day_key,
             'up'              => 0,
             'down'            => 0,
@@ -313,22 +680,22 @@ function sitepulse_update_uptime_archive($entry) {
         ];
     }
 
-    if (!isset($archive[$day_key][$status_key])) {
-        $archive[$day_key][$status_key] = 0;
+    if (!isset($archive[$target_id][$day_key][$status_key])) {
+        $archive[$target_id][$day_key][$status_key] = 0;
     }
 
-    $archive[$day_key][$status_key]++;
-    $archive[$day_key]['total']++;
+    $archive[$target_id][$day_key][$status_key]++;
+    $archive[$target_id][$day_key]['total']++;
 
-    $archive[$day_key]['first_timestamp'] = isset($archive[$day_key]['first_timestamp'])
-        ? min((int) $archive[$day_key]['first_timestamp'], $timestamp)
+    $archive[$target_id][$day_key]['first_timestamp'] = isset($archive[$target_id][$day_key]['first_timestamp'])
+        ? min((int) $archive[$target_id][$day_key]['first_timestamp'], $timestamp)
         : $timestamp;
-    $archive[$day_key]['last_timestamp'] = isset($archive[$day_key]['last_timestamp'])
-        ? max((int) $archive[$day_key]['last_timestamp'], $timestamp)
+    $archive[$target_id][$day_key]['last_timestamp'] = isset($archive[$target_id][$day_key]['last_timestamp'])
+        ? max((int) $archive[$target_id][$day_key]['last_timestamp'], $timestamp)
         : $timestamp;
 
-    if (count($archive) > 120) {
-        $archive = array_slice($archive, -120, null, true);
+    if (count($archive[$target_id]) > 120) {
+        $archive[$target_id] = array_slice($archive[$target_id], -120, null, true);
     }
 
     update_option(SITEPULSE_OPTION_UPTIME_ARCHIVE, $archive, false);
@@ -383,67 +750,157 @@ function sitepulse_uptime_tracker_page() {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
-    $uptime_log = sitepulse_normalize_uptime_log(get_option(SITEPULSE_OPTION_UPTIME_LOG, []));
-    $uptime_archive = sitepulse_get_uptime_archive();
-    $total_checks = count($uptime_log);
-    $boolean_checks = array_values(array_filter($uptime_log, function ($entry) {
-        return isset($entry['status']) && is_bool($entry['status']);
-    }));
-    $evaluated_checks = count($boolean_checks);
-    $up_checks = count(array_filter($boolean_checks, function ($entry) {
-        return isset($entry['status']) && true === $entry['status'];
-    }));
-    $uptime_percentage = $evaluated_checks > 0 ? ($up_checks / $evaluated_checks) * 100 : 100;
+    $targets = function_exists('sitepulse_get_uptime_targets') ? sitepulse_get_uptime_targets() : [];
+    $frequency_choices = sitepulse_get_uptime_frequency_choices();
     $date_format = get_option('date_format');
     $time_format = get_option('time_format');
-    $current_incident_duration = '';
-    $current_incident_start = null;
+    $now = (int) current_time('timestamp');
 
-    if (!empty($uptime_log)) {
-        $last_entry = end($uptime_log);
-        if (isset($last_entry['status']) && is_bool($last_entry['status']) && false === $last_entry['status']) {
-            $current_incident_start = isset($last_entry['incident_start']) ? (int) $last_entry['incident_start'] : (int) $last_entry['timestamp'];
-            $current_timestamp = (int) current_time('timestamp');
-            $current_incident_duration = human_time_diff($current_incident_start, $current_timestamp);
-        }
-        reset($uptime_log);
+    $default_uptime_warning = defined('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT') ? (float) SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT : 99.0;
+
+    if (function_exists('sitepulse_get_uptime_warning_percentage')) {
+        $uptime_warning_threshold = (float) sitepulse_get_uptime_warning_percentage();
+    } else {
+        $uptime_warning_option = get_option(SITEPULSE_OPTION_UPTIME_WARNING_PERCENT, $default_uptime_warning);
+        $uptime_warning_threshold = is_scalar($uptime_warning_option) ? (float) $uptime_warning_option : $default_uptime_warning;
     }
-    $trend_entries = array_slice($uptime_archive, -30, null, true);
-    $trend_data = [];
 
-    foreach ($trend_entries as $day_key => $daily_entry) {
-        $total = isset($daily_entry['total']) ? max(0, (int) $daily_entry['total']) : 0;
-        $up = isset($daily_entry['up']) ? (int) $daily_entry['up'] : 0;
-        $uptime_value = $total > 0 ? ($up / $total) * 100 : 100;
-        $uptime_value = max(0, min(100, $uptime_value));
-        $bar_height = (int) max(4, round($uptime_value));
-        $trend_timestamp = isset($daily_entry['last_timestamp']) ? (int) $daily_entry['last_timestamp'] : strtotime($day_key . ' 23:59:59');
-        $formatted_day = wp_date($date_format, $trend_timestamp);
-        $formatted_value = number_format_i18n($uptime_value, 2);
-        $total_label = number_format_i18n($total);
-        $bar_class = 'uptime-trend__bar--high';
+    if ($uptime_warning_threshold < 0) {
+        $uptime_warning_threshold = 0.0;
+    } elseif ($uptime_warning_threshold > 100) {
+        $uptime_warning_threshold = 100.0;
+    }
 
-        if ($uptime_value < 95) {
-            $bar_class = 'uptime-trend__bar--low';
-        } elseif ($uptime_value < 99) {
-            $bar_class = 'uptime-trend__bar--medium';
+    $status_labels = [
+        'status-ok'      => __('Opérationnel', 'sitepulse'),
+        'status-warn'    => __('Dégradé', 'sitepulse'),
+        'status-bad'     => __('Incident', 'sitepulse'),
+        'status-unknown' => __('Inconnu', 'sitepulse'),
+    ];
+
+    $target_reports = [];
+
+    foreach ($targets as $target) {
+        if (!is_array($target)) {
+            continue;
         }
 
-        $trend_data[] = [
-            'height' => $bar_height,
-            'class'  => $bar_class,
-            'label'  => sprintf(
-                /* translators: 1: formatted date, 2: uptime percentage, 3: number of checks. */
-                __('Disponibilité du %1$s : %2$s%% (%3$s contrôles)', 'sitepulse'),
-                $formatted_day,
-                $formatted_value,
-                $total_label
-            ),
+        $target_id = isset($target['id']) ? sanitize_key((string) $target['id']) : '';
+
+        if ($target_id === '') {
+            $target_id = sanitize_key(sitepulse_generate_uptime_target_id(microtime(true)));
+        }
+
+        $target_url = isset($target['url']) ? (string) $target['url'] : '';
+        $display_url = $target_url !== '' ? esc_url($target_url) : esc_url(home_url('/'));
+        $target_label = isset($target['label']) && is_string($target['label']) && $target['label'] !== '' ? $target['label'] : $display_url;
+        $alerts_enabled = !empty($target['alerts']);
+        $frequency_key = isset($target['frequency']) ? $target['frequency'] : '';
+        $frequency_key = function_exists('sitepulse_sanitize_uptime_frequency') ? sitepulse_sanitize_uptime_frequency($frequency_key) : $frequency_key;
+        $frequency_label = isset($frequency_choices[$frequency_key]['label']) ? $frequency_choices[$frequency_key]['label'] : $frequency_key;
+
+        $log = sitepulse_get_uptime_log_for_target($target_id);
+        $recent_log = array_slice($log, -30);
+        $total_checks = count($log);
+        $recent_total = count($recent_log);
+        $boolean_checks = array_values(array_filter($log, function ($entry) {
+            return isset($entry['status']) && is_bool($entry['status']);
+        }));
+        $evaluated_checks = count($boolean_checks);
+        $up_checks = count(array_filter($boolean_checks, function ($entry) {
+            return isset($entry['status']) && true === $entry['status'];
+        }));
+        $uptime_percentage = $evaluated_checks > 0 ? ($up_checks / max(1, $evaluated_checks)) * 100 : 100;
+
+        $status = 'status-ok';
+        $current_incident_start = null;
+        $current_incident_duration = '';
+        $last_check_time = null;
+        $last_status = null;
+
+        if (!empty($log)) {
+            $last_entry = end($log);
+            $last_status = $last_entry['status'] ?? null;
+            $last_check_time = isset($last_entry['timestamp']) ? (int) $last_entry['timestamp'] : null;
+
+            if (isset($last_entry['status']) && is_bool($last_entry['status']) && false === $last_entry['status']) {
+                $current_incident_start = isset($last_entry['incident_start']) ? (int) $last_entry['incident_start'] : (isset($last_entry['timestamp']) ? (int) $last_entry['timestamp'] : $now);
+                $current_incident_duration = human_time_diff($current_incident_start, $now);
+            }
+
+            reset($log);
+        }
+
+        if ($last_status === false) {
+            $status = 'status-bad';
+        } elseif ($uptime_percentage < $uptime_warning_threshold) {
+            $status = 'status-bad';
+        } elseif ($uptime_percentage < 100) {
+            $status = 'status-warn';
+        } elseif ($total_checks === 0) {
+            $status = 'status-unknown';
+        }
+
+        $archive = sitepulse_get_uptime_archive_for_target($target_id);
+        $trend_entries = array_slice($archive, -30, null, true);
+        $trend_data = [];
+
+        foreach ($trend_entries as $day_key => $daily_entry) {
+            $total = isset($daily_entry['total']) ? max(0, (int) $daily_entry['total']) : 0;
+            $up = isset($daily_entry['up']) ? (int) $daily_entry['up'] : 0;
+            $uptime_value = $total > 0 ? ($up / $total) * 100 : 100;
+            $uptime_value = max(0, min(100, $uptime_value));
+            $bar_height = (int) max(4, round($uptime_value));
+            $trend_timestamp = isset($daily_entry['last_timestamp']) ? (int) $daily_entry['last_timestamp'] : strtotime($day_key . ' 23:59:59');
+            $formatted_day = wp_date($date_format, $trend_timestamp);
+            $formatted_value = number_format_i18n($uptime_value, 2);
+            $total_label = number_format_i18n($total);
+            $bar_class = 'uptime-trend__bar--high';
+
+            if ($uptime_value < 95) {
+                $bar_class = 'uptime-trend__bar--low';
+            } elseif ($uptime_value < 99) {
+                $bar_class = 'uptime-trend__bar--medium';
+            }
+
+            $trend_data[] = [
+                'height' => $bar_height,
+                'class'  => $bar_class,
+                'label'  => sprintf(
+                    /* translators: 1: formatted date, 2: uptime percentage, 3: number of checks. */
+                    __('Disponibilité du %1$s : %2$s%% (%3$s contrôles)', 'sitepulse'),
+                    $formatted_day,
+                    $formatted_value,
+                    $total_label
+                ),
+            ];
+        }
+
+        $seven_day_metrics = sitepulse_calculate_uptime_window_metrics($archive, 7);
+        $thirty_day_metrics = sitepulse_calculate_uptime_window_metrics($archive, 30);
+
+        $target_reports[] = [
+            'id'                        => $target_id,
+            'target'                    => $target,
+            'display_url'               => $display_url,
+            'display_name'              => $target_label,
+            'frequency_label'           => $frequency_label,
+            'alerts_enabled'            => $alerts_enabled,
+            'log'                       => $recent_log,
+            'total_checks'              => $total_checks,
+            'recent_total'              => $recent_total,
+            'uptime_percentage'         => $uptime_percentage,
+            'status'                    => $status,
+            'status_label'              => isset($status_labels[$status]) ? $status_labels[$status] : $status,
+            'current_incident_start'    => $current_incident_start,
+            'current_incident_duration' => $current_incident_duration,
+            'trend_data'                => $trend_data,
+            'seven_day_metrics'         => $seven_day_metrics,
+            'thirty_day_metrics'        => $thirty_day_metrics,
+            'last_check_time'           => $last_check_time,
+            'last_status'               => $last_status,
         ];
     }
-
-    $seven_day_metrics = sitepulse_calculate_uptime_window_metrics($uptime_archive, 7);
-    $thirty_day_metrics = sitepulse_calculate_uptime_window_metrics($uptime_archive, 30);
 
     ?>
     <?php
@@ -453,208 +910,314 @@ function sitepulse_uptime_tracker_page() {
     ?>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-chart-bar"></span> Suivi de Disponibilité</h1>
-        <p>Cet outil vérifie la disponibilité de votre site toutes les heures. Voici le statut des <?php echo esc_html($total_checks); ?> dernières vérifications.</p>
-        <h2>Disponibilité (<?php echo esc_html($total_checks); ?> dernières heures): <strong style="font-size: 1.4em;"><?php echo esc_html(round($uptime_percentage, 2)); ?>%</strong></h2>
-        <div class="uptime-summary-grid">
-            <div class="uptime-summary-card">
-                <h3><?php esc_html_e('Disponibilité 7 derniers jours', 'sitepulse'); ?></h3>
-                <p class="uptime-summary-card__value"><?php echo esc_html(number_format_i18n($seven_day_metrics['uptime'], 2)); ?>%</p>
-                <p class="uptime-summary-card__meta"><?php
-                    printf(
-                        /* translators: 1: total checks, 2: incidents */
-                        esc_html__('Sur %1$s contrôles (%2$s incidents)', 'sitepulse'),
-                        esc_html(number_format_i18n($seven_day_metrics['total_checks'])),
-                        esc_html(number_format_i18n($seven_day_metrics['down_checks']))
-                    );
-                ?></p>
-            </div>
-            <div class="uptime-summary-card">
-                <h3><?php esc_html_e('Disponibilité 30 derniers jours', 'sitepulse'); ?></h3>
-                <p class="uptime-summary-card__value"><?php echo esc_html(number_format_i18n($thirty_day_metrics['uptime'], 2)); ?>%</p>
-                <p class="uptime-summary-card__meta"><?php
-                    printf(
-                        /* translators: 1: total checks, 2: incidents */
-                        esc_html__('Sur %1$s contrôles (%2$s incidents)', 'sitepulse'),
-                        esc_html(number_format_i18n($thirty_day_metrics['total_checks'])),
-                        esc_html(number_format_i18n($thirty_day_metrics['down_checks']))
-                    );
-                ?></p>
-            </div>
-        </div>
-        <div class="uptime-chart">
-            <?php if (empty($uptime_log)): ?><p>Aucune donnée de disponibilité. La première vérification aura lieu dans l'heure.</p><?php else: ?>
-                <?php foreach ($uptime_log as $index => $entry): ?>
-                    <?php
-                    $status = $entry['status'] ?? null;
-                    $bar_class = 'unknown';
-                    if (true === $status) {
-                        $bar_class = 'up';
-                    } elseif (false === $status) {
-                        $bar_class = 'down';
-                    }
-                    $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
-                    $check_time = $timestamp > 0
-                        ? date_i18n($date_format . ' ' . $time_format, $timestamp)
-                        : __('Horodatage inconnu', 'sitepulse');
-                    $previous_entry = $index > 0 ? $uptime_log[$index - 1] : null;
-                    $next_entry = ($index + 1) < $total_checks ? $uptime_log[$index + 1] : null;
+        <?php if (empty($target_reports)) : ?>
+            <p><?php esc_html_e('Aucune cible n’est configurée pour le suivi de disponibilité. Ajoutez des URL depuis les réglages de SitePulse.', 'sitepulse'); ?></p>
+        <?php else : ?>
+            <p><?php esc_html_e('Cet outil vérifie la disponibilité de chaque cible selon la fréquence choisie. Consultez ci-dessous le statut de vos endpoints.', 'sitepulse'); ?></p>
+            <ul class="sitepulse-uptime-status-list">
+                <?php foreach ($target_reports as $report) : ?>
+                    <li>
+                        <span class="status-badge <?php echo esc_attr($report['status']); ?>">
+                            <span class="status-text"><?php echo esc_html($report['status_label']); ?></span>
+                        </span>
+                        <strong><?php echo esc_html($report['display_name']); ?></strong>
+                        <span class="sitepulse-uptime-status-meta">
+                            <?php echo esc_html(sprintf(__('Fréquence : %s', 'sitepulse'), $report['frequency_label'])); ?> ·
+                            <?php echo esc_html($report['alerts_enabled'] ? __('Alertes activées', 'sitepulse') : __('Alertes désactivées', 'sitepulse')); ?>
+                        </span>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
 
-                    $status_label = '';
-                    $duration_label = '';
-
-                    if (true === $status) {
-                        $bar_title = sprintf(__('Site OK lors du contrôle du %s.', 'sitepulse'), $check_time);
-                        $status_label = __('Statut : site disponible.', 'sitepulse');
-
-                        if (!empty($previous_entry) && isset($previous_entry['status']) && is_bool($previous_entry['status']) && false === $previous_entry['status']) {
-                            $incident_start = isset($previous_entry['incident_start']) ? (int) $previous_entry['incident_start'] : (isset($previous_entry['timestamp']) ? (int) $previous_entry['timestamp'] : 0);
-                            if ($incident_start > 0 && $timestamp >= $incident_start) {
-                                $incident_start_formatted = date_i18n($date_format . ' ' . $time_format, $incident_start);
-                                $bar_title .= ' ' . sprintf(__('Retour à la normale après un incident débuté le %1$s (durée : %2$s).', 'sitepulse'), $incident_start_formatted, human_time_diff($incident_start, $timestamp));
-                                $duration_label = sprintf(__('Durée de l’incident résolu : %s.', 'sitepulse'), human_time_diff($incident_start, $timestamp));
-                            }
-                        }
-
-                        if ('' === $duration_label) {
-                            $duration_label = __('Durée : disponibilité confirmée lors de ce contrôle.', 'sitepulse');
-                        }
-                    } elseif (false === $status) {
-                        $incident_start = isset($entry['incident_start']) ? (int) $entry['incident_start'] : $timestamp;
-                        $incident_start_formatted = $incident_start > 0
-                            ? date_i18n($date_format . ' ' . $time_format, $incident_start)
-                            : __('horodatage inconnu', 'sitepulse');
-                        $bar_title = sprintf(__('Site KO lors du contrôle du %1$s. Incident commencé le %2$s.', 'sitepulse'), $check_time, $incident_start_formatted);
-                        $status_label = __('Statut : site indisponible.', 'sitepulse');
-
-                        if (array_key_exists('error', $entry)) {
-                            $error_detail = is_scalar($entry['error']) ? (string) $entry['error'] : wp_json_encode($entry['error']);
-
-                            if ('' !== $error_detail && false !== $error_detail) {
-                                $bar_title .= ' ' . sprintf(__('Détails : %s.', 'sitepulse'), $error_detail);
-                            }
-                        }
-
-                        $is_transition = empty($previous_entry) || (isset($previous_entry['status']) && true === $previous_entry['status']);
-
-                        if ($index === $total_checks - 1 && !empty($current_incident_duration)) {
-                            $bar_title .= ' ' . sprintf(__('Incident en cours depuis %s.', 'sitepulse'), $current_incident_duration);
-                            $duration_label = sprintf(__('Durée de l’incident en cours : %s.', 'sitepulse'), $current_incident_duration);
-                        } else {
-                            $duration_reference = null;
-
-                            if (!empty($next_entry) && isset($next_entry['status']) && true === $next_entry['status']) {
-                                $duration_reference = isset($next_entry['timestamp']) ? (int) $next_entry['timestamp'] : null;
-                            } elseif ($timestamp > 0) {
-                                $duration_reference = $timestamp;
-                            }
-
-                            if ($duration_reference && $incident_start && $duration_reference >= $incident_start) {
-                                $duration_text = human_time_diff($incident_start, $duration_reference);
-                                $label = $is_transition ? __('Durée estimée : %s.', 'sitepulse') : __('Durée cumulée : %s.', 'sitepulse');
-                                $bar_title .= ' ' . sprintf($label, $duration_text);
-                                $duration_label = sprintf(__('Durée de l’incident : %s.', 'sitepulse'), $duration_text);
-                            }
-                        }
-
-                        if ('' === $duration_label) {
-                            $duration_label = __('Durée : incident en cours, durée non déterminée.', 'sitepulse');
-                        }
-                    } else {
-                        $error_text = isset($entry['error']) ? $entry['error'] : __('Erreur réseau inconnue.', 'sitepulse');
-                        $bar_title = sprintf(__('Statut indéterminé lors du contrôle du %1$s : %2$s', 'sitepulse'), $check_time, $error_text);
-                        $status_label = __('Statut : indéterminé.', 'sitepulse');
-                        $duration_label = __('Durée : impossible à déterminer pour ce contrôle.', 'sitepulse');
-                    }
-                    $screen_reader_text = implode(' ', array_filter([
-                        sprintf(__('Contrôle du %s.', 'sitepulse'), $check_time),
-                        $status_label,
-                        $duration_label,
-                    ]));
-                    ?>
-                    <div class="uptime-bar <?php echo esc_attr($bar_class); ?>" title="<?php echo esc_attr($bar_title); ?>">
-                        <span class="screen-reader-text"><?php echo esc_html($screen_reader_text); ?></span>
+            <?php foreach ($target_reports as $report) :
+                $log = $report['log'];
+                $recent_total = $report['recent_total'];
+                $total_checks = $report['total_checks'];
+                ?>
+                <section class="sitepulse-uptime-target-report" id="sitepulse-uptime-<?php echo esc_attr($report['id']); ?>">
+                    <h2>
+                        <span class="status-badge <?php echo esc_attr($report['status']); ?>">
+                            <span class="status-text"><?php echo esc_html($report['status_label']); ?></span>
+                        </span>
+                        <?php echo esc_html($report['display_name']); ?>
+                    </h2>
+                    <p class="sitepulse-uptime-target-meta">
+                        <strong><?php esc_html_e('URL', 'sitepulse'); ?>:</strong> <a href="<?php echo esc_url($report['display_url']); ?>" target="_blank" rel="noopener"><?php echo esc_html($report['display_url']); ?></a><br>
+                        <strong><?php esc_html_e('Fréquence', 'sitepulse'); ?>:</strong> <?php echo esc_html($report['frequency_label']); ?><br>
+                        <strong><?php esc_html_e('Alertes e-mail', 'sitepulse'); ?>:</strong> <?php echo esc_html($report['alerts_enabled'] ? __('activées', 'sitepulse') : __('désactivées', 'sitepulse')); ?>
+                    </p>
+                    <div class="uptime-summary-grid">
+                        <div class="uptime-summary-card">
+                            <h3><?php esc_html_e('Disponibilité 7 derniers jours', 'sitepulse'); ?></h3>
+                            <p class="uptime-summary-card__value"><?php echo esc_html(number_format_i18n($report['seven_day_metrics']['uptime'], 2)); ?>%</p>
+                            <p class="uptime-summary-card__meta"><?php
+                                printf(
+                                    /* translators: 1: total checks, 2: incidents */
+                                    esc_html__('Sur %1$s contrôles (%2$s incidents)', 'sitepulse'),
+                                    esc_html(number_format_i18n($report['seven_day_metrics']['total_checks'])),
+                                    esc_html(number_format_i18n($report['seven_day_metrics']['down_checks']))
+                                );
+                            ?></p>
+                        </div>
+                        <div class="uptime-summary-card">
+                            <h3><?php esc_html_e('Disponibilité 30 derniers jours', 'sitepulse'); ?></h3>
+                            <p class="uptime-summary-card__value"><?php echo esc_html(number_format_i18n($report['thirty_day_metrics']['uptime'], 2)); ?>%</p>
+                            <p class="uptime-summary-card__meta"><?php
+                                printf(
+                                    /* translators: 1: total checks, 2: incidents */
+                                    esc_html__('Sur %1$s contrôles (%2$s incidents)', 'sitepulse'),
+                                    esc_html(number_format_i18n($report['thirty_day_metrics']['total_checks'])),
+                                    esc_html(number_format_i18n($report['thirty_day_metrics']['down_checks']))
+                                );
+                            ?></p>
+                        </div>
                     </div>
-                <?php endforeach; ?>
-            <?php endif; ?>
-        </div>
-        <div class="uptime-timeline__labels"><span><?php echo sprintf(esc_html__('Il y a %d heures', 'sitepulse'), absint($total_checks)); ?></span><span><?php esc_html_e('Maintenant', 'sitepulse'); ?></span></div>
-        <?php if (!empty($current_incident_duration) && null !== $current_incident_start): ?>
-            <div class="notice notice-error uptime-notice--error">
-                <p>
-                    <strong><?php esc_html_e('Incident en cours', 'sitepulse'); ?> :</strong>
-                    <?php
-                    $current_incident_start_formatted = date_i18n($date_format . ' ' . $time_format, $current_incident_start);
-                    echo esc_html(
-                        sprintf(
-                            __('Votre site est signalé comme indisponible depuis le %1$s (%2$s).', 'sitepulse'),
-                            $current_incident_start_formatted,
-                            $current_incident_duration
-                        )
-                    );
-                    ?>
-                </p>
-            </div>
+                    <div class="uptime-chart">
+                        <?php if (empty($log)) : ?>
+                            <p><?php esc_html_e('Aucune donnée de disponibilité pour cette cible. La première vérification sera effectuée prochainement.', 'sitepulse'); ?></p>
+                        <?php else : ?>
+                            <?php foreach ($log as $index => $entry) :
+                                $status = $entry['status'] ?? null;
+                                $bar_class = 'unknown';
+
+                                if (true === $status) {
+                                    $bar_class = 'up';
+                                } elseif (false === $status) {
+                                    $bar_class = 'down';
+                                }
+
+                                $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+                                $check_time = $timestamp > 0 ? date_i18n($date_format . ' ' . $time_format, $timestamp) : __('Horodatage inconnu', 'sitepulse');
+                                $previous_entry = $index > 0 ? $log[$index - 1] : null;
+                                $next_entry = ($index + 1) < $recent_total ? $log[$index + 1] : null;
+
+                                $status_label = '';
+                                $duration_label = '';
+                                $bar_title = '';
+
+                                if (true === $status) {
+                                    $bar_title = sprintf(__('Cible disponible lors du contrôle du %s.', 'sitepulse'), $check_time);
+                                    $status_label = __('Statut : disponible.', 'sitepulse');
+
+                                    if (!empty($previous_entry) && isset($previous_entry['status']) && is_bool($previous_entry['status']) && false === $previous_entry['status']) {
+                                        $incident_start = isset($previous_entry['incident_start']) ? (int) $previous_entry['incident_start'] : (isset($previous_entry['timestamp']) ? (int) $previous_entry['timestamp'] : 0);
+
+                                        if ($incident_start > 0 && $timestamp >= $incident_start) {
+                                            $incident_start_formatted = date_i18n($date_format . ' ' . $time_format, $incident_start);
+                                            $incident_duration = human_time_diff($incident_start, $timestamp);
+                                            $bar_title .= ' ' . sprintf(__('Retour à la normale après un incident débuté le %1$s (durée : %2$s).', 'sitepulse'), $incident_start_formatted, $incident_duration);
+                                            $duration_label = sprintf(__('Durée de l’incident résolu : %s.', 'sitepulse'), $incident_duration);
+                                        }
+                                    }
+
+                                    if ('' === $duration_label) {
+                                        $duration_label = __('Durée : disponibilité confirmée lors de ce contrôle.', 'sitepulse');
+                                    }
+                                } elseif (false === $status) {
+                                    $incident_start = isset($entry['incident_start']) ? (int) $entry['incident_start'] : $timestamp;
+                                    $incident_start_formatted = $incident_start > 0 ? date_i18n($date_format . ' ' . $time_format, $incident_start) : __('horodatage inconnu', 'sitepulse');
+                                    $bar_title = sprintf(__('Cible indisponible lors du contrôle du %1$s. Incident commencé le %2$s.', 'sitepulse'), $check_time, $incident_start_formatted);
+                                    $status_label = __('Statut : indisponible.', 'sitepulse');
+
+                                    if (array_key_exists('error', $entry)) {
+                                        $error_detail = is_scalar($entry['error']) ? (string) $entry['error'] : wp_json_encode($entry['error']);
+
+                                        if (!empty($error_detail)) {
+                                            $bar_title .= ' ' . sprintf(__('Détails : %s.', 'sitepulse'), $error_detail);
+                                        }
+                                    }
+
+                                    $is_transition = empty($previous_entry) || (isset($previous_entry['status']) && true === $previous_entry['status']);
+
+                                    if ($index === $recent_total - 1 && !empty($report['current_incident_duration']) && null !== $report['current_incident_start']) {
+                                        $bar_title .= ' ' . sprintf(__('Incident en cours depuis %s.', 'sitepulse'), $report['current_incident_duration']);
+                                        $duration_label = sprintf(__('Durée de l’incident en cours : %s.', 'sitepulse'), $report['current_incident_duration']);
+                                    } else {
+                                        $duration_reference = null;
+
+                                        if (!empty($next_entry) && isset($next_entry['status']) && true === $next_entry['status']) {
+                                            $duration_reference = isset($next_entry['timestamp']) ? (int) $next_entry['timestamp'] : null;
+                                        } elseif ($timestamp > 0) {
+                                            $duration_reference = $timestamp;
+                                        }
+
+                                        if ($duration_reference && $incident_start && $duration_reference >= $incident_start) {
+                                            $duration_text = human_time_diff($incident_start, $duration_reference);
+                                            $label = $is_transition ? __('Durée estimée : %s.', 'sitepulse') : __('Durée cumulée : %s.', 'sitepulse');
+                                            $bar_title .= ' ' . sprintf($label, $duration_text);
+                                            $duration_label = sprintf(__('Durée de l’incident : %s.', 'sitepulse'), $duration_text);
+                                        }
+                                    }
+
+                                    if ('' === $duration_label) {
+                                        $duration_label = __('Durée : incident en cours, durée non déterminée.', 'sitepulse');
+                                    }
+                                } else {
+                                    $error_text = isset($entry['error']) ? $entry['error'] : __('Erreur réseau inconnue.', 'sitepulse');
+                                    $bar_title = sprintf(__('Statut indéterminé lors du contrôle du %1$s : %2$s', 'sitepulse'), $check_time, $error_text);
+                                    $status_label = __('Statut : indéterminé.', 'sitepulse');
+                                    $duration_label = __('Durée : impossible à déterminer pour ce contrôle.', 'sitepulse');
+                                }
+
+                                $screen_reader_text = implode(' ', array_filter([
+                                    sprintf(__('Contrôle du %s.', 'sitepulse'), $check_time),
+                                    $status_label,
+                                    $duration_label,
+                                ]));
+                                ?>
+                                <div class="uptime-bar <?php echo esc_attr($bar_class); ?>" title="<?php echo esc_attr($bar_title); ?>">
+                                    <span class="screen-reader-text"><?php echo esc_html($screen_reader_text); ?></span>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
+                    <div class="uptime-timeline__labels"><span><?php echo esc_html(sprintf(__('Il y a %d contrôles', 'sitepulse'), absint($recent_total))); ?></span><span><?php esc_html_e('Maintenant', 'sitepulse'); ?></span></div>
+
+                    <?php if (!empty($report['current_incident_duration']) && null !== $report['current_incident_start']) : ?>
+                        <div class="notice notice-error uptime-notice--error">
+                            <p>
+                                <strong><?php esc_html_e('Incident en cours', 'sitepulse'); ?> :</strong>
+                                <?php
+                                $incident_start_formatted = date_i18n($date_format . ' ' . $time_format, $report['current_incident_start']);
+                                echo esc_html(
+                                    sprintf(
+                                        __('Cette cible est indisponible depuis le %1$s (%2$s).', 'sitepulse'),
+                                        $incident_start_formatted,
+                                        $report['current_incident_duration']
+                                    )
+                                );
+                                ?>
+                            </p>
+                        </div>
+                    <?php endif; ?>
+
+                    <?php if (!empty($report['trend_data'])) : ?>
+                        <h3><?php esc_html_e('Tendance de disponibilité (30 jours)', 'sitepulse'); ?></h3>
+                        <div class="uptime-trend" role="img" aria-label="<?php echo esc_attr(sprintf(__('Disponibilité quotidienne sur %d jours.', 'sitepulse'), count($report['trend_data']))); ?>">
+                            <?php foreach ($report['trend_data'] as $bar) : ?>
+                                <span class="uptime-trend__bar <?php echo esc_attr($bar['class']); ?>" style="height: <?php echo esc_attr($bar['height']); ?>%;" title="<?php echo esc_attr($bar['label']); ?>"></span>
+                            <?php endforeach; ?>
+                        </div>
+                        <p class="uptime-trend__legend">
+                            <span class="uptime-trend__legend-item uptime-trend__legend-item--high"><?php esc_html_e('≥ 99% de disponibilité', 'sitepulse'); ?></span>
+                            <span class="uptime-trend__legend-item uptime-trend__legend-item--medium"><?php esc_html_e('95 – 98% de disponibilité', 'sitepulse'); ?></span>
+                            <span class="uptime-trend__legend-item uptime-trend__legend-item--low"><?php esc_html_e('< 95% de disponibilité', 'sitepulse'); ?></span>
+                        </p>
+                    <?php endif; ?>
+                </section>
+            <?php endforeach; ?>
         <?php endif; ?>
-        <?php if (!empty($trend_data)): ?>
-            <h2><?php esc_html_e('Tendance de disponibilité (30 jours)', 'sitepulse'); ?></h2>
-            <div class="uptime-trend" role="img" aria-label="<?php echo esc_attr(sprintf(__('Disponibilité quotidienne sur %d jours.', 'sitepulse'), count($trend_data))); ?>">
-                <?php foreach ($trend_data as $bar): ?>
-                    <span class="uptime-trend__bar <?php echo esc_attr($bar['class']); ?>" style="height: <?php echo esc_attr($bar['height']); ?>%;" title="<?php echo esc_attr($bar['label']); ?>"></span>
-                <?php endforeach; ?>
-            </div>
-            <p class="uptime-trend__legend">
-                <span class="uptime-trend__legend-item uptime-trend__legend-item--high"><?php esc_html_e('≥ 99% de disponibilité', 'sitepulse'); ?></span>
-                <span class="uptime-trend__legend-item uptime-trend__legend-item--medium"><?php esc_html_e('95 – 98% de disponibilité', 'sitepulse'); ?></span>
-                <span class="uptime-trend__legend-item uptime-trend__legend-item--low"><?php esc_html_e('< 95% de disponibilité', 'sitepulse'); ?></span>
-            </p>
-        <?php endif; ?>
-        <div class="notice notice-info uptime-notice--info"><p><strong><?php esc_html_e('Comment ça marche :', 'sitepulse'); ?></strong> <?php echo esc_html__('Une barre verte indique que votre site était en ligne. Une barre rouge indique un possible incident où votre site était inaccessible.', 'sitepulse'); ?></p></div>
+        <div class="notice notice-info uptime-notice--info"><p><strong><?php esc_html_e('Comment ça marche :', 'sitepulse'); ?></strong> <?php echo esc_html__('Une barre verte indique que la cible était en ligne. Une barre rouge indique un incident détecté.', 'sitepulse'); ?></p></div>
     </div>
     <?php
 }
-function sitepulse_run_uptime_check() {
+function sitepulse_prepare_uptime_request_config() {
     $default_timeout = defined('SITEPULSE_DEFAULT_UPTIME_TIMEOUT') ? (int) SITEPULSE_DEFAULT_UPTIME_TIMEOUT : 10;
     $timeout_option = get_option(SITEPULSE_OPTION_UPTIME_TIMEOUT, $default_timeout);
-    $timeout = $default_timeout;
-    $default_method = defined('SITEPULSE_DEFAULT_UPTIME_HTTP_METHOD') ? SITEPULSE_DEFAULT_UPTIME_HTTP_METHOD : 'GET';
-    $method_option = get_option(SITEPULSE_OPTION_UPTIME_HTTP_METHOD, $default_method);
-    $http_method = function_exists('sitepulse_sanitize_uptime_http_method')
-        ? sitepulse_sanitize_uptime_http_method($method_option)
-        : (is_string($method_option) && $method_option !== '' ? strtoupper($method_option) : $default_method);
-    $headers_option = get_option(SITEPULSE_OPTION_UPTIME_HTTP_HEADERS, []);
-    $custom_headers = function_exists('sitepulse_sanitize_uptime_http_headers')
-        ? sitepulse_sanitize_uptime_http_headers($headers_option)
-        : (is_array($headers_option) ? $headers_option : []);
-    $expected_codes_option = get_option(SITEPULSE_OPTION_UPTIME_EXPECTED_CODES, []);
-    $expected_codes = function_exists('sitepulse_sanitize_uptime_expected_codes')
-        ? sitepulse_sanitize_uptime_expected_codes($expected_codes_option)
-        : [];
-
-    if (is_numeric($timeout_option)) {
-        $timeout = (int) $timeout_option;
-    }
+    $timeout = (is_numeric($timeout_option) ? (int) $timeout_option : $default_timeout);
 
     if ($timeout < 1) {
         $timeout = $default_timeout;
     }
 
-    $configured_url = get_option(SITEPULSE_OPTION_UPTIME_URL, '');
-    $custom_url = '';
+    $default_method = defined('SITEPULSE_DEFAULT_UPTIME_HTTP_METHOD') ? SITEPULSE_DEFAULT_UPTIME_HTTP_METHOD : 'GET';
+    $method_option = get_option(SITEPULSE_OPTION_UPTIME_HTTP_METHOD, $default_method);
+    $http_method = function_exists('sitepulse_sanitize_uptime_http_method')
+        ? sitepulse_sanitize_uptime_http_method($method_option)
+        : (is_string($method_option) && $method_option !== '' ? strtoupper($method_option) : $default_method);
 
-    if (is_string($configured_url)) {
-        $configured_url = trim($configured_url);
+    $headers_option = get_option(SITEPULSE_OPTION_UPTIME_HTTP_HEADERS, []);
+    $custom_headers = function_exists('sitepulse_sanitize_uptime_http_headers')
+        ? sitepulse_sanitize_uptime_http_headers($headers_option)
+        : (is_array($headers_option) ? $headers_option : []);
 
-        if ($configured_url !== '') {
-            $validated_url = wp_http_validate_url($configured_url);
+    $expected_codes_option = get_option(SITEPULSE_OPTION_UPTIME_EXPECTED_CODES, []);
+    $expected_codes = function_exists('sitepulse_sanitize_uptime_expected_codes')
+        ? sitepulse_sanitize_uptime_expected_codes($expected_codes_option)
+        : [];
 
-            if ($validated_url) {
-                $custom_url = $validated_url;
-            }
-        }
+    return [
+        'timeout'        => $timeout,
+        'http_method'    => $http_method,
+        'custom_headers' => $custom_headers,
+        'expected_codes' => $expected_codes,
+    ];
+}
+
+function sitepulse_run_uptime_checks_for_frequency($frequency) {
+    $targets = function_exists('sitepulse_get_uptime_targets') ? sitepulse_get_uptime_targets() : [];
+
+    if (empty($targets)) {
+        return;
     }
 
-    $default_url = home_url();
-    $request_url_default = $custom_url !== '' ? $custom_url : $default_url;
+    $config = sitepulse_prepare_uptime_request_config();
+
+    foreach ($targets as $target) {
+        if (!is_array($target)) {
+            continue;
+        }
+
+        $target_frequency = isset($target['frequency']) ? $target['frequency'] : '';
+        $target_frequency = function_exists('sitepulse_sanitize_uptime_frequency')
+            ? sitepulse_sanitize_uptime_frequency($target_frequency)
+            : (is_string($target_frequency) && $target_frequency !== '' ? $target_frequency : (defined('SITEPULSE_DEFAULT_UPTIME_FREQUENCY') ? SITEPULSE_DEFAULT_UPTIME_FREQUENCY : 'hourly'));
+
+        if ($target_frequency !== $frequency) {
+            continue;
+        }
+
+        sitepulse_execute_uptime_check($target, $config);
+    }
+}
+
+function sitepulse_run_uptime_check($target = null) {
+    $config = sitepulse_prepare_uptime_request_config();
+
+    if (is_array($target) && !empty($target)) {
+        sitepulse_execute_uptime_check($target, $config);
+        return;
+    }
+
+    $targets = function_exists('sitepulse_get_uptime_targets') ? sitepulse_get_uptime_targets() : [];
+
+    foreach ($targets as $target_entry) {
+        if (!is_array($target_entry)) {
+            continue;
+        }
+
+        sitepulse_execute_uptime_check($target_entry, $config);
+    }
+}
+
+/**
+ * Executes the uptime check for a specific target.
+ *
+ * @param array $target Target configuration.
+ * @param array $config Shared request configuration.
+ * @return void
+ */
+function sitepulse_execute_uptime_check($target, $config) {
+    $target = is_array($target) ? $target : [];
+    $target_id = isset($target['id']) ? sanitize_key((string) $target['id']) : '';
+
+    if ($target_id === '') {
+        $seed = isset($target['url']) ? (string) $target['url'] : microtime(true);
+        $target_id = sanitize_key(sitepulse_generate_uptime_target_id($seed));
+    }
+
+    $alerts_enabled = !empty($target['alerts']);
+    $target_label = isset($target['label']) && is_string($target['label']) ? trim($target['label']) : '';
+
+    $default_url = home_url('/');
+    $target_url = isset($target['url']) ? trim((string) $target['url']) : '';
+    $validated_target_url = $target_url !== '' ? wp_http_validate_url($target_url) : false;
+    $request_url_default = $validated_target_url ? $validated_target_url : $default_url;
+
+    $timeout = isset($config['timeout']) ? max(1, (int) $config['timeout']) : 10;
+    $http_method = isset($config['http_method']) ? $config['http_method'] : 'GET';
+    $custom_headers = isset($config['custom_headers']) && is_array($config['custom_headers']) ? $config['custom_headers'] : [];
+    $expected_codes = isset($config['expected_codes']) ? (array) $config['expected_codes'] : [];
 
     $defaults = [
         'timeout'   => $timeout,
@@ -664,19 +1227,7 @@ function sitepulse_run_uptime_check() {
         'headers'   => $custom_headers,
     ];
 
-    /**
-     * Filtre les arguments passés à la requête de vérification d'uptime.
-     *
-     * Permet de désactiver la vérification SSL, d'ajuster le timeout ou de pointer
-     * vers une URL spécifique pour les environnements de test.
-     *
-     * @since 1.0
-     *
-     * @param array $request_args Arguments transmis à wp_remote_request(). Le paramètre
-     *                            "url" peut être fourni pour cibler une adresse
-     *                            différente.
-     */
-    $request_args = apply_filters('sitepulse_uptime_request_args', $defaults);
+    $request_args = apply_filters('sitepulse_uptime_request_args', $defaults, $target);
 
     if (!is_array($request_args)) {
         $request_args = $defaults;
@@ -699,20 +1250,21 @@ function sitepulse_run_uptime_check() {
     unset($request_args['url']);
 
     if (isset($request_args['expected_codes'])) {
-        $expected_codes_candidate = $request_args['expected_codes'];
+        $candidate_codes = $request_args['expected_codes'];
 
         if (function_exists('sitepulse_sanitize_uptime_expected_codes')) {
-            $expected_codes = sitepulse_sanitize_uptime_expected_codes($expected_codes_candidate);
+            $expected_codes = sitepulse_sanitize_uptime_expected_codes($candidate_codes);
+        } elseif (is_array($candidate_codes)) {
+            $expected_codes = array_map('intval', $candidate_codes);
         }
 
         unset($request_args['expected_codes']);
     }
 
     if (isset($request_args['method'])) {
-        $method_candidate = $request_args['method'];
         $request_args['method'] = function_exists('sitepulse_sanitize_uptime_http_method')
-            ? sitepulse_sanitize_uptime_http_method($method_candidate)
-            : (is_string($method_candidate) && $method_candidate !== '' ? strtoupper($method_candidate) : $http_method);
+            ? sitepulse_sanitize_uptime_http_method($request_args['method'])
+            : (is_string($request_args['method']) && $request_args['method'] !== '' ? strtoupper($request_args['method']) : $http_method);
     } else {
         $request_args['method'] = $http_method;
     }
@@ -730,19 +1282,17 @@ function sitepulse_run_uptime_check() {
     }
 
     $response = wp_remote_request($request_url, $request_args);
-
-    $raw_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
-
-    if (!is_array($raw_log)) {
-        $raw_log = empty($raw_log) ? [] : [$raw_log];
-    }
-
-    $log = sitepulse_normalize_uptime_log($raw_log);
-
     $timestamp = (int) current_time('timestamp');
+
     $entry = [
         'timestamp' => $timestamp,
+        'target_id' => $target_id,
+        'url'       => esc_url_raw($request_url),
     ];
+
+    if ($target_label !== '') {
+        $entry['label'] = $target_label;
+    }
 
     if (is_wp_error($response)) {
         $error_message = $response->get_error_message();
@@ -752,25 +1302,27 @@ function sitepulse_run_uptime_check() {
             $entry['error'] = $error_message;
         }
 
-        $failure_streak = (int) get_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0) + 1;
-        update_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, $failure_streak, false);
-
+        $failure_streak = sitepulse_increment_uptime_failure_streak($target_id);
         $default_threshold = 3;
-        $threshold = (int) apply_filters('sitepulse_uptime_consecutive_failures', $default_threshold, $failure_streak, $response, $request_url, $request_args);
+        $threshold = (int) apply_filters('sitepulse_uptime_consecutive_failures', $default_threshold, $failure_streak, $response, $request_url, $request_args, $target);
         $threshold = max(1, $threshold);
 
-        $log[] = $entry;
+        $log_level = $failure_streak >= $threshold ? 'ALERT' : 'WARNING';
 
-        $level = $failure_streak >= $threshold ? 'ALERT' : 'WARNING';
-        $log_message = sprintf('Uptime check: network error (%1$d/%2$d)%3$s', $failure_streak, $threshold, !empty($error_message) ? ' - ' . $error_message : '');
-        sitepulse_log($log_message, $level);
-
-        if (count($log) > 30) {
-            $log = array_slice($log, -30);
+        if (!$alerts_enabled && 'ALERT' === $log_level) {
+            $log_level = 'WARNING';
         }
 
-        update_option(SITEPULSE_OPTION_UPTIME_LOG, array_values($log), false);
-        sitepulse_update_uptime_archive($entry);
+        $log_message = sprintf('Uptime check [%1$s]: network error (%2$d/%3$d)%4$s',
+            $request_url,
+            $failure_streak,
+            $threshold,
+            !empty($error_message) ? ' - ' . $error_message : ''
+        );
+
+        sitepulse_append_uptime_log_entry($target_id, $entry);
+        sitepulse_update_uptime_archive($target_id, $entry);
+        sitepulse_log($log_message, $log_level);
 
         return;
     }
@@ -782,8 +1334,12 @@ function sitepulse_run_uptime_check() {
         $is_up = in_array((int) $response_code, $expected_codes, true);
     }
 
-    if ((int) get_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0) !== 0) {
-        update_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0, false);
+    $existing_log = sitepulse_get_uptime_log_for_target($target_id);
+
+    if ($is_up) {
+        sitepulse_reset_uptime_failure_streak($target_id);
+    } else {
+        sitepulse_increment_uptime_failure_streak($target_id);
     }
 
     $entry['status'] = $is_up;
@@ -791,17 +1347,17 @@ function sitepulse_run_uptime_check() {
     if (!$is_up) {
         $incident_start = $timestamp;
 
-        if (!empty($log)) {
-            for ($i = count($log) - 1; $i >= 0; $i--) {
-                if (!isset($log[$i]['status']) || !is_bool($log[$i]['status'])) {
+        if (!empty($existing_log)) {
+            for ($i = count($existing_log) - 1; $i >= 0; $i--) {
+                if (!isset($existing_log[$i]['status']) || !is_bool($existing_log[$i]['status'])) {
                     continue;
                 }
 
-                if (false === $log[$i]['status']) {
-                    if (isset($log[$i]['incident_start'])) {
-                        $incident_start = (int) $log[$i]['incident_start'];
-                    } elseif (isset($log[$i]['timestamp'])) {
-                        $incident_start = (int) $log[$i]['timestamp'];
+                if (false === $existing_log[$i]['status']) {
+                    if (isset($existing_log[$i]['incident_start'])) {
+                        $incident_start = (int) $existing_log[$i]['incident_start'];
+                    } elseif (isset($existing_log[$i]['timestamp'])) {
+                        $incident_start = (int) $existing_log[$i]['timestamp'];
                     }
                 }
 
@@ -813,18 +1369,17 @@ function sitepulse_run_uptime_check() {
         $entry['error'] = sprintf('HTTP %d', $response_code);
     }
 
-    $log[] = $entry;
+    $log_message = $is_up
+        ? sprintf('Uptime check [%s]: Up', $request_url)
+        : sprintf('Uptime check [%s]: Down (HTTP %d)', $request_url, $response_code);
 
-    if (!$is_up) {
-        sitepulse_log(sprintf('Uptime check: Down (HTTP %d)', $response_code), 'ALERT');
-    } else {
-        sitepulse_log('Uptime check: Up');
+    $log_level = $is_up ? 'INFO' : 'ALERT';
+
+    if (!$alerts_enabled && 'ALERT' === $log_level) {
+        $log_level = 'WARNING';
     }
 
-    if (count($log) > 30) {
-        $log = array_slice($log, -30);
-    }
-
-    update_option(SITEPULSE_OPTION_UPTIME_LOG, array_values($log), false);
-    sitepulse_update_uptime_archive($entry);
+    sitepulse_append_uptime_log_entry($target_id, $entry);
+    sitepulse_update_uptime_archive($target_id, $entry);
+    sitepulse_log($log_message, $log_level);
 }

@@ -202,11 +202,48 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
             $status_meta = sitepulse_dashboard_preview_get_status_meta(isset($card['status']) ? $card['status'] : '', $status_labels);
             $canvas_id = $unique_prefix . '-uptime-chart';
             $percentage = isset($card['percentage']) ? round((float) $card['percentage'], 2) : 0;
+            $targets = isset($card['targets']) && is_array($card['targets']) ? $card['targets'] : [];
+            $target_items = [];
+
+            foreach ($targets as $target_summary) {
+                if (!is_array($target_summary)) {
+                    continue;
+                }
+
+                $target_status = isset($target_summary['status']) ? $target_summary['status'] : '';
+                $target_status_meta = sitepulse_dashboard_preview_get_status_meta($target_status, $status_labels);
+                $target_name = isset($target_summary['name']) ? $target_summary['name'] : '';
+                $target_percentage = isset($target_summary['percentage']) ? (float) $target_summary['percentage'] : null;
+                $incident_label = '';
+
+                if (isset($target_summary['incident']) && is_array($target_summary['incident'])) {
+                    $incident = $target_summary['incident'];
+                    if (isset($incident['duration'])) {
+                        $incident_label = sprintf(__('Incident en cours (%s)', 'sitepulse'), $incident['duration']);
+                    }
+                }
+
+                $target_items[] = sprintf(
+                    '<li><span class="status-badge %1$s" aria-hidden="true"><span class="status-icon">%2$s</span><span class="status-text">%3$s</span></span><span class="sitepulse-uptime-target-name">%4$s</span><span class="sitepulse-uptime-target-percentage">%5$s</span>%6$s</li>',
+                    esc_attr($target_status),
+                    esc_html($target_status_meta['icon']),
+                    esc_html($target_status_meta['label']),
+                    esc_html($target_name),
+                    $target_percentage !== null ? esc_html(number_format_i18n($target_percentage, 1) . '%') : esc_html__('N/A', 'sitepulse'),
+                    $incident_label !== '' ? '<span class="sitepulse-uptime-target-incident">' . esc_html($incident_label) . '</span>' : ''
+                );
+            }
+
+            $targets_html = !empty($target_items)
+                ? '<ul class="sitepulse-uptime-target-list">' . implode('', $target_items) . '</ul>'
+                : '<p class="sitepulse-card-note">' . esc_html__('Aucune cible configurée pour le suivi de disponibilité.', 'sitepulse') . '</p>';
+
+            $summary_text = isset($card['summary']) ? $card['summary'] : '';
 
             $cards[] = sprintf(
-                '<section class="sitepulse-card sitepulse-card--uptime"><div class="sitepulse-card-header"><h3>%1$s</h3></div><p class="sitepulse-card-subtitle">%2$s</p>%3$s<p class="sitepulse-metric"><span class="status-badge %4$s" aria-hidden="true"><span class="status-icon">%5$s</span><span class="status-text">%6$s</span></span><span class="screen-reader-text">%7$s</span><span class="sitepulse-metric-value">%8$s<span class="sitepulse-metric-unit">%9$s</span></span></p><p class="description">%10$s</p></section>',
+                '<section class="sitepulse-card sitepulse-card--uptime"><div class="sitepulse-card-header"><h3>%1$s</h3></div><p class="sitepulse-card-subtitle">%2$s</p>%3$s<p class="sitepulse-metric"><span class="status-badge %4$s" aria-hidden="true"><span class="status-icon">%5$s</span><span class="status-text">%6$s</span></span><span class="screen-reader-text">%7$s</span><span class="sitepulse-metric-value">%8$s<span class="sitepulse-metric-unit">%9$s</span></span></p><p class="description">%10$s</p>%11$s</section>',
                 esc_html__('Disponibilité', 'sitepulse'),
-                esc_html__('Taux de réussite des 30 dernières vérifications horaires.', 'sitepulse'),
+                esc_html__('Vue d’ensemble des cibles surveillées.', 'sitepulse'),
                 sitepulse_dashboard_preview_render_chart_area($canvas_id, $chart),
                 esc_attr(isset($card['status']) ? $card['status'] : ''),
                 esc_html($status_meta['icon']),
@@ -214,7 +251,8 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
                 esc_html($status_meta['sr']),
                 esc_html(number_format_i18n($percentage, 2)),
                 esc_html__('%', 'sitepulse'),
-                esc_html__('Chaque barre représente une vérification de disponibilité programmée.', 'sitepulse')
+                esc_html($summary_text !== '' ? $summary_text : __('Chaque barre représente la disponibilité mesurée pour chaque cible.', 'sitepulse')),
+                $targets_html
             );
         }
 

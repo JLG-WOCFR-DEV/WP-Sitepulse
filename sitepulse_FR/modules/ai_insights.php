@@ -1197,25 +1197,45 @@ function sitepulse_ai_get_metrics_summary() {
     }
 
     if (defined('SITEPULSE_OPTION_UPTIME_LOG')) {
-        $uptime_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
-
-        if (!is_array($uptime_log)) {
-            $uptime_log = [];
-        }
-
-        if (function_exists('sitepulse_normalize_uptime_log')) {
-            $uptime_log = sitepulse_normalize_uptime_log($uptime_log);
-        }
-
         $boolean_statuses = [];
 
-        foreach ($uptime_log as $entry) {
-            if (is_array($entry) && array_key_exists('status', $entry) && is_bool($entry['status'])) {
-                $boolean_statuses[] = $entry['status'];
-            } elseif (is_bool($entry)) {
-                $boolean_statuses[] = $entry;
-            } elseif (is_numeric($entry)) {
-                $boolean_statuses[] = (bool) $entry;
+        if (function_exists('sitepulse_get_uptime_log_store')) {
+            $log_store = sitepulse_get_uptime_log_store();
+
+            foreach ($log_store as $target_entries) {
+                if (!is_array($target_entries)) {
+                    continue;
+                }
+
+                $normalized_entries = function_exists('sitepulse_normalize_uptime_log')
+                    ? sitepulse_normalize_uptime_log($target_entries)
+                    : (array) $target_entries;
+
+                foreach ($normalized_entries as $entry) {
+                    if (is_array($entry) && array_key_exists('status', $entry) && is_bool($entry['status'])) {
+                        $boolean_statuses[] = $entry['status'];
+                    }
+                }
+            }
+        } else {
+            $uptime_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+
+            if (!is_array($uptime_log)) {
+                $uptime_log = [];
+            }
+
+            if (function_exists('sitepulse_normalize_uptime_log')) {
+                $uptime_log = sitepulse_normalize_uptime_log($uptime_log);
+            }
+
+            foreach ($uptime_log as $entry) {
+                if (is_array($entry) && array_key_exists('status', $entry) && is_bool($entry['status'])) {
+                    $boolean_statuses[] = $entry['status'];
+                } elseif (is_bool($entry)) {
+                    $boolean_statuses[] = $entry;
+                } elseif (is_numeric($entry)) {
+                    $boolean_statuses[] = (bool) $entry;
+                }
             }
         }
 
@@ -1226,7 +1246,7 @@ function sitepulse_ai_get_metrics_summary() {
 
             $summary_parts[] = sprintf(
                 /* translators: %s: Uptime percentage. */
-                __('Disponibilité récemment mesurée : %s%%.', 'sitepulse'),
+                __('Disponibilité moyenne des cibles : %s%%.', 'sitepulse'),
                 number_format_i18n(round($uptime_pct, 2), 2)
             );
         }
