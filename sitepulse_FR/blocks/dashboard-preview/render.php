@@ -106,14 +106,15 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
      * @return string HTML markup for the chart area.
      */
     function sitepulse_dashboard_preview_render_chart_area($canvas_id, $chart) {
+        $summary = sitepulse_dashboard_preview_render_dataset_summary($chart);
+        $summary_id = is_array($summary) && isset($summary['id']) ? $summary['id'] : '';
+        $summary_html = is_array($summary) && isset($summary['html']) ? $summary['html'] : (string) $summary;
+
         $has_chart = is_array($chart) && !empty($chart) && empty($chart['empty']) && !empty($chart['datasets']);
 
         if ($has_chart) {
             $chart_data = wp_json_encode($chart);
             $chart_attribute = is_string($chart_data) ? $chart_data : '';
-            $summary = sitepulse_dashboard_preview_render_dataset_summary($chart);
-            $summary_id = is_array($summary) && isset($summary['id']) ? $summary['id'] : '';
-            $summary_html = is_array($summary) && isset($summary['html']) ? $summary['html'] : (string) $summary;
 
             $canvas_attributes = [
                 'id'                   => esc_attr($canvas_id),
@@ -140,22 +141,30 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
                 $canvas_attribute_string .= sprintf(' %s="%s"', $attribute, $value);
             }
 
-            $fallback_text = esc_html__(
-                'Votre navigateur ne prend pas en charge les graphiques. Consultez le résumé textuel ci-dessous.',
-                'sitepulse'
+            $fallback_markup = sprintf(
+                '<span aria-hidden="true">%1$s</span><span class="screen-reader-text">%2$s</span>',
+                esc_html__(
+                    'Votre navigateur ne prend pas en charge les graphiques. Consultez le résumé textuel ci-dessous.',
+                    'sitepulse'
+                ),
+                esc_html__(
+                    'Les données du graphique sont détaillées dans le résumé textuel qui suit.',
+                    'sitepulse'
+                )
             );
 
             return sprintf(
                 '<div class="sitepulse-chart-container"><canvas%1$s>%2$s</canvas>%3$s</div>',
                 $canvas_attribute_string,
-                $fallback_text,
+                $fallback_markup,
                 $summary_html
             );
         }
 
         return sprintf(
-            '<div class="sitepulse-chart-container"><div class="sitepulse-chart-placeholder">%s</div></div>',
-            esc_html__('Pas encore de mesures disponibles pour ce graphique.', 'sitepulse')
+            '<div class="sitepulse-chart-container"><div class="sitepulse-chart-placeholder">%1$s</div>%2$s</div>',
+            esc_html__('Pas encore de mesures disponibles pour ce graphique.', 'sitepulse'),
+            $summary_html
         );
     }
 
