@@ -11,6 +11,8 @@ if (!defined('SITEPULSE_OPTION_UPTIME_ARCHIVE')) {
 
 $sitepulse_uptime_cron_hook = function_exists('sitepulse_get_cron_hook') ? sitepulse_get_cron_hook('uptime_tracker') : 'sitepulse_uptime_tracker_cron';
 
+add_filter('cron_schedules', 'sitepulse_uptime_tracker_register_cron_schedules');
+
 add_action('admin_menu', function() {
     add_submenu_page('sitepulse-dashboard', 'Uptime Tracker', 'Uptime', sitepulse_get_capability(), 'sitepulse-uptime', 'sitepulse_uptime_tracker_page');
 });
@@ -42,6 +44,73 @@ if (!empty($sitepulse_uptime_cron_hook)) {
 }
 
 /**
+ * Registers custom cron schedules used by the uptime tracker.
+ *
+ * @param array $schedules Existing schedules.
+ * @return array Modified schedules including SitePulse intervals.
+ */
+function sitepulse_uptime_tracker_register_cron_schedules($schedules) {
+    if (!is_array($schedules)) {
+        $schedules = [];
+    }
+
+    $frequency_choices = function_exists('sitepulse_get_uptime_frequency_choices')
+        ? sitepulse_get_uptime_frequency_choices()
+        : [];
+
+    foreach ($frequency_choices as $frequency_key => $frequency_data) {
+        if (in_array($frequency_key, ['hourly', 'twicedaily', 'daily'], true)) {
+            continue;
+        }
+
+        if (!is_array($frequency_data) || !isset($frequency_data['interval'])) {
+            continue;
+        }
+
+        $interval = (int) $frequency_data['interval'];
+
+        if ($interval < 1) {
+            continue;
+        }
+
+        $display = isset($frequency_data['label']) && is_string($frequency_data['label'])
+            ? $frequency_data['label']
+            : ucfirst(str_replace('_', ' ', $frequency_key));
+
+        $schedules[$frequency_key] = [
+            'interval' => $interval,
+            'display'  => $display,
+        ];
+    }
+
+    return $schedules;
+}
+
+/**
+ * Retrieves the configured cron schedule for uptime checks.
+ *
+ * @return string
+ */
+function sitepulse_uptime_tracker_get_schedule() {
+    $default = defined('SITEPULSE_DEFAULT_UPTIME_FREQUENCY') ? SITEPULSE_DEFAULT_UPTIME_FREQUENCY : 'hourly';
+    $option  = get_option(SITEPULSE_OPTION_UPTIME_FREQUENCY, $default);
+
+    if (function_exists('sitepulse_sanitize_uptime_frequency')) {
+        $option = sitepulse_sanitize_uptime_frequency($option);
+    } elseif (!is_string($option) || $option === '') {
+        $option = $default;
+    }
+
+    $choices = function_exists('sitepulse_get_uptime_frequency_choices') ? sitepulse_get_uptime_frequency_choices() : [];
+
+    if (!isset($choices[$option])) {
+        $option = $default;
+    }
+
+    return $option;
+}
+
+/**
  * Ensures the uptime tracker cron hook is scheduled and reports failures.
  *
  * @return void
@@ -53,11 +122,29 @@ function sitepulse_uptime_tracker_ensure_cron() {
         return;
     }
 
+    $desired_schedule = sitepulse_uptime_tracker_get_schedule();
+    $available_schedules = wp_get_schedules();
+
+    if (!isset($available_schedules[$desired_schedule])) {
+        $fallback_schedule = defined('SITEPULSE_DEFAULT_UPTIME_FREQUENCY') ? SITEPULSE_DEFAULT_UPTIME_FREQUENCY : 'hourly';
+        if (isset($available_schedules[$fallback_schedule])) {
+            $desired_schedule = $fallback_schedule;
+        } elseif (isset($available_schedules['hourly'])) {
+            $desired_schedule = 'hourly';
+        }
+    }
+
+    $current_schedule = wp_get_schedule($sitepulse_uptime_cron_hook);
+
+    if ($current_schedule && $current_schedule !== $desired_schedule) {
+        wp_clear_scheduled_hook($sitepulse_uptime_cron_hook);
+    }
+
     $next_run = wp_next_scheduled($sitepulse_uptime_cron_hook);
 
     if (!$next_run) {
         $next_run = (int) current_time('timestamp', true);
-        $scheduled = wp_schedule_event($next_run, 'hourly', $sitepulse_uptime_cron_hook);
+        $scheduled = wp_schedule_event($next_run, $desired_schedule, $sitepulse_uptime_cron_hook);
 
         if (false === $scheduled && function_exists('sitepulse_log')) {
             sitepulse_log(sprintf('Unable to schedule uptime tracker cron hook: %s', $sitepulse_uptime_cron_hook), 'ERROR');
@@ -529,6 +616,19 @@ function sitepulse_run_uptime_check() {
     $default_timeout = defined('SITEPULSE_DEFAULT_UPTIME_TIMEOUT') ? (int) SITEPULSE_DEFAULT_UPTIME_TIMEOUT : 10;
     $timeout_option = get_option(SITEPULSE_OPTION_UPTIME_TIMEOUT, $default_timeout);
     $timeout = $default_timeout;
+    $default_method = defined('SITEPULSE_DEFAULT_UPTIME_HTTP_METHOD') ? SITEPULSE_DEFAULT_UPTIME_HTTP_METHOD : 'GET';
+    $method_option = get_option(SITEPULSE_OPTION_UPTIME_HTTP_METHOD, $default_method);
+    $http_method = function_exists('sitepulse_sanitize_uptime_http_method')
+        ? sitepulse_sanitize_uptime_http_method($method_option)
+        : (is_string($method_option) && $method_option !== '' ? strtoupper($method_option) : $default_method);
+    $headers_option = get_option(SITEPULSE_OPTION_UPTIME_HTTP_HEADERS, []);
+    $custom_headers = function_exists('sitepulse_sanitize_uptime_http_headers')
+        ? sitepulse_sanitize_uptime_http_headers($headers_option)
+        : (is_array($headers_option) ? $headers_option : []);
+    $expected_codes_option = get_option(SITEPULSE_OPTION_UPTIME_EXPECTED_CODES, []);
+    $expected_codes = function_exists('sitepulse_sanitize_uptime_expected_codes')
+        ? sitepulse_sanitize_uptime_expected_codes($expected_codes_option)
+        : [];
 
     if (is_numeric($timeout_option)) {
         $timeout = (int) $timeout_option;
@@ -560,6 +660,8 @@ function sitepulse_run_uptime_check() {
         'timeout'   => $timeout,
         'sslverify' => true,
         'url'       => $request_url_default,
+        'method'    => $http_method,
+        'headers'   => $custom_headers,
     ];
 
     /**
@@ -570,7 +672,7 @@ function sitepulse_run_uptime_check() {
      *
      * @since 1.0
      *
-     * @param array $request_args Arguments transmis à wp_remote_get(). Le paramètre
+     * @param array $request_args Arguments transmis à wp_remote_request(). Le paramètre
      *                            "url" peut être fourni pour cibler une adresse
      *                            différente.
      */
@@ -596,7 +698,38 @@ function sitepulse_run_uptime_check() {
 
     unset($request_args['url']);
 
-    $response = wp_remote_get($request_url, $request_args);
+    if (isset($request_args['expected_codes'])) {
+        $expected_codes_candidate = $request_args['expected_codes'];
+
+        if (function_exists('sitepulse_sanitize_uptime_expected_codes')) {
+            $expected_codes = sitepulse_sanitize_uptime_expected_codes($expected_codes_candidate);
+        }
+
+        unset($request_args['expected_codes']);
+    }
+
+    if (isset($request_args['method'])) {
+        $method_candidate = $request_args['method'];
+        $request_args['method'] = function_exists('sitepulse_sanitize_uptime_http_method')
+            ? sitepulse_sanitize_uptime_http_method($method_candidate)
+            : (is_string($method_candidate) && $method_candidate !== '' ? strtoupper($method_candidate) : $http_method);
+    } else {
+        $request_args['method'] = $http_method;
+    }
+
+    if (isset($request_args['headers'])) {
+        $request_args['headers'] = function_exists('sitepulse_sanitize_uptime_http_headers')
+            ? sitepulse_sanitize_uptime_http_headers($request_args['headers'])
+            : (is_array($request_args['headers']) ? $request_args['headers'] : []);
+    } else {
+        $request_args['headers'] = $custom_headers;
+    }
+
+    if (empty($request_args['headers'])) {
+        unset($request_args['headers']);
+    }
+
+    $response = wp_remote_request($request_url, $request_args);
 
     $raw_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
 
@@ -644,6 +777,10 @@ function sitepulse_run_uptime_check() {
 
     $response_code = wp_remote_retrieve_response_code($response);
     $is_up = $response_code >= 200 && $response_code < 400;
+
+    if (!empty($expected_codes)) {
+        $is_up = in_array((int) $response_code, $expected_codes, true);
+    }
 
     if ((int) get_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0) !== 0) {
         update_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0, false);

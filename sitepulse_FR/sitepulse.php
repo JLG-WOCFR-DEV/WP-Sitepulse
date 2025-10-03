@@ -29,6 +29,10 @@ define('SITEPULSE_DEFAULT_AI_MODEL', 'gemini-1.5-flash');
 define('SITEPULSE_OPTION_UPTIME_LOG', 'sitepulse_uptime_log');
 define('SITEPULSE_OPTION_UPTIME_URL', 'sitepulse_uptime_url');
 define('SITEPULSE_OPTION_UPTIME_TIMEOUT', 'sitepulse_uptime_timeout');
+define('SITEPULSE_OPTION_UPTIME_FREQUENCY', 'sitepulse_uptime_frequency');
+define('SITEPULSE_OPTION_UPTIME_HTTP_METHOD', 'sitepulse_uptime_http_method');
+define('SITEPULSE_OPTION_UPTIME_HTTP_HEADERS', 'sitepulse_uptime_http_headers');
+define('SITEPULSE_OPTION_UPTIME_EXPECTED_CODES', 'sitepulse_uptime_expected_codes');
 define('SITEPULSE_OPTION_LAST_LOAD_TIME', 'sitepulse_last_load_time');
 define('SITEPULSE_OPTION_SPEED_SCAN_HISTORY', 'sitepulse_speed_scan_history');
 define('SITEPULSE_OPTION_CPU_ALERT_THRESHOLD', 'sitepulse_cpu_alert_threshold');
@@ -47,6 +51,8 @@ define('SITEPULSE_OPTION_UPTIME_WARNING_PERCENT', 'sitepulse_uptime_warning_perc
 define('SITEPULSE_OPTION_REVISION_LIMIT', 'sitepulse_revision_limit');
 
 define('SITEPULSE_DEFAULT_UPTIME_TIMEOUT', 10);
+define('SITEPULSE_DEFAULT_UPTIME_FREQUENCY', 'hourly');
+define('SITEPULSE_DEFAULT_UPTIME_HTTP_METHOD', 'GET');
 define('SITEPULSE_DEFAULT_SPEED_WARNING_MS', 200);
 define('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS', 500);
 define('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT', 99);

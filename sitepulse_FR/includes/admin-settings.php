@@ -168,6 +168,18 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_TIMEOUT, [
         'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_uptime_timeout', 'default' => SITEPULSE_DEFAULT_UPTIME_TIMEOUT
     ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_FREQUENCY, [
+        'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_uptime_frequency', 'default' => SITEPULSE_DEFAULT_UPTIME_FREQUENCY
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_HTTP_METHOD, [
+        'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_uptime_http_method', 'default' => SITEPULSE_DEFAULT_UPTIME_HTTP_METHOD
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_HTTP_HEADERS, [
+        'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_uptime_http_headers', 'default' => []
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_EXPECTED_CODES, [
+        'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_uptime_expected_codes', 'default' => []
+    ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_SPEED_WARNING_MS, [
         'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_speed_warning_threshold', 'default' => SITEPULSE_DEFAULT_SPEED_WARNING_MS
     ]);
@@ -400,6 +412,226 @@ function sitepulse_sanitize_uptime_timeout($value) {
     }
 
     return $value;
+}
+
+/**
+ * Returns the available frequency choices for uptime checks.
+ *
+ * @return array<string,array<string,mixed>> List of frequency configurations.
+ */
+function sitepulse_get_uptime_frequency_choices() {
+    $minute = defined('MINUTE_IN_SECONDS') ? (int) MINUTE_IN_SECONDS : 60;
+    $hour   = defined('HOUR_IN_SECONDS') ? (int) HOUR_IN_SECONDS : 3600;
+    $day    = defined('DAY_IN_SECONDS') ? (int) DAY_IN_SECONDS : 86400;
+
+    return [
+        'sitepulse_uptime_five_minutes'   => [
+            'label'    => __('Toutes les 5 minutes', 'sitepulse'),
+            'interval' => 5 * $minute,
+        ],
+        'sitepulse_uptime_ten_minutes'    => [
+            'label'    => __('Toutes les 10 minutes', 'sitepulse'),
+            'interval' => 10 * $minute,
+        ],
+        'sitepulse_uptime_fifteen_minutes' => [
+            'label'    => __('Toutes les 15 minutes', 'sitepulse'),
+            'interval' => 15 * $minute,
+        ],
+        'sitepulse_uptime_thirty_minutes' => [
+            'label'    => __('Toutes les 30 minutes', 'sitepulse'),
+            'interval' => 30 * $minute,
+        ],
+        'hourly'                          => [
+            'label'    => __('Toutes les heures', 'sitepulse'),
+            'interval' => $hour,
+        ],
+        'twicedaily'                      => [
+            'label'    => __('Deux fois par jour', 'sitepulse'),
+            'interval' => 12 * $hour,
+        ],
+        'daily'                           => [
+            'label'    => __('Quotidien', 'sitepulse'),
+            'interval' => $day,
+        ],
+    ];
+}
+
+/**
+ * Retrieves the default frequency identifier for uptime checks.
+ *
+ * @return string
+ */
+function sitepulse_get_default_uptime_frequency() {
+    return defined('SITEPULSE_DEFAULT_UPTIME_FREQUENCY') ? SITEPULSE_DEFAULT_UPTIME_FREQUENCY : 'hourly';
+}
+
+/**
+ * Returns the supported HTTP method choices for uptime requests.
+ *
+ * @return array<string,string>
+ */
+function sitepulse_get_uptime_http_method_choices() {
+    return [
+        'GET'  => __('GET', 'sitepulse'),
+        'HEAD' => __('HEAD', 'sitepulse'),
+        'POST' => __('POST', 'sitepulse'),
+    ];
+}
+
+/**
+ * Sanitizes the configured frequency identifier for uptime checks.
+ *
+ * @param mixed $value Raw user input value.
+ * @return string Validated frequency identifier.
+ */
+function sitepulse_sanitize_uptime_frequency($value) {
+    $default = sitepulse_get_default_uptime_frequency();
+
+    if (!is_string($value) || $value === '') {
+        return $default;
+    }
+
+    $value = trim($value);
+    $choices = sitepulse_get_uptime_frequency_choices();
+
+    if (!array_key_exists($value, $choices)) {
+        return $default;
+    }
+
+    return $value;
+}
+
+/**
+ * Sanitizes the configured HTTP method used for uptime checks.
+ *
+ * @param mixed $value Raw user input value.
+ * @return string Validated HTTP method.
+ */
+function sitepulse_sanitize_uptime_http_method($value) {
+    $default = defined('SITEPULSE_DEFAULT_UPTIME_HTTP_METHOD') ? SITEPULSE_DEFAULT_UPTIME_HTTP_METHOD : 'GET';
+
+    if (!is_string($value) || $value === '') {
+        return $default;
+    }
+
+    $value = strtoupper(trim($value));
+    $choices = sitepulse_get_uptime_http_method_choices();
+
+    if (!array_key_exists($value, $choices)) {
+        return $default;
+    }
+
+    return $value;
+}
+
+/**
+ * Sanitizes the custom HTTP headers configured for uptime checks.
+ *
+ * @param mixed $value Raw user input value.
+ * @return array<string,string> Associative array of header names and values.
+ */
+function sitepulse_sanitize_uptime_http_headers($value) {
+    $headers = [];
+
+    if (is_string($value)) {
+        $value = preg_split('/\r\n|\r|\n/', $value);
+    }
+
+    if (!is_array($value)) {
+        return $headers;
+    }
+
+    foreach ($value as $key => $entry) {
+        if (is_string($key) && $key !== '' && is_scalar($entry)) {
+            $header_name  = trim($key);
+            $header_value = trim((string) $entry);
+        } elseif (is_string($entry)) {
+            $parts = explode(':', $entry, 2);
+            $header_name = trim($parts[0]);
+            $header_value = isset($parts[1]) ? trim($parts[1]) : '';
+        } else {
+            continue;
+        }
+
+        if ($header_name === '') {
+            continue;
+        }
+
+        if (!preg_match('/^[A-Za-z0-9\-]+$/', $header_name)) {
+            continue;
+        }
+
+        $headers[$header_name] = $header_value;
+    }
+
+    return $headers;
+}
+
+/**
+ * Sanitizes the expected HTTP status codes configured for uptime checks.
+ *
+ * @param mixed $value Raw user input value.
+ * @return int[] List of expected status codes.
+ */
+function sitepulse_sanitize_uptime_expected_codes($value) {
+    $codes = [];
+    $entries = [];
+
+    if (is_string($value)) {
+        $entries = preg_split('/[\s,]+/', $value);
+    } elseif (is_array($value)) {
+        foreach ($value as $key => $item) {
+            if (is_scalar($item)) {
+                $entries[] = (string) $item;
+            } elseif (is_scalar($key) && !is_int($key)) {
+                $entries[] = (string) $key;
+            }
+        }
+    }
+
+    if (empty($entries)) {
+        return $codes;
+    }
+
+    foreach ($entries as $entry) {
+        $entry = trim((string) $entry);
+
+        if ($entry === '') {
+            continue;
+        }
+
+        if (strpos($entry, '-') !== false) {
+            $range_parts = explode('-', $entry, 2);
+
+            if (count($range_parts) === 2) {
+                $start = absint($range_parts[0]);
+                $end   = absint($range_parts[1]);
+
+                if ($start >= 100 && $start <= 599 && $end >= $start) {
+                    $end = min($end, 599);
+                    for ($code = $start; $code <= $end; $code++) {
+                        $codes[] = $code;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        $code = absint($entry);
+
+        if ($code >= 100 && $code <= 599) {
+            $codes[] = $code;
+        }
+    }
+
+    if (empty($codes)) {
+        return [];
+    }
+
+    $codes = array_values(array_unique($codes));
+    sort($codes, SORT_NUMERIC);
+
+    return $codes;
 }
 
 /**
@@ -760,6 +992,24 @@ function sitepulse_settings_page() {
 
     $uptime_timeout_option = get_option(SITEPULSE_OPTION_UPTIME_TIMEOUT, SITEPULSE_DEFAULT_UPTIME_TIMEOUT);
     $uptime_timeout = sitepulse_sanitize_uptime_timeout($uptime_timeout_option);
+    $uptime_frequency_option = get_option(SITEPULSE_OPTION_UPTIME_FREQUENCY, sitepulse_get_default_uptime_frequency());
+    $uptime_frequency = sitepulse_sanitize_uptime_frequency($uptime_frequency_option);
+    $uptime_http_method_option = get_option(SITEPULSE_OPTION_UPTIME_HTTP_METHOD, SITEPULSE_DEFAULT_UPTIME_HTTP_METHOD);
+    $uptime_http_method = sitepulse_sanitize_uptime_http_method($uptime_http_method_option);
+    $uptime_headers_option = get_option(SITEPULSE_OPTION_UPTIME_HTTP_HEADERS, []);
+    $uptime_headers = sitepulse_sanitize_uptime_http_headers($uptime_headers_option);
+    $uptime_headers_lines = [];
+
+    foreach ($uptime_headers as $header_name => $header_value) {
+        $uptime_headers_lines[] = $header_value === ''
+            ? $header_name
+            : $header_name . ': ' . $header_value;
+    }
+
+    $uptime_headers_text = implode("\n", $uptime_headers_lines);
+    $uptime_expected_codes_option = get_option(SITEPULSE_OPTION_UPTIME_EXPECTED_CODES, []);
+    $uptime_expected_codes = sitepulse_sanitize_uptime_expected_codes($uptime_expected_codes_option);
+    $uptime_expected_codes_text = implode(', ', $uptime_expected_codes);
 
     $default_speed_thresholds = [
         'warning'  => defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200,
@@ -881,6 +1131,7 @@ function sitepulse_settings_page() {
         }
         if (isset($_POST['sitepulse_clear_data'])) {
             delete_option(SITEPULSE_OPTION_UPTIME_LOG);
+            delete_option(SITEPULSE_OPTION_UPTIME_HTTP_HEADERS);
             delete_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
             echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('Données stockées effacées.', 'sitepulse') . '</p></div>';
         }
@@ -894,6 +1145,10 @@ function sitepulse_settings_page() {
                 SITEPULSE_OPTION_UPTIME_LOG,
                 SITEPULSE_OPTION_UPTIME_URL,
                 SITEPULSE_OPTION_UPTIME_TIMEOUT,
+                SITEPULSE_OPTION_UPTIME_FREQUENCY,
+                SITEPULSE_OPTION_UPTIME_HTTP_METHOD,
+                SITEPULSE_OPTION_UPTIME_HTTP_HEADERS,
+                SITEPULSE_OPTION_UPTIME_EXPECTED_CODES,
                 SITEPULSE_OPTION_LAST_LOAD_TIME,
                 SITEPULSE_OPTION_CPU_ALERT_THRESHOLD,
                 SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES,
@@ -1399,6 +1654,62 @@ function sitepulse_settings_page() {
                             <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TIMEOUT); ?>"><?php esc_html_e('Temps maximal avant échec', 'sitepulse'); ?></label>
                             <input type="number" min="1" id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TIMEOUT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_TIMEOUT); ?>" value="<?php echo esc_attr($uptime_timeout); ?>" class="small-text" aria-describedby="<?php echo esc_attr($uptime_timeout_description_id); ?>">
                             <p class="sitepulse-card-description" id="<?php echo esc_attr($uptime_timeout_description_id); ?>"><?php esc_html_e('Nombre de secondes avant de considérer la requête comme échouée.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Fréquence des contrôles', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <?php $uptime_frequency_choices = sitepulse_get_uptime_frequency_choices(); ?>
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_FREQUENCY); ?>"><?php esc_html_e('Intervalle entre deux vérifications', 'sitepulse'); ?></label>
+                            <select id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_FREQUENCY); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_FREQUENCY); ?>">
+                                <?php foreach ($uptime_frequency_choices as $frequency_key => $frequency_data) :
+                                    if (!is_array($frequency_data) || !isset($frequency_data['label'])) {
+                                        continue;
+                                    }
+
+                                    $label = $frequency_data['label'];
+                                    ?>
+                                    <option value="<?php echo esc_attr($frequency_key); ?>" <?php selected($uptime_frequency, $frequency_key); ?>><?php echo esc_html($label); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <p class="sitepulse-card-description"><?php esc_html_e('Sélectionnez la fréquence d’exécution de la tâche de surveillance.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Méthode HTTP', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <?php $uptime_method_choices = sitepulse_get_uptime_http_method_choices(); ?>
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_HTTP_METHOD); ?>"><?php esc_html_e('Méthode utilisée pour la requête', 'sitepulse'); ?></label>
+                            <select id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_HTTP_METHOD); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_HTTP_METHOD); ?>">
+                                <?php foreach ($uptime_method_choices as $method_key => $method_label) : ?>
+                                    <option value="<?php echo esc_attr($method_key); ?>" <?php selected($uptime_http_method, $method_key); ?>><?php echo esc_html($method_label); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <p class="sitepulse-card-description"><?php esc_html_e('Choisissez la méthode HTTP employée pour vérifier la disponibilité.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('En-têtes personnalisés', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_HTTP_HEADERS); ?>"><?php esc_html_e('En-têtes additionnels', 'sitepulse'); ?></label>
+                            <textarea id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_HTTP_HEADERS); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_HTTP_HEADERS); ?>" rows="4" class="large-text code sitepulse-textarea" placeholder="<?php echo esc_attr__('Header-Name: valeur', 'sitepulse'); ?>"><?php echo esc_textarea($uptime_headers_text); ?></textarea>
+                            <p class="sitepulse-card-description"><?php esc_html_e('Indiquez un en-tête par ligne au format « Nom: valeur ». Laissez vide pour n’ajouter aucun en-tête.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Codes HTTP attendus', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_EXPECTED_CODES); ?>"><?php esc_html_e('Codes considérés comme succès', 'sitepulse'); ?></label>
+                            <input type="text" id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_EXPECTED_CODES); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_EXPECTED_CODES); ?>" value="<?php echo esc_attr($uptime_expected_codes_text); ?>" class="regular-text" placeholder="200, 201-204">
+                            <p class="sitepulse-card-description"><?php esc_html_e('Liste de codes séparés par des virgules ou plages (ex. 200-204). Laissez vide pour accepter toute réponse 2xx ou 3xx.', 'sitepulse'); ?></p>
                         </div>
                     </div>
                 </div>
