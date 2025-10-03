@@ -15,18 +15,27 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
      *
      * @param array|null $chart Chart configuration as assembled by the dashboard module.
      *
-     * @return string HTML list.
+     * @return array{
+     *     id: string,
+     *     html: string,
+     * } Summary identifier and markup. Empty strings are returned when no summary can be generated.
      */
     function sitepulse_dashboard_preview_render_dataset_summary($chart) {
         if (!is_array($chart)) {
-            return '';
+            return [
+                'id'   => '',
+                'html' => '',
+            ];
         }
 
         $labels = isset($chart['labels']) && is_array($chart['labels']) ? $chart['labels'] : [];
         $datasets = isset($chart['datasets']) && is_array($chart['datasets']) ? $chart['datasets'] : [];
 
         if (empty($labels) || empty($datasets)) {
-            return '';
+            return [
+                'id'   => '',
+                'html' => '',
+            ];
         }
 
         $items = [];
@@ -66,10 +75,26 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
         }
 
         if (empty($items)) {
-            return '';
+            return [
+                'id'   => '',
+                'html' => '',
+            ];
         }
 
-        return '<ul class="sitepulse-preview-list">' . implode('', $items) . '</ul>';
+        $summary_id = function_exists('wp_unique_id')
+            ? wp_unique_id('sitepulse-preview-summary-')
+            : uniqid('sitepulse-preview-summary-');
+
+        $list_markup = '<ul class="sitepulse-preview-list">' . implode('', $items) . '</ul>';
+
+        return [
+            'id'   => $summary_id,
+            'html' => sprintf(
+                '<div id="%1$s" class="sitepulse-preview-summary">%2$s</div>',
+                esc_attr($summary_id),
+                $list_markup
+            ),
+        ];
     }
 
     /**
@@ -87,12 +112,44 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
             $chart_data = wp_json_encode($chart);
             $chart_attribute = is_string($chart_data) ? $chart_data : '';
             $summary = sitepulse_dashboard_preview_render_dataset_summary($chart);
+            $summary_id = is_array($summary) && isset($summary['id']) ? $summary['id'] : '';
+            $summary_html = is_array($summary) && isset($summary['html']) ? $summary['html'] : (string) $summary;
+
+            $canvas_attributes = [
+                'id'                   => esc_attr($canvas_id),
+                'data-sitepulse-chart' => esc_attr($chart_attribute),
+                'role'                 => 'img',
+            ];
+
+            if (!empty($summary_id)) {
+                $canvas_attributes['aria-describedby'] = esc_attr($summary_id);
+            } else {
+                $canvas_attributes['aria-label'] = esc_attr__(
+                    'Aperçu du graphique des données SitePulse.',
+                    'sitepulse'
+                );
+            }
+
+            $canvas_attribute_string = '';
+
+            foreach ($canvas_attributes as $attribute => $value) {
+                if ($value === '') {
+                    continue;
+                }
+
+                $canvas_attribute_string .= sprintf(' %s="%s"', $attribute, $value);
+            }
+
+            $fallback_text = esc_html__(
+                'Votre navigateur ne prend pas en charge les graphiques. Consultez le résumé textuel ci-dessous.',
+                'sitepulse'
+            );
 
             return sprintf(
-                '<div class="sitepulse-chart-container"><canvas id="%1$s" data-sitepulse-chart="%2$s"></canvas>%3$s</div>',
-                esc_attr($canvas_id),
-                esc_attr($chart_attribute),
-                $summary
+                '<div class="sitepulse-chart-container"><canvas%1$s>%2$s</canvas>%3$s</div>',
+                $canvas_attribute_string,
+                $fallback_text,
+                $summary_html
             );
         }
 

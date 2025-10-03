@@ -73,8 +73,12 @@
     background: rgba(255, 255, 255, 0.7);
 }
 
-.wp-block-sitepulse-dashboard-preview .sitepulse-chart-container canvas + .sitepulse-preview-list {
+.wp-block-sitepulse-dashboard-preview .sitepulse-chart-container .sitepulse-preview-summary {
     margin-top: 12px;
+}
+
+.wp-block-sitepulse-dashboard-preview .sitepulse-chart-container .sitepulse-preview-summary:empty {
+    display: none;
 }
 
 .wp-block-sitepulse-dashboard-preview .sitepulse-dashboard-preview__header {
