@@ -150,8 +150,14 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_AI_RATE_LIMIT, [
         'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_ai_rate_limit', 'default' => sitepulse_get_default_ai_rate_limit()
     ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS, [
+        'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_alert_channels', 'default' => ['cpu', 'php_fatal']
+    ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, [
         'type' => 'number', 'sanitize_callback' => 'sitepulse_sanitize_cpu_threshold', 'default' => 5
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD, [
+        'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_php_fatal_threshold', 'default' => 1
     ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, [
         'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_cooldown_minutes', 'default' => 60
@@ -331,6 +337,27 @@ function sitepulse_sanitize_modules($input) {
 }
 
 /**
+ * Sanitizes the list of enabled alert channels.
+ *
+ * @param mixed $input Raw user input value.
+ * @return array List of allowed channel identifiers.
+ */
+function sitepulse_sanitize_alert_channels($input) {
+    $valid_channels = ['cpu', 'php_fatal'];
+    $sanitized      = [];
+
+    if (is_array($input)) {
+        foreach ($input as $channel) {
+            if (in_array($channel, $valid_channels, true)) {
+                $sanitized[] = $channel;
+            }
+        }
+    }
+
+    return array_values(array_unique($sanitized));
+}
+
+/**
  * Sanitizes the CPU threshold value for alerts.
  *
  * @param mixed $value Raw user input value.
@@ -341,6 +368,22 @@ function sitepulse_sanitize_cpu_threshold($value) {
     if ($value <= 0) {
         $value = 5.0;
     }
+    return $value;
+}
+
+/**
+ * Sanitizes the PHP fatal error alert threshold.
+ *
+ * @param mixed $value Raw user input value.
+ * @return int Number of fatal entries required to send an alert.
+ */
+function sitepulse_sanitize_php_fatal_threshold($value) {
+    $value = is_scalar($value) ? absint($value) : 0;
+
+    if ($value < 1) {
+        $value = 1;
+    }
+
     return $value;
 }
 
@@ -909,6 +952,26 @@ function sitepulse_settings_page() {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
+    $test_notice       = '';
+    $test_notice_class = 'updated';
+
+    if (isset($_GET['sitepulse_alert_test'])) {
+        $test_status = sanitize_key(wp_unslash($_GET['sitepulse_alert_test']));
+
+        if ($test_status !== '') {
+            if ($test_status === 'success') {
+                $test_notice       = esc_html__('E-mail de test envoyé. Vérifiez votre boîte de réception.', 'sitepulse');
+                $test_notice_class = 'updated';
+            } elseif ($test_status === 'no_recipients') {
+                $test_notice       = esc_html__('Impossible d’envoyer le test : aucun destinataire valide.', 'sitepulse');
+                $test_notice_class = 'error';
+            } elseif ($test_status === 'error') {
+                $test_notice       = esc_html__('L’envoi de l’e-mail de test a échoué. Consultez les journaux ou réessayez.', 'sitepulse');
+                $test_notice_class = 'error';
+            }
+        }
+    }
+
     $modules = [
         'log_analyzer'          => [
             'label'       => __('Log Analyzer', 'sitepulse'),
@@ -1150,7 +1213,9 @@ function sitepulse_settings_page() {
                 SITEPULSE_OPTION_UPTIME_HTTP_HEADERS,
                 SITEPULSE_OPTION_UPTIME_EXPECTED_CODES,
                 SITEPULSE_OPTION_LAST_LOAD_TIME,
+                SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS,
                 SITEPULSE_OPTION_CPU_ALERT_THRESHOLD,
+                SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD,
                 SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES,
                 SITEPULSE_OPTION_ALERT_INTERVAL,
                 // Clear stored alert recipients so the default (empty) list is restored on activation.
@@ -1241,6 +1306,10 @@ function sitepulse_settings_page() {
                 echo '<div class="notice notice-error is-dismissible"><p>' . esc_html__('Impossible de supprimer le journal de débogage. Vérifiez les permissions du fichier.', 'sitepulse') . '</p></div>';
             }
         }
+    }
+
+    if ($test_notice !== '') {
+        printf('<div class="notice notice-%1$s is-dismissible"><p>%2$s</p></div>', esc_attr($test_notice_class), $test_notice);
     }
     ?>
     <div class="wrap sitepulse-settings-wrap">
@@ -1586,14 +1655,38 @@ function sitepulse_settings_page() {
                             <p class="sitepulse-card-description"><?php esc_html_e("Entrez une adresse par ligne (ou séparées par des virgules). L'adresse e-mail de l'administrateur sera toujours incluse si elle est valide.", 'sitepulse'); ?></p>
                         </div>
                     </div>
+                    <?php
+                    $enabled_alert_channels = (array) get_option(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS, ['cpu', 'php_fatal']);
+                    $cpu_enabled           = in_array('cpu', $enabled_alert_channels, true);
+                    $php_enabled           = in_array('php_fatal', $enabled_alert_channels, true);
+                    ?>
                     <div class="sitepulse-module-card sitepulse-module-card--setting">
                         <div class="sitepulse-card-header">
                             <h3 class="sitepulse-card-title"><?php esc_html_e("Seuil d'alerte de charge CPU", 'sitepulse'); ?></h3>
                         </div>
                         <div class="sitepulse-card-body">
+                            <input type="hidden" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS); ?>[]" value="">
+                            <label class="sitepulse-toggle" for="sitepulse-alert-channel-cpu">
+                                <input type="checkbox" id="sitepulse-alert-channel-cpu" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS); ?>[]" value="cpu" <?php checked($cpu_enabled); ?>>
+                                <span><?php esc_html_e('Activer les alertes de charge CPU', 'sitepulse'); ?></span>
+                            </label>
                             <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>"><?php esc_html_e('Valeur déclenchant une alerte', 'sitepulse'); ?></label>
                             <input type="number" step="0.1" min="0" id="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>" value="<?php echo esc_attr(get_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 5)); ?>" class="small-text">
                             <p class="sitepulse-card-description"><?php esc_html_e('Une alerte e-mail est envoyée lorsque la charge moyenne sur 1 minute dépasse ce seuil multiplié par le nombre de cœurs détectés.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Alertes sur les erreurs PHP', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <label class="sitepulse-toggle" for="sitepulse-alert-channel-php">
+                                <input type="checkbox" id="sitepulse-alert-channel-php" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS); ?>[]" value="php_fatal" <?php checked($php_enabled); ?>>
+                                <span><?php esc_html_e('Activer les alertes sur les erreurs fatales', 'sitepulse'); ?></span>
+                            </label>
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD); ?>"><?php esc_html_e('Nombre de lignes fatales avant alerte', 'sitepulse'); ?></label>
+                            <input type="number" min="1" id="<?php echo esc_attr(SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD); ?>" value="<?php echo esc_attr(get_option(SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD, 1)); ?>" class="small-text">
+                            <p class="sitepulse-card-description"><?php esc_html_e('Déclenche une alerte lorsqu’au moins ce nombre de nouvelles entrées fatales est trouvé dans le journal.', 'sitepulse'); ?></p>
                         </div>
                     </div>
                     <div class="sitepulse-module-card sitepulse-module-card--setting">
@@ -1627,6 +1720,26 @@ function sitepulse_settings_page() {
                                 <?php endforeach; ?>
                             </select>
                             <p class="sitepulse-card-description"><?php esc_html_e('Détermine la fréquence des vérifications automatisées pour les alertes.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Tester la configuration', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <p class="sitepulse-card-description"><?php esc_html_e('Envoyez un e-mail de démonstration aux destinataires configurés pour vérifier l’acheminement.', 'sitepulse'); ?></p>
+                        </div>
+                        <div class="sitepulse-card-footer">
+                            <?php
+                            $test_url = add_query_arg(
+                                [
+                                    'action'   => 'sitepulse_send_alert_test',
+                                    '_wpnonce' => wp_create_nonce(SITEPULSE_NONCE_ACTION_ALERT_TEST),
+                                ],
+                                admin_url('admin-post.php')
+                            );
+                            ?>
+                            <button type="submit" class="button button-secondary" formaction="<?php echo esc_url($test_url); ?>" formmethod="post"><?php esc_html_e('Envoyer un test', 'sitepulse'); ?></button>
                         </div>
                     </div>
                 </div>
