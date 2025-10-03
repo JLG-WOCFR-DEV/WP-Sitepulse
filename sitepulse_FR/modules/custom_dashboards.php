@@ -10,6 +10,7 @@
 if (!defined('ABSPATH')) exit; // Exit if accessed directly.
 
 add_action('admin_enqueue_scripts', 'sitepulse_custom_dashboard_enqueue_assets');
+add_action('wp_ajax_sitepulse_save_dashboard_preferences', 'sitepulse_save_dashboard_preferences');
 
 /**
  * Registers the assets used by the SitePulse dashboard when the page is loaded.
@@ -124,6 +125,14 @@ function sitepulse_custom_dashboard_enqueue_assets($hook_suffix) {
         SITEPULSE_VERSION,
         true
     );
+
+    wp_register_script(
+        'sitepulse-dashboard-preferences',
+        SITEPULSE_URL . 'modules/js/sitepulse-dashboard-preferences.js',
+        ['jquery', 'jquery-ui-sortable'],
+        SITEPULSE_VERSION,
+        true
+    );
 }
 
 /**
@@ -226,6 +235,225 @@ function sitepulse_render_chart_summary($chart_id, $chart_data) {
         esc_attr($summary_id),
         implode('', $items)
     );
+}
+
+/**
+ * Returns the identifiers of the dashboard cards that can be customised.
+ *
+ * @return string[]
+ */
+function sitepulse_get_dashboard_card_keys() {
+    return ['speed', 'uptime', 'database', 'logs'];
+}
+
+/**
+ * Provides the default dashboard preferences for the supplied cards.
+ *
+ * @param string[]|null $allowed_cards Optional subset of cards to include.
+ *
+ * @return array{
+ *     order: string[],
+ *     visibility: array<string,bool>,
+ *     sizes: array<string,string>
+ * }
+ */
+function sitepulse_get_dashboard_default_preferences($allowed_cards = null) {
+    $card_keys = sitepulse_get_dashboard_card_keys();
+
+    if (is_array($allowed_cards) && !empty($allowed_cards)) {
+        $allowed_cards = array_values(array_filter(array_map('strval', $allowed_cards)));
+
+        if (!empty($allowed_cards)) {
+            $card_keys = array_values(array_unique(array_merge(
+                array_intersect($card_keys, $allowed_cards),
+                $allowed_cards
+            )));
+        }
+    }
+
+    $order = $card_keys;
+    $visibility = [];
+    $sizes = [];
+
+    foreach ($card_keys as $key) {
+        $visibility[$key] = true;
+        $sizes[$key] = 'medium';
+    }
+
+    return [
+        'order'      => $order,
+        'visibility' => $visibility,
+        'sizes'      => $sizes,
+    ];
+}
+
+/**
+ * Sanitizes a set of dashboard preferences.
+ *
+ * @param array            $raw_preferences Potentially unsanitized preferences.
+ * @param string[]|null    $allowed_cards   Optional subset of cards to accept.
+ *
+ * @return array{
+ *     order: string[],
+ *     visibility: array<string,bool>,
+ *     sizes: array<string,string>
+ * }
+ */
+function sitepulse_sanitize_dashboard_preferences($raw_preferences, $allowed_cards = null) {
+    $defaults = sitepulse_get_dashboard_default_preferences($allowed_cards);
+    $allowed_cards = $defaults['order'];
+    $allowed_sizes = ['small', 'medium', 'large'];
+
+    $order = [];
+
+    if (isset($raw_preferences['order']) && is_array($raw_preferences['order'])) {
+        foreach ($raw_preferences['order'] as $card_key) {
+            $card_key = sanitize_key((string) $card_key);
+
+            if ($card_key !== '' && in_array($card_key, $allowed_cards, true) && !in_array($card_key, $order, true)) {
+                $order[] = $card_key;
+            }
+        }
+    }
+
+    foreach ($allowed_cards as $card_key) {
+        if (!in_array($card_key, $order, true)) {
+            $order[] = $card_key;
+        }
+    }
+
+    $visibility = [];
+
+    if (isset($raw_preferences['visibility']) && is_array($raw_preferences['visibility'])) {
+        foreach ($allowed_cards as $card_key) {
+            if (array_key_exists($card_key, $raw_preferences['visibility'])) {
+                $visibility[$card_key] = filter_var(
+                    $raw_preferences['visibility'][$card_key],
+                    FILTER_VALIDATE_BOOLEAN,
+                    FILTER_NULL_ON_FAILURE
+                );
+
+                if ($visibility[$card_key] === null) {
+                    $visibility[$card_key] = $defaults['visibility'][$card_key];
+                }
+
+                continue;
+            }
+
+            $visibility[$card_key] = $defaults['visibility'][$card_key];
+        }
+    } else {
+        $visibility = $defaults['visibility'];
+    }
+
+    $sizes = [];
+
+    if (isset($raw_preferences['sizes']) && is_array($raw_preferences['sizes'])) {
+        foreach ($allowed_cards as $card_key) {
+            if (array_key_exists($card_key, $raw_preferences['sizes'])) {
+                $size_value = strtolower((string) $raw_preferences['sizes'][$card_key]);
+
+                if (!in_array($size_value, $allowed_sizes, true)) {
+                    $size_value = $defaults['sizes'][$card_key];
+                }
+
+                $sizes[$card_key] = $size_value;
+                continue;
+            }
+
+            $sizes[$card_key] = $defaults['sizes'][$card_key];
+        }
+    } else {
+        $sizes = $defaults['sizes'];
+    }
+
+    return [
+        'order'      => $order,
+        'visibility' => $visibility,
+        'sizes'      => $sizes,
+    ];
+}
+
+/**
+ * Returns the saved dashboard preferences for a given user.
+ *
+ * @param int              $user_id       Optional user identifier.
+ * @param string[]|null    $allowed_cards Optional subset of cards to accept.
+ *
+ * @return array{
+ *     order: string[],
+ *     visibility: array<string,bool>,
+ *     sizes: array<string,string>
+ * }
+ */
+function sitepulse_get_dashboard_preferences($user_id = 0, $allowed_cards = null) {
+    if (!is_int($user_id) || $user_id <= 0) {
+        $user_id = get_current_user_id();
+    }
+
+    $stored_preferences = [];
+
+    if ($user_id > 0) {
+        $stored_preferences = get_user_meta($user_id, 'sitepulse_dashboard_preferences', true);
+
+        if (!is_array($stored_preferences)) {
+            $stored_preferences = [];
+        }
+    }
+
+    return sitepulse_sanitize_dashboard_preferences($stored_preferences, $allowed_cards);
+}
+
+/**
+ * Persists dashboard preferences for the supplied user.
+ *
+ * @param int              $user_id       User identifier.
+ * @param array            $preferences   Preferences to store.
+ * @param string[]|null    $allowed_cards Optional subset of cards to accept.
+ *
+ * @return bool True on success, false otherwise.
+ */
+function sitepulse_update_dashboard_preferences($user_id, $preferences, $allowed_cards = null) {
+    $user_id = (int) $user_id;
+
+    if ($user_id <= 0) {
+        return false;
+    }
+
+    $sanitized = sitepulse_sanitize_dashboard_preferences($preferences, $allowed_cards);
+
+    return (bool) update_user_meta($user_id, 'sitepulse_dashboard_preferences', $sanitized);
+}
+
+/**
+ * Handles AJAX requests to store dashboard preferences for the current user.
+ */
+function sitepulse_save_dashboard_preferences() {
+    if (!current_user_can(sitepulse_get_capability())) {
+        wp_send_json_error(['message' => __('Vous n’avez pas les permissions nécessaires pour modifier ces préférences.', 'sitepulse')], 403);
+    }
+
+    $nonce = isset($_POST['nonce']) ? sanitize_text_field((string) wp_unslash($_POST['nonce'])) : '';
+
+    if (!wp_verify_nonce($nonce, 'sitepulse_dashboard_preferences')) {
+        wp_send_json_error(['message' => __('Jeton de sécurité invalide. Merci de recharger la page.', 'sitepulse')], 400);
+    }
+
+    $raw_preferences = [
+        'order'      => isset($_POST['order']) ? (array) wp_unslash($_POST['order']) : [],
+        'visibility' => isset($_POST['visibility']) ? (array) wp_unslash($_POST['visibility']) : [],
+        'sizes'      => isset($_POST['sizes']) ? (array) wp_unslash($_POST['sizes']) : [],
+    ];
+
+    $allowed_cards = sitepulse_get_dashboard_card_keys();
+    $preferences = sitepulse_sanitize_dashboard_preferences($raw_preferences, $allowed_cards);
+    $user_id = get_current_user_id();
+
+    if (!sitepulse_update_dashboard_preferences($user_id, $preferences, $allowed_cards)) {
+        wp_send_json_error(['message' => __('Impossible d’enregistrer les préférences pour le moment.', 'sitepulse')], 500);
+    }
+
+    wp_send_json_success(['preferences' => $preferences]);
 }
 
 /**
@@ -1614,6 +1842,276 @@ function sitepulse_custom_dashboards_page() {
         ];
     }
 
+    $allowed_card_keys = sitepulse_get_dashboard_card_keys();
+    $dashboard_preferences = sitepulse_get_dashboard_preferences(get_current_user_id(), $allowed_card_keys);
+    $card_definitions = [
+        'speed' => [
+            'label'        => __('Speed', 'sitepulse'),
+            'default_size' => 'medium',
+            'available'    => ($is_speed_enabled && $speed_card !== null),
+            'content'      => '',
+        ],
+        'uptime' => [
+            'label'        => __('Uptime', 'sitepulse'),
+            'default_size' => 'medium',
+            'available'    => ($is_uptime_enabled && $uptime_card !== null),
+            'content'      => '',
+        ],
+        'database' => [
+            'label'        => __('Database Health', 'sitepulse'),
+            'default_size' => 'medium',
+            'available'    => ($is_database_enabled && $database_card !== null),
+            'content'      => '',
+        ],
+        'logs' => [
+            'label'        => __('Error Log', 'sitepulse'),
+            'default_size' => 'medium',
+            'available'    => ($is_logs_enabled && $logs_card !== null),
+            'content'      => '',
+        ],
+    ];
+
+    if (!empty($card_definitions['speed']['available'])) {
+        ob_start();
+        ?>
+        <div class="sitepulse-card-header">
+            <h2><span class="dashicons dashicons-performance"></span> <?php esc_html_e('Speed', 'sitepulse'); ?></h2>
+            <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-speed')); ?>" class="button button-secondary"><?php esc_html_e('Details', 'sitepulse'); ?></a>
+        </div>
+        <p class="sitepulse-card-subtitle"><?php esc_html_e('Backend PHP processing time captured during recent scans.', 'sitepulse'); ?></p>
+        <?php
+            $speed_summary_html = sitepulse_render_chart_summary('sitepulse-speed-chart', $speed_chart);
+            $speed_summary_id = sitepulse_get_chart_summary_id('sitepulse-speed-chart');
+            $speed_canvas_describedby = ['sitepulse-speed-description'];
+
+            if ('' !== $speed_summary_html) {
+                $speed_canvas_describedby[] = $speed_summary_id;
+            }
+        ?>
+        <div class="sitepulse-chart-container">
+            <canvas id="sitepulse-speed-chart" aria-describedby="<?php echo esc_attr(implode(' ', $speed_canvas_describedby)); ?>"></canvas>
+            <?php echo $speed_summary_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+        </div>
+        <?php $speed_status_meta = $get_status_meta($speed_card['status']); ?>
+        <p class="sitepulse-metric">
+            <span class="status-badge <?php echo esc_attr($speed_card['status']); ?>" aria-hidden="true">
+                <span class="status-icon"><?php echo esc_html($speed_status_meta['icon']); ?></span>
+                <span class="status-text"><?php echo esc_html($speed_status_meta['label']); ?></span>
+            </span>
+            <span class="screen-reader-text"><?php echo esc_html($speed_status_meta['sr']); ?></span>
+            <span class="sitepulse-metric-value"><?php echo esc_html($speed_card['display']); ?></span>
+        </p>
+        <p id="sitepulse-speed-description" class="description"><?php printf(
+            esc_html__('Des temps inférieurs à %1$d ms indiquent une excellente réponse PHP. Au-delà de %2$d ms, envisagez d’auditer vos plugins ou votre hébergement.', 'sitepulse'),
+            (int) $speed_warning_threshold,
+            (int) $speed_critical_threshold
+        ); ?></p>
+        <?php
+        $card_definitions['speed']['content'] = ob_get_clean();
+    }
+
+    if (!empty($card_definitions['uptime']['available'])) {
+        ob_start();
+        ?>
+        <div class="sitepulse-card-header">
+            <h2><span class="dashicons dashicons-chart-bar"></span> <?php esc_html_e('Uptime', 'sitepulse'); ?></h2>
+            <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-uptime')); ?>" class="button button-secondary"><?php esc_html_e('Details', 'sitepulse'); ?></a>
+        </div>
+        <p class="sitepulse-card-subtitle"><?php esc_html_e('Availability for the last 30 hourly checks.', 'sitepulse'); ?></p>
+        <?php
+            $uptime_summary_html = sitepulse_render_chart_summary('sitepulse-uptime-chart', $uptime_chart);
+            $uptime_summary_id = sitepulse_get_chart_summary_id('sitepulse-uptime-chart');
+            $uptime_canvas_describedby = ['sitepulse-uptime-description'];
+
+            if ('' !== $uptime_summary_html) {
+                $uptime_canvas_describedby[] = $uptime_summary_id;
+            }
+        ?>
+        <div class="sitepulse-chart-container">
+            <canvas id="sitepulse-uptime-chart" aria-describedby="<?php echo esc_attr(implode(' ', $uptime_canvas_describedby)); ?>"></canvas>
+            <?php echo $uptime_summary_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+        </div>
+        <?php $uptime_status_meta = $get_status_meta($uptime_card['status']); ?>
+        <p class="sitepulse-metric">
+            <span class="status-badge <?php echo esc_attr($uptime_card['status']); ?>" aria-hidden="true">
+                <span class="status-icon"><?php echo esc_html($uptime_status_meta['icon']); ?></span>
+                <span class="status-text"><?php echo esc_html($uptime_status_meta['label']); ?></span>
+            </span>
+            <span class="screen-reader-text"><?php echo esc_html($uptime_status_meta['sr']); ?></span>
+            <span class="sitepulse-metric-value"><?php echo esc_html(round($uptime_card['percentage'], 2)); ?><span class="sitepulse-metric-unit"><?php esc_html_e('%', 'sitepulse'); ?></span></span>
+        </p>
+        <p id="sitepulse-uptime-description" class="description"><?php esc_html_e('Each bar shows whether the site responded during the scheduled availability probe.', 'sitepulse'); ?></p>
+        <?php
+        $card_definitions['uptime']['content'] = ob_get_clean();
+    }
+
+    if (!empty($card_definitions['database']['available'])) {
+        ob_start();
+        ?>
+        <div class="sitepulse-card-header">
+            <h2><span class="dashicons dashicons-database"></span> <?php esc_html_e('Database Health', 'sitepulse'); ?></h2>
+            <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-db')); ?>" class="button button-secondary"><?php esc_html_e('Optimize', 'sitepulse'); ?></a>
+        </div>
+        <p class="sitepulse-card-subtitle"><?php esc_html_e('Post revision volume compared to the recommended limit.', 'sitepulse'); ?></p>
+        <?php
+            $database_summary_html = sitepulse_render_chart_summary('sitepulse-database-chart', $database_chart);
+            $database_summary_id = sitepulse_get_chart_summary_id('sitepulse-database-chart');
+            $database_canvas_describedby = ['sitepulse-database-description'];
+
+            if ('' !== $database_summary_html) {
+                $database_canvas_describedby[] = $database_summary_id;
+            }
+        ?>
+        <div class="sitepulse-chart-container">
+            <canvas id="sitepulse-database-chart" aria-describedby="<?php echo esc_attr(implode(' ', $database_canvas_describedby)); ?>"></canvas>
+            <?php echo $database_summary_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+        </div>
+        <?php $database_status_meta = $get_status_meta($database_card['status']); ?>
+        <p class="sitepulse-metric">
+            <span class="status-badge <?php echo esc_attr($database_card['status']); ?>" aria-hidden="true">
+                <span class="status-icon"><?php echo esc_html($database_status_meta['icon']); ?></span>
+                <span class="status-text"><?php echo esc_html($database_status_meta['label']); ?></span>
+            </span>
+            <span class="screen-reader-text"><?php echo esc_html($database_status_meta['sr']); ?></span>
+            <span class="sitepulse-metric-value">
+                <?php echo esc_html(number_format_i18n($database_card['revisions'])); ?>
+                <span class="sitepulse-metric-unit"><?php esc_html_e('revisions', 'sitepulse'); ?></span>
+            </span>
+        </p>
+        <p id="sitepulse-database-description" class="description"><?php printf(esc_html__('Keep revisions under %d to avoid bloating the posts table. Cleaning them is safe and reversible with backups.', 'sitepulse'), (int) $database_card['limit']); ?></p>
+        <?php
+        $card_definitions['database']['content'] = ob_get_clean();
+    }
+
+    if (!empty($card_definitions['logs']['available'])) {
+        ob_start();
+        ?>
+        <div class="sitepulse-card-header">
+            <h2><span class="dashicons dashicons-hammer"></span> <?php esc_html_e('Error Log', 'sitepulse'); ?></h2>
+            <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-logs')); ?>" class="button button-secondary"><?php esc_html_e('Analyze', 'sitepulse'); ?></a>
+        </div>
+        <p class="sitepulse-card-subtitle"><?php esc_html_e('Breakdown of the most recent entries in the WordPress debug log.', 'sitepulse'); ?></p>
+        <div class="sitepulse-chart-container">
+            <canvas id="sitepulse-log-chart" aria-describedby="sitepulse-log-description"></canvas>
+        </div>
+        <?php $logs_status_meta = $get_status_meta($logs_card['status']); ?>
+        <p class="sitepulse-metric">
+            <span class="status-badge <?php echo esc_attr($logs_card['status']); ?>" aria-hidden="true">
+                <span class="status-icon"><?php echo esc_html($logs_status_meta['icon']); ?></span>
+                <span class="status-text"><?php echo esc_html($logs_status_meta['label']); ?></span>
+            </span>
+            <span class="screen-reader-text"><?php echo esc_html($logs_status_meta['sr']); ?></span>
+            <span class="sitepulse-metric-value"><?php echo esc_html($logs_card['summary']); ?></span>
+        </p>
+        <ul class="sitepulse-legend">
+            <li>
+                <span class="label"><span class="badge" style="background-color: <?php echo esc_attr($palette['red']); ?>;"></span><?php esc_html_e('Fatal errors', 'sitepulse'); ?></span>
+                <span class="value"><?php echo esc_html(number_format_i18n($logs_card['counts']['fatal'])); ?></span>
+            </li>
+            <li>
+                <span class="label"><span class="badge" style="background-color: <?php echo esc_attr($palette['amber']); ?>;"></span><?php esc_html_e('Warnings', 'sitepulse'); ?></span>
+                <span class="value"><?php echo esc_html(number_format_i18n($logs_card['counts']['warning'])); ?></span>
+            </li>
+            <li>
+                <span class="label"><span class="badge" style="background-color: <?php echo esc_attr($palette['blue']); ?>;"></span><?php esc_html_e('Notices', 'sitepulse'); ?></span>
+                <span class="value"><?php echo esc_html(number_format_i18n($logs_card['counts']['notice'])); ?></span>
+            </li>
+            <li>
+                <span class="label"><span class="badge" style="background-color: <?php echo esc_attr($palette['purple']); ?>;"></span><?php esc_html_e('Deprecated notices', 'sitepulse'); ?></span>
+                <span class="value"><?php echo esc_html(number_format_i18n($logs_card['counts']['deprecated'])); ?></span>
+            </li>
+        </ul>
+        <p id="sitepulse-log-description" class="description"><?php esc_html_e('Use the analyzer to inspect full stack traces and silence recurring issues.', 'sitepulse'); ?></p>
+        <?php
+        $card_definitions['logs']['content'] = ob_get_clean();
+    }
+
+    $render_order = array_values(array_unique(array_merge(
+        isset($dashboard_preferences['order']) && is_array($dashboard_preferences['order']) ? $dashboard_preferences['order'] : [],
+        array_keys($card_definitions)
+    )));
+
+    $rendered_cards = [];
+    $preferences_panel_items = [];
+    $cards_for_localization = [];
+    $visible_cards_count = 0;
+    $allowed_sizes = ['small', 'medium', 'large'];
+
+    foreach ($render_order as $card_key) {
+        if (!isset($card_definitions[$card_key])) {
+            continue;
+        }
+
+        $definition = $card_definitions[$card_key];
+        $is_available = !empty($definition['available']);
+        $size = isset($dashboard_preferences['sizes'][$card_key]) ? strtolower((string) $dashboard_preferences['sizes'][$card_key]) : $definition['default_size'];
+
+        if (!in_array($size, $allowed_sizes, true)) {
+            $size = $definition['default_size'];
+        }
+
+        $is_visible = isset($dashboard_preferences['visibility'][$card_key])
+            ? (bool) $dashboard_preferences['visibility'][$card_key]
+            : true;
+
+        if (!$is_available) {
+            $is_visible = false;
+        }
+
+        $should_render = $is_available && $definition['content'] !== '';
+
+        if ($should_render && $is_visible) {
+            $visible_cards_count++;
+        }
+
+        $rendered_cards[$card_key] = [
+            'key'           => $card_key,
+            'content'       => $definition['content'],
+            'size'          => $size,
+            'visible'       => $is_visible,
+            'should_render' => $should_render,
+            'available'     => $is_available,
+            'label'         => $definition['label'],
+        ];
+
+        $preferences_panel_items[$card_key] = [
+            'label'     => $definition['label'],
+            'available' => $is_available,
+            'visible'   => $is_visible,
+            'size'      => $size,
+        ];
+
+        $cards_for_localization[$card_key] = [
+            'label'       => $definition['label'],
+            'available'   => $is_available,
+            'defaultSize' => $definition['default_size'],
+        ];
+    }
+
+    if (wp_script_is('sitepulse-dashboard-preferences', 'registered')) {
+        wp_localize_script('sitepulse-dashboard-preferences', 'SitePulsePreferencesData', [
+            'ajaxUrl'      => admin_url('admin-ajax.php'),
+            'nonce'        => wp_create_nonce('sitepulse_dashboard_preferences'),
+            'preferences'  => $dashboard_preferences,
+            'cards'        => $cards_for_localization,
+            'sizes'        => [
+                'small'  => __('Compacte', 'sitepulse'),
+                'medium' => __('Standard', 'sitepulse'),
+                'large'  => __('Étendue', 'sitepulse'),
+            ],
+            'strings'      => [
+                'panelDescription' => __('Réorganisez les cartes en les faisant glisser et choisissez celles à afficher.', 'sitepulse'),
+                'toggleLabel'      => __('Afficher', 'sitepulse'),
+                'sizeLabel'        => __('Taille', 'sitepulse'),
+                'saveSuccess'      => __('Préférences enregistrées.', 'sitepulse'),
+                'saveError'        => __('Impossible d’enregistrer les préférences.', 'sitepulse'),
+                'moduleDisabled'   => __('Module requis pour afficher cette carte.', 'sitepulse'),
+                'changesSaved'     => __('Les préférences du tableau de bord ont été mises à jour.', 'sitepulse'),
+            ],
+        ]);
+        wp_enqueue_script('sitepulse-dashboard-preferences');
+    }
+
     ?>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-dashboard"></span> <?php esc_html_e('SitePulse Dashboard', 'sitepulse'); ?></h1>
@@ -1642,153 +2140,83 @@ function sitepulse_custom_dashboards_page() {
             </nav>
         <?php endif; ?>
 
-        <div class="sitepulse-grid">
-            <?php if ($is_speed_enabled && $speed_card !== null): ?>
-                <div class="sitepulse-card">
-                    <div class="sitepulse-card-header">
-                        <h2><span class="dashicons dashicons-performance"></span> <?php esc_html_e('Speed', 'sitepulse'); ?></h2>
-                        <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-speed')); ?>" class="button button-secondary"><?php esc_html_e('Details', 'sitepulse'); ?></a>
-                    </div>
-                    <p class="sitepulse-card-subtitle"><?php esc_html_e('Backend PHP processing time captured during recent scans.', 'sitepulse'); ?></p>
-                    <?php
-                        $speed_summary_html = sitepulse_render_chart_summary('sitepulse-speed-chart', $speed_chart);
-                        $speed_summary_id = sitepulse_get_chart_summary_id('sitepulse-speed-chart');
-                        $speed_canvas_describedby = ['sitepulse-speed-description'];
-
-                        if ('' !== $speed_summary_html) {
-                            $speed_canvas_describedby[] = $speed_summary_id;
+        <div class="sitepulse-dashboard-preferences">
+            <button type="button" class="button button-secondary sitepulse-preferences__toggle" aria-expanded="false" aria-controls="sitepulse-preferences-panel">
+                <?php esc_html_e('Personnaliser l\'affichage', 'sitepulse'); ?>
+            </button>
+            <div id="sitepulse-preferences-panel" class="sitepulse-preferences__panel" hidden tabindex="-1">
+                <p class="sitepulse-preferences__description"><?php esc_html_e('Réorganisez les cartes en les faisant glisser et choisissez celles à afficher.', 'sitepulse'); ?></p>
+                <ul class="sitepulse-preferences__list" data-sitepulse-preferences-list>
+                    <?php foreach ($render_order as $card_key) :
+                        if (!isset($preferences_panel_items[$card_key])) {
+                            continue;
                         }
+
+                        $item = $preferences_panel_items[$card_key];
                     ?>
-                    <div class="sitepulse-chart-container">
-                        <canvas id="sitepulse-speed-chart" aria-describedby="<?php echo esc_attr(implode(' ', $speed_canvas_describedby)); ?>"></canvas>
-                        <?php echo $speed_summary_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
-                    </div>
-                    <?php $speed_status_meta = $get_status_meta($speed_card['status']); ?>
-                    <p class="sitepulse-metric">
-                        <span class="status-badge <?php echo esc_attr($speed_card['status']); ?>" aria-hidden="true">
-                            <span class="status-icon"><?php echo esc_html($speed_status_meta['icon']); ?></span>
-                            <span class="status-text"><?php echo esc_html($speed_status_meta['label']); ?></span>
-                        </span>
-                        <span class="screen-reader-text"><?php echo esc_html($speed_status_meta['sr']); ?></span>
-                        <span class="sitepulse-metric-value"><?php echo esc_html($speed_card['display']); ?></span>
-                    </p>
-                    <p id="sitepulse-speed-description" class="description"><?php printf(
-                        esc_html__('Des temps inférieurs à %1$d ms indiquent une excellente réponse PHP. Au-delà de %2$d ms, envisagez d’auditer vos plugins ou votre hébergement.', 'sitepulse'),
-                        (int) $speed_warning_threshold,
-                        (int) $speed_critical_threshold
-                    ); ?></p>
-                </div>
-            <?php endif; ?>
-
-            <?php if ($is_uptime_enabled && $uptime_card !== null): ?>
-                <div class="sitepulse-card">
-                    <div class="sitepulse-card-header">
-                        <h2><span class="dashicons dashicons-chart-bar"></span> <?php esc_html_e('Uptime', 'sitepulse'); ?></h2>
-                        <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-uptime')); ?>" class="button button-secondary"><?php esc_html_e('Details', 'sitepulse'); ?></a>
-                    </div>
-                    <p class="sitepulse-card-subtitle"><?php esc_html_e('Availability for the last 30 hourly checks.', 'sitepulse'); ?></p>
-                    <?php
-                        $uptime_summary_html = sitepulse_render_chart_summary('sitepulse-uptime-chart', $uptime_chart);
-                        $uptime_summary_id = sitepulse_get_chart_summary_id('sitepulse-uptime-chart');
-                        $uptime_canvas_describedby = ['sitepulse-uptime-description'];
-
-                        if ('' !== $uptime_summary_html) {
-                            $uptime_canvas_describedby[] = $uptime_summary_id;
-                        }
-                    ?>
-                    <div class="sitepulse-chart-container">
-                        <canvas id="sitepulse-uptime-chart" aria-describedby="<?php echo esc_attr(implode(' ', $uptime_canvas_describedby)); ?>"></canvas>
-                        <?php echo $uptime_summary_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
-                    </div>
-                    <?php $uptime_status_meta = $get_status_meta($uptime_card['status']); ?>
-                    <p class="sitepulse-metric">
-                        <span class="status-badge <?php echo esc_attr($uptime_card['status']); ?>" aria-hidden="true">
-                            <span class="status-icon"><?php echo esc_html($uptime_status_meta['icon']); ?></span>
-                            <span class="status-text"><?php echo esc_html($uptime_status_meta['label']); ?></span>
-                        </span>
-                        <span class="screen-reader-text"><?php echo esc_html($uptime_status_meta['sr']); ?></span>
-                        <span class="sitepulse-metric-value"><?php echo esc_html(round($uptime_card['percentage'], 2)); ?><span class="sitepulse-metric-unit"><?php esc_html_e('%', 'sitepulse'); ?></span></span>
-                    </p>
-                    <p id="sitepulse-uptime-description" class="description"><?php esc_html_e('Each bar shows whether the site responded during the scheduled availability probe.', 'sitepulse'); ?></p>
-                </div>
-            <?php endif; ?>
-
-            <?php if ($is_database_enabled && $database_card !== null): ?>
-                <div class="sitepulse-card">
-                    <div class="sitepulse-card-header">
-                        <h2><span class="dashicons dashicons-database"></span> <?php esc_html_e('Database Health', 'sitepulse'); ?></h2>
-                        <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-db')); ?>" class="button button-secondary"><?php esc_html_e('Optimize', 'sitepulse'); ?></a>
-                    </div>
-                    <p class="sitepulse-card-subtitle"><?php esc_html_e('Post revision volume compared to the recommended limit.', 'sitepulse'); ?></p>
-                    <?php
-                        $database_summary_html = sitepulse_render_chart_summary('sitepulse-database-chart', $database_chart);
-                        $database_summary_id = sitepulse_get_chart_summary_id('sitepulse-database-chart');
-                        $database_canvas_describedby = ['sitepulse-database-description'];
-
-                        if ('' !== $database_summary_html) {
-                            $database_canvas_describedby[] = $database_summary_id;
-                        }
-                    ?>
-                    <div class="sitepulse-chart-container">
-                        <canvas id="sitepulse-database-chart" aria-describedby="<?php echo esc_attr(implode(' ', $database_canvas_describedby)); ?>"></canvas>
-                        <?php echo $database_summary_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
-                    </div>
-                    <?php $database_status_meta = $get_status_meta($database_card['status']); ?>
-                    <p class="sitepulse-metric">
-                        <span class="status-badge <?php echo esc_attr($database_card['status']); ?>" aria-hidden="true">
-                            <span class="status-icon"><?php echo esc_html($database_status_meta['icon']); ?></span>
-                            <span class="status-text"><?php echo esc_html($database_status_meta['label']); ?></span>
-                        </span>
-                        <span class="screen-reader-text"><?php echo esc_html($database_status_meta['sr']); ?></span>
-                        <span class="sitepulse-metric-value">
-                            <?php echo esc_html(number_format_i18n($database_card['revisions'])); ?>
-                            <span class="sitepulse-metric-unit"><?php esc_html_e('revisions', 'sitepulse'); ?></span>
-                        </span>
-                    </p>
-                    <p id="sitepulse-database-description" class="description"><?php printf(esc_html__('Keep revisions under %d to avoid bloating the posts table. Cleaning them is safe and reversible with backups.', 'sitepulse'), (int) $database_card['limit']); ?></p>
-                </div>
-            <?php endif; ?>
-
-            <?php if ($is_logs_enabled && $logs_card !== null): ?>
-                <div class="sitepulse-card">
-                    <div class="sitepulse-card-header">
-                        <h2><span class="dashicons dashicons-hammer"></span> <?php esc_html_e('Error Log', 'sitepulse'); ?></h2>
-                        <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-logs')); ?>" class="button button-secondary"><?php esc_html_e('Analyze', 'sitepulse'); ?></a>
-                    </div>
-                    <p class="sitepulse-card-subtitle"><?php esc_html_e('Breakdown of the most recent entries in the WordPress debug log.', 'sitepulse'); ?></p>
-                    <div class="sitepulse-chart-container">
-                        <canvas id="sitepulse-log-chart" aria-describedby="sitepulse-log-description"></canvas>
-                    </div>
-                    <?php $logs_status_meta = $get_status_meta($logs_card['status']); ?>
-                    <p class="sitepulse-metric">
-                        <span class="status-badge <?php echo esc_attr($logs_card['status']); ?>" aria-hidden="true">
-                            <span class="status-icon"><?php echo esc_html($logs_status_meta['icon']); ?></span>
-                            <span class="status-text"><?php echo esc_html($logs_status_meta['label']); ?></span>
-                        </span>
-                        <span class="screen-reader-text"><?php echo esc_html($logs_status_meta['sr']); ?></span>
-                        <span class="sitepulse-metric-value"><?php echo esc_html($logs_card['summary']); ?></span>
-                    </p>
-                    <ul class="sitepulse-legend">
-                        <li>
-                            <span class="label"><span class="badge" style="background-color: <?php echo esc_attr($palette['red']); ?>;"></span><?php esc_html_e('Fatal errors', 'sitepulse'); ?></span>
-                            <span class="value"><?php echo esc_html(number_format_i18n($logs_card['counts']['fatal'])); ?></span>
+                        <li class="sitepulse-preferences__item<?php echo !$item['available'] ? ' is-disabled' : ''; ?>" data-card-key="<?php echo esc_attr($card_key); ?>" data-card-enabled="<?php echo $item['available'] ? '1' : '0'; ?>">
+                            <span class="sitepulse-preferences__drag-handle" aria-hidden="true"></span>
+                            <div class="sitepulse-preferences__details">
+                                <span class="sitepulse-preferences__label"><?php echo esc_html($item['label']); ?></span>
+                                <?php if (!$item['available']) : ?>
+                                    <span class="sitepulse-preferences__status"><?php esc_html_e('Module requis pour afficher cette carte.', 'sitepulse'); ?></span>
+                                <?php endif; ?>
+                                <div class="sitepulse-preferences__controls">
+                                    <label class="sitepulse-preferences__control">
+                                        <input type="checkbox" class="sitepulse-preferences__visibility" <?php checked(!empty($item['visible'])); ?> <?php disabled(!$item['available']); ?> />
+                                        <span><?php esc_html_e('Afficher', 'sitepulse'); ?></span>
+                                    </label>
+                                    <label class="sitepulse-preferences__control sitepulse-preferences__control--size">
+                                        <span class="sitepulse-preferences__control-label"><?php esc_html_e('Taille', 'sitepulse'); ?></span>
+                                        <span class="screen-reader-text"><?php printf(esc_html__('Taille de la carte %s', 'sitepulse'), $item['label']); ?></span>
+                                        <select class="sitepulse-preferences__size" <?php disabled(!$item['available']); ?>>
+                                            <option value="small" <?php selected($item['size'], 'small'); ?>><?php esc_html_e('Compacte', 'sitepulse'); ?></option>
+                                            <option value="medium" <?php selected($item['size'], 'medium'); ?>><?php esc_html_e('Standard', 'sitepulse'); ?></option>
+                                            <option value="large" <?php selected($item['size'], 'large'); ?>><?php esc_html_e('Étendue', 'sitepulse'); ?></option>
+                                        </select>
+                                    </label>
+                                </div>
+                            </div>
                         </li>
-                        <li>
-                            <span class="label"><span class="badge" style="background-color: <?php echo esc_attr($palette['amber']); ?>;"></span><?php esc_html_e('Warnings', 'sitepulse'); ?></span>
-                            <span class="value"><?php echo esc_html(number_format_i18n($logs_card['counts']['warning'])); ?></span>
-                        </li>
-                        <li>
-                            <span class="label"><span class="badge" style="background-color: <?php echo esc_attr($palette['blue']); ?>;"></span><?php esc_html_e('Notices', 'sitepulse'); ?></span>
-                            <span class="value"><?php echo esc_html(number_format_i18n($logs_card['counts']['notice'])); ?></span>
-                        </li>
-                        <li>
-                            <span class="label"><span class="badge" style="background-color: <?php echo esc_attr($palette['purple']); ?>;"></span><?php esc_html_e('Deprecated notices', 'sitepulse'); ?></span>
-                            <span class="value"><?php echo esc_html(number_format_i18n($logs_card['counts']['deprecated'])); ?></span>
-                        </li>
-                    </ul>
-                    <p id="sitepulse-log-description" class="description"><?php esc_html_e('Use the analyzer to inspect full stack traces and silence recurring issues.', 'sitepulse'); ?></p>
+                    <?php endforeach; ?>
+                </ul>
+                <div class="sitepulse-preferences__notice is-hidden" role="status" aria-live="polite"></div>
+                <div class="sitepulse-preferences__actions">
+                    <button type="button" class="button button-primary sitepulse-preferences__save"><?php esc_html_e('Enregistrer', 'sitepulse'); ?></button>
+                    <button type="button" class="button sitepulse-preferences__cancel"><?php esc_html_e('Annuler', 'sitepulse'); ?></button>
                 </div>
-            <?php endif; ?>
+            </div>
+        </div>
+
+        <div class="sitepulse-grid" data-sitepulse-card-grid>
+            <?php foreach ($render_order as $card_key) :
+                if (!isset($rendered_cards[$card_key])) {
+                    continue;
+                }
+
+                $card = $rendered_cards[$card_key];
+
+                if (!$card['should_render']) {
+                    continue;
+                }
+
+                $card_classes = ['sitepulse-card', 'sitepulse-card--' . $card['size']];
+
+                if (!$card['visible']) {
+                    $card_classes[] = 'sitepulse-card--is-hidden';
+                }
+            ?>
+                <div class="<?php echo esc_attr(implode(' ', $card_classes)); ?>"
+                    data-card-key="<?php echo esc_attr($card['key']); ?>"
+                    data-card-size="<?php echo esc_attr($card['size']); ?>"
+                    data-card-enabled="<?php echo $card['available'] ? '1' : '0'; ?>"<?php if (!$card['visible']) { echo ' hidden aria-hidden="true"'; } ?>>
+                    <?php echo $card['content']; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+                </div>
+            <?php endforeach; ?>
+        </div>
+        <div class="sitepulse-empty-state" data-sitepulse-empty-state <?php echo ($visible_cards_count === 0) ? '' : 'hidden'; ?>>
+            <h2><?php esc_html_e('Votre tableau de bord est vide', 'sitepulse'); ?></h2>
+            <p><?php esc_html_e('Utilisez le bouton « Personnaliser l’affichage » pour sélectionner des cartes.', 'sitepulse'); ?></p>
         </div>
     </div>
     <?php
