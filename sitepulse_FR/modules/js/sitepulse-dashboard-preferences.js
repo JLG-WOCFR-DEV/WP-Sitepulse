@@ -98,14 +98,10 @@
     }
 
     function closePanel(focusTarget) {
-        lastActiveElement = focusTarget || document.activeElement || null;
+        rememberActiveElement(focusTarget);
 
         panel.setAttribute('hidden', 'hidden');
         toggleButton.setAttribute('aria-expanded', 'false');
-
-        if (!isFocusableElement(lastActiveElement) || (panel.contains(lastActiveElement))) {
-            lastActiveElement = toggleButton;
-        }
 
         focusAfterTransition(() => {
             if (isFocusableElement(lastActiveElement)) {
@@ -114,6 +110,17 @@
 
             lastActiveElement = null;
         });
+    }
+
+    function rememberActiveElement(focusTarget) {
+        const activeElement = focusTarget || document.activeElement || lastActiveElement;
+
+        if (isFocusableElement(activeElement) && !panel.contains(activeElement)) {
+            lastActiveElement = activeElement;
+            return;
+        }
+
+        lastActiveElement = toggleButton;
     }
 
     function normaliseState(prefs) {
