@@ -1315,9 +1315,34 @@ function sitepulse_settings_page() {
     <div class="wrap sitepulse-settings-wrap">
         <h1><?php esc_html_e('Réglages de SitePulse', 'sitepulse'); ?></h1>
         <p class="sitepulse-settings-intro"><?php esc_html_e('Activez les modules qui vous intéressent et ajustez les seuils clés pour votre surveillance.', 'sitepulse'); ?></p>
-        <form method="post" action="options.php" class="sitepulse-settings-form">
-            <?php settings_fields('sitepulse_settings'); do_settings_sections('sitepulse_settings'); ?>
-            <div class="sitepulse-settings-section" id="sitepulse-section-api">
+        <div class="sitepulse-settings-layout">
+            <nav class="sitepulse-settings-toc" aria-label="<?php esc_attr_e('Sommaire des réglages', 'sitepulse'); ?>">
+                <h2 class="screen-reader-text"><?php esc_html_e('Sommaire des réglages', 'sitepulse'); ?></h2>
+                <ul>
+                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-ai" href="#sitepulse-section-api"><?php esc_html_e('Connexion IA', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-ai" href="#sitepulse-section-ai"><?php esc_html_e('Réglages IA', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-performance" href="#sitepulse-section-performance"><?php esc_html_e('Performances', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-alerts" href="#sitepulse-section-alerts"><?php esc_html_e('Alertes', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-uptime" href="#sitepulse-section-uptime"><?php esc_html_e('Disponibilité', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-modules" href="#sitepulse-section-modules"><?php esc_html_e('Modules', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-maintenance" href="#sitepulse-section-maintenance"><?php esc_html_e('Maintenance', 'sitepulse'); ?></a></li>
+                </ul>
+            </nav>
+            <div class="sitepulse-settings-content">
+                <div class="sitepulse-settings-tabs-container">
+                    <h2 class="nav-tab-wrapper sitepulse-settings-tabs" role="tablist">
+                        <a id="sitepulse-tab-ai-label" class="nav-tab nav-tab-active" href="#sitepulse-tab-ai" data-tab-target="sitepulse-tab-ai" role="tab" aria-controls="sitepulse-tab-ai" aria-selected="true" tabindex="0"><?php esc_html_e('IA', 'sitepulse'); ?></a>
+                        <a id="sitepulse-tab-performance-label" class="nav-tab" href="#sitepulse-tab-performance" data-tab-target="sitepulse-tab-performance" role="tab" aria-controls="sitepulse-tab-performance" aria-selected="false" tabindex="-1"><?php esc_html_e('Performances', 'sitepulse'); ?></a>
+                        <a id="sitepulse-tab-alerts-label" class="nav-tab" href="#sitepulse-tab-alerts" data-tab-target="sitepulse-tab-alerts" role="tab" aria-controls="sitepulse-tab-alerts" aria-selected="false" tabindex="-1"><?php esc_html_e('Alertes', 'sitepulse'); ?></a>
+                        <a id="sitepulse-tab-uptime-label" class="nav-tab" href="#sitepulse-tab-uptime" data-tab-target="sitepulse-tab-uptime" role="tab" aria-controls="sitepulse-tab-uptime" aria-selected="false" tabindex="-1"><?php esc_html_e('Disponibilité', 'sitepulse'); ?></a>
+                        <a id="sitepulse-tab-modules-label" class="nav-tab" href="#sitepulse-tab-modules" data-tab-target="sitepulse-tab-modules" role="tab" aria-controls="sitepulse-tab-modules" aria-selected="false" tabindex="-1"><?php esc_html_e('Modules', 'sitepulse'); ?></a>
+                        <a id="sitepulse-tab-maintenance-label" class="nav-tab" href="#sitepulse-tab-maintenance" data-tab-target="sitepulse-tab-maintenance" role="tab" aria-controls="sitepulse-tab-maintenance" aria-selected="false" tabindex="-1"><?php esc_html_e('Maintenance', 'sitepulse'); ?></a>
+                    </h2>
+                    <div class="sitepulse-tab-panels">
+                        <form method="post" action="options.php" class="sitepulse-settings-form">
+                            <?php settings_fields('sitepulse_settings'); do_settings_sections('sitepulse_settings'); ?>
+            <div class="sitepulse-tab-panel is-active" id="sitepulse-tab-ai" role="tabpanel" aria-labelledby="sitepulse-tab-ai-label">
+                <div class="sitepulse-settings-section" id="sitepulse-section-api">
                 <h2><?php esc_html_e("Paramètres de l'API", 'sitepulse'); ?></h2>
                 <div class="sitepulse-settings-grid">
                     <div class="sitepulse-module-card sitepulse-module-card--setting">
@@ -1349,8 +1374,8 @@ function sitepulse_settings_page() {
                         </div>
                     </div>
                 </div>
-            </div>
-            <div class="sitepulse-settings-section" id="sitepulse-section-ai">
+                </div>
+                <div class="sitepulse-settings-section" id="sitepulse-section-ai">
                 <h2><?php esc_html_e('IA', 'sitepulse'); ?></h2>
                 <div class="sitepulse-settings-grid">
                     <div class="sitepulse-module-card sitepulse-module-card--setting">
@@ -1400,8 +1425,10 @@ function sitepulse_settings_page() {
                         </div>
                     </div>
                 </div>
+                </div>
             </div>
-            <div class="sitepulse-settings-section" id="sitepulse-section-performance">
+            <div class="sitepulse-tab-panel" id="sitepulse-tab-performance" role="tabpanel" aria-labelledby="sitepulse-tab-performance-label" hidden>
+                <div class="sitepulse-settings-section" id="sitepulse-section-performance">
                 <h2><?php esc_html_e('Seuils de performance', 'sitepulse'); ?></h2>
                 <div class="sitepulse-settings-grid">
                     <div class="sitepulse-module-card sitepulse-module-card--setting">
@@ -1577,7 +1604,9 @@ function sitepulse_settings_page() {
                     </div>
                 </div>
             </div>
-            <div class="sitepulse-settings-section" id="sitepulse-section-modules">
+            </div>
+            <div class="sitepulse-tab-panel" id="sitepulse-tab-modules" role="tabpanel" aria-labelledby="sitepulse-tab-modules-label" hidden>
+                <div class="sitepulse-settings-section" id="sitepulse-section-modules">
                 <h2><?php esc_html_e('Activer les Modules', 'sitepulse'); ?></h2>
                 <p class="sitepulse-section-intro"><?php esc_html_e('Sélectionnez les modules de surveillance à activer.', 'sitepulse'); ?></p>
                 <div class="sitepulse-settings-grid">
@@ -1637,8 +1666,10 @@ function sitepulse_settings_page() {
                         </div>
                     </div>
                 </div>
+                </div>
             </div>
-            <div class="sitepulse-settings-section" id="sitepulse-section-alerts">
+            <div class="sitepulse-tab-panel" id="sitepulse-tab-alerts" role="tabpanel" aria-labelledby="sitepulse-tab-alerts-label" hidden>
+                <div class="sitepulse-settings-section" id="sitepulse-section-alerts">
                 <h2><?php esc_html_e('Alertes', 'sitepulse'); ?></h2>
                 <div class="sitepulse-settings-grid">
                     <div class="sitepulse-module-card sitepulse-module-card--setting">
@@ -1744,7 +1775,9 @@ function sitepulse_settings_page() {
                     </div>
                 </div>
             </div>
-            <div class="sitepulse-settings-section" id="sitepulse-section-uptime">
+            </div>
+            <div class="sitepulse-tab-panel" id="sitepulse-tab-uptime" role="tabpanel" aria-labelledby="sitepulse-tab-uptime-label" hidden>
+                <div class="sitepulse-settings-section" id="sitepulse-section-uptime">
                 <h2><?php esc_html_e('Disponibilité', 'sitepulse'); ?></h2>
                 <div class="sitepulse-settings-grid">
                     <div class="sitepulse-module-card sitepulse-module-card--setting">
@@ -1826,55 +1859,144 @@ function sitepulse_settings_page() {
                         </div>
                     </div>
                 </div>
+                </div>
             </div>
             <div class="sitepulse-settings-actions">
                 <?php submit_button(esc_html__('Enregistrer les modifications', 'sitepulse')); ?>
             </div>
         </form>
-        <hr class="sitepulse-settings-separator">
-        <div class="sitepulse-settings-section" id="sitepulse-section-maintenance">
-            <h2><?php esc_html_e('Nettoyage & Réinitialisation', 'sitepulse'); ?></h2>
-            <p class="sitepulse-section-intro"><?php esc_html_e('Gérez les données du plugin.', 'sitepulse'); ?></p>
-            <form method="post" action="" class="sitepulse-settings-form sitepulse-settings-form--secondary">
-                <?php wp_nonce_field(SITEPULSE_NONCE_ACTION_CLEANUP, SITEPULSE_NONCE_FIELD_CLEANUP); ?>
-                <div class="sitepulse-settings-grid">
-                    <div class="sitepulse-module-card sitepulse-module-card--setting">
-                        <div class="sitepulse-card-header">
-                            <h3 class="sitepulse-card-title"><?php esc_html_e('Vider le journal de debug', 'sitepulse'); ?></h3>
-                        </div>
-                        <div class="sitepulse-card-body">
-                            <p class="sitepulse-card-description"><?php esc_html_e('Supprime le contenu du fichier de log de débogage.', 'sitepulse'); ?></p>
-                            <div class="sitepulse-card-footer">
-                                <button type="submit" name="sitepulse_clear_log" class="button"><?php echo esc_html__('Vider le journal', 'sitepulse'); ?></button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="sitepulse-module-card sitepulse-module-card--setting">
-                        <div class="sitepulse-card-header">
-                            <h3 class="sitepulse-card-title"><?php esc_html_e('Vider les données stockées', 'sitepulse'); ?></h3>
-                        </div>
-                        <div class="sitepulse-card-body">
-                            <p class="sitepulse-card-description"><?php esc_html_e('Supprime les données stockées comme les journaux de disponibilité et les résultats de scan.', 'sitepulse'); ?></p>
-                            <div class="sitepulse-card-footer">
-                                <button type="submit" name="sitepulse_clear_data" class="button"><?php echo esc_html__('Vider les données', 'sitepulse'); ?></button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="sitepulse-module-card sitepulse-module-card--danger">
-                        <div class="sitepulse-card-header">
-                            <h3 class="sitepulse-card-title"><?php esc_html_e('Réinitialiser le plugin', 'sitepulse'); ?></h3>
-                        </div>
-                        <div class="sitepulse-card-body">
-                            <p class="sitepulse-card-description"><?php esc_html_e("Réinitialise SitePulse à son état d'installation initial.", 'sitepulse'); ?></p>
-                            <div class="sitepulse-card-footer">
-                                <button type="submit" name="sitepulse_reset_all" class="button button-danger" onclick="return confirm('<?php echo esc_js(__('Êtes-vous sûr ?', 'sitepulse')); ?>');"><?php echo esc_html__('Tout réinitialiser', 'sitepulse'); ?></button>
+                        <div class="sitepulse-tab-panel" id="sitepulse-tab-maintenance" role="tabpanel" aria-labelledby="sitepulse-tab-maintenance-label" hidden>
+                            <div class="sitepulse-settings-section" id="sitepulse-section-maintenance">
+                            <h2><?php esc_html_e('Nettoyage & Réinitialisation', 'sitepulse'); ?></h2>
+                            <p class="sitepulse-section-intro"><?php esc_html_e('Gérez les données du plugin.', 'sitepulse'); ?></p>
+                            <form method="post" action="" class="sitepulse-settings-form sitepulse-settings-form--secondary">
+                                <?php wp_nonce_field(SITEPULSE_NONCE_ACTION_CLEANUP, SITEPULSE_NONCE_FIELD_CLEANUP); ?>
+                                <div class="sitepulse-settings-grid">
+                                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                                        <div class="sitepulse-card-header">
+                                            <h3 class="sitepulse-card-title"><?php esc_html_e('Vider le journal de debug', 'sitepulse'); ?></h3>
+                                        </div>
+                                        <div class="sitepulse-card-body">
+                                            <p class="sitepulse-card-description"><?php esc_html_e('Supprime le contenu du fichier de log de débogage.', 'sitepulse'); ?></p>
+                                            <div class="sitepulse-card-footer">
+                                                <button type="submit" name="sitepulse_clear_log" class="button"><?php echo esc_html__('Vider le journal', 'sitepulse'); ?></button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                                        <div class="sitepulse-card-header">
+                                            <h3 class="sitepulse-card-title"><?php esc_html_e('Vider les données stockées', 'sitepulse'); ?></h3>
+                                        </div>
+                                        <div class="sitepulse-card-body">
+                                            <p class="sitepulse-card-description"><?php esc_html_e('Supprime les données stockées comme les journaux de disponibilité et les résultats de scan.', 'sitepulse'); ?></p>
+                                            <div class="sitepulse-card-footer">
+                                                <button type="submit" name="sitepulse_clear_data" class="button"><?php echo esc_html__('Vider les données', 'sitepulse'); ?></button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="sitepulse-module-card sitepulse-module-card--danger">
+                                        <div class="sitepulse-card-header">
+                                            <h3 class="sitepulse-card-title"><?php esc_html_e('Réinitialiser le plugin', 'sitepulse'); ?></h3>
+                                        </div>
+                                        <div class="sitepulse-card-body">
+                                            <p class="sitepulse-card-description"><?php esc_html_e("Réinitialise SitePulse à son état d'installation initial.", 'sitepulse'); ?></p>
+                                            <div class="sitepulse-card-footer">
+                                                <button type="submit" name="sitepulse_reset_all" class="button button-danger" onclick="return confirm('<?php echo esc_js(__('Êtes-vous sûr ?', 'sitepulse')); ?>');"><?php echo esc_html__('Tout réinitialiser', 'sitepulse'); ?></button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
                             </div>
                         </div>
                     </div>
                 </div>
-            </form>
+            </div>
         </div>
     </div>
+    <?php // phpcs:disable WordPress.WP.EnqueuedResources.NonEnqueuedScript ?>
+    <script>
+        (function () {
+            const container = document.querySelector('.sitepulse-settings-tabs-container');
+            if (!container) {
+                return;
+            }
+            const tabLinks = container.querySelectorAll('.sitepulse-settings-tabs .nav-tab');
+            const tabPanels = document.querySelectorAll('.sitepulse-tab-panel');
+            const tocLinks = document.querySelectorAll('.sitepulse-toc-link[data-tab-target]');
+            if (!tabLinks.length || !tabPanels.length) {
+                return;
+            }
+            function activateTab(targetId) {
+                tabLinks.forEach((link) => {
+                    const isActive = link.dataset.tabTarget === targetId;
+                    link.classList.toggle('nav-tab-active', isActive);
+                    link.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                    link.setAttribute('tabindex', isActive ? '0' : '-1');
+                });
+                tabPanels.forEach((panel) => {
+                    const isActive = panel.id === targetId;
+                    panel.classList.toggle('is-active', isActive);
+                    if (isActive) {
+                        panel.removeAttribute('hidden');
+                    } else {
+                        panel.setAttribute('hidden', 'hidden');
+                    }
+                });
+            }
+            function findPanelFromHash(hashValue) {
+                if (!hashValue) {
+                    return null;
+                }
+                const directTarget = document.getElementById(hashValue);
+                if (!directTarget) {
+                    return null;
+                }
+                if (directTarget.classList && directTarget.classList.contains('sitepulse-tab-panel')) {
+                    return directTarget;
+                }
+                return directTarget.closest('.sitepulse-tab-panel');
+            }
+            tabLinks.forEach((link) => {
+                link.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    const targetId = link.dataset.tabTarget;
+                    if (!targetId) {
+                        return;
+                    }
+                    activateTab(targetId);
+                    const panel = document.getElementById(targetId);
+                    if (panel) {
+                        const firstSection = panel.querySelector('.sitepulse-settings-section');
+                        if (firstSection && firstSection.id) {
+                            window.location.hash = firstSection.id;
+                        } else {
+                            window.location.hash = targetId;
+                        }
+                    }
+                });
+            });
+            tocLinks.forEach((link) => {
+                link.addEventListener('click', () => {
+                    const targetId = link.dataset.tabTarget;
+                    if (targetId) {
+                        activateTab(targetId);
+                    }
+                });
+            });
+            window.addEventListener('hashchange', () => {
+                const panel = findPanelFromHash(window.location.hash.substring(1));
+                if (panel) {
+                    activateTab(panel.id);
+                }
+            });
+            const initialPanel = findPanelFromHash(window.location.hash.substring(1)) || tabPanels[0];
+            if (initialPanel) {
+                activateTab(initialPanel.id);
+            }
+        })();
+    </script>
+    <?php // phpcs:enable WordPress.WP.EnqueuedResources.NonEnqueuedScript ?>
     <?php
 }
 
