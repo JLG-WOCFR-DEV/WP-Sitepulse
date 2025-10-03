@@ -1272,13 +1272,17 @@ function sitepulse_localize_dashboard_preview_block() {
         'modules' => $modules_payload,
         'settings' => [
             'moduleSettingsUrl' => $module_settings_url,
+            'moduleActivationUrl' => $module_settings_url,
         ],
         'strings' => [
             'inactiveNotice'        => __('Les modules suivants sont désactivés : %s', 'sitepulse'),
             'inactiveNoticeHelp'    => __('Activez les modules requis pour afficher toutes les cartes du tableau de bord.', 'sitepulse'),
             'inactiveNoticeCta'     => __('Gérer les modules', 'sitepulse'),
+            'inactiveNoticeSecondaryCta' => __('Accéder aux réglages', 'sitepulse'),
             'moduleDisabledHelp'    => __('Ce module est actuellement désactivé. Activez-le depuis les réglages de SitePulse.', 'sitepulse'),
+            'moduleDisabledHelpMore' => __('Activez ce module pour l’afficher dans le bloc Aperçu du tableau de bord.', 'sitepulse'),
             'moduleDisabledHelpCta' => __('Accéder aux réglages des modules', 'sitepulse'),
+            'moduleSettingsHelp'    => __('Vous pouvez activer les modules depuis l’écran de réglages de SitePulse.', 'sitepulse'),
         ],
     ];
 

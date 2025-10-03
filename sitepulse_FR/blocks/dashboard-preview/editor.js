@@ -42,6 +42,8 @@
             var config = getConfig();
             var modules = config.modules;
             var moduleSettingsUrl = config.settings.moduleSettingsUrl;
+            var moduleActivationUrl = config.settings.moduleActivationUrl || moduleSettingsUrl;
+            var moduleSettingsHelp = config.strings.moduleSettingsHelp;
             var inactiveModules = useMemo(function () {
                 return MODULE_KEYS.filter(function (key) {
                     return modules[key] && modules[key].enabled === false;
@@ -79,32 +81,26 @@
                             var toggleHelp = null;
 
                             if (moduleDisabled) {
-                                var helpText = config.strings.moduleDisabledHelp || __('Ce module est actuellement désactivé. Activez-le depuis les réglages de SitePulse.', 'sitepulse');
+                                var helpIntro = config.strings.moduleDisabledHelp || __('Ce module est actuellement désactivé. Activez-le depuis les réglages de SitePulse.', 'sitepulse');
+                                var helpMore = config.strings.moduleDisabledHelpMore || __('Activez ce module pour l’afficher dans le bloc Aperçu du tableau de bord.', 'sitepulse');
+                                var helpText = [helpIntro, helpMore].filter(Boolean).join(' ');
                                 var helpCtaLabel = config.strings.moduleDisabledHelpCta || __('Accéder aux réglages des modules', 'sitepulse');
                                 var helpCta = moduleSettingsUrl
                                     ? wp.element.createElement(
                                           Button,
                                           {
                                               href: moduleSettingsUrl,
-                                              isSecondary: true,
+                                              variant: 'link',
+                                              isLink: true,
                                               target: '_self'
                                           },
                                           helpCtaLabel
                                       )
                                     : null;
 
-                                toggleHelp = wp.element.createElement(
-                                    Fragment,
-                                    null,
-                                    wp.element.createElement('span', null, helpText),
-                                    helpCta
-                                        ? wp.element.createElement(
-                                              'div',
-                                              { className: 'sitepulse-dashboard-preview-block__module-help-cta' },
-                                              helpCta
-                                          )
-                                        : null
-                                );
+                                toggleHelp = helpCta
+                                    ? wp.element.createElement(Fragment, null, helpText, ' ', helpCta)
+                                    : helpText;
                             }
 
                             return wp.element.createElement(ToggleControl, {
@@ -147,15 +143,37 @@
                             config.strings.inactiveNoticeHelp
                                 ? wp.element.createElement('p', null, config.strings.inactiveNoticeHelp)
                                 : null,
-                            moduleSettingsUrl
+                            moduleSettingsHelp ? wp.element.createElement('p', null, moduleSettingsHelp) : null,
+                            (moduleSettingsUrl || moduleActivationUrl)
                                 ? wp.element.createElement(
-                                      Button,
-                                      {
-                                          href: moduleSettingsUrl,
-                                          isSecondary: true,
-                                          target: '_self'
-                                      },
-                                      config.strings.inactiveNoticeCta || __('Gérer les modules', 'sitepulse')
+                                      'div',
+                                      { className: 'sitepulse-dashboard-preview-block__notice-actions' },
+                                      moduleSettingsUrl
+                                          ? wp.element.createElement(
+                                                Button,
+                                                {
+                                                    key: 'primary',
+                                                    href: moduleSettingsUrl,
+                                                    variant: 'secondary',
+                                                    isSecondary: true,
+                                                    target: '_self'
+                                                },
+                                                config.strings.inactiveNoticeCta || __('Gérer les modules', 'sitepulse')
+                                            )
+                                          : null,
+                                      moduleActivationUrl && moduleActivationUrl !== moduleSettingsUrl && config.strings.inactiveNoticeSecondaryCta
+                                          ? wp.element.createElement(
+                                                Button,
+                                                {
+                                                    key: 'secondary',
+                                                    href: moduleActivationUrl,
+                                                    variant: 'link',
+                                                    isLink: true,
+                                                    target: '_self'
+                                                },
+                                                config.strings.inactiveNoticeSecondaryCta
+                                            )
+                                          : null
                                   )
                                 : null
                         ),
