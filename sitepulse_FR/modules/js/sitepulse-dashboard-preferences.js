@@ -25,6 +25,7 @@
 
     let savedState = normaliseState(data.preferences || {});
     let currentState = deepClone(savedState);
+    let lastActiveElement = null;
 
     initialise();
 
@@ -36,21 +37,21 @@
     }
 
     function bindEvents() {
-        toggleButton.addEventListener('click', () => {
+        toggleButton.addEventListener('click', (event) => {
             if (panel.hasAttribute('hidden')) {
                 openPanel();
             } else {
-                closePanel();
+                closePanel(event.currentTarget || toggleButton);
             }
         });
 
         if (cancelButton) {
-            cancelButton.addEventListener('click', () => {
+            cancelButton.addEventListener('click', (event) => {
                 currentState = deepClone(savedState);
                 setControlsFromState(savedState);
                 applyStateToGrid(savedState);
                 clearNotice();
-                closePanel();
+                closePanel(event.currentTarget || cancelButton);
             });
         }
 
@@ -96,9 +97,23 @@
         panel.focus();
     }
 
-    function closePanel() {
+    function closePanel(focusTarget) {
+        lastActiveElement = focusTarget || document.activeElement || null;
+
         panel.setAttribute('hidden', 'hidden');
         toggleButton.setAttribute('aria-expanded', 'false');
+
+        if (!isFocusableElement(lastActiveElement) || (panel.contains(lastActiveElement))) {
+            lastActiveElement = toggleButton;
+        }
+
+        focusAfterTransition(() => {
+            if (isFocusableElement(lastActiveElement)) {
+                lastActiveElement.focus();
+            }
+
+            lastActiveElement = null;
+        });
     }
 
     function normaliseState(prefs) {
@@ -272,7 +287,7 @@
                 currentState = deepClone(savedState);
                 showNotice((data.strings && data.strings.saveSuccess) || '', false);
                 speak((data.strings && data.strings.changesSaved) || '');
-                closePanel();
+                closePanel(toggleButton);
             } else {
                 showNotice(getErrorMessage(response), true);
             }
@@ -312,6 +327,42 @@
 
     function clearNotice() {
         showNotice('', false);
+    }
+
+    function isFocusableElement(element) {
+        if (!element || typeof element.focus !== 'function') {
+            return false;
+        }
+
+        if (element.disabled) {
+            return false;
+        }
+
+        if (typeof element.closest === 'function') {
+            const hiddenParent = element.closest('[hidden]');
+
+            if (hiddenParent) {
+                return false;
+            }
+        }
+
+        if (element.getAttribute && element.getAttribute('aria-hidden') === 'true') {
+            return false;
+        }
+
+        return true;
+    }
+
+    function focusAfterTransition(callback) {
+        if (typeof callback !== 'function') {
+            return;
+        }
+
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(callback);
+        } else {
+            setTimeout(callback, 0);
+        }
     }
 
     function getErrorMessage(response) {
