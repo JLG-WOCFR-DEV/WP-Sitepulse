@@ -1254,6 +1254,10 @@ function sitepulse_localize_dashboard_preview_block() {
 
     $modules_payload = [];
 
+    $module_settings_url = function_exists('admin_url')
+        ? admin_url('admin.php?page=sitepulse-settings#sitepulse-section-modules')
+        : '';
+
     foreach ($module_definitions as $key => $definition) {
         $module_state = isset($modules_context[$key]) && is_array($modules_context[$key]) ? $modules_context[$key] : [];
 
@@ -1266,8 +1270,15 @@ function sitepulse_localize_dashboard_preview_block() {
 
     $data = [
         'modules' => $modules_payload,
+        'settings' => [
+            'moduleSettingsUrl' => $module_settings_url,
+        ],
         'strings' => [
-            'inactiveNotice' => __('Les modules suivants sont désactivés : %s', 'sitepulse'),
+            'inactiveNotice'        => __('Les modules suivants sont désactivés : %s', 'sitepulse'),
+            'inactiveNoticeHelp'    => __('Activez les modules requis pour afficher toutes les cartes du tableau de bord.', 'sitepulse'),
+            'inactiveNoticeCta'     => __('Gérer les modules', 'sitepulse'),
+            'moduleDisabledHelp'    => __('Ce module est actuellement désactivé. Activez-le depuis les réglages de SitePulse.', 'sitepulse'),
+            'moduleDisabledHelpCta' => __('Accéder aux réglages des modules', 'sitepulse'),
         ],
     ];
 
