@@ -13,6 +13,7 @@
     var PanelBody = wp.components.PanelBody;
     var ToggleControl = wp.components.ToggleControl;
     var Notice = wp.components.Notice;
+    var Button = wp.components.Button;
     var ServerSideRender = wp.serverSideRender;
 
     var BLOCK_NAME = 'sitepulse/dashboard-preview';
@@ -26,6 +27,9 @@
         if (!config.strings) {
             config.strings = {};
         }
+        if (!config.settings) {
+            config.settings = {};
+        }
         return config;
     }
 
@@ -37,24 +41,26 @@
             var blockProps = useBlockProps();
             var config = getConfig();
             var modules = config.modules;
-
-            var inactiveNotice = useMemo(function () {
-                var inactive = MODULE_KEYS.filter(function (key) {
+            var moduleSettingsUrl = config.settings.moduleSettingsUrl;
+            var inactiveModules = useMemo(function () {
+                return MODULE_KEYS.filter(function (key) {
                     return modules[key] && modules[key].enabled === false;
                 });
+            }, [modules]);
 
-                if (!inactive.length) {
+            var inactiveNotice = useMemo(function () {
+                if (!inactiveModules.length) {
                     return null;
                 }
 
-                var labels = inactive.map(function (key) {
+                var labels = inactiveModules.map(function (key) {
                     return modules[key].label || key;
                 });
 
                 var template = config.strings.inactiveNotice || __('Les modules suivants sont désactivés : %s', 'sitepulse');
 
                 return sprintf(template, labels.join(', '));
-            }, [modules]);
+            }, [inactiveModules, modules]);
 
             return wp.element.createElement(
                 Fragment,
@@ -69,6 +75,37 @@
                             var attributeKey = 'show' + key.charAt(0).toUpperCase() + key.slice(1);
                             var isEnabled = attributes.hasOwnProperty(attributeKey) ? attributes[attributeKey] : true;
                             var label = (modules[key] && modules[key].controlLabel) || (modules[key] && modules[key].label) || key;
+                            var moduleDisabled = modules[key] && modules[key].enabled === false;
+                            var toggleHelp = null;
+
+                            if (moduleDisabled) {
+                                var helpText = config.strings.moduleDisabledHelp || __('Ce module est actuellement désactivé. Activez-le depuis les réglages de SitePulse.', 'sitepulse');
+                                var helpCtaLabel = config.strings.moduleDisabledHelpCta || __('Accéder aux réglages des modules', 'sitepulse');
+                                var helpCta = moduleSettingsUrl
+                                    ? wp.element.createElement(
+                                          Button,
+                                          {
+                                              href: moduleSettingsUrl,
+                                              isSecondary: true,
+                                              target: '_self'
+                                          },
+                                          helpCtaLabel
+                                      )
+                                    : null;
+
+                                toggleHelp = wp.element.createElement(
+                                    Fragment,
+                                    null,
+                                    wp.element.createElement('span', null, helpText),
+                                    helpCta
+                                        ? wp.element.createElement(
+                                              'div',
+                                              { className: 'sitepulse-dashboard-preview-block__module-help-cta' },
+                                              helpCta
+                                          )
+                                        : null
+                                );
+                            }
 
                             return wp.element.createElement(ToggleControl, {
                                 key: key,
@@ -79,7 +116,8 @@
                                     next[attributeKey] = !!value;
                                     setAttributes(next);
                                 },
-                                disabled: modules[key] && modules[key].enabled === false
+                                disabled: moduleDisabled,
+                                help: toggleHelp
                             });
                         })
                     ),
@@ -105,7 +143,21 @@
                         wp.element.createElement(
                             Notice,
                             { status: 'warning', isDismissible: false, className: 'sitepulse-dashboard-preview-block__notice' },
-                            inactiveNotice
+                            wp.element.createElement('p', null, inactiveNotice),
+                            config.strings.inactiveNoticeHelp
+                                ? wp.element.createElement('p', null, config.strings.inactiveNoticeHelp)
+                                : null,
+                            moduleSettingsUrl
+                                ? wp.element.createElement(
+                                      Button,
+                                      {
+                                          href: moduleSettingsUrl,
+                                          isSecondary: true,
+                                          target: '_self'
+                                      },
+                                      config.strings.inactiveNoticeCta || __('Gérer les modules', 'sitepulse')
+                                  )
+                                : null
                         ),
                     wp.element.createElement(ServerSideRender, {
                         block: BLOCK_NAME,
