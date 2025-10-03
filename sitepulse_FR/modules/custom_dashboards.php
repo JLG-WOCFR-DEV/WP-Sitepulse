@@ -1117,6 +1117,17 @@ function sitepulse_custom_dashboards_page() {
 
     $palette = $default_palette;
     $status_labels = $default_status_labels;
+    $get_status_meta = static function ($status) use (&$status_labels, $default_status_labels) {
+        if (isset($status_labels[$status])) {
+            return $status_labels[$status];
+        }
+
+        if (isset($status_labels['status-warn'])) {
+            return $status_labels['status-warn'];
+        }
+
+        return $default_status_labels['status-warn'];
+    };
     $charts_payload = [];
     $speed_card = null;
     $speed_chart = null;
@@ -1188,41 +1199,8 @@ function sitepulse_custom_dashboards_page() {
         $is_database_enabled = in_array('database_optimizer', $active_modules, true);
         $is_logs_enabled = in_array('log_analyzer', $active_modules, true);
 
-    $palette = [
-        'green'    => '#0b6d2a',
-        'amber'    => '#8a6100',
-        'red'      => '#a0141e',
-        'deep_red' => '#7f1018',
-        'blue'     => '#2196F3',
-        'grey'     => '#E0E0E0',
-        'purple'   => '#9C27B0',
-    ];
-
-    $status_labels = [
-        'status-ok'   => [
-            'label' => __('Bon', 'sitepulse'),
-            'sr'    => __('Statut : bon', 'sitepulse'),
-            'icon'  => '✔️',
-        ],
-        'status-warn' => [
-            'label' => __('Attention', 'sitepulse'),
-            'sr'    => __('Statut : attention', 'sitepulse'),
-            'icon'  => '⚠️',
-        ],
-        'status-bad'  => [
-            'label' => __('Critique', 'sitepulse'),
-            'sr'    => __('Statut : critique', 'sitepulse'),
-            'icon'  => '⛔',
-        ],
-    ];
-
-    $get_status_meta = static function ($status) use ($status_labels) {
-        if (isset($status_labels[$status])) {
-            return $status_labels[$status];
-        }
-
-        return $status_labels['status-warn'];
-    };
+    $palette = $default_palette;
+    $status_labels = $default_status_labels;
 
     $charts_payload = [];
     $speed_card = null;
