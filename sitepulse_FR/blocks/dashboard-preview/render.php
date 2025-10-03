@@ -212,6 +212,7 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
             'layoutVariant' => 'grid',
             'columns'       => 2,
             'gridDensity'   => 'comfortable',
+            'showHeader'    => true,
         ];
 
         $attributes = is_array($attributes) ? $attributes : [];
@@ -243,12 +244,18 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
             $columns = 4;
         }
 
+        $show_header = !empty($attributes['showHeader']);
+
         $base_wrapper_classes = [
             'sitepulse-dashboard-preview',
             'sitepulse-dashboard-preview--layout-' . $layout_variant_slug,
             'sitepulse-dashboard-preview--density-' . $grid_density_slug,
             'sitepulse-dashboard-preview--columns-' . $columns,
         ];
+
+        $base_wrapper_classes[] = $show_header
+            ? 'sitepulse-dashboard-preview--has-header'
+            : 'sitepulse-dashboard-preview--no-header';
 
         $grid_classes = [
             'sitepulse-grid',
@@ -257,12 +264,16 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
             'sitepulse-grid--variant-' . $layout_variant_slug,
         ];
 
+        $wrapper_class_attribute = function ($additional_classes = []) use ($base_wrapper_classes) {
+            $classes = array_merge($base_wrapper_classes, $additional_classes);
+            $classes = array_map('sanitize_html_class', array_unique(array_filter($classes)));
+
+            return implode(' ', $classes);
+        };
+
         if (!function_exists('sitepulse_get_dashboard_preview_context')) {
             $wrapper_attributes = get_block_wrapper_attributes([
-                'class' => implode(' ', array_filter(array_unique(array_merge(
-                    $base_wrapper_classes,
-                    ['sitepulse-dashboard-preview--is-empty']
-                )))),
+                'class' => $wrapper_class_attribute(['sitepulse-dashboard-preview--is-empty']),
             ]);
 
             return sprintf(
@@ -406,10 +417,7 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
 
         if (empty($cards)) {
             $wrapper_attributes = get_block_wrapper_attributes([
-                'class' => implode(' ', array_filter(array_unique(array_merge(
-                    $base_wrapper_classes,
-                    ['sitepulse-dashboard-preview--is-empty']
-                )))),
+                'class' => $wrapper_class_attribute(['sitepulse-dashboard-preview--is-empty']),
             ]);
 
             return sprintf(
@@ -419,21 +427,25 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
             );
         }
 
-        $header = sprintf(
-            '<div class="sitepulse-dashboard-preview__header"><h3>%1$s</h3><p>%2$s</p></div>',
-            esc_html__('Aperçu SitePulse', 'sitepulse'),
-            esc_html__('Dernières mesures agrégées par vos modules actifs.', 'sitepulse')
-        );
+        $header = '';
+
+        if ($show_header) {
+            $header = sprintf(
+                '<div class="sitepulse-dashboard-preview__header"><h3>%1$s</h3><p>%2$s</p></div>',
+                esc_html__('Aperçu SitePulse', 'sitepulse'),
+                esc_html__('Dernières mesures agrégées par vos modules actifs.', 'sitepulse')
+            );
+        }
 
         $wrapper_attributes = get_block_wrapper_attributes([
-            'class' => implode(' ', array_filter(array_unique($base_wrapper_classes))),
+            'class' => $wrapper_class_attribute(),
         ]);
 
         return sprintf(
             '<div %1$s>%2$s<div class="%3$s">%4$s</div></div>',
             $wrapper_attributes,
             $header,
-            esc_attr(implode(' ', array_map('sanitize_html_class', $grid_classes))),
+            esc_attr(implode(' ', array_map('sanitize_html_class', array_unique($grid_classes)))),
             implode('', $cards)
         );
     }

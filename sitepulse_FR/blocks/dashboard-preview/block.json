@@ -16,6 +16,12 @@
       "margin": true,
       "padding": true,
       "blockGap": true
+    },
+    "layout": {
+      "allowSwitching": true,
+      "default": {
+        "type": "grid"
+      }
     }
   },
   "attributes": {
@@ -46,6 +52,10 @@
     "gridDensity": {
       "type": "string",
       "default": "comfortable"
+    },
+    "showHeader": {
+      "type": "boolean",
+      "default": true
     }
   }
 }
