@@ -20,6 +20,14 @@ class Sitepulse_Error_Alerts_Test extends WP_UnitTestCase {
             define('SITEPULSE_OPTION_ALERT_INTERVAL', 'sitepulse_alert_interval');
         }
 
+        if (!defined('SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS')) {
+            define('SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS', 'sitepulse_alert_enabled_channels');
+        }
+
+        if (!defined('SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD')) {
+            define('SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD', 'sitepulse_php_fatal_alert_threshold');
+        }
+
         require_once $plugin_root . 'modules/error_alerts.php';
     }
 
@@ -34,6 +42,8 @@ class Sitepulse_Error_Alerts_Test extends WP_UnitTestCase {
 
         delete_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER);
         delete_option(SITEPULSE_OPTION_ALERT_RECIPIENTS);
+        delete_option(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS);
+        delete_option(SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD);
         delete_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK);
         delete_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK);
     }
@@ -44,6 +54,8 @@ class Sitepulse_Error_Alerts_Test extends WP_UnitTestCase {
         delete_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER);
         delete_option(SITEPULSE_OPTION_ALERT_RECIPIENTS);
         delete_option(SITEPULSE_OPTION_ALERT_INTERVAL);
+        delete_option(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS);
+        delete_option(SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD);
         delete_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK);
         delete_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK);
 
@@ -301,5 +313,71 @@ Another line
         $this->assertDoesNotMatchRegularExpression('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $mail['message'], 'Fatal alert message must not contain control characters.');
 
         update_option('blogname', 'Test Blog');
+    }
+
+    public function test_cpu_alert_respects_disabled_channel() {
+        update_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, ['alerts@example.com']);
+        update_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 1);
+        update_option(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS, ['php_fatal']);
+
+        $core_filter = static function () {
+            return 2;
+        };
+
+        $load_filter = static function () {
+            return [4.0, 0.0, 0.0];
+        };
+
+        add_filter('sitepulse_error_alert_cpu_core_count', $core_filter, 10, 1);
+        add_filter('sitepulse_error_alerts_cpu_load', $load_filter, 10, 1);
+
+        try {
+            sitepulse_error_alerts_check_cpu_load();
+        } finally {
+            remove_filter('sitepulse_error_alert_cpu_core_count', $core_filter, 10);
+            remove_filter('sitepulse_error_alerts_cpu_load', $load_filter, 10);
+        }
+
+        $this->assertCount(0, $this->sent_mail, 'CPU alert should be ignored when the channel is disabled.');
+    }
+
+    public function test_php_fatal_threshold_requires_multiple_entries() {
+        update_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, ['alerts@example.com']);
+        update_option(SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD, 2);
+
+        $log_path = $this->create_log_file("PHP Fatal error: First crash\n");
+
+        sitepulse_error_alerts_check_debug_log();
+
+        $this->assertCount(0, $this->sent_mail, 'Single fatal entry should not trigger when threshold is higher.');
+
+        $this->sent_mail = [];
+
+        file_put_contents($log_path, "PHP Fatal error: First crash\nPHP Fatal error: Second crash\n");
+        delete_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER);
+
+        sitepulse_error_alerts_check_debug_log();
+
+        $this->assertCount(1, $this->sent_mail, 'Multiple fatal entries should trigger once threshold is met.');
+    }
+
+    public function test_send_test_message_requires_recipients() {
+        $result = sitepulse_error_alerts_send_test_message();
+
+        $this->assertInstanceOf(WP_Error::class, $result, 'Test message without recipients should return an error.');
+        $this->assertSame('sitepulse_no_alert_recipients', $result->get_error_code());
+    }
+
+    public function test_send_test_message_lists_channels() {
+        update_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, ['alerts@example.com']);
+        update_option(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS, ['cpu']);
+
+        $result = sitepulse_error_alerts_send_test_message();
+
+        $this->assertTrue($result, 'Test message should be sent successfully with recipients.');
+        $this->assertNotEmpty($this->sent_mail, 'Test message should go through wp_mail.');
+
+        $mail = $this->sent_mail[0];
+        $this->assertStringContainsString('Charge CPU', $mail['message'], 'Active channel label should be listed in the test message.');
     }
 }

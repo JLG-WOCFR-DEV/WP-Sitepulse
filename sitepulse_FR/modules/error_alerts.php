@@ -40,6 +40,66 @@ function sitepulse_error_alerts_get_schedule_slug($minutes = null) {
 $sitepulse_error_alerts_schedule = sitepulse_error_alerts_get_schedule_slug();
 
 /**
+ * Returns the human readable labels for alert channels.
+ *
+ * @return array<string, string>
+ */
+function sitepulse_error_alerts_get_channel_labels() {
+    return [
+        'cpu'       => __('Charge CPU', 'sitepulse'),
+        'php_fatal' => __('Erreurs PHP fatales', 'sitepulse'),
+    ];
+}
+
+/**
+ * Returns the list of enabled alert channels.
+ *
+ * @return string[] List of channel identifiers.
+ */
+function sitepulse_error_alerts_get_enabled_channels() {
+    $stored_channels = get_option(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS, array_keys(sitepulse_error_alerts_get_channel_labels()));
+
+    if (!is_array($stored_channels)) {
+        $stored_channels = array_keys(sitepulse_error_alerts_get_channel_labels());
+    }
+
+    $allowed_channels = array_keys(sitepulse_error_alerts_get_channel_labels());
+    $normalized       = [];
+
+    foreach ($stored_channels as $channel) {
+        if (!is_string($channel)) {
+            continue;
+        }
+
+        $channel = sanitize_key($channel);
+
+        if ($channel === '' || !in_array($channel, $allowed_channels, true)) {
+            continue;
+        }
+
+        if (!in_array($channel, $normalized, true)) {
+            $normalized[] = $channel;
+        }
+    }
+
+    return $normalized;
+}
+
+/**
+ * Determines if a specific alert channel is enabled.
+ *
+ * @param string $channel Channel identifier.
+ * @return bool Whether the channel is enabled.
+ */
+function sitepulse_error_alerts_is_channel_enabled($channel) {
+    if (!is_string($channel) || $channel === '') {
+        return false;
+    }
+
+    return in_array($channel, sitepulse_error_alerts_get_enabled_channels(), true);
+}
+
+/**
  * Returns the configured CPU load threshold for alerting.
  *
  * @return float
@@ -53,6 +113,27 @@ function sitepulse_error_alert_get_cpu_threshold() {
     $threshold = (float) $threshold;
     if ($threshold <= 0) {
         $threshold = 5;
+    }
+
+    return $threshold;
+}
+
+/**
+ * Returns the configured PHP fatal error threshold.
+ *
+ * @return int
+ */
+function sitepulse_error_alert_get_php_fatal_threshold() {
+    $threshold = get_option(SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD, 1);
+
+    if (!is_numeric($threshold)) {
+        $threshold = 1;
+    }
+
+    $threshold = (int) $threshold;
+
+    if ($threshold < 1) {
+        $threshold = 1;
     }
 
     return $threshold;
@@ -274,6 +355,62 @@ function sitepulse_error_alert_send($type, $subject, $message) {
 }
 
 /**
+ * Sends a test alert message without applying cooldown locks.
+ *
+ * @return true|\WP_Error True on success, WP_Error on failure.
+ */
+function sitepulse_error_alerts_send_test_message() {
+    $recipients = sitepulse_error_alert_get_recipients();
+
+    if (empty($recipients)) {
+        return new WP_Error('sitepulse_no_alert_recipients', __('Aucun destinataire valide pour les alertes.', 'sitepulse'));
+    }
+
+    $raw_site_name = get_bloginfo('name');
+    $site_name     = trim(wp_strip_all_tags((string) $raw_site_name));
+
+    if ($site_name === '') {
+        $site_name = home_url('/');
+    }
+
+    $channel_labels = sitepulse_error_alerts_get_channel_labels();
+    $enabled        = sitepulse_error_alerts_get_enabled_channels();
+
+    $enabled_labels = [];
+
+    foreach ($enabled as $channel_key) {
+        if (isset($channel_labels[$channel_key])) {
+            $enabled_labels[] = $channel_labels[$channel_key];
+        }
+    }
+
+    if (empty($enabled_labels)) {
+        $enabled_labels[] = __('aucun canal actif', 'sitepulse');
+    }
+
+    /* translators: %s: Site title. */
+    $subject = sprintf(__('SitePulse : e-mail de test pour %s', 'sitepulse'), $site_name);
+    $subject = sanitize_text_field($subject);
+
+    /* translators: 1: Site title. 2: Comma-separated list of enabled alert channels. */
+    $message = sprintf(
+        esc_html__('Cet e-mail confirme la configuration des alertes SitePulse pour %1$s. Canaux actifs : %2$s.', 'sitepulse'),
+        $site_name,
+        implode(', ', $enabled_labels)
+    );
+
+    $message = sanitize_textarea_field($message);
+
+    $sent = wp_mail($recipients, $subject, $message);
+
+    if (!$sent) {
+        return new WP_Error('sitepulse_test_mail_failed', __('Impossible d’envoyer l’e-mail de test.', 'sitepulse'));
+    }
+
+    return true;
+}
+
+/**
  * Registers the cron schedule used by the error alerts module.
  *
  * @param array $schedules Existing cron schedules.
@@ -322,6 +459,10 @@ function sitepulse_error_alerts_run_checks() {
  * @return void
  */
 function sitepulse_error_alerts_check_cpu_load() {
+    if (!sitepulse_error_alerts_is_channel_enabled('cpu')) {
+        return;
+    }
+
     if (!function_exists('sys_getloadavg')) {
         if (function_exists('sitepulse_log')) {
             sitepulse_log('sys_getloadavg is unavailable; CPU alert skipped.', 'WARNING');
@@ -389,6 +530,10 @@ function sitepulse_error_alerts_check_cpu_load() {
  * @return void
  */
 function sitepulse_error_alerts_check_debug_log() {
+    $fatal_threshold = sitepulse_error_alert_get_php_fatal_threshold();
+    $channel_enabled = sitepulse_error_alerts_is_channel_enabled('php_fatal');
+    $fatal_count     = 0;
+
     if (!function_exists('sitepulse_get_wp_debug_log_path')) {
         return;
     }
@@ -514,6 +659,16 @@ function sitepulse_error_alerts_check_debug_log() {
         }
 
         if ($has_fatal_error) {
+            $fatal_count++;
+
+            if (!$channel_enabled) {
+                continue;
+            }
+
+            if ($fatal_count < $fatal_threshold) {
+                continue;
+            }
+
             $raw_site_name = get_bloginfo('name');
             $site_name     = trim(wp_strip_all_tags((string) $raw_site_name));
 
@@ -535,11 +690,12 @@ function sitepulse_error_alerts_check_debug_log() {
 
             $subject = sanitize_text_field($subject);
 
-            /* translators: 1: Log file path. 2: Site title. */
+            /* translators: 1: Log file path. 2: Site title. 3: Number of fatal errors detected. */
             $message = sprintf(
-                esc_html__('Review %1$s for error details affecting %2$s.', 'sitepulse'),
+                esc_html__('Au moins %3$d nouvelles erreurs fatales ont été détectées dans %1$s pour %2$s. Consultez ce fichier pour plus de détails.', 'sitepulse'),
                 $log_file_for_message,
-                $site_name
+                $site_name,
+                (int) $fatal_count
             );
 
             $message = sanitize_textarea_field($message);
@@ -633,4 +789,122 @@ if (!empty($sitepulse_error_alerts_cron_hook)) {
 
     add_action($sitepulse_error_alerts_cron_hook, 'sitepulse_error_alerts_run_checks');
     add_action('update_option_' . SITEPULSE_OPTION_ALERT_INTERVAL, 'sitepulse_error_alerts_on_interval_update', 10, 3);
+}
+
+/**
+ * Handles the admin-post request triggered from the settings screen.
+ *
+ * @return void
+ */
+function sitepulse_error_alerts_handle_test_admin_post() {
+    if (!current_user_can(sitepulse_get_capability())) {
+        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour effectuer cette action.", 'sitepulse'));
+    }
+
+    $nonce = isset($_REQUEST['_wpnonce']) ? sanitize_text_field(wp_unslash($_REQUEST['_wpnonce'])) : '';
+
+    if (!wp_verify_nonce($nonce, SITEPULSE_NONCE_ACTION_ALERT_TEST)) {
+        wp_die(esc_html__('Échec de la vérification de sécurité pour l’envoi de test.', 'sitepulse'));
+    }
+
+    $result = sitepulse_error_alerts_send_test_message();
+    $status = 'success';
+
+    if (is_wp_error($result)) {
+        $status = $result->get_error_code() === 'sitepulse_no_alert_recipients' ? 'no_recipients' : 'error';
+    }
+
+    $redirect_url = add_query_arg(
+        'sitepulse_alert_test',
+        $status,
+        admin_url('admin.php?page=sitepulse-settings#sitepulse-section-alerts')
+    );
+
+    wp_safe_redirect($redirect_url);
+    exit;
+}
+add_action('admin_post_sitepulse_send_alert_test', 'sitepulse_error_alerts_handle_test_admin_post');
+
+/**
+ * Handles AJAX test requests.
+ *
+ * @return void
+ */
+function sitepulse_error_alerts_handle_ajax_test() {
+    check_ajax_referer(SITEPULSE_NONCE_ACTION_ALERT_TEST, 'nonce');
+
+    if (!current_user_can(sitepulse_get_capability())) {
+        wp_send_json_error([
+            'message' => esc_html__("Vous n'avez pas les permissions nécessaires pour effectuer cette action.", 'sitepulse'),
+        ], 403);
+    }
+
+    $result = sitepulse_error_alerts_send_test_message();
+
+    if (is_wp_error($result)) {
+        $status_code = $result->get_error_code() === 'sitepulse_no_alert_recipients' ? 400 : 500;
+
+        wp_send_json_error([
+            'message' => esc_html($result->get_error_message()),
+        ], $status_code);
+    }
+
+    wp_send_json_success([
+        'message' => esc_html__('E-mail de test envoyé.', 'sitepulse'),
+    ]);
+}
+add_action('wp_ajax_sitepulse_send_alert_test', 'sitepulse_error_alerts_handle_ajax_test');
+
+/**
+ * Registers the REST API endpoint for sending test alerts.
+ *
+ * @return void
+ */
+function sitepulse_error_alerts_register_rest_routes() {
+    register_rest_route(
+        'sitepulse/v1',
+        '/alerts/test',
+        [
+            'methods'             => 'POST',
+            'callback'            => 'sitepulse_error_alerts_handle_rest_test',
+            'permission_callback' => 'sitepulse_error_alerts_rest_permissions',
+        ]
+    );
+}
+add_action('rest_api_init', 'sitepulse_error_alerts_register_rest_routes');
+
+/**
+ * Permission callback for the REST endpoint.
+ *
+ * @return bool
+ */
+function sitepulse_error_alerts_rest_permissions() {
+    return current_user_can(sitepulse_get_capability());
+}
+
+/**
+ * Handles REST API test alert requests.
+ *
+ * @param \WP_REST_Request $request The REST request instance.
+ * @return \WP_REST_Response|\WP_Error
+ */
+function sitepulse_error_alerts_handle_rest_test($request) {
+    $nonce = $request->get_param('_wpnonce');
+
+    if ($nonce && !wp_verify_nonce($nonce, SITEPULSE_NONCE_ACTION_ALERT_TEST)) {
+        return new WP_Error('sitepulse_invalid_nonce', __('Échec de la vérification de sécurité pour l’envoi de test.', 'sitepulse'), ['status' => 403]);
+    }
+
+    $result = sitepulse_error_alerts_send_test_message();
+
+    if (is_wp_error($result)) {
+        $status = $result->get_error_code() === 'sitepulse_no_alert_recipients' ? 400 : 500;
+
+        return new WP_Error($result->get_error_code(), $result->get_error_message(), ['status' => $status]);
+    }
+
+    return rest_ensure_response([
+        'success' => true,
+        'message' => esc_html__('E-mail de test envoyé.', 'sitepulse'),
+    ]);
 }

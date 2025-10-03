@@ -35,7 +35,9 @@ define('SITEPULSE_OPTION_UPTIME_HTTP_HEADERS', 'sitepulse_uptime_http_headers');
 define('SITEPULSE_OPTION_UPTIME_EXPECTED_CODES', 'sitepulse_uptime_expected_codes');
 define('SITEPULSE_OPTION_LAST_LOAD_TIME', 'sitepulse_last_load_time');
 define('SITEPULSE_OPTION_SPEED_SCAN_HISTORY', 'sitepulse_speed_scan_history');
+define('SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS', 'sitepulse_alert_enabled_channels');
 define('SITEPULSE_OPTION_CPU_ALERT_THRESHOLD', 'sitepulse_cpu_alert_threshold');
+define('SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD', 'sitepulse_php_fatal_alert_threshold');
 define('SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES', 'sitepulse_alert_cooldown_minutes');
 define('SITEPULSE_OPTION_ALERT_INTERVAL', 'sitepulse_alert_interval');
 define('SITEPULSE_OPTION_ALERT_RECIPIENTS', 'sitepulse_alert_recipients');
@@ -68,6 +70,7 @@ define('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX', 'sitepulse_plugin_dir_size_
 define('SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT', 'sitepulse_resource_monitor_snapshot');
 
 define('SITEPULSE_NONCE_ACTION_AI_INSIGHT', 'sitepulse_get_ai_insight');
+define('SITEPULSE_NONCE_ACTION_ALERT_TEST', 'sitepulse_alert_test');
 define('SITEPULSE_NONCE_ACTION_CLEANUP', 'sitepulse_cleanup');
 define('SITEPULSE_NONCE_FIELD_CLEANUP', 'sitepulse_cleanup_nonce');
 define('SITEPULSE_ACTION_PLUGIN_IMPACT_REFRESH', 'sitepulse_plugin_impact_refresh');
@@ -1341,7 +1344,9 @@ function sitepulse_activate_site() {
     if (!function_exists('sitepulse_is_gemini_api_key_overridden') || !sitepulse_is_gemini_api_key_overridden()) {
         add_option(SITEPULSE_OPTION_GEMINI_API_KEY, '', '', false);
     }
+    add_option(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS, ['cpu', 'php_fatal'], '', false);
     add_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 5, '', false);
+    add_option(SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD, 1, '', false);
     add_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60, '', false);
     add_option(SITEPULSE_OPTION_ALERT_INTERVAL, 5, '', false);
     add_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, [], '', false);
