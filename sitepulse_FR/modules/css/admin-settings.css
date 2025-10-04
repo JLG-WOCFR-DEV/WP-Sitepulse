@@ -120,6 +120,48 @@
     color: #b91c1c;
 }
 
+.sitepulse-status.is-success {
+    background: #ecfdf5;
+    color: #047857;
+}
+
+.sitepulse-status.is-warning {
+    background: #fef3c7;
+    color: #b45309;
+}
+
+.sitepulse-status.is-critical {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.sitepulse-module-metrics {
+    list-style: none;
+    margin: 12px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.sitepulse-module-metric {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #2d3748;
+}
+
+.sitepulse-module-metric-value {
+    font-weight: 600;
+}
+
+.sitepulse-card-placeholder {
+    color: #718096;
+    font-size: 13px;
+    margin: 12px 0 0;
+}
+
 .sitepulse-field-label {
     display: block;
     font-weight: 600;

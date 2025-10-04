@@ -956,6 +956,347 @@ function sitepulse_sanitize_revision_limit($value) {
 }
 
 /**
+ * Builds status summaries for each module card using stored measurements.
+ *
+ * @return array<string,array<int,array<string,string>>> Module summaries keyed by module slug.
+ */
+function sitepulse_get_module_status_summaries() {
+    $summaries = [];
+    $now_local = function_exists('current_time') ? (int) current_time('timestamp') : time();
+    $now_utc   = function_exists('current_time') ? (int) current_time('timestamp', true) : time();
+
+    // Log Analyzer – queued debug notices.
+    $debug_notices = get_option(SITEPULSE_OPTION_DEBUG_NOTICES, []);
+
+    if (!is_array($debug_notices)) {
+        $debug_notices = [];
+    }
+
+    $notice_count = count($debug_notices);
+    $summaries['log_analyzer'][] = [
+        'label'  => __('Alertes', 'sitepulse'),
+        'value'  => $notice_count > 0
+            ? sprintf(_n('%s en attente', '%s en attente', $notice_count, 'sitepulse'), number_format_i18n($notice_count))
+            : __('Aucune alerte', 'sitepulse'),
+        'status' => $notice_count > 0 ? 'is-critical' : 'is-success',
+    ];
+
+    // Resource Monitor – last recorded load and memory usage.
+    $resource_history = get_option(SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY, []);
+
+    if (is_array($resource_history) && !empty($resource_history)) {
+        $latest_entry = end($resource_history);
+
+        if (is_array($latest_entry)) {
+            $load_value = null;
+
+            if (isset($latest_entry['load']) && is_array($latest_entry['load'])) {
+                if (isset($latest_entry['load'][0]) && is_numeric($latest_entry['load'][0])) {
+                    $load_value = (float) $latest_entry['load'][0];
+                } else {
+                    $first_load = reset($latest_entry['load']);
+
+                    if ($first_load !== false && is_numeric($first_load)) {
+                        $load_value = (float) $first_load;
+                    }
+                }
+            }
+
+            if ($load_value !== null) {
+                $load_status = 'is-success';
+
+                if ($load_value >= 2) {
+                    $load_status = 'is-critical';
+                } elseif ($load_value >= 1) {
+                    $load_status = 'is-warning';
+                }
+
+                $summaries['resource_monitor'][] = [
+                    'label'  => __('Charge serveur', 'sitepulse'),
+                    'value'  => sprintf(__('%s (1 min)', 'sitepulse'), number_format_i18n($load_value, 2)),
+                    'status' => $load_status,
+                ];
+            }
+
+            $memory_usage = isset($latest_entry['memory']['usage']) && is_numeric($latest_entry['memory']['usage'])
+                ? (int) $latest_entry['memory']['usage']
+                : null;
+            $memory_limit = isset($latest_entry['memory']['limit']) && is_numeric($latest_entry['memory']['limit'])
+                ? (int) $latest_entry['memory']['limit']
+                : null;
+
+            if ($memory_usage !== null && $memory_limit !== null && $memory_limit > 0) {
+                $memory_percent = ($memory_usage / $memory_limit) * 100;
+                $memory_status  = 'is-success';
+
+                if ($memory_percent >= 90) {
+                    $memory_status = 'is-critical';
+                } elseif ($memory_percent >= 75) {
+                    $memory_status = 'is-warning';
+                }
+
+                $summaries['resource_monitor'][] = [
+                    'label'  => __('Mémoire', 'sitepulse'),
+                    'value'  => sprintf(__('%s %% utilisés', 'sitepulse'), number_format_i18n($memory_percent, 0)),
+                    'status' => $memory_status,
+                ];
+            }
+        }
+    }
+
+    // Plugin Impact Scanner – last refresh and sample count.
+    $impact_data = get_option(SITEPULSE_PLUGIN_IMPACT_OPTION, []);
+
+    if (is_array($impact_data)) {
+        $default_interval = defined('SITEPULSE_PLUGIN_IMPACT_REFRESH_INTERVAL')
+            ? (int) SITEPULSE_PLUGIN_IMPACT_REFRESH_INTERVAL
+            : 15 * MINUTE_IN_SECONDS;
+        $interval     = isset($impact_data['interval']) && is_numeric($impact_data['interval'])
+            ? max(1, (int) $impact_data['interval'])
+            : $default_interval;
+        $last_updated = isset($impact_data['last_updated']) ? (int) $impact_data['last_updated'] : 0;
+
+        if ($last_updated > 0) {
+            $age_seconds = max(0, $now_local - $last_updated);
+            $status      = 'is-success';
+
+            if ($interval > 0) {
+                if ($age_seconds > ($interval * 2)) {
+                    $status = 'is-critical';
+                } elseif ($age_seconds > $interval) {
+                    $status = 'is-warning';
+                }
+            }
+
+            $summaries['plugin_impact_scanner'][] = [
+                'label'  => __('Dernière analyse', 'sitepulse'),
+                'value'  => sprintf(__('Il y a %s', 'sitepulse'), human_time_diff($last_updated, $now_local)),
+                'status' => $status,
+            ];
+        }
+
+        $samples = isset($impact_data['samples']) && is_array($impact_data['samples'])
+            ? array_filter($impact_data['samples'], 'is_array')
+            : [];
+        $sample_count = count($samples);
+
+        if ($sample_count > 0) {
+            $summaries['plugin_impact_scanner'][] = [
+                'label'  => __('Extensions suivies', 'sitepulse'),
+                'value'  => number_format_i18n($sample_count),
+                'status' => 'is-success',
+            ];
+        }
+    }
+
+    // Speed Analyzer – last response time and last scan.
+    $thresholds = function_exists('sitepulse_get_speed_thresholds')
+        ? sitepulse_get_speed_thresholds()
+        : [
+            'warning'  => defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200,
+            'critical' => defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? (int) SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500,
+        ];
+    $warning_ms  = isset($thresholds['warning']) ? (int) $thresholds['warning'] : 200;
+    $critical_ms = isset($thresholds['critical']) ? (int) $thresholds['critical'] : max($warning_ms + 1, 500);
+
+    $last_load_time = get_option(SITEPULSE_OPTION_LAST_LOAD_TIME, 0);
+    $last_load_time = is_numeric($last_load_time) ? max(0.0, (float) $last_load_time) : 0.0;
+
+    if ($last_load_time > 0) {
+        $speed_status = 'is-success';
+
+        if ($last_load_time >= $critical_ms) {
+            $speed_status = 'is-critical';
+        } elseif ($last_load_time >= $warning_ms) {
+            $speed_status = 'is-warning';
+        }
+
+        $summaries['speed_analyzer'][] = [
+            'label'  => __('Temps de réponse', 'sitepulse'),
+            'value'  => sprintf(__('%s ms', 'sitepulse'), number_format_i18n($last_load_time, 0)),
+            'status' => $speed_status,
+        ];
+    }
+
+    $speed_history = get_option(SITEPULSE_OPTION_SPEED_SCAN_HISTORY, []);
+
+    if (is_array($speed_history) && !empty($speed_history)) {
+        $last_scan = end($speed_history);
+
+        if (is_array($last_scan) && isset($last_scan['timestamp'])) {
+            $scan_timestamp = (int) $last_scan['timestamp'];
+
+            if ($scan_timestamp > 0) {
+                $age_seconds = max(0, $now_local - $scan_timestamp);
+                $status      = 'is-success';
+
+                if ($age_seconds > (2 * DAY_IN_SECONDS)) {
+                    $status = 'is-critical';
+                } elseif ($age_seconds > DAY_IN_SECONDS) {
+                    $status = 'is-warning';
+                }
+
+                $summaries['speed_analyzer'][] = [
+                    'label'  => __('Dernier scan', 'sitepulse'),
+                    'value'  => sprintf(__('Il y a %s', 'sitepulse'), human_time_diff($scan_timestamp, $now_local)),
+                    'status' => $status,
+                ];
+            }
+        }
+    }
+
+    // Uptime Tracker – latest status and availability ratio.
+    $raw_uptime_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+    $uptime_entries = [];
+
+    if (function_exists('sitepulse_normalize_uptime_log')) {
+        $uptime_entries = sitepulse_normalize_uptime_log($raw_uptime_log);
+    } elseif (is_array($raw_uptime_log)) {
+        foreach ($raw_uptime_log as $entry) {
+            if (is_array($entry)) {
+                $uptime_entries[] = $entry;
+                continue;
+            }
+
+            $uptime_entries[] = [
+                'status' => (bool) $entry,
+            ];
+        }
+    }
+
+    if (!empty($uptime_entries)) {
+        usort($uptime_entries, static function ($a, $b) {
+            $a_time = isset($a['timestamp']) ? (int) $a['timestamp'] : 0;
+            $b_time = isset($b['timestamp']) ? (int) $b['timestamp'] : 0;
+
+            return $a_time <=> $b_time;
+        });
+
+        $last_entry = end($uptime_entries);
+
+        if (is_array($last_entry) && array_key_exists('status', $last_entry)) {
+            $status_value = $last_entry['status'];
+            $status_label = __('Indéterminé', 'sitepulse');
+            $status_class = 'is-warning';
+
+            if ($status_value === true) {
+                $status_label = __('En ligne', 'sitepulse');
+                $status_class = 'is-success';
+            } elseif ($status_value === false) {
+                $status_label = __('Hors ligne', 'sitepulse');
+                $status_class = 'is-critical';
+            }
+
+            $summaries['uptime_tracker'][] = [
+                'label'  => __('Statut actuel', 'sitepulse'),
+                'value'  => $status_label,
+                'status' => $status_class,
+            ];
+        }
+
+        $bool_entries = array_filter($uptime_entries, static function ($entry) {
+            return isset($entry['status']) && is_bool($entry['status']);
+        });
+        $total_entries = count($bool_entries);
+
+        if ($total_entries > 0) {
+            $up_entries = count(array_filter($bool_entries, static function ($entry) {
+                return !empty($entry['status']);
+            }));
+            $uptime_percent = ($up_entries / $total_entries) * 100;
+            $warning_threshold = function_exists('sitepulse_get_uptime_warning_percentage')
+                ? (float) sitepulse_get_uptime_warning_percentage()
+                : (float) (defined('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT') ? SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT : 99.0);
+            $status_class = 'is-success';
+
+            if ($uptime_percent < max(0.0, $warning_threshold - 5)) {
+                $status_class = 'is-critical';
+            } elseif ($uptime_percent < $warning_threshold) {
+                $status_class = 'is-warning';
+            }
+
+            $summaries['uptime_tracker'][] = [
+                'label'  => __('Taux de disponibilité', 'sitepulse'),
+                'value'  => sprintf(__('%s %% (24h)', 'sitepulse'), number_format_i18n($uptime_percent, 1)),
+                'status' => $status_class,
+            ];
+        }
+    }
+
+    // AI Insights – last generation run.
+    $last_ai_run = (int) get_option(SITEPULSE_OPTION_AI_LAST_RUN, 0);
+
+    if ($last_ai_run > 0) {
+        $rate_limit_value = get_option(SITEPULSE_OPTION_AI_RATE_LIMIT, 'week');
+
+        if (!is_string($rate_limit_value) || $rate_limit_value === '') {
+            $rate_limit_value = 'week';
+        }
+
+        switch ($rate_limit_value) {
+            case 'day':
+                $rate_limit_window = DAY_IN_SECONDS;
+                break;
+            case 'month':
+                $rate_limit_window = MONTH_IN_SECONDS;
+                break;
+            case 'week':
+                $rate_limit_window = WEEK_IN_SECONDS;
+                break;
+            default:
+                $rate_limit_window = 0;
+        }
+
+        $age_seconds = max(0, $now_utc - $last_ai_run);
+        $status      = 'is-success';
+
+        if ($rate_limit_window > 0) {
+            if ($age_seconds > ($rate_limit_window * 2)) {
+                $status = 'is-critical';
+            } elseif ($age_seconds > $rate_limit_window) {
+                $status = 'is-warning';
+            }
+        }
+
+        $summaries['ai_insights'][] = [
+            'label'  => __('Dernière exécution', 'sitepulse'),
+            'value'  => sprintf(__('Il y a %s', 'sitepulse'), human_time_diff($last_ai_run, $now_utc)),
+            'status' => $status,
+        ];
+    }
+
+    // Error Alerts – cron warnings and last log scan.
+    $cron_warnings = get_option(SITEPULSE_OPTION_CRON_WARNINGS, []);
+
+    if (is_array($cron_warnings) && isset($cron_warnings['error_alerts'])) {
+        $summaries['error_alerts'][] = [
+            'label'  => __('Planification', 'sitepulse'),
+            'value'  => __('Avertissement détecté', 'sitepulse'),
+            'status' => 'is-warning',
+        ];
+    }
+
+    $log_pointer = get_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER, []);
+
+    if (is_array($log_pointer) && isset($log_pointer['updated_at'])) {
+        $pointer_time = (int) $log_pointer['updated_at'];
+
+        if ($pointer_time > 0) {
+            $age_seconds = max(0, time() - $pointer_time);
+            $status      = $age_seconds > DAY_IN_SECONDS ? 'is-warning' : 'is-success';
+
+            $summaries['error_alerts'][] = [
+                'label'  => __('Dernière analyse', 'sitepulse'),
+                'value'  => sprintf(__('Il y a %s', 'sitepulse'), human_time_diff($pointer_time, time())),
+                'status' => $status,
+            ];
+        }
+    }
+
+    return $summaries;
+}
+
+/**
  * Renders the settings page.
  */
 function sitepulse_settings_page() {
@@ -1035,6 +1376,7 @@ function sitepulse_settings_page() {
             'page'        => '#sitepulse-section-alerts',
         ],
     ];
+    $module_summaries = sitepulse_get_module_status_summaries();
     $stored_gemini_api_key = (string) get_option(SITEPULSE_OPTION_GEMINI_API_KEY, '');
     $has_stored_gemini_api_key = $stored_gemini_api_key !== '';
     $effective_gemini_api_key = function_exists('sitepulse_get_gemini_api_key') ? sitepulse_get_gemini_api_key() : $stored_gemini_api_key;
@@ -1643,8 +1985,54 @@ function sitepulse_settings_page() {
                             <span class="sitepulse-status <?php echo esc_attr($status_class); ?>"><?php echo $status_label; ?></span>
                         </div>
                         <div class="sitepulse-card-body">
+                            <?php
+                            $raw_metrics = isset($module_summaries[$module_key]) && is_array($module_summaries[$module_key])
+                                ? $module_summaries[$module_key]
+                                : [];
+                            $module_metrics = [];
+
+                            foreach ($raw_metrics as $metric) {
+                                if (!is_array($metric)) {
+                                    continue;
+                                }
+
+                                $metric_label = isset($metric['label']) ? (string) $metric['label'] : '';
+                                $metric_value = isset($metric['value']) ? (string) $metric['value'] : '';
+                                $metric_status = isset($metric['status']) ? (string) $metric['status'] : '';
+
+                                if ($metric_label === '' && $metric_value === '') {
+                                    continue;
+                                }
+
+                                if ($metric_status === '') {
+                                    $metric_status = 'is-success';
+                                }
+
+                                $module_metrics[] = [
+                                    'label'  => $metric_label,
+                                    'value'  => $metric_value,
+                                    'status' => $metric_status,
+                                ];
+                            }
+                            ?>
                             <?php if ($module_description !== '') : ?>
                                 <p class="sitepulse-card-description" id="<?php echo esc_attr($description_id); ?>"><?php echo esc_html($module_description); ?></p>
+                            <?php endif; ?>
+                            <?php if (!empty($module_metrics)) : ?>
+                                <ul class="sitepulse-module-metrics">
+                                    <?php foreach ($module_metrics as $metric) : ?>
+                                        <li class="sitepulse-module-metric">
+                                            <?php if ($metric['label'] !== '') : ?>
+                                                <span class="sitepulse-status <?php echo esc_attr($metric['status']); ?>"><?php echo esc_html($metric['label']); ?></span>
+                                            <?php endif; ?>
+                                            <?php if ($metric['value'] !== '') : ?>
+                                                <span class="sitepulse-module-metric-value"><?php echo esc_html($metric['value']); ?></span>
+                                            <?php endif; ?>
+                                        </li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            <?php else : ?>
+                                <p class="sitepulse-card-placeholder"><?php esc_html_e('Aucun relevé', 'sitepulse'); ?></p>
                             <?php endif; ?>
                             <div class="sitepulse-card-footer">
                                 <label class="sitepulse-toggle" for="<?php echo esc_attr($checkbox_id); ?>">
