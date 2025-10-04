@@ -37,6 +37,194 @@
             });
     }
 
+    function getStatusMeta(status) {
+        var labels = settings.statusLabels || {};
+
+        if (labels[status]) {
+            return labels[status];
+        }
+
+        return labels['status-warn'] || { icon: '', label: '', sr: '' };
+    }
+
+    function buildThresholdDatasets(length) {
+        var thresholds = settings.thresholds || {};
+        var datasets = [];
+        var i18n = settings.i18n || {};
+
+        if (!length) {
+            return datasets;
+        }
+
+        var warning = Number(thresholds.warning);
+        var critical = Number(thresholds.critical);
+
+        if (Number.isFinite(warning)) {
+            datasets.push({
+                label: i18n.warningThresholdLabel || '',
+                data: new Array(length).fill(warning),
+                borderColor: '#f0ad4e',
+                borderWidth: 1,
+                borderDash: [6, 4],
+                pointRadius: 0,
+                pointHitRadius: 0,
+                fill: false,
+                tension: 0,
+                order: 0,
+                tooltip: {
+                    enabled: false
+                }
+            });
+        }
+
+        if (Number.isFinite(critical)) {
+            datasets.push({
+                label: i18n.criticalThresholdLabel || '',
+                data: new Array(length).fill(critical),
+                borderColor: '#d63638',
+                borderWidth: 1,
+                borderDash: [4, 4],
+                pointRadius: 0,
+                pointHitRadius: 0,
+                fill: false,
+                tension: 0,
+                order: 1,
+                tooltip: {
+                    enabled: false
+                }
+            });
+        }
+
+        return datasets;
+    }
+
+    function buildTooltipLines() {
+        var aggregates = settings.aggregates || {};
+        var metrics = aggregates.metrics || {};
+        var summaryMeta = settings.summaryMeta || {};
+        var i18n = settings.i18n || {};
+        var unit = i18n.summaryUnit || 'ms';
+        var noData = i18n.summaryNoData || '';
+        var order = ['mean', 'median', 'p95', 'best', 'worst'];
+        var lines = [];
+
+        order.forEach(function (key) {
+            if (!Object.prototype.hasOwnProperty.call(summaryMeta, key)) {
+                return;
+            }
+
+            var meta = summaryMeta[key] || {};
+            var metric = metrics[key] || {};
+            var label = meta.label || key;
+            var value = metric.value;
+
+            if (typeof value === 'number' && isFinite(value)) {
+                value = value.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
+                }) + ' ' + unit;
+            } else {
+                value = noData;
+            }
+
+            lines.push(label + ': ' + value);
+        });
+
+        return lines;
+    }
+
+    function tooltipAfterBody() {
+        return buildTooltipLines();
+    }
+
+    function renderSummary(aggregates, dom) {
+        var grid = dom.summaryGrid;
+        var meta = settings.summaryMeta || {};
+        var i18n = settings.i18n || {};
+        var unit = i18n.summaryUnit || 'ms';
+        var noData = i18n.summaryNoData || 'N/A';
+
+        if (!grid) {
+            return;
+        }
+
+        var metrics = aggregates && aggregates.metrics ? aggregates.metrics : {};
+
+        Object.keys(meta).forEach(function (key) {
+            var card = grid.querySelector('[data-metric="' + key + '"]');
+
+            if (!card) {
+                return;
+            }
+
+            var metric = metrics[key] || {};
+            var status = metric.status || 'status-warn';
+            var badge = card.querySelector('.status-badge');
+            var sr = card.querySelector('[data-summary-sr]');
+            var valueEl = card.querySelector('[data-summary-value]');
+            var statusMeta = getStatusMeta(status);
+
+            if (badge) {
+                badge.classList.remove('status-ok', 'status-warn', 'status-bad');
+                badge.classList.add(status);
+
+                var icon = badge.querySelector('.status-icon');
+                var text = badge.querySelector('.status-text');
+
+                if (icon && typeof statusMeta.icon !== 'undefined') {
+                    icon.textContent = statusMeta.icon;
+                }
+
+                if (text && typeof statusMeta.label !== 'undefined') {
+                    text.textContent = statusMeta.label;
+                }
+            }
+
+            if (sr && typeof statusMeta.sr !== 'undefined') {
+                sr.textContent = statusMeta.sr;
+            }
+
+            if (valueEl) {
+                var value = metric.value;
+
+                if (typeof value === 'number' && isFinite(value)) {
+                    valueEl.textContent = value.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                    }) + ' ' + unit;
+                } else {
+                    valueEl.textContent = noData;
+                }
+            }
+        });
+
+        var noteEl = dom.summaryNote;
+
+        if (noteEl) {
+            var noteParts = [];
+            var count = aggregates && typeof aggregates.count === 'number' ? aggregates.count : 0;
+            var excluded = aggregates && typeof aggregates.excluded_outliers === 'number' ? aggregates.excluded_outliers : 0;
+
+            if (count > 0) {
+                var sampleTemplate = count === 1 ? i18n.summarySampleSingular : i18n.summarySamplePlural;
+
+                if (sampleTemplate) {
+                    noteParts.push(sampleTemplate.replace('%d', count));
+                }
+            }
+
+            if (excluded > 0) {
+                var outlierTemplate = excluded === 1 ? i18n.summaryOutlierSingular : i18n.summaryOutlierPlural;
+
+                if (outlierTemplate) {
+                    noteParts.push(outlierTemplate.replace('%d', excluded));
+                }
+            }
+
+            noteEl.textContent = noteParts.join(' ');
+        }
+    }
+
     function formatTimestamp(timestamp) {
         var date = new Date(timestamp * 1000);
 
@@ -89,26 +277,28 @@
         var values = sanitized.map(function (entry) {
             return entry.server_processing_ms;
         });
+        var datasets = [
+            {
+                label: i18n.chartLabel || '',
+                data: values,
+                borderColor: '#0073aa',
+                backgroundColor: 'rgba(0, 115, 170, 0.15)',
+                borderWidth: 2,
+                pointRadius: 3,
+                pointBackgroundColor: '#ffffff',
+                pointBorderColor: '#0073aa',
+                tension: 0.25,
+                fill: true,
+                order: 2
+            }
+        ].concat(buildThresholdDatasets(values.length));
 
         if (!chartInstance) {
             chartInstance = new window.Chart(canvas.getContext('2d'), {
                 type: 'line',
                 data: {
                     labels: labels,
-                    datasets: [
-                        {
-                            label: i18n.chartLabel || '',
-                            data: values,
-                            borderColor: '#0073aa',
-                            backgroundColor: 'rgba(0, 115, 170, 0.15)',
-                            borderWidth: 2,
-                            pointRadius: 3,
-                            pointBackgroundColor: '#ffffff',
-                            pointBorderColor: '#0073aa',
-                            tension: 0.25,
-                            fill: true
-                        }
-                    ]
+                    datasets: datasets
                 },
                 options: {
                     responsive: true,
@@ -132,7 +322,8 @@
                                 label: function (context) {
                                     var label = context.dataset.label ? context.dataset.label + ': ' : '';
                                     return label + context.parsed.y.toFixed(2) + ' ms';
-                                }
+                                },
+                                afterBody: tooltipAfterBody
                             }
                         }
                     }
@@ -140,7 +331,8 @@
             });
         } else {
             chartInstance.data.labels = labels;
-            chartInstance.data.datasets[0].data = values;
+            chartInstance.data.datasets = datasets;
+            chartInstance.options.plugins.tooltip.callbacks.afterBody = tooltipAfterBody;
             chartInstance.update();
         }
     }
@@ -219,11 +411,14 @@
             status: document.getElementById('sitepulse-speed-scan-status'),
             canvas: document.getElementById('sitepulse-speed-history-chart'),
             tableBody: document.querySelector('#sitepulse-speed-history-table tbody'),
-            recommendations: document.querySelector('#sitepulse-speed-recommendations ul')
+            recommendations: document.querySelector('#sitepulse-speed-recommendations ul'),
+            summaryGrid: document.getElementById('sitepulse-speed-summary-grid'),
+            summaryNote: document.getElementById('sitepulse-speed-summary-note')
         };
 
         renderHistory(settings.history || [], dom);
         updateRecommendations(settings.recommendations || [], dom);
+        renderSummary(settings.aggregates || {}, dom);
 
         if (!dom.button) {
             return;
@@ -291,10 +486,15 @@
                             updateRecommendations(errorData.recommendations, dom);
                         }
 
+                        if (errorData.aggregates) {
+                            settings.aggregates = errorData.aggregates;
+                        }
+
                         if (Array.isArray(errorData.history)) {
                             renderHistory(errorData.history, dom);
                         }
 
+                        renderSummary(settings.aggregates || {}, dom);
                         setStatus(message, type, dom);
                         setButtonState(false, dom);
                         return;
@@ -306,9 +506,11 @@
                     settings.recommendations = Array.isArray(data.recommendations) ? data.recommendations : [];
                     settings.lastRun = data.last_run || settings.lastRun;
                     settings.rateLimit = data.rate_limit || settings.rateLimit;
+                    settings.aggregates = data.aggregates || settings.aggregates;
 
                     renderHistory(settings.history, dom);
                     updateRecommendations(settings.recommendations, dom);
+                    renderSummary(settings.aggregates || {}, dom);
 
                     setStatus(data.message || '', 'success', dom);
                     setButtonState(false, dom);
