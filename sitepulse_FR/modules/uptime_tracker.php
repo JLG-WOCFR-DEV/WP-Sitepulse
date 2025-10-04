@@ -9,6 +9,18 @@ if (!defined('SITEPULSE_OPTION_UPTIME_ARCHIVE')) {
     define('SITEPULSE_OPTION_UPTIME_ARCHIVE', 'sitepulse_uptime_archive');
 }
 
+if (!defined('SITEPULSE_OPTION_UPTIME_AGENTS')) {
+    define('SITEPULSE_OPTION_UPTIME_AGENTS', 'sitepulse_uptime_agents');
+}
+
+if (!defined('SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE')) {
+    define('SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE', 'sitepulse_uptime_remote_queue');
+}
+
+if (!defined('SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS')) {
+    define('SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS', 'sitepulse_uptime_maintenance_windows');
+}
+
 $sitepulse_uptime_cron_hook = function_exists('sitepulse_get_cron_hook') ? sitepulse_get_cron_hook('uptime_tracker') : 'sitepulse_uptime_tracker_cron';
 
 add_filter('cron_schedules', 'sitepulse_uptime_tracker_register_cron_schedules');
@@ -42,6 +54,8 @@ if (!empty($sitepulse_uptime_cron_hook)) {
     add_action('init', 'sitepulse_uptime_tracker_ensure_cron');
     add_action($sitepulse_uptime_cron_hook, 'sitepulse_run_uptime_check');
 }
+
+add_action('init', 'sitepulse_uptime_register_remote_worker_hooks');
 
 /**
  * Registers custom cron schedules used by the uptime tracker.
@@ -87,6 +101,31 @@ function sitepulse_uptime_tracker_register_cron_schedules($schedules) {
 }
 
 /**
+ * Registers hooks used for remote worker orchestration.
+ *
+ * @return void
+ */
+function sitepulse_uptime_register_remote_worker_hooks() {
+    add_action('sitepulse_uptime_process_remote_queue', 'sitepulse_uptime_process_remote_queue');
+    add_action('sitepulse_uptime_schedule_internal_request', 'sitepulse_uptime_schedule_internal_request', 10, 3);
+
+    if (defined('WP_CLI') && WP_CLI && class_exists('WP_CLI')) {
+        WP_CLI::add_command('sitepulse uptime:queue', function ($args, $assoc_args) {
+            $agent = isset($assoc_args['agent']) ? $assoc_args['agent'] : 'default';
+            $payload = isset($assoc_args['payload']) ? json_decode($assoc_args['payload'], true) : [];
+            $timestamp = isset($assoc_args['timestamp']) ? (int) $assoc_args['timestamp'] : null;
+
+            if (!is_array($payload)) {
+                $payload = [];
+            }
+
+            sitepulse_uptime_schedule_internal_request($agent, $payload, $timestamp);
+            WP_CLI::success(sprintf('Vérification programmée pour %s.', $agent));
+        });
+    }
+}
+
+/**
  * Retrieves the configured cron schedule for uptime checks.
  *
  * @return string
@@ -108,6 +147,254 @@ function sitepulse_uptime_tracker_get_schedule() {
     }
 
     return $option;
+}
+
+/**
+ * Returns the configured uptime monitoring agents.
+ *
+ * @return array<string,array<string,mixed>>
+ */
+function sitepulse_uptime_get_agents() {
+    $agents = get_option(SITEPULSE_OPTION_UPTIME_AGENTS, []);
+
+    if (!is_array($agents)) {
+        $agents = [];
+    }
+
+    if (empty($agents)) {
+        $agents = [
+            'default' => [
+                'label'  => __('Agent principal', 'sitepulse'),
+                'region' => 'global',
+                'active' => true,
+            ],
+        ];
+    }
+
+    foreach ($agents as $agent_id => $agent_data) {
+        if (!is_array($agent_data)) {
+            $agents[$agent_id] = [];
+            $agent_data = [];
+        }
+
+        $agents[$agent_id] = wp_parse_args($agent_data, [
+            'label'          => ucfirst(str_replace('_', ' ', $agent_id)),
+            'region'         => 'global',
+            'url'            => '',
+            'timeout'        => null,
+            'method'         => null,
+            'headers'        => [],
+            'expected_codes' => [],
+            'active'         => true,
+        ]);
+    }
+
+    return $agents;
+}
+
+/**
+ * Retrieves a single agent definition.
+ *
+ * @param string $agent_id Agent identifier.
+ * @return array<string,mixed>
+ */
+function sitepulse_uptime_get_agent($agent_id) {
+    $agent_id = sitepulse_uptime_normalize_agent_id($agent_id);
+    $agents = sitepulse_uptime_get_agents();
+
+    if (!isset($agents[$agent_id])) {
+        return [
+            'label'          => __('Agent principal', 'sitepulse'),
+            'region'         => 'global',
+            'url'            => '',
+            'timeout'        => null,
+            'method'         => null,
+            'headers'        => [],
+            'expected_codes' => [],
+            'active'         => true,
+        ];
+    }
+
+    return $agents[$agent_id];
+}
+
+/**
+ * Normalises an agent identifier.
+ *
+ * @param string $agent_id Raw identifier.
+ * @return string
+ */
+function sitepulse_uptime_normalize_agent_id($agent_id) {
+    if (!is_string($agent_id) || $agent_id === '') {
+        return 'default';
+    }
+
+    $agent_id = sanitize_key($agent_id);
+
+    if ($agent_id === '') {
+        return 'default';
+    }
+
+    return $agent_id;
+}
+
+/**
+ * Returns configured maintenance windows.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function sitepulse_uptime_get_maintenance_windows() {
+    $windows = get_option(SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS, []);
+
+    if (!is_array($windows)) {
+        return [];
+    }
+
+    return array_values(array_filter(array_map(function ($window) {
+        if (!is_array($window)) {
+            return null;
+        }
+
+        $start = isset($window['start']) ? (int) $window['start'] : 0;
+        $end = isset($window['end']) ? (int) $window['end'] : 0;
+
+        if ($start <= 0 || $end <= 0 || $start >= $end) {
+            return null;
+        }
+
+        $agent = isset($window['agent']) ? sitepulse_uptime_normalize_agent_id($window['agent']) : 'all';
+
+        return [
+            'agent'      => $agent,
+            'start'      => $start,
+            'end'        => $end,
+            'label'      => isset($window['label']) && is_string($window['label']) ? $window['label'] : '',
+            'created_at' => isset($window['created_at']) ? (int) $window['created_at'] : (int) current_time('timestamp'),
+        ];
+    }, $windows)));
+}
+
+/**
+ * Determines if the provided agent is inside a maintenance window.
+ *
+ * @param string   $agent_id  Agent identifier.
+ * @param int|null $timestamp Timestamp to evaluate.
+ * @return bool
+ */
+function sitepulse_uptime_is_in_maintenance_window($agent_id, $timestamp = null) {
+    $timestamp = null === $timestamp ? (int) current_time('timestamp') : (int) $timestamp;
+    $agent_id = sitepulse_uptime_normalize_agent_id($agent_id);
+    $windows = sitepulse_uptime_get_maintenance_windows();
+
+    foreach ($windows as $window) {
+        if ($timestamp < $window['start'] || $timestamp > $window['end']) {
+            continue;
+        }
+
+        if ('all' === $window['agent'] || $window['agent'] === $agent_id) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Queues a remote worker request so it is executed internally.
+ *
+ * @param string   $agent_id  Agent identifier.
+ * @param array    $payload   Optional overrides for the request.
+ * @param int|null $timestamp When the request should be executed.
+ * @return void
+ */
+function sitepulse_uptime_schedule_internal_request($agent_id, $payload = [], $timestamp = null) {
+    $agent_id = sitepulse_uptime_normalize_agent_id($agent_id);
+    $timestamp = null === $timestamp ? (int) current_time('timestamp') : (int) $timestamp;
+
+    if (!is_array($payload)) {
+        $payload = [];
+    }
+
+    $queue = get_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, []);
+
+    if (!is_array($queue)) {
+        $queue = [];
+    }
+
+    $queue[] = [
+        'agent'       => $agent_id,
+        'payload'     => $payload,
+        'scheduled_at'=> $timestamp,
+        'created_at'  => (int) current_time('timestamp'),
+    ];
+
+    update_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, $queue, false);
+
+    sitepulse_uptime_maybe_schedule_queue_processor($timestamp);
+}
+
+/**
+ * Ensures a cron event exists to process the remote worker queue.
+ *
+ * @param int $timestamp Desired execution time.
+ * @return void
+ */
+function sitepulse_uptime_maybe_schedule_queue_processor($timestamp) {
+    $timestamp = max((int) $timestamp, (int) current_time('timestamp'));
+
+    $current = wp_next_scheduled('sitepulse_uptime_process_remote_queue');
+
+    if (!$current || $timestamp < $current) {
+        if ($current) {
+            wp_unschedule_event($current, 'sitepulse_uptime_process_remote_queue');
+        }
+
+        wp_schedule_single_event($timestamp, 'sitepulse_uptime_process_remote_queue');
+    }
+}
+
+/**
+ * Processes the remote worker queue and executes pending checks.
+ *
+ * @return void
+ */
+function sitepulse_uptime_process_remote_queue() {
+    $queue = get_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, []);
+
+    if (!is_array($queue) || empty($queue)) {
+        return;
+    }
+
+    $now = (int) current_time('timestamp');
+    $remaining = [];
+
+    foreach ($queue as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+
+        $scheduled_at = isset($item['scheduled_at']) ? (int) $item['scheduled_at'] : $now;
+
+        if ($scheduled_at > $now) {
+            $remaining[] = $item;
+            continue;
+        }
+
+        $agent = isset($item['agent']) ? $item['agent'] : 'default';
+        $payload = isset($item['payload']) && is_array($item['payload']) ? $item['payload'] : [];
+
+        sitepulse_run_uptime_check($agent, $payload);
+    }
+
+    update_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, array_values($remaining), false);
+
+    if (!empty($remaining)) {
+        $next_timestamp = min(array_map(function ($item) {
+            return isset($item['scheduled_at']) ? (int) $item['scheduled_at'] : (int) current_time('timestamp');
+        }, $remaining));
+
+        sitepulse_uptime_maybe_schedule_queue_processor($next_timestamp);
+    }
 }
 
 /**
@@ -218,6 +505,8 @@ function sitepulse_normalize_uptime_log($log) {
         $incident_start = null;
         $error_message = null;
 
+        $agent = 'default';
+
         if (is_array($entry)) {
             if (isset($entry['timestamp']) && is_numeric($entry['timestamp'])) {
                 $timestamp = (int) $entry['timestamp'];
@@ -246,11 +535,17 @@ function sitepulse_normalize_uptime_log($log) {
                     }
                 }
             }
+
+            if (isset($entry['agent']) && is_string($entry['agent'])) {
+                $agent = sitepulse_uptime_normalize_agent_id($entry['agent']);
+            }
         } else {
             $status = (bool) (is_int($entry) ? $entry : !empty($entry));
         }
 
-        if (is_bool($status)) {
+        if ('maintenance' === $status) {
+            $incident_start = null;
+        } elseif (is_bool($status)) {
             if (false === $status) {
                 if (null === $incident_start) {
                     $previous_boolean_entry = null;
@@ -282,6 +577,7 @@ function sitepulse_normalize_uptime_log($log) {
             'status'         => $status,
             'incident_start' => $incident_start,
             'error'          => $error_message,
+            'agent'          => $agent,
         ], function ($value) {
             return null !== $value;
         });
@@ -330,12 +626,15 @@ function sitepulse_update_uptime_archive($entry) {
     $day_key = wp_date('Y-m-d', $timestamp);
 
     $status_key = 'unknown';
+    $agent = isset($entry['agent']) ? sitepulse_uptime_normalize_agent_id($entry['agent']) : 'default';
 
     if (array_key_exists('status', $entry)) {
         if (true === $entry['status']) {
             $status_key = 'up';
         } elseif (false === $entry['status']) {
             $status_key = 'down';
+        } elseif (is_string($entry['status']) && 'maintenance' === $entry['status']) {
+            $status_key = 'maintenance';
         } elseif (is_string($entry['status']) && 'unknown' === $entry['status']) {
             $status_key = 'unknown';
         }
@@ -350,8 +649,10 @@ function sitepulse_update_uptime_archive($entry) {
             'down'            => 0,
             'unknown'         => 0,
             'total'           => 0,
+            'maintenance'     => 0,
             'first_timestamp' => $timestamp,
             'last_timestamp'  => $timestamp,
+            'agents'          => [],
         ];
     }
 
@@ -368,6 +669,23 @@ function sitepulse_update_uptime_archive($entry) {
     $archive[$day_key]['last_timestamp'] = isset($archive[$day_key]['last_timestamp'])
         ? max((int) $archive[$day_key]['last_timestamp'], $timestamp)
         : $timestamp;
+
+    if (!isset($archive[$day_key]['agents'][$agent])) {
+        $archive[$day_key]['agents'][$agent] = [
+            'up'          => 0,
+            'down'        => 0,
+            'unknown'     => 0,
+            'maintenance' => 0,
+            'total'       => 0,
+        ];
+    }
+
+    if (!isset($archive[$day_key]['agents'][$agent][$status_key])) {
+        $archive[$day_key]['agents'][$agent][$status_key] = 0;
+    }
+
+    $archive[$day_key]['agents'][$agent][$status_key]++;
+    $archive[$day_key]['agents'][$agent]['total']++;
 
     if (count($archive) > 120) {
         $archive = array_slice($archive, -120, null, true);
@@ -407,7 +725,11 @@ function sitepulse_calculate_uptime_window_metrics($archive, $days) {
     ];
 
     foreach ($window as $entry) {
-        $totals['total_checks'] += isset($entry['total']) ? (int) $entry['total'] : 0;
+        $day_total = isset($entry['total']) ? (int) $entry['total'] : 0;
+        $maintenance = isset($entry['maintenance']) ? (int) $entry['maintenance'] : 0;
+        $effective_total = max(0, $day_total - $maintenance);
+
+        $totals['total_checks'] += $effective_total;
         $totals['up_checks'] += isset($entry['up']) ? (int) $entry['up'] : 0;
         $totals['down_checks'] += isset($entry['down']) ? (int) $entry['down'] : 0;
         $totals['unknown_checks'] += isset($entry['unknown']) ? (int) $entry['unknown'] : 0;
@@ -420,6 +742,107 @@ function sitepulse_calculate_uptime_window_metrics($archive, $days) {
     return $totals;
 }
 
+/**
+ * Aggregates uptime metrics per agent for the provided window.
+ *
+ * @param array<string,array<string,mixed>> $archive Archive entries.
+ * @param int                               $days    Window size.
+ * @return array<string,array<string,mixed>>
+ */
+function sitepulse_calculate_agent_uptime_metrics($archive, $days) {
+    if (!is_array($archive) || empty($archive) || $days < 1) {
+        return [];
+    }
+
+    $window = array_slice($archive, -$days, null, true);
+    $totals = [];
+
+    foreach ($window as $entry) {
+        $agents = isset($entry['agents']) && is_array($entry['agents']) ? $entry['agents'] : [];
+
+        if (empty($agents)) {
+            $agents = [
+                'default' => [
+                    'up'          => isset($entry['up']) ? (int) $entry['up'] : 0,
+                    'down'        => isset($entry['down']) ? (int) $entry['down'] : 0,
+                    'unknown'     => isset($entry['unknown']) ? (int) $entry['unknown'] : 0,
+                    'maintenance' => isset($entry['maintenance']) ? (int) $entry['maintenance'] : 0,
+                    'total'       => isset($entry['total']) ? (int) $entry['total'] : 0,
+                ],
+            ];
+        }
+
+        foreach ($agents as $agent_id => $agent_totals) {
+            if (!isset($totals[$agent_id])) {
+                $totals[$agent_id] = [
+                    'up'          => 0,
+                    'down'        => 0,
+                    'unknown'     => 0,
+                    'maintenance' => 0,
+                    'total'       => 0,
+                ];
+            }
+
+            $totals[$agent_id]['up'] += isset($agent_totals['up']) ? (int) $agent_totals['up'] : 0;
+            $totals[$agent_id]['down'] += isset($agent_totals['down']) ? (int) $agent_totals['down'] : 0;
+            $totals[$agent_id]['unknown'] += isset($agent_totals['unknown']) ? (int) $agent_totals['unknown'] : 0;
+            $totals[$agent_id]['maintenance'] += isset($agent_totals['maintenance']) ? (int) $agent_totals['maintenance'] : 0;
+            $totals[$agent_id]['total'] += isset($agent_totals['total']) ? (int) $agent_totals['total'] : 0;
+        }
+    }
+
+    foreach ($totals as $agent_id => $counts) {
+        $effective_total = max(0, (int) $counts['total'] - (int) $counts['maintenance']);
+        $uptime = $effective_total > 0 ? ($counts['up'] / $effective_total) * 100 : 100;
+        $totals[$agent_id]['uptime'] = max(0, min(100, $uptime));
+        $totals[$agent_id]['effective_total'] = $effective_total;
+    }
+
+    return $totals;
+}
+
+/**
+ * Aggregates uptime metrics per region based on agent configuration.
+ *
+ * @param array<string,array<string,mixed>> $agent_metrics Metrics per agent.
+ * @param array<string,array<string,mixed>> $agents        Agent definitions.
+ * @return array<string,array<string,mixed>>
+ */
+function sitepulse_calculate_region_uptime_metrics($agent_metrics, $agents) {
+    $regions = [];
+
+    foreach ($agent_metrics as $agent_id => $metrics) {
+        $agent = isset($agents[$agent_id]) ? $agents[$agent_id] : ['region' => 'global'];
+        $region = isset($agent['region']) && is_string($agent['region']) ? sanitize_key($agent['region']) : 'global';
+
+        if (!isset($regions[$region])) {
+            $regions[$region] = [
+                'up'              => 0,
+                'down'            => 0,
+                'unknown'         => 0,
+                'maintenance'     => 0,
+                'effective_total' => 0,
+                'agents'          => [],
+            ];
+        }
+
+        $regions[$region]['up'] += isset($metrics['up']) ? (int) $metrics['up'] : 0;
+        $regions[$region]['down'] += isset($metrics['down']) ? (int) $metrics['down'] : 0;
+        $regions[$region]['unknown'] += isset($metrics['unknown']) ? (int) $metrics['unknown'] : 0;
+        $regions[$region]['maintenance'] += isset($metrics['maintenance']) ? (int) $metrics['maintenance'] : 0;
+        $regions[$region]['effective_total'] += isset($metrics['effective_total']) ? (int) $metrics['effective_total'] : 0;
+        $regions[$region]['agents'][] = $agent_id;
+    }
+
+    foreach ($regions as $region => $region_metrics) {
+        $effective_total = max(0, (int) $region_metrics['effective_total']);
+        $uptime = $effective_total > 0 ? ($region_metrics['up'] / $effective_total) * 100 : 100;
+        $regions[$region]['uptime'] = max(0, min(100, $uptime));
+    }
+
+    return $regions;
+}
+
 function sitepulse_uptime_tracker_page() {
     if (!current_user_can(sitepulse_get_capability())) {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
@@ -427,6 +850,7 @@ function sitepulse_uptime_tracker_page() {
 
     $uptime_log = sitepulse_normalize_uptime_log(get_option(SITEPULSE_OPTION_UPTIME_LOG, []));
     $uptime_archive = sitepulse_get_uptime_archive();
+    $agents = sitepulse_uptime_get_agents();
     $total_checks = count($uptime_log);
     $boolean_checks = array_values(array_filter($uptime_log, function ($entry) {
         return isset($entry['status']) && is_bool($entry['status']);
@@ -455,8 +879,10 @@ function sitepulse_uptime_tracker_page() {
 
     foreach ($trend_entries as $day_key => $daily_entry) {
         $total = isset($daily_entry['total']) ? max(0, (int) $daily_entry['total']) : 0;
+        $maintenance = isset($daily_entry['maintenance']) ? max(0, (int) $daily_entry['maintenance']) : 0;
+        $effective_total = max(0, $total - $maintenance);
         $up = isset($daily_entry['up']) ? (int) $daily_entry['up'] : 0;
-        $uptime_value = $total > 0 ? ($up / $total) * 100 : 100;
+        $uptime_value = $effective_total > 0 ? ($up / $effective_total) * 100 : 100;
         $uptime_value = max(0, min(100, $uptime_value));
         $bar_height = (int) max(4, round($uptime_value));
         $trend_timestamp = isset($daily_entry['last_timestamp']) ? (int) $daily_entry['last_timestamp'] : strtotime($day_key . ' 23:59:59');
@@ -486,6 +912,25 @@ function sitepulse_uptime_tracker_page() {
 
     $seven_day_metrics = sitepulse_calculate_uptime_window_metrics($uptime_archive, 7);
     $thirty_day_metrics = sitepulse_calculate_uptime_window_metrics($uptime_archive, 30);
+    $agent_metrics = sitepulse_calculate_agent_uptime_metrics($uptime_archive, 30);
+    $region_metrics = sitepulse_calculate_region_uptime_metrics($agent_metrics, $agents);
+    $maintenance_windows = sitepulse_uptime_get_maintenance_windows();
+
+    $last_checks = [];
+
+    foreach ($uptime_log as $entry) {
+        if (!isset($entry['agent'])) {
+            continue;
+        }
+
+        $agent_id = sitepulse_uptime_normalize_agent_id($entry['agent']);
+
+        if (!isset($last_checks[$agent_id]) || $entry['timestamp'] >= $last_checks[$agent_id]['timestamp']) {
+            $last_checks[$agent_id] = $entry;
+        }
+    }
+
+    $current_timestamp = (int) current_time('timestamp');
 
     ?>
     <?php
@@ -542,6 +987,150 @@ function sitepulse_uptime_tracker_page() {
                 ?></p>
             </div>
         </div>
+        <h2><?php esc_html_e('Disponibilité par localisation', 'sitepulse'); ?></h2>
+        <table class="widefat striped">
+            <thead>
+                <tr>
+                    <th><?php esc_html_e('Agent', 'sitepulse'); ?></th>
+                    <th><?php esc_html_e('Région', 'sitepulse'); ?></th>
+                    <th><?php esc_html_e('Uptime (30 jours)', 'sitepulse'); ?></th>
+                    <th><?php esc_html_e('Dernier statut', 'sitepulse'); ?></th>
+                    <th><?php esc_html_e('Contrôle le', 'sitepulse'); ?></th>
+                    <th><?php esc_html_e('Maintenance', 'sitepulse'); ?></th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($agents as $agent_id => $agent_data) :
+                    $agent_metrics_entry = isset($agent_metrics[$agent_id]) ? $agent_metrics[$agent_id] : [
+                        'uptime'          => 100,
+                        'effective_total' => 0,
+                        'up'              => 0,
+                        'down'            => 0,
+                        'unknown'         => 0,
+                        'maintenance'     => 0,
+                    ];
+                    $uptime_value = number_format_i18n($agent_metrics_entry['uptime'], 2);
+                    $last_entry = isset($last_checks[$agent_id]) ? $last_checks[$agent_id] : null;
+                    $status_label = __('Aucun contrôle', 'sitepulse');
+                    $status_class = 'status-unknown';
+                    $last_check_time = __('Jamais', 'sitepulse');
+
+                    if ($last_entry) {
+                        $last_check_time = date_i18n($date_format . ' ' . $time_format, (int) $last_entry['timestamp']);
+                        $status_value = isset($last_entry['status']) ? $last_entry['status'] : null;
+
+                        if (true === $status_value) {
+                            $status_label = __('Disponible', 'sitepulse');
+                            $status_class = 'status-up';
+                        } elseif (false === $status_value) {
+                            $status_label = __('Incident', 'sitepulse');
+                            $status_class = 'status-down';
+                        } elseif ('maintenance' === $status_value) {
+                            $status_label = __('Maintenance', 'sitepulse');
+                            $status_class = 'status-maintenance';
+                        } else {
+                            $status_label = __('Inconnu', 'sitepulse');
+                            $status_class = 'status-unknown';
+                        }
+                    }
+
+                    $active_maintenance = sitepulse_uptime_is_in_maintenance_window($agent_id, $current_timestamp);
+                    $next_window = null;
+
+                    foreach ($maintenance_windows as $window) {
+                        if ('all' !== $window['agent'] && $window['agent'] !== $agent_id) {
+                            continue;
+                        }
+
+                        if ($window['start'] <= $current_timestamp && $window['end'] >= $current_timestamp) {
+                            $next_window = $window;
+                            break;
+                        }
+
+                        if ($window['start'] > $current_timestamp) {
+                            if (null === $next_window || $window['start'] < $next_window['start']) {
+                                $next_window = $window;
+                            }
+                        }
+                    }
+
+                    $maintenance_label = $active_maintenance
+                        ? __('Maintenance active', 'sitepulse')
+                        : __('Aucune', 'sitepulse');
+
+                    if ($next_window && !$active_maintenance) {
+                        $maintenance_label = sprintf(
+                            /* translators: 1: start date, 2: end date. */
+                            __('Prochaine : du %1$s au %2$s', 'sitepulse'),
+                            date_i18n($date_format . ' ' . $time_format, (int) $next_window['start']),
+                            date_i18n($date_format . ' ' . $time_format, (int) $next_window['end'])
+                        );
+                    } elseif ($next_window && $active_maintenance) {
+                        $maintenance_label = sprintf(
+                            /* translators: 1: end date. */
+                            __('Maintenance en cours jusqu’au %s', 'sitepulse'),
+                            date_i18n($date_format . ' ' . $time_format, (int) $next_window['end'])
+                        );
+                    }
+                ?>
+                <tr>
+                    <td>
+                        <strong><?php echo esc_html($agent_data['label']); ?></strong><br />
+                        <small><?php echo esc_html($agent_id); ?></small>
+                    </td>
+                    <td><?php echo esc_html(isset($agent_data['region']) ? strtoupper($agent_data['region']) : 'GLOBAL'); ?></td>
+                    <td><?php echo esc_html($uptime_value); ?>%</td>
+                    <td><span class="sitepulse-uptime-status <?php echo esc_attr($status_class); ?>"><?php echo esc_html($status_label); ?></span></td>
+                    <td><?php echo esc_html($last_check_time); ?></td>
+                    <td><?php echo esc_html($maintenance_label); ?></td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+        <?php if (!empty($region_metrics)) : ?>
+            <h2><?php esc_html_e('Disponibilité par région', 'sitepulse'); ?></h2>
+            <table class="widefat striped">
+                <thead>
+                    <tr>
+                        <th><?php esc_html_e('Région', 'sitepulse'); ?></th>
+                        <th><?php esc_html_e('Agents suivis', 'sitepulse'); ?></th>
+                        <th><?php esc_html_e('Uptime (30 jours)', 'sitepulse'); ?></th>
+                        <th><?php esc_html_e('Incidents', 'sitepulse'); ?></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($region_metrics as $region => $metrics) :
+                        $region_label = strtoupper($region);
+                        $incident_count = isset($metrics['down']) ? (int) $metrics['down'] : 0;
+                    ?>
+                    <tr>
+                        <td><?php echo esc_html($region_label); ?></td>
+                        <td><?php echo esc_html(implode(', ', $metrics['agents'])); ?></td>
+                        <td><?php echo esc_html(number_format_i18n($metrics['uptime'], 2)); ?>%</td>
+                        <td><?php echo esc_html(number_format_i18n($incident_count)); ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
+        <?php if (!empty($maintenance_windows)) : ?>
+            <h2><?php esc_html_e('Fenêtres de maintenance programmées', 'sitepulse'); ?></h2>
+            <ul class="sitepulse-maintenance-list">
+                <?php foreach ($maintenance_windows as $window) :
+                    $window_agent = 'all' === $window['agent'] ? __('Tous les agents', 'sitepulse') : $window['agent'];
+                ?>
+                <li>
+                    <strong><?php echo esc_html($window_agent); ?></strong> —
+                    <?php echo esc_html(date_i18n($date_format . ' ' . $time_format, (int) $window['start'])); ?>
+                    →
+                    <?php echo esc_html(date_i18n($date_format . ' ' . $time_format, (int) $window['end'])); ?>
+                    <?php if (!empty($window['label'])) : ?>
+                        <em><?php echo esc_html($window['label']); ?></em>
+                    <?php endif; ?>
+                </li>
+                <?php endforeach; ?>
+            </ul>
+        <?php endif; ?>
         <div class="uptime-chart">
             <?php if (empty($uptime_log)) : ?>
                 <p><?php esc_html_e("Aucune donnée de disponibilité. La première vérification aura lieu dans l'heure.", 'sitepulse'); ?></p>
@@ -554,6 +1143,8 @@ function sitepulse_uptime_tracker_page() {
                         $bar_class = 'up';
                     } elseif (false === $status) {
                         $bar_class = 'down';
+                    } elseif ('maintenance' === $status) {
+                        $bar_class = 'maintenance';
                     }
                     $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
                     $check_time = $timestamp > 0
@@ -622,6 +1213,10 @@ function sitepulse_uptime_tracker_page() {
                         if ('' === $duration_label) {
                             $duration_label = __('Durée : incident en cours, durée non déterminée.', 'sitepulse');
                         }
+                    } elseif ('maintenance' === $status) {
+                        $bar_title = sprintf(__('Fenêtre de maintenance lors du contrôle du %s.', 'sitepulse'), $check_time);
+                        $status_label = __('Statut : maintenance planifiée.', 'sitepulse');
+                        $duration_label = __('Durée : ce contrôle est ignoré pour le calcul de disponibilité.', 'sitepulse');
                     } else {
                         $error_text = isset($entry['error']) ? $entry['error'] : __('Erreur réseau inconnue.', 'sitepulse');
                         $bar_title = sprintf(__('Statut indéterminé lors du contrôle du %1$s : %2$s', 'sitepulse'), $check_time, $error_text);
@@ -675,7 +1270,14 @@ function sitepulse_uptime_tracker_page() {
     </div>
     <?php
 }
-function sitepulse_run_uptime_check() {
+function sitepulse_run_uptime_check($agent_id = 'default', $override_args = []) {
+    $agent_id = sitepulse_uptime_normalize_agent_id($agent_id);
+    $agent_config = sitepulse_uptime_get_agent($agent_id);
+
+    if (isset($agent_config['active']) && false === (bool) $agent_config['active']) {
+        return;
+    }
+
     $default_timeout = defined('SITEPULSE_DEFAULT_UPTIME_TIMEOUT') ? (int) SITEPULSE_DEFAULT_UPTIME_TIMEOUT : 10;
     $timeout_option = get_option(SITEPULSE_OPTION_UPTIME_TIMEOUT, $default_timeout);
     $timeout = $default_timeout;
@@ -719,12 +1321,37 @@ function sitepulse_run_uptime_check() {
     $default_url = home_url();
     $request_url_default = $custom_url !== '' ? $custom_url : $default_url;
 
+    if (isset($agent_config['timeout']) && is_numeric($agent_config['timeout'])) {
+        $timeout = max(1, (int) $agent_config['timeout']);
+    }
+
+    if (isset($agent_config['method']) && is_string($agent_config['method']) && $agent_config['method'] !== '') {
+        $http_method = strtoupper($agent_config['method']);
+    }
+
+    if (isset($agent_config['headers']) && is_array($agent_config['headers'])) {
+        $custom_headers = wp_parse_args($agent_config['headers'], $custom_headers);
+    }
+
+    if (isset($agent_config['expected_codes']) && is_array($agent_config['expected_codes'])) {
+        $agent_expected = array_map('intval', $agent_config['expected_codes']);
+        $expected_codes = array_values(array_unique(array_merge($expected_codes, $agent_expected)));
+    }
+
+    if (isset($agent_config['url']) && is_string($agent_config['url']) && '' !== trim($agent_config['url'])) {
+        $candidate_url = wp_http_validate_url($agent_config['url']);
+        if ($candidate_url) {
+            $request_url_default = $candidate_url;
+        }
+    }
+
     $defaults = [
         'timeout'   => $timeout,
         'sslverify' => true,
         'url'       => $request_url_default,
         'method'    => $http_method,
         'headers'   => $custom_headers,
+        'agent'     => $agent_id,
     ];
 
     /**
@@ -744,6 +1371,13 @@ function sitepulse_run_uptime_check() {
     if (!is_array($request_args)) {
         $request_args = $defaults;
     }
+
+    if (is_array($override_args) && !empty($override_args)) {
+        $request_args = array_merge($request_args, $override_args);
+    }
+
+    $request_agent = isset($request_args['agent']) ? sitepulse_uptime_normalize_agent_id($request_args['agent']) : $agent_id;
+    unset($request_args['agent']);
 
     $request_url = isset($request_args['url']) ? $request_args['url'] : $defaults['url'];
 
@@ -792,8 +1426,6 @@ function sitepulse_run_uptime_check() {
         unset($request_args['headers']);
     }
 
-    $response = wp_remote_request($request_url, $request_args);
-
     $raw_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
 
     if (!is_array($raw_log)) {
@@ -801,10 +1433,33 @@ function sitepulse_run_uptime_check() {
     }
 
     $log = sitepulse_normalize_uptime_log($raw_log);
-
     $timestamp = (int) current_time('timestamp');
+
+    if (sitepulse_uptime_is_in_maintenance_window($request_agent, $timestamp)) {
+        $entry = [
+            'timestamp' => $timestamp,
+            'status'    => 'maintenance',
+            'agent'     => $request_agent,
+        ];
+
+        $log[] = $entry;
+
+        if (count($log) > 30) {
+            $log = array_slice($log, -30);
+        }
+
+        update_option(SITEPULSE_OPTION_UPTIME_LOG, array_values($log), false);
+        sitepulse_update_uptime_archive($entry);
+        sitepulse_log(sprintf('Uptime check skipped for %s due to maintenance window.', $request_agent), 'INFO');
+
+        return;
+    }
+
+    $response = wp_remote_request($request_url, $request_args);
+
     $entry = [
         'timestamp' => $timestamp,
+        'agent'     => $request_agent,
     ];
 
     if (is_wp_error($response)) {
