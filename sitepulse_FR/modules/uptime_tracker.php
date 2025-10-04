@@ -452,9 +452,28 @@ function sitepulse_uptime_tracker_page() {
     }
     ?>
     <div class="wrap">
-        <h1><span class="dashicons-before dashicons-chart-bar"></span> Suivi de Disponibilité</h1>
-        <p>Cet outil vérifie la disponibilité de votre site toutes les heures. Voici le statut des <?php echo esc_html($total_checks); ?> dernières vérifications.</p>
-        <h2>Disponibilité (<?php echo esc_html($total_checks); ?> dernières heures): <strong style="font-size: 1.4em;"><?php echo esc_html(round($uptime_percentage, 2)); ?>%</strong></h2>
+        <h1><span class="dashicons-before dashicons-chart-bar"></span> <?php esc_html_e('Suivi de Disponibilité', 'sitepulse'); ?></h1>
+        <p>
+            <?php
+            printf(
+                /* translators: %s: number of uptime checks. */
+                esc_html__('Cet outil vérifie la disponibilité de votre site toutes les heures. Voici le statut des %s dernières vérifications.', 'sitepulse'),
+                esc_html(number_format_i18n($total_checks))
+            );
+            ?>
+        </p>
+        <h2>
+            <?php
+            echo wp_kses_post(
+                sprintf(
+                    /* translators: 1: number of checks, 2: uptime percentage. */
+                    __('Disponibilité (%1$s dernières heures) : <strong style="font-size: 1.4em;">%2$s%%</strong>', 'sitepulse'),
+                    esc_html(number_format_i18n($total_checks)),
+                    esc_html(number_format_i18n($uptime_percentage, 2))
+                )
+            );
+            ?>
+        </h2>
         <div class="uptime-summary-grid">
             <div class="uptime-summary-card">
                 <h3><?php esc_html_e('Disponibilité 7 derniers jours', 'sitepulse'); ?></h3>
@@ -482,7 +501,9 @@ function sitepulse_uptime_tracker_page() {
             </div>
         </div>
         <div class="uptime-chart">
-            <?php if (empty($uptime_log)): ?><p>Aucune donnée de disponibilité. La première vérification aura lieu dans l'heure.</p><?php else: ?>
+            <?php if (empty($uptime_log)) : ?>
+                <p><?php esc_html_e("Aucune donnée de disponibilité. La première vérification aura lieu dans l'heure.", 'sitepulse'); ?></p>
+            <?php else : ?>
                 <?php foreach ($uptime_log as $index => $entry): ?>
                     <?php
                     $status = $entry['status'] ?? null;
