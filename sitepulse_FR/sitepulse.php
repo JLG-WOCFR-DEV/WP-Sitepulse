@@ -620,6 +620,219 @@ function sitepulse_render_cron_warnings() {
 add_action('admin_notices', 'sitepulse_render_cron_warnings');
 
 /**
+ * Registers Site Health tests exposed by SitePulse.
+ *
+ * @param array $tests Previously registered tests grouped by type.
+ *
+ * @return array
+ */
+function sitepulse_register_site_health_tests($tests) {
+    if (!is_array($tests)) {
+        $tests = [];
+    }
+
+    if (!isset($tests['direct']) || !is_array($tests['direct'])) {
+        $tests['direct'] = [];
+    }
+
+    $tests['direct']['sitepulse_status'] = [
+        'label' => __('État de SitePulse', 'sitepulse'),
+        'test'  => 'sitepulse_site_health_status_test',
+    ];
+
+    $tests['direct']['sitepulse_ai_api_key'] = [
+        'label' => __('Clé API Gemini SitePulse', 'sitepulse'),
+        'test'  => 'sitepulse_site_health_ai_api_key_test',
+    ];
+
+    return $tests;
+}
+add_filter('site_status_tests', 'sitepulse_register_site_health_tests');
+
+/**
+ * Site Health test summarizing SitePulse alerts stored in options.
+ *
+ * @return array
+ */
+function sitepulse_site_health_status_test() {
+    $badge = [
+        'label' => __('SitePulse', 'sitepulse'),
+        'color' => 'blue',
+    ];
+
+    $cron_warnings_option = get_option(SITEPULSE_OPTION_CRON_WARNINGS, []);
+    $cron_messages         = [];
+
+    if (is_array($cron_warnings_option)) {
+        foreach ($cron_warnings_option as $warning) {
+            if (is_array($warning) && isset($warning['message'])) {
+                $message = trim(wp_strip_all_tags((string) $warning['message']));
+
+                if ($message !== '') {
+                    $cron_messages[] = $message;
+                }
+            }
+        }
+    }
+
+    $ai_option_name = defined('SITEPULSE_OPTION_AI_INSIGHT_ERRORS')
+        ? SITEPULSE_OPTION_AI_INSIGHT_ERRORS
+        : 'sitepulse_ai_insight_errors';
+
+    $ai_errors_option = get_option($ai_option_name, []);
+    $ai_messages       = [];
+
+    if (is_array($ai_errors_option)) {
+        foreach ($ai_errors_option as $error) {
+            if (is_array($error) && isset($error['message'])) {
+                $message = trim(wp_strip_all_tags((string) $error['message']));
+
+                if ($message !== '') {
+                    $ai_messages[] = $message;
+                }
+            } elseif (is_string($error)) {
+                $message = trim(wp_strip_all_tags($error));
+
+                if ($message !== '') {
+                    $ai_messages[] = $message;
+                }
+            }
+        }
+    } elseif (is_string($ai_errors_option)) {
+        $message = trim(wp_strip_all_tags($ai_errors_option));
+
+        if ($message !== '') {
+            $ai_messages[] = $message;
+        }
+    }
+
+    $cron_messages = array_values(array_unique($cron_messages));
+    $ai_messages   = array_values(array_unique($ai_messages));
+
+    $status      = 'good';
+    $label       = __('Aucune alerte active signalée par SitePulse.', 'sitepulse');
+    $description = '<p>' . esc_html__('SitePulse ne signale actuellement aucune alerte.', 'sitepulse') . '</p>';
+    $actions     = '';
+
+    $issues_sections = [];
+
+    if (!empty($cron_messages)) {
+        $status = 'recommended';
+        $label  = __('SitePulse a détecté des avertissements de planification.', 'sitepulse');
+
+        $list_items = '';
+
+        foreach ($cron_messages as $message) {
+            $list_items .= '<li>' . esc_html($message) . '</li>';
+        }
+
+        $issues_sections[] = '<p>'
+            . esc_html__('Avertissements WP-Cron enregistrés :', 'sitepulse')
+            . '</p><ul>' . $list_items . '</ul>';
+    }
+
+    if (!empty($ai_messages)) {
+        $status = 'critical';
+        $label  = __('SitePulse a rencontré des erreurs critiques.', 'sitepulse');
+
+        $list_items = '';
+
+        foreach ($ai_messages as $message) {
+            $list_items .= '<li>' . esc_html($message) . '</li>';
+        }
+
+        $issues_sections[] = '<p>'
+            . esc_html__('Erreurs critiques AI Insights :', 'sitepulse')
+            . '</p><ul>' . $list_items . '</ul>';
+    }
+
+    if (!empty($issues_sections)) {
+        $description = implode('', $issues_sections);
+    }
+
+    if (function_exists('admin_url')) {
+        $settings_url = admin_url('admin.php?page=sitepulse-settings');
+
+        if (is_string($settings_url) && $settings_url !== '') {
+            $actions = sprintf(
+                '<p><a class="button button-primary" href="%s">%s</a></p>',
+                esc_url($settings_url),
+                esc_html__('Ouvrir SitePulse', 'sitepulse')
+            );
+        }
+    }
+
+    return [
+        'label'       => $label,
+        'status'      => $status,
+        'badge'       => $badge,
+        'description' => $description,
+        'actions'     => $actions,
+        'test'        => 'sitepulse_status',
+    ];
+}
+
+/**
+ * Site Health test ensuring an API key is available for AI Insights.
+ *
+ * @return array
+ */
+function sitepulse_site_health_ai_api_key_test() {
+    $badge = [
+        'label' => __('SitePulse', 'sitepulse'),
+        'color' => 'blue',
+    ];
+
+    $active_modules_option = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
+    $active_modules        = array_map('strval', (array) $active_modules_option);
+    $ai_module_enabled     = in_array('ai_insights', $active_modules, true);
+
+    $settings_url = function_exists('admin_url') ? admin_url('admin.php?page=sitepulse-settings#sitepulse-section-ai') : '';
+    $actions      = '';
+
+    if (is_string($settings_url) && $settings_url !== '') {
+        $actions = sprintf(
+            '<p><a class="button" href="%s">%s</a></p>',
+            esc_url($settings_url),
+            esc_html__('Configurer SitePulse', 'sitepulse')
+        );
+    }
+
+    if (!$ai_module_enabled) {
+        return [
+            'label'       => __('Le module AI Insights est désactivé.', 'sitepulse'),
+            'status'      => 'good',
+            'badge'       => $badge,
+            'description' => '<p>' . esc_html__('Aucune clé API n’est nécessaire tant que le module AI Insights reste désactivé.', 'sitepulse') . '</p>',
+            'actions'     => $actions,
+            'test'        => 'sitepulse_ai_api_key',
+        ];
+    }
+
+    $api_key = function_exists('sitepulse_get_gemini_api_key') ? sitepulse_get_gemini_api_key() : '';
+
+    if (trim((string) $api_key) === '') {
+        return [
+            'label'       => __('Ajoutez une clé API Gemini pour SitePulse.', 'sitepulse'),
+            'status'      => 'recommended',
+            'badge'       => $badge,
+            'description' => '<p>' . esc_html__('Les analyses IA échoueront sans clé API Gemini valide. Renseignez une clé pour lancer les insights.', 'sitepulse') . '</p>',
+            'actions'     => $actions,
+            'test'        => 'sitepulse_ai_api_key',
+        ];
+    }
+
+    return [
+        'label'       => __('Une clé API Gemini est configurée pour SitePulse.', 'sitepulse'),
+        'status'      => 'good',
+        'badge'       => $badge,
+        'description' => '<p>' . esc_html__('SitePulse dispose d’une clé API Gemini valide pour générer des analyses IA.', 'sitepulse') . '</p>',
+        'actions'     => $actions,
+        'test'        => 'sitepulse_ai_api_key',
+    ];
+}
+
+/**
  * Attempts to bootstrap the WordPress filesystem abstraction layer.
  *
  * @return WP_Filesystem_Base|null
