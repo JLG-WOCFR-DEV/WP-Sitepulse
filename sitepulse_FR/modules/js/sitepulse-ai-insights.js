@@ -21,6 +21,18 @@
         return date.toLocaleString();
     }
 
+    function generateHistoryFallbackId(parts) {
+        var input = parts.join('|');
+        var hash = 0;
+
+        for (var i = 0; i < input.length; i += 1) {
+            hash = (hash << 5) - hash + input.charCodeAt(i);
+            hash |= 0;
+        }
+
+        return 'local-' + Math.abs(hash).toString(36);
+    }
+
     function setStatus($statusEl, message) {
         if (typeof message === 'string' && message.trim() !== '') {
             $statusEl.text(message).show();
@@ -34,6 +46,14 @@
     function normalizeHistoryEntry(entry) {
         if (!entry || typeof entry !== 'object') {
             return null;
+        }
+
+        var entryId = '';
+
+        if (typeof entry.id === 'string') {
+            entryId = entry.id.trim();
+        } else if (typeof entry.id !== 'undefined') {
+            entryId = String(entry.id || '').trim();
         }
 
         var text = typeof entry.text === 'string' ? entry.text : '';
@@ -60,21 +80,58 @@
             timestamp = null;
         }
 
+        var timestampDisplay = typeof entry.timestamp_display === 'string' ? entry.timestamp_display : '';
+        var timestampIso = typeof entry.timestamp_iso === 'string' ? entry.timestamp_iso : '';
+
+        if (timestamp && (!timestampDisplay || !timestampIso)) {
+            var timestampDate = new Date(timestamp * 1000);
+
+            if (!timestampDisplay && !isNaN(timestampDate.getTime())) {
+                timestampDisplay = timestampDate.toLocaleString();
+            }
+
+            if (!timestampIso && !isNaN(timestampDate.getTime())) {
+                timestampIso = timestampDate.toISOString();
+            }
+        }
+
         var model = entry.model && typeof entry.model === 'object' ? entry.model : {};
         var rateLimit = entry.rate_limit && typeof entry.rate_limit === 'object' ? entry.rate_limit : {};
 
+        var modelKey = typeof model.key === 'string' ? model.key : '';
+        var rateLimitKey = typeof rateLimit.key === 'string' ? rateLimit.key : '';
+
+        if (!entryId) {
+            entryId = generateHistoryFallbackId([
+                String(timestamp || ''),
+                modelKey,
+                rateLimitKey,
+                trimmedText
+            ]);
+        }
+
+        var note = '';
+
+        if (typeof entry.note === 'string') {
+            note = entry.note.trim();
+        }
+
         return {
+            id: entryId,
             text: trimmedText,
             html: trimmedHtml,
             timestamp: timestamp,
+            timestamp_display: timestampDisplay,
+            timestamp_iso: timestampIso,
             model: {
-                key: typeof model.key === 'string' ? model.key : '',
+                key: modelKey,
                 label: typeof model.label === 'string' ? model.label : '',
             },
             rate_limit: {
-                key: typeof rateLimit.key === 'string' ? rateLimit.key : '',
+                key: rateLimitKey,
                 label: typeof rateLimit.label === 'string' ? rateLimit.label : '',
             },
+            note: note,
         };
     }
 
@@ -89,6 +146,7 @@
 
         var $item = $('<li/>')
             .addClass('sitepulse-ai-history-item')
+            .attr('data-entry-id', normalized.id || '')
             .attr('data-model', normalized.model && normalized.model.key ? normalized.model.key : '')
             .attr('data-rate-limit', normalized.rate_limit && normalized.rate_limit.key ? normalized.rate_limit.key : '');
 
@@ -124,6 +182,34 @@
 
         $item.append($textEl);
 
+        var noteLabel = sitepulseAIInsights.strings && sitepulseAIInsights.strings.historyNoteLabel
+            ? sitepulseAIInsights.strings.historyNoteLabel
+            : 'Note';
+        var notePlaceholder = sitepulseAIInsights.strings && sitepulseAIInsights.strings.historyNotePlaceholder
+            ? sitepulseAIInsights.strings.historyNotePlaceholder
+            : '';
+        var noteFieldId = 'sitepulse-ai-history-note-' + normalized.id;
+
+        var $noteWrapper = $('<div/>').addClass('sitepulse-ai-history-note');
+        $('<label/>')
+            .attr('for', noteFieldId)
+            .text(noteLabel)
+            .appendTo($noteWrapper);
+
+        $('<textarea/>')
+            .attr({
+                id: noteFieldId,
+                rows: 2,
+                placeholder: notePlaceholder
+            })
+            .addClass('sitepulse-ai-history-note-field')
+            .attr('data-entry-id', normalized.id)
+            .val(normalized.note || '')
+            .data('savedNote', normalized.note || '')
+            .appendTo($noteWrapper);
+
+        $item.append($noteWrapper);
+
         return $item;
     }
 
@@ -141,13 +227,22 @@
         var isCached = data && typeof data.cached !== 'undefined' ? !!data.cached : false;
         var model = data && data.model ? data.model : null;
         var rateLimit = data && data.rate_limit ? data.rate_limit : null;
+        var entryId = data && typeof data.id === 'string' ? data.id : '';
+        var note = data && typeof data.note === 'string' ? data.note : '';
+        var timestampDisplay = data && typeof data.timestamp_display === 'string' ? data.timestamp_display : '';
+        var timestampIso = data && typeof data.timestamp_iso === 'string' ? data.timestamp_iso : '';
+
         var normalized = {
             text: trimmedText,
             html: trimmedHtml,
             timestamp: timestamp,
             cached: isCached,
             model: model,
-            rate_limit: rateLimit
+            rate_limit: rateLimit,
+            id: entryId,
+            note: note,
+            timestamp_display: timestampDisplay,
+            timestamp_iso: timestampIso
         };
 
         if (trimmedText.length === 0 && trimmedHtml.length === 0) {
@@ -164,9 +259,19 @@
             $textEl.text(trimmedText);
         }
 
-        var formattedTimestamp = formatTimestamp(timestamp);
+        if (timestamp && !timestampIso) {
+            var isoDate = new Date(timestamp * 1000);
+
+            if (!isNaN(isoDate.getTime())) {
+                timestampIso = isoDate.toISOString();
+                normalized.timestamp_iso = timestampIso;
+            }
+        }
+
+        var formattedTimestamp = timestampDisplay || formatTimestamp(timestamp);
 
         if (formattedTimestamp) {
+            normalized.timestamp_display = formattedTimestamp;
             $timestampEl.text(sitepulseAIInsights.strings.cachedPrefix + ' ' + formattedTimestamp).show();
         } else {
             $timestampEl.hide().text('');
@@ -232,11 +337,61 @@
         var $historyEmpty = $('#sitepulse-ai-history-empty');
         var $modelFilter = $('#sitepulse-ai-history-filter-model');
         var $rateFilter = $('#sitepulse-ai-history-filter-rate');
+        var $historyExportButton = $('#sitepulse-ai-history-export-csv');
+        var $historyCopyButton = $('#sitepulse-ai-history-copy');
+        var $historyFeedback = $('#sitepulse-ai-history-feedback');
         var historyEntries = [];
         var historyMaxEntries = parseInt(sitepulseAIInsights.historyMaxEntries, 10);
         var lastResultData = null;
         var pollTimer = null;
         var activeJobId = null;
+        var historyExportConfig = sitepulseAIInsights.historyExport || {};
+        var historyExportHeaders = historyExportConfig.headers || {};
+        var historyExportColumns = Array.isArray(historyExportConfig.columns) && historyExportConfig.columns.length
+            ? historyExportConfig.columns
+            : Object.keys(historyExportHeaders || {});
+        var historyExportFileName = typeof historyExportConfig.fileName === 'string' && historyExportConfig.fileName
+            ? historyExportConfig.fileName
+            : 'sitepulse-ai-historique';
+        var historyExportRowsMap = {};
+        var historyContext = sitepulseAIInsights.historyContext || {};
+
+        if (!Array.isArray(historyExportColumns) || historyExportColumns.length === 0) {
+            historyExportColumns = ['timestamp_display', 'model', 'rate_limit', 'text', 'note'];
+        }
+
+        if (Array.isArray(historyExportConfig.rows)) {
+            historyExportConfig.rows.forEach(function (row) {
+                if (!row || typeof row !== 'object') {
+                    return;
+                }
+
+                var rowId = '';
+
+                if (typeof row.id === 'string') {
+                    rowId = row.id;
+                } else if (typeof row.id !== 'undefined') {
+                    rowId = String(row.id || '');
+                }
+
+                if (!rowId) {
+                    return;
+                }
+
+                historyExportRowsMap[rowId] = {
+                    id: rowId,
+                    timestamp: typeof row.timestamp === 'number' ? row.timestamp : parseInt(row.timestamp, 10) || 0,
+                    timestamp_display: typeof row.timestamp_display === 'string' ? row.timestamp_display : '',
+                    timestamp_iso: typeof row.timestamp_iso === 'string' ? row.timestamp_iso : '',
+                    model: typeof row.model === 'string' ? row.model : '',
+                    model_key: typeof row.model_key === 'string' ? row.model_key : '',
+                    rate_limit: typeof row.rate_limit === 'string' ? row.rate_limit : '',
+                    rate_limit_key: typeof row.rate_limit_key === 'string' ? row.rate_limit_key : '',
+                    text: typeof row.text === 'string' ? row.text : '',
+                    note: typeof row.note === 'string' ? row.note : ''
+                };
+            });
+        }
 
         if (!isFinite(historyMaxEntries) || historyMaxEntries <= 0) {
             historyMaxEntries = 20;
@@ -248,6 +403,7 @@
 
                 if (normalizedEntry) {
                     historyEntries.push(normalizedEntry);
+                    syncHistoryExportRow(normalizedEntry);
                 }
             });
         }
@@ -256,12 +412,125 @@
             historyEntries = historyEntries.slice(historyEntries.length - historyMaxEntries);
         }
 
+        var existingIds = {};
+
+        historyEntries.forEach(function (entry) {
+            if (entry && entry.id) {
+                existingIds[entry.id] = true;
+            }
+        });
+
+        Object.keys(historyExportRowsMap).forEach(function (id) {
+            if (!existingIds[id]) {
+                delete historyExportRowsMap[id];
+            }
+        });
+
         function setActionsBusy(isBusy) {
             if ($actionsContainer.length === 0) {
                 return;
             }
 
             $actionsContainer.attr('aria-busy', isBusy ? 'true' : 'false');
+        }
+
+        function announceHistoryMessage(message) {
+            if (!$historyFeedback.length) {
+                return;
+            }
+
+            var text = '';
+
+            if (typeof message === 'string' && message.trim() !== '') {
+                text = message.trim();
+            } else if (sitepulseAIInsights.strings && sitepulseAIInsights.strings.historyAriaDefault) {
+                text = sitepulseAIInsights.strings.historyAriaDefault;
+            }
+
+            if (text) {
+                $historyFeedback.text(text);
+            }
+        }
+
+        function syncHistoryExportRow(entry) {
+            var normalized = entry && typeof entry === 'object' && typeof entry.text === 'string'
+                ? entry
+                : normalizeHistoryEntry(entry);
+
+            if (!normalized) {
+                return;
+            }
+
+            var entryId = typeof normalized.id === 'string' ? normalized.id : '';
+
+            if (!entryId) {
+                return;
+            }
+
+            var existing = historyExportRowsMap[entryId] || {};
+            var timestamp = normalized.timestamp;
+
+            if (typeof timestamp !== 'number') {
+                timestamp = existing.timestamp || 0;
+            }
+
+            var timestampDisplay = normalized.timestamp_display || existing.timestamp_display || '';
+            var timestampIso = normalized.timestamp_iso || existing.timestamp_iso || '';
+
+            if (timestamp && (!timestampDisplay || !timestampIso)) {
+                var fallbackDate = new Date(timestamp * 1000);
+
+                if (!timestampDisplay && !isNaN(fallbackDate.getTime())) {
+                    timestampDisplay = fallbackDate.toLocaleString();
+                }
+
+                if (!timestampIso && !isNaN(fallbackDate.getTime())) {
+                    timestampIso = fallbackDate.toISOString();
+                }
+            }
+
+            historyExportRowsMap[entryId] = {
+                id: entryId,
+                timestamp: timestamp || 0,
+                timestamp_display: timestampDisplay || '',
+                timestamp_iso: timestampIso || '',
+                model: normalized.model && normalized.model.label
+                    ? normalized.model.label
+                    : existing.model || '',
+                model_key: normalized.model && normalized.model.key
+                    ? normalized.model.key
+                    : existing.model_key || '',
+                rate_limit: normalized.rate_limit && normalized.rate_limit.label
+                    ? normalized.rate_limit.label
+                    : existing.rate_limit || '',
+                rate_limit_key: normalized.rate_limit && normalized.rate_limit.key
+                    ? normalized.rate_limit.key
+                    : existing.rate_limit_key || '',
+                text: normalized.text || existing.text || '',
+                note: normalized.note || ''
+            };
+        }
+
+        function updateHistoryEntryNoteLocal(entryId, note) {
+            if (!entryId) {
+                return;
+            }
+
+            historyEntries.forEach(function (entry) {
+                if (entry && entry.id === entryId) {
+                    entry.note = note;
+                }
+            });
+
+            if (historyExportRowsMap[entryId]) {
+                historyExportRowsMap[entryId].note = note;
+            }
+
+            if (sitepulseAIInsights.historyExport && Array.isArray(sitepulseAIInsights.historyExport.rows)) {
+                sitepulseAIInsights.historyExport.rows = Object.keys(historyExportRowsMap).map(function (key) {
+                    return historyExportRowsMap[key];
+                });
+            }
         }
 
         function clearPollingTimer() {
@@ -325,17 +594,13 @@
             }
         }
 
-        function renderHistoryEntriesList(entries) {
-            if ($historyList.length === 0) {
-                return;
-            }
-
+        function getFilteredHistoryEntries() {
+            var filtered = [];
             var selectedModel = $modelFilter.length ? $modelFilter.val() : '';
             var selectedRate = $rateFilter.length ? $rateFilter.val() : '';
-            var filtered = [];
 
-            if (Array.isArray(entries)) {
-                entries.forEach(function (entry) {
+            if (Array.isArray(historyEntries)) {
+                historyEntries.forEach(function (entry) {
                     if (!entry || typeof entry !== 'object') {
                         return;
                     }
@@ -358,6 +623,16 @@
 
                 return bTime - aTime;
             });
+
+            return filtered;
+        }
+
+        function renderHistoryEntriesList() {
+            if ($historyList.length === 0) {
+                return;
+            }
+
+            var filtered = getFilteredHistoryEntries();
 
             $historyList.empty();
 
@@ -386,6 +661,253 @@
             });
         }
 
+        function escapeCsvValue(value) {
+            var stringValue = String(value);
+
+            if (/[";\n\r]/.test(stringValue)) {
+                stringValue = '"' + stringValue.replace(/"/g, '""') + '"';
+            }
+
+            return stringValue;
+        }
+
+        function buildHistoryPlainText(entries) {
+            var lines = [];
+
+            if (historyContext.siteName) {
+                lines.push(historyContext.siteName);
+            }
+
+            if (historyContext.siteUrl) {
+                lines.push(historyContext.siteUrl);
+            }
+
+            if (historyContext.pageUrl) {
+                lines.push(historyContext.pageUrl);
+            }
+
+            if (lines.length) {
+                lines.push('');
+            }
+
+            var noteLabel = sitepulseAIInsights.strings && sitepulseAIInsights.strings.historyNoteLabel
+                ? sitepulseAIInsights.strings.historyNoteLabel
+                : 'Note';
+
+            entries.forEach(function (entry) {
+                if (!entry || typeof entry !== 'object') {
+                    return;
+                }
+
+                syncHistoryExportRow(entry);
+
+                var exportRow = entry.id ? historyExportRowsMap[entry.id] : null;
+                var headerParts = [];
+
+                if (exportRow && exportRow.timestamp_display) {
+                    headerParts.push(exportRow.timestamp_display);
+                } else if (entry.timestamp) {
+                    var formatted = formatTimestamp(entry.timestamp);
+
+                    if (formatted) {
+                        headerParts.push(formatted);
+                    }
+                }
+
+                if (entry.model && entry.model.label) {
+                    headerParts.push(entry.model.label);
+                }
+
+                if (entry.rate_limit && entry.rate_limit.label) {
+                    headerParts.push(entry.rate_limit.label);
+                }
+
+                if (headerParts.length) {
+                    lines.push(headerParts.join(' • '));
+                }
+
+                lines.push(entry.text || '');
+
+                if (entry.note) {
+                    lines.push(noteLabel + ' : ' + entry.note);
+                }
+
+                lines.push('');
+            });
+
+            return lines.join('\n').trim();
+        }
+
+        function copyHistoryToClipboard(entries) {
+            var text = buildHistoryPlainText(entries);
+
+            if (!text) {
+                announceHistoryMessage(sitepulseAIInsights.strings.historyNoEntries || '');
+                return;
+            }
+
+            function fallbackCopy(textToCopy) {
+                var $textarea = $('<textarea readonly class="sitepulse-ai-history-copy-buffer" />')
+                    .css({
+                        position: 'absolute',
+                        left: '-9999px',
+                        top: 'auto'
+                    })
+                    .val(textToCopy);
+
+                $('body').append($textarea);
+                $textarea[0].select();
+
+                try {
+                    document.execCommand('copy');
+                    announceHistoryMessage(sitepulseAIInsights.strings.historyCopied || '');
+                } catch (err) {
+                    announceHistoryMessage(sitepulseAIInsights.strings.historyCopyError || '');
+                }
+
+                $textarea.remove();
+            }
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(function () {
+                    announceHistoryMessage(sitepulseAIInsights.strings.historyCopied || '');
+                }).catch(function () {
+                    fallbackCopy(text);
+                });
+            } else {
+                fallbackCopy(text);
+            }
+        }
+
+        function exportHistoryCsv(entries) {
+            if (!Array.isArray(entries) || entries.length === 0) {
+                announceHistoryMessage(sitepulseAIInsights.strings.historyNoEntries || '');
+                return;
+            }
+
+            var columns = historyExportColumns && historyExportColumns.length
+                ? historyExportColumns
+                : ['timestamp_display', 'model', 'rate_limit', 'text', 'note'];
+            var headerRow = columns.map(function (column) {
+                var label = historyExportHeaders[column];
+
+                if (typeof label !== 'string') {
+                    label = column;
+                }
+
+                return escapeCsvValue(label);
+            });
+            var csvRows = [headerRow.join(';')];
+
+            entries.forEach(function (entry) {
+                if (!entry || typeof entry !== 'object') {
+                    return;
+                }
+
+                syncHistoryExportRow(entry);
+
+                var exportRow = entry.id ? historyExportRowsMap[entry.id] : null;
+
+                if (!exportRow) {
+                    return;
+                }
+
+                var rowValues = columns.map(function (column) {
+                    var value = exportRow[column];
+
+                    if (typeof value === 'undefined' || value === null) {
+                        value = '';
+                    }
+
+                    if (!value && column === 'text') {
+                        value = entry.text || '';
+                    }
+
+                    if (!value && column === 'note') {
+                        value = entry.note || '';
+                    }
+
+                    return escapeCsvValue(value);
+                });
+
+                csvRows.push(rowValues.join(';'));
+            });
+
+            if (csvRows.length <= 1) {
+                announceHistoryMessage(sitepulseAIInsights.strings.historyNoEntries || '');
+                return;
+            }
+
+            var csvContent = csvRows.join('\r\n');
+            var blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            var url = URL.createObjectURL(blob);
+            var link = document.createElement('a');
+            var timestampSuffix = new Date().toISOString().replace(/[:.]/g, '-');
+
+            link.href = url;
+            link.download = historyExportFileName + '-' + timestampSuffix + '.csv';
+
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            window.setTimeout(function () {
+                URL.revokeObjectURL(url);
+            }, 1000);
+
+            announceHistoryMessage(sitepulseAIInsights.strings.historyDownload || '');
+        }
+
+        function saveHistoryNote(entryId, note, $field) {
+            if (!entryId) {
+                return;
+            }
+
+            var requestData = {
+                action: sitepulseAIInsights.noteAction || 'sitepulse_save_ai_history_note',
+                nonce: sitepulseAIInsights.nonce,
+                entry_id: entryId,
+                note: note
+            };
+
+            if ($field && $field.length) {
+                $field.attr('aria-busy', 'true').addClass('is-saving');
+            }
+
+            $.post(sitepulseAIInsights.ajaxUrl, requestData).done(function (response) {
+                if (response && response.success && response.data) {
+                    var savedNote = typeof response.data.note === 'string' ? response.data.note : '';
+
+                    if ($field && $field.length) {
+                        $field.val(savedNote);
+                        $field.data('savedNote', savedNote);
+                        $field.attr('aria-busy', 'false');
+                    }
+
+                    updateHistoryEntryNoteLocal(entryId, savedNote);
+                    announceHistoryMessage(sitepulseAIInsights.strings.historyNoteSaved || '');
+                } else {
+                    if ($field && $field.length) {
+                        $field.val($field.data('savedNote') || '');
+                        $field.attr('aria-busy', 'false');
+                    }
+
+                    announceHistoryMessage(sitepulseAIInsights.strings.historyNoteError || '');
+                }
+            }).fail(function () {
+                if ($field && $field.length) {
+                    $field.val($field.data('savedNote') || '');
+                    $field.attr('aria-busy', 'false');
+                }
+
+                announceHistoryMessage(sitepulseAIInsights.strings.historyNoteError || '');
+            }).always(function () {
+                if ($field && $field.length) {
+                    $field.removeClass('is-saving');
+                }
+            });
+        }
+
         function addHistoryEntryFromResult(result) {
             var entry = normalizeHistoryEntry({
                 text: result && typeof result.text === 'string' ? result.text : '',
@@ -393,11 +915,19 @@
                 timestamp: result ? result.timestamp : null,
                 model: result ? result.model : null,
                 rate_limit: result ? result.rate_limit : null,
+                id: result && typeof result.id === 'string' ? result.id : '',
+                note: result && typeof result.note === 'string' ? result.note : '',
+                timestamp_display: result && typeof result.timestamp_display === 'string' ? result.timestamp_display : '',
+                timestamp_iso: result && typeof result.timestamp_iso === 'string' ? result.timestamp_iso : ''
             });
 
             if (!entry) {
                 return;
             }
+
+            historyEntries = historyEntries.filter(function (existing) {
+                return !existing || existing.id !== entry.id;
+            });
 
             historyEntries.push(entry);
 
@@ -405,9 +935,25 @@
                 historyEntries = historyEntries.slice(historyEntries.length - historyMaxEntries);
             }
 
+            syncHistoryExportRow(entry);
+
+            var currentIds = {};
+
+            historyEntries.forEach(function (item) {
+                if (item && item.id) {
+                    currentIds[item.id] = true;
+                }
+            });
+
+            Object.keys(historyExportRowsMap).forEach(function (id) {
+                if (!currentIds[id]) {
+                    delete historyExportRowsMap[id];
+                }
+            });
+
             ensureFilterOption($modelFilter, entry.model);
             ensureFilterOption($rateFilter, entry.rate_limit);
-            renderHistoryEntriesList(historyEntries);
+            renderHistoryEntriesList();
         }
 
         function scheduleJobPoll(jobId, immediate) {
@@ -499,17 +1045,74 @@
             $historyEmpty.text(sitepulseAIInsights.strings.historyEmpty);
         }
 
-        renderHistoryEntriesList(historyEntries);
+        renderHistoryEntriesList();
 
         if ($modelFilter.length) {
             $modelFilter.on('change', function () {
-                renderHistoryEntriesList(historyEntries);
+                renderHistoryEntriesList();
             });
         }
 
         if ($rateFilter.length) {
             $rateFilter.on('change', function () {
-                renderHistoryEntriesList(historyEntries);
+                renderHistoryEntriesList();
+            });
+        }
+
+        if ($historyCopyButton.length) {
+            $historyCopyButton.on('click', function (event) {
+                event.preventDefault();
+
+                var filtered = getFilteredHistoryEntries();
+
+                if (!filtered.length) {
+                    announceHistoryMessage(sitepulseAIInsights.strings.historyNoEntries || '');
+                    return;
+                }
+
+                copyHistoryToClipboard(filtered);
+            });
+        }
+
+        if ($historyExportButton.length) {
+            $historyExportButton.on('click', function (event) {
+                event.preventDefault();
+
+                var filtered = getFilteredHistoryEntries();
+
+                if (!filtered.length) {
+                    announceHistoryMessage(sitepulseAIInsights.strings.historyNoEntries || '');
+                    return;
+                }
+
+                exportHistoryCsv(filtered);
+            });
+        }
+
+        if ($historyList.length) {
+            $historyList.on('change', '.sitepulse-ai-history-note-field', function () {
+                var $field = $(this);
+                var entryId = $field.data('entryId');
+
+                if (!entryId) {
+                    return;
+                }
+
+                var value = typeof $field.val() === 'string' ? $field.val() : '';
+
+                value = value.replace(/\r\n?/g, '\n');
+
+                var normalizedValue = value.trim();
+
+                if ($field.data('savedNote') === normalizedValue) {
+                    return;
+                }
+
+                if (value !== normalizedValue) {
+                    $field.val(normalizedValue);
+                }
+
+                saveHistoryNote(entryId, normalizedValue, $field);
             });
         }
 

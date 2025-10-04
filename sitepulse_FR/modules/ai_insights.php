@@ -17,6 +17,7 @@ add_action('wp_ajax_sitepulse_get_ai_insight_status', 'sitepulse_get_ai_insight_
 add_action('wp_ajax_sitepulse_run_ai_insight_job', 'sitepulse_ai_handle_async_job_request');
 add_action('wp_ajax_nopriv_sitepulse_run_ai_insight_job', 'sitepulse_ai_handle_async_job_request');
 add_action('sitepulse_run_ai_insight_job', 'sitepulse_run_ai_insight_job', 10, 1);
+add_action('wp_ajax_sitepulse_save_ai_history_note', 'sitepulse_ai_save_history_note');
 add_action('admin_notices', 'sitepulse_ai_render_error_notices');
 
 if (!defined('SITEPULSE_TRANSIENT_AI_INSIGHT_JOB_PREFIX')) {
@@ -29,6 +30,10 @@ if (!defined('SITEPULSE_OPTION_AI_INSIGHT_ERRORS')) {
 
 if (!defined('SITEPULSE_OPTION_AI_HISTORY')) {
     define('SITEPULSE_OPTION_AI_HISTORY', 'sitepulse_ai_history');
+}
+
+if (!defined('SITEPULSE_OPTION_AI_HISTORY_NOTES')) {
+    define('SITEPULSE_OPTION_AI_HISTORY_NOTES', 'sitepulse_ai_history_notes');
 }
 
 if (!defined('SITEPULSE_OPTION_AI_JOB_SECRET')) {
@@ -377,16 +382,213 @@ function sitepulse_ai_get_history_max_entries() {
 }
 
 /**
+ * Generates a deterministic identifier for a history entry.
+ *
+ * @param array<string,mixed> $entry History entry data.
+ *
+ * @return string
+ */
+function sitepulse_ai_generate_history_entry_id(array $entry) {
+    $parts = [
+        isset($entry['timestamp']) ? (string) absint($entry['timestamp']) : '',
+        isset($entry['model']) && is_array($entry['model']) && isset($entry['model']['key'])
+            ? sanitize_text_field((string) $entry['model']['key'])
+            : (isset($entry['model_key']) ? sanitize_text_field((string) $entry['model_key']) : ''),
+        isset($entry['rate_limit']) && is_array($entry['rate_limit']) && isset($entry['rate_limit']['key'])
+            ? sanitize_text_field((string) $entry['rate_limit']['key'])
+            : (isset($entry['rate_limit_key']) ? sanitize_text_field((string) $entry['rate_limit_key']) : ''),
+        isset($entry['text']) ? sitepulse_ai_sanitize_insight_text($entry['text']) : '',
+    ];
+
+    $hash = md5(implode('|', $parts));
+
+    return substr($hash, 0, 12);
+}
+
+/**
+ * Retrieves stored notes keyed by history entry identifiers.
+ *
+ * @return array<string,string>
+ */
+function sitepulse_ai_get_history_notes() {
+    if (!function_exists('get_option')) {
+        return [];
+    }
+
+    $notes = get_option(SITEPULSE_OPTION_AI_HISTORY_NOTES, []);
+
+    if (!is_array($notes)) {
+        return [];
+    }
+
+    $sanitized = [];
+
+    foreach ($notes as $entry_id => $note) {
+        $key = sanitize_key((string) $entry_id);
+
+        if ('' === $key) {
+            continue;
+        }
+
+        $sanitized[$key] = sanitize_textarea_field((string) $note);
+    }
+
+    return $sanitized;
+}
+
+/**
+ * Persists the given history notes array.
+ *
+ * @param array<string,string> $notes Notes keyed by entry identifier.
+ *
+ * @return void
+ */
+function sitepulse_ai_update_history_notes(array $notes) {
+    if (!function_exists('update_option')) {
+        return;
+    }
+
+    $normalized = [];
+
+    foreach ($notes as $entry_id => $note) {
+        $key = sanitize_key((string) $entry_id);
+
+        if ('' === $key) {
+            continue;
+        }
+
+        $value = sanitize_textarea_field((string) $note);
+
+        if ('' === $value) {
+            continue;
+        }
+
+        $normalized[$key] = $value;
+    }
+
+    update_option(SITEPULSE_OPTION_AI_HISTORY_NOTES, $normalized, false);
+}
+
+/**
+ * Removes notes that no longer match existing history entries.
+ *
+ * @param array<int,array<string,mixed>> $history_entries Stored history entries.
+ *
+ * @return void
+ */
+function sitepulse_ai_prune_history_notes(array $history_entries) {
+    if (!function_exists('update_option')) {
+        return;
+    }
+
+    $notes = sitepulse_ai_get_history_notes();
+
+    if (empty($notes)) {
+        return;
+    }
+
+    $valid_ids = [];
+
+    foreach ($history_entries as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+
+        $entry_id = '';
+
+        if (isset($entry['id'])) {
+            $entry_id = (string) $entry['id'];
+        }
+
+        if ('' === $entry_id) {
+            $entry_id = sitepulse_ai_generate_history_entry_id($entry);
+        }
+
+        $entry_id = sanitize_key($entry_id);
+
+        if ('' === $entry_id) {
+            continue;
+        }
+
+        $valid_ids[$entry_id] = true;
+    }
+
+    $cleaned_notes = array_intersect_key($notes, $valid_ids);
+
+    if ($cleaned_notes !== $notes) {
+        update_option(SITEPULSE_OPTION_AI_HISTORY_NOTES, $cleaned_notes, false);
+    }
+}
+
+/**
+ * Prepares export-ready rows from history entries.
+ *
+ * @param array<int,array<string,mixed>> $entries History entries.
+ *
+ * @return array<int,array<string,string|int>>
+ */
+function sitepulse_ai_prepare_history_export_rows(array $entries) {
+    $rows = [];
+
+    foreach ($entries as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+
+        $normalized_entry = sitepulse_ai_normalize_history_entry($entry);
+
+        if (null === $normalized_entry) {
+            continue;
+        }
+
+        if (isset($entry['note'])) {
+            $normalized_entry['note'] = sanitize_textarea_field((string) $entry['note']);
+        }
+
+        $timestamp = isset($normalized_entry['timestamp']) ? (int) $normalized_entry['timestamp'] : 0;
+        $display   = '';
+        $iso8601   = '';
+
+        if ($timestamp > 0) {
+            if (function_exists('date_i18n')) {
+                $display = date_i18n(get_option('date_format') . ' ' . get_option('time_format'), $timestamp);
+            } else {
+                $display = gmdate('Y-m-d H:i:s', $timestamp);
+            }
+
+            $iso8601 = gmdate('c', $timestamp);
+        }
+
+        $rows[] = [
+            'id'                => isset($normalized_entry['id']) ? (string) $normalized_entry['id'] : sitepulse_ai_generate_history_entry_id($normalized_entry),
+            'timestamp'         => $timestamp,
+            'timestamp_display' => $display,
+            'timestamp_iso'     => $iso8601,
+            'model'             => isset($normalized_entry['model']['label']) ? (string) $normalized_entry['model']['label'] : '',
+            'model_key'         => isset($normalized_entry['model']['key']) ? (string) $normalized_entry['model']['key'] : '',
+            'rate_limit'        => isset($normalized_entry['rate_limit']['label']) ? (string) $normalized_entry['rate_limit']['label'] : '',
+            'rate_limit_key'    => isset($normalized_entry['rate_limit']['key']) ? (string) $normalized_entry['rate_limit']['key'] : '',
+            'text'              => isset($normalized_entry['text']) ? (string) $normalized_entry['text'] : '',
+            'note'              => isset($normalized_entry['note']) ? (string) $normalized_entry['note'] : '',
+        ];
+    }
+
+    return $rows;
+}
+
+/**
  * Normalizes a raw AI history entry.
  *
  * @param array<string,mixed> $entry Raw history entry data.
  *
  * @return array{
+ *     id:string,
  *     text:string,
  *     html:string,
  *     timestamp:int,
  *     model:array{key:string,label:string},
- *     rate_limit:array{key:string,label:string}
+ *     rate_limit:array{key:string,label:string},
+ *     note:string
  * }|null
  */
 function sitepulse_ai_normalize_history_entry($entry) {
@@ -455,7 +657,7 @@ function sitepulse_ai_normalize_history_entry($entry) {
         $rate_limit_label = $rate_limit_key;
     }
 
-    return [
+    $normalized = [
         'text'      => $variants['text'],
         'html'      => $variants['html'],
         'timestamp' => $timestamp,
@@ -467,7 +669,12 @@ function sitepulse_ai_normalize_history_entry($entry) {
             'key'   => $rate_limit_key,
             'label' => $rate_limit_label,
         ],
+        'note' => '',
     ];
+
+    $normalized['id'] = sitepulse_ai_generate_history_entry_id($normalized);
+
+    return $normalized;
 }
 
 /**
@@ -502,18 +709,26 @@ function sitepulse_ai_record_history_entry(array $entry) {
         $history = array_slice($history, -$max_entries, $max_entries, true);
     }
 
-    update_option(SITEPULSE_OPTION_AI_HISTORY, array_values($history));
+    $history = array_values($history);
+
+    update_option(SITEPULSE_OPTION_AI_HISTORY, $history);
+
+    sitepulse_ai_prune_history_notes($history);
 }
 
 /**
  * Retrieves the stored AI insight history entries ordered from newest to oldest.
  *
  * @return array<int,array{
+ *     id:string,
  *     text:string,
  *     html:string,
  *     timestamp:int,
  *     model:array{key:string,label:string},
- *     rate_limit:array{key:string,label:string}
+ *     rate_limit:array{key:string,label:string},
+ *     note:string,
+ *     timestamp_display:string,
+ *     timestamp_iso:string
  * }>
  */
 function sitepulse_ai_get_history_entries() {
@@ -524,6 +739,7 @@ function sitepulse_ai_get_history_entries() {
     }
 
     $normalized = [];
+    $notes      = sitepulse_ai_get_history_notes();
 
     foreach ($history as $entry) {
         $normalized_entry = sitepulse_ai_normalize_history_entry($entry);
@@ -531,6 +747,29 @@ function sitepulse_ai_get_history_entries() {
         if (null === $normalized_entry) {
             continue;
         }
+
+        $entry_id = isset($normalized_entry['id']) ? sanitize_key((string) $normalized_entry['id']) : '';
+
+        if ('' !== $entry_id && isset($notes[$entry_id])) {
+            $normalized_entry['note'] = sanitize_textarea_field((string) $notes[$entry_id]);
+        }
+
+        $timestamp = isset($normalized_entry['timestamp']) ? (int) $normalized_entry['timestamp'] : 0;
+        $display   = '';
+        $iso8601   = '';
+
+        if ($timestamp > 0) {
+            if (function_exists('date_i18n')) {
+                $display = date_i18n(get_option('date_format') . ' ' . get_option('time_format'), $timestamp);
+            } else {
+                $display = gmdate('Y-m-d H:i:s', $timestamp);
+            }
+
+            $iso8601 = gmdate('c', $timestamp);
+        }
+
+        $normalized_entry['timestamp_display'] = $display;
+        $normalized_entry['timestamp_iso']     = $iso8601;
 
         $normalized[] = $normalized_entry;
     }
@@ -1275,9 +1514,14 @@ function sitepulse_run_ai_insight_job($job_id) {
             ],
         ];
 
+        $history_entry_id = sitepulse_ai_generate_history_entry_id($history_entry);
+        $history_entry['id'] = $history_entry_id;
+
         $result_with_context = array_merge($result, [
             'model'      => $history_entry['model'],
             'rate_limit' => $history_entry['rate_limit'],
+            'id'         => $history_entry_id,
+            'note'       => '',
         ]);
 
         sitepulse_ai_save_job_data($job_id, array_merge($job_data, [
@@ -1532,10 +1776,15 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
     $insight_text       = isset($stored_insight['text']) ? $stored_insight['text'] : '';
     $insight_html       = isset($stored_insight['html']) ? $stored_insight['html'] : '';
     $insight_timestamp  = isset($stored_insight['timestamp']) ? absint($stored_insight['timestamp']) : null;
-    $history_entries    = sitepulse_ai_get_history_entries();
-    $history_models     = sitepulse_ai_get_history_filter_options($history_entries, 'model');
-    $history_rate_limits = sitepulse_ai_get_history_filter_options($history_entries, 'rate_limit');
-    $history_max_entries = sitepulse_ai_get_history_max_entries();
+    $history_entries      = sitepulse_ai_get_history_entries();
+    $history_models       = sitepulse_ai_get_history_filter_options($history_entries, 'model');
+    $history_rate_limits  = sitepulse_ai_get_history_filter_options($history_entries, 'rate_limit');
+    $history_max_entries  = sitepulse_ai_get_history_max_entries();
+    $history_export_rows  = sitepulse_ai_prepare_history_export_rows($history_entries);
+    $history_page_url     = admin_url('admin.php?page=sitepulse-ai');
+    $history_export_name  = sanitize_file_name('sitepulse-ai-historique');
+    $site_name            = wp_strip_all_tags(get_bloginfo('name', 'display'));
+    $site_url             = home_url('/');
 
     wp_localize_script(
         'sitepulse-ai-insights',
@@ -1552,6 +1801,24 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
                 'rateLimits' => $history_rate_limits,
             ],
             'historyMaxEntries' => $history_max_entries,
+            'historyExport'     => [
+                'fileName' => $history_export_name,
+                'rows'     => $history_export_rows,
+                'headers'  => [
+                    'timestamp_display' => esc_html__('Date', 'sitepulse'),
+                    'model'             => esc_html__('Modèle', 'sitepulse'),
+                    'rate_limit'        => esc_html__('Limitation', 'sitepulse'),
+                    'text'              => esc_html__('Recommandation', 'sitepulse'),
+                    'note'              => esc_html__('Note', 'sitepulse'),
+                ],
+                'columns' => ['timestamp_display', 'model', 'rate_limit', 'text', 'note'],
+            ],
+            'historyContext'    => [
+                'pageUrl'  => esc_url_raw($history_page_url),
+                'siteName' => $site_name,
+                'siteUrl'  => esc_url_raw($site_url),
+            ],
+            'noteAction'        => 'sitepulse_save_ai_history_note',
             'strings'           => [
                 'defaultError'    => esc_html__('Une erreur inattendue est survenue. Veuillez réessayer.', 'sitepulse'),
                 'cachedPrefix'    => esc_html__('Dernière mise à jour :', 'sitepulse'),
@@ -1561,6 +1828,17 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
                 'statusQueued'    => esc_html__('Analyse en attente de traitement…', 'sitepulse'),
                 'statusFailed'    => esc_html__('La génération a échoué. Veuillez réessayer.', 'sitepulse'),
                 'historyEmpty'    => esc_html__('Aucun historique disponible pour le moment.', 'sitepulse'),
+                'historyExportCsv' => esc_html__('Exporter en CSV', 'sitepulse'),
+                'historyCopy'     => esc_html__('Copier', 'sitepulse'),
+                'historyCopied'   => esc_html__('Historique copié dans le presse-papiers.', 'sitepulse'),
+                'historyCopyError' => esc_html__('Impossible de copier l’historique. Veuillez réessayer.', 'sitepulse'),
+                'historyDownload' => esc_html__('Téléchargement de l’historique démarré.', 'sitepulse'),
+                'historyNoEntries' => esc_html__('Aucune recommandation à exporter pour ces filtres.', 'sitepulse'),
+                'historyNoteLabel' => esc_html__('Note personnelle', 'sitepulse'),
+                'historyNotePlaceholder' => esc_html__('Ajoutez un commentaire ou un plan d’action…', 'sitepulse'),
+                'historyNoteSaved' => esc_html__('Note enregistrée.', 'sitepulse'),
+                'historyNoteError' => esc_html__('Échec de l’enregistrement de la note.', 'sitepulse'),
+                'historyAriaDefault' => esc_html__('Mise à jour de l’historique.', 'sitepulse'),
             ],
             'initialCached'     => '' !== $insight_text,
             'statusAction'      => 'sitepulse_get_ai_insight_status',
@@ -1687,11 +1965,21 @@ function sitepulse_ai_insights_page() {
                     </select>
                 </label>
             </div>
+            <div class="sitepulse-ai-history-toolbar" role="region" aria-label="<?php echo esc_attr__('Actions d’historique', 'sitepulse'); ?>">
+                <button type="button" id="sitepulse-ai-history-export-csv" class="button button-secondary">
+                    <?php esc_html_e('Exporter en CSV', 'sitepulse'); ?>
+                </button>
+                <button type="button" id="sitepulse-ai-history-copy" class="button">
+                    <?php esc_html_e('Copier', 'sitepulse'); ?>
+                </button>
+            </div>
+            <p id="sitepulse-ai-history-feedback" class="screen-reader-text" aria-live="polite" aria-atomic="true"></p>
             <p id="sitepulse-ai-history-empty" class="sitepulse-ai-history-empty"<?php if (!empty($history_entries)) : ?> style="display:none;"<?php endif; ?>>
                 <?php esc_html_e('Aucun historique disponible pour le moment.', 'sitepulse'); ?>
             </p>
             <ul id="sitepulse-ai-history-list" class="sitepulse-ai-history-list">
                 <?php foreach ($history_entries as $entry) :
+                    $entry_id = isset($entry['id']) ? (string) $entry['id'] : '';
                     $model_key = isset($entry['model']['key']) ? (string) $entry['model']['key'] : '';
                     $model_label = isset($entry['model']['label']) ? (string) $entry['model']['label'] : '';
                     $rate_key = isset($entry['rate_limit']['key']) ? (string) $entry['rate_limit']['key'] : '';
@@ -1717,7 +2005,7 @@ function sitepulse_ai_insights_page() {
 
                     $meta_parts = array_filter(array_map('trim', $meta_parts), 'strlen');
                 ?>
-                    <li class="sitepulse-ai-history-item" data-model="<?php echo esc_attr($model_key); ?>" data-rate-limit="<?php echo esc_attr($rate_key); ?>">
+                    <li class="sitepulse-ai-history-item" data-entry-id="<?php echo esc_attr($entry_id); ?>" data-model="<?php echo esc_attr($model_key); ?>" data-rate-limit="<?php echo esc_attr($rate_key); ?>">
                         <?php if (!empty($meta_parts)) : ?>
                             <p class="sitepulse-ai-history-meta"><?php echo esc_html(implode(' • ', $meta_parts)); ?></p>
                         <?php endif; ?>
@@ -1730,12 +2018,66 @@ function sitepulse_ai_insights_page() {
                             }
                             ?>
                         </div>
+                        <div class="sitepulse-ai-history-note">
+                            <label for="sitepulse-ai-history-note-<?php echo esc_attr($entry_id); ?>"><?php esc_html_e('Note personnelle', 'sitepulse'); ?></label>
+                            <textarea
+                                id="sitepulse-ai-history-note-<?php echo esc_attr($entry_id); ?>"
+                                class="sitepulse-ai-history-note-field"
+                                data-entry-id="<?php echo esc_attr($entry_id); ?>"
+                                rows="2"
+                                placeholder="<?php echo esc_attr__('Ajoutez un commentaire ou un plan d’action…', 'sitepulse'); ?>"
+                            ><?php echo isset($entry['note']) ? esc_textarea($entry['note']) : ''; ?></textarea>
+                        </div>
                     </li>
                 <?php endforeach; ?>
             </ul>
         </div>
     </div>
     <?php
+}
+
+function sitepulse_ai_save_history_note() {
+    if (!current_user_can(sitepulse_get_capability())) {
+        wp_send_json_error([
+            'message' => esc_html__("Vous n'avez pas les permissions nécessaires pour effectuer cette action.", 'sitepulse'),
+        ], 403);
+    }
+
+    $nonce = isset($_POST['nonce']) ? sanitize_text_field(wp_unslash($_POST['nonce'])) : '';
+
+    if (!wp_verify_nonce($nonce, SITEPULSE_NONCE_ACTION_AI_INSIGHT)) {
+        wp_send_json_error([
+            'message' => esc_html__('La sécurité de la requête n’a pas pu être vérifiée.', 'sitepulse'),
+        ], 400);
+    }
+
+    $entry_id = isset($_POST['entry_id']) ? sanitize_key((string) wp_unslash($_POST['entry_id'])) : '';
+
+    if ('' === $entry_id) {
+        wp_send_json_error([
+            'message' => esc_html__('Identifiant de recommandation manquant.', 'sitepulse'),
+        ], 400);
+    }
+
+    $raw_note = isset($_POST['note']) ? wp_unslash($_POST['note']) : '';
+    $note     = sanitize_textarea_field((string) $raw_note);
+
+    $notes = sitepulse_ai_get_history_notes();
+
+    if ('' === $note) {
+        if (isset($notes[$entry_id])) {
+            unset($notes[$entry_id]);
+            sitepulse_ai_update_history_notes($notes);
+        }
+    } else {
+        $notes[$entry_id] = $note;
+        sitepulse_ai_update_history_notes($notes);
+    }
+
+    wp_send_json_success([
+        'entryId' => $entry_id,
+        'note'    => $note,
+    ]);
 }
 
 function sitepulse_generate_ai_insight() {
@@ -1777,6 +2119,14 @@ function sitepulse_generate_ai_insight() {
 
             if (isset($latest_entry['rate_limit'])) {
                 $cached_payload['rate_limit'] = $latest_entry['rate_limit'];
+            }
+
+            if (isset($latest_entry['id'])) {
+                $cached_payload['id'] = $latest_entry['id'];
+            }
+
+            if (isset($latest_entry['note'])) {
+                $cached_payload['note'] = $latest_entry['note'];
             }
         }
 
