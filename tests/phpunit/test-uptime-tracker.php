@@ -51,6 +51,7 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         delete_option(SITEPULSE_OPTION_UPTIME_ARCHIVE);
         delete_option(SITEPULSE_OPTION_UPTIME_URL);
         delete_option(SITEPULSE_OPTION_UPTIME_TIMEOUT);
+        delete_option(SITEPULSE_OPTION_UPTIME_FREQUENCY);
     }
 
     protected function tear_down(): void {
@@ -62,6 +63,7 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         delete_option(SITEPULSE_OPTION_UPTIME_ARCHIVE);
         delete_option(SITEPULSE_OPTION_UPTIME_URL);
         delete_option(SITEPULSE_OPTION_UPTIME_TIMEOUT);
+        delete_option(SITEPULSE_OPTION_UPTIME_FREQUENCY);
 
         parent::tear_down();
     }
@@ -187,6 +189,49 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $archive = get_option(SITEPULSE_OPTION_UPTIME_ARCHIVE, []);
         $this->assertSame(1, $archive[$day_key]['down']);
         $this->assertSame(2, $archive[$day_key]['total']);
+    }
+
+    public function test_normalize_log_uses_five_minute_schedule_interval() {
+        update_option(SITEPULSE_OPTION_UPTIME_FREQUENCY, 'sitepulse_uptime_five_minutes');
+        wp_get_schedules();
+
+        $log = [
+            ['status' => true],
+            ['status' => false],
+            ['status' => true],
+        ];
+
+        $normalized = sitepulse_normalize_uptime_log($log);
+
+        $this->assertCount(3, $normalized);
+        $this->assertArrayHasKey('timestamp', $normalized[0]);
+        $this->assertArrayHasKey('timestamp', $normalized[1]);
+        $this->assertArrayHasKey('timestamp', $normalized[2]);
+        $this->assertSame(5 * MINUTE_IN_SECONDS, $normalized[1]['timestamp'] - $normalized[0]['timestamp']);
+        $this->assertSame(5 * MINUTE_IN_SECONDS, $normalized[2]['timestamp'] - $normalized[1]['timestamp']);
+    }
+
+    public function test_normalize_log_uses_fifteen_minute_schedule_interval() {
+        update_option(SITEPULSE_OPTION_UPTIME_FREQUENCY, 'sitepulse_uptime_fifteen_minutes');
+        wp_get_schedules();
+
+        $log = [
+            ['status' => false],
+            ['status' => true],
+            ['status' => false],
+            ['status' => true],
+        ];
+
+        $normalized = sitepulse_normalize_uptime_log($log);
+
+        $this->assertCount(4, $normalized);
+        $this->assertArrayHasKey('timestamp', $normalized[0]);
+        $this->assertArrayHasKey('timestamp', $normalized[1]);
+        $this->assertArrayHasKey('timestamp', $normalized[2]);
+        $this->assertArrayHasKey('timestamp', $normalized[3]);
+        $this->assertSame(15 * MINUTE_IN_SECONDS, $normalized[1]['timestamp'] - $normalized[0]['timestamp']);
+        $this->assertSame(15 * MINUTE_IN_SECONDS, $normalized[2]['timestamp'] - $normalized[1]['timestamp']);
+        $this->assertSame(15 * MINUTE_IN_SECONDS, $normalized[3]['timestamp'] - $normalized[2]['timestamp']);
     }
 
     public function test_uptime_tracker_page_includes_extended_metrics() {
