@@ -14,7 +14,7 @@ $sitepulse_uptime_cron_hook = function_exists('sitepulse_get_cron_hook') ? sitep
 add_filter('cron_schedules', 'sitepulse_uptime_tracker_register_cron_schedules');
 
 add_action('admin_menu', function() {
-    add_submenu_page('sitepulse-dashboard', 'Uptime Tracker', 'Uptime', sitepulse_get_capability(), 'sitepulse-uptime', 'sitepulse_uptime_tracker_page');
+    add_submenu_page('sitepulse-dashboard', __('Uptime Tracker', 'sitepulse'), __('Uptime', 'sitepulse'), sitepulse_get_capability(), 'sitepulse-uptime', 'sitepulse_uptime_tracker_page');
 });
 
 add_action('admin_enqueue_scripts', 'sitepulse_uptime_tracker_enqueue_assets');
