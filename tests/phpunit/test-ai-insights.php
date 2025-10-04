@@ -32,6 +32,20 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
      */
     private $last_http_args = null;
 
+    /**
+     * Number of times the mocked spawn_cron callable has been requested.
+     *
+     * @var int
+     */
+    private $spawn_callable_invocations = 0;
+
+    /**
+     * Timestamp provided to the mocked spawn_cron callable.
+     *
+     * @var int|null
+     */
+    private $last_spawn_timestamp = null;
+
     public static function wpSetUpBeforeClass($factory) {
         require_once dirname(__DIR__, 2) . '/sitepulse_FR/includes/functions.php';
         require_once dirname(__DIR__, 2) . '/sitepulse_FR/modules/ai_insights.php';
@@ -51,12 +65,15 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->http_request_count = 0;
         $this->mock_response_parts = [];
         $this->last_http_args      = null;
+        $this->spawn_callable_invocations = 0;
+        $this->last_spawn_timestamp = null;
 
         delete_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
         delete_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
         update_option(SITEPULSE_OPTION_GEMINI_API_KEY, '');
         delete_option(SITEPULSE_PLUGIN_IMPACT_OPTION);
         delete_option(SITEPULSE_OPTION_UPTIME_LOG);
+        delete_option(SITEPULSE_OPTION_AI_INSIGHT_ERRORS);
         $this->reset_cached_insight_static();
     }
 
@@ -67,6 +84,7 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         delete_option(SITEPULSE_OPTION_GEMINI_API_KEY);
         delete_option(SITEPULSE_PLUGIN_IMPACT_OPTION);
         delete_option(SITEPULSE_OPTION_UPTIME_LOG);
+        delete_option(SITEPULSE_OPTION_AI_INSIGHT_ERRORS);
 
         parent::tear_down();
     }
@@ -482,6 +500,34 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
     }
 
     /**
+     * Ensures that when WP-Cron is spawned immediately we log failures for visibility in Site Health.
+     */
+    public function test_schedule_attempts_immediate_cron_spawn_and_logs_failures() {
+        add_filter('sitepulse_ai_spawn_cron_callable', [$this, 'filter_mock_spawn_callable'], 10, 2);
+
+        $job_id = sitepulse_ai_schedule_generation_job(false);
+
+        remove_filter('sitepulse_ai_spawn_cron_callable', [$this, 'filter_mock_spawn_callable'], 10);
+
+        $this->assertIsString($job_id, 'Scheduling should return a job identifier even if spawn fails.');
+        $this->assertSame(1, $this->spawn_callable_invocations, 'An immediate cron spawn should be attempted once.');
+        $this->assertIsInt($this->last_spawn_timestamp);
+        $this->assertGreaterThan(0, $this->last_spawn_timestamp);
+
+        $logged_errors = get_option(SITEPULSE_OPTION_AI_INSIGHT_ERRORS, []);
+
+        $this->assertIsArray($logged_errors, 'Logged errors should be stored as an array.');
+        $this->assertNotEmpty($logged_errors, 'A failed spawn attempt should be logged for Site Health.');
+
+        $latest_error = array_pop($logged_errors);
+
+        $this->assertIsArray($latest_error);
+        $this->assertArrayHasKey('message', $latest_error);
+        $this->assertStringContainsString('WP-Cron', $latest_error['message']);
+        $this->assertStringContainsString('No incoming traffic', $latest_error['message']);
+    }
+
+    /**
      * Ensures that HTTP errors trigger the AI insight logger with sanitized output.
      */
     public function test_http_error_triggers_logger() {
@@ -521,6 +567,32 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $response = json_decode($this->_last_response, true);
 
         $this->assertFalse($response['success']);
+    }
+
+    /**
+     * Returns a callable used to mock spawn_cron() invocations during tests.
+     *
+     * @param callable|string $callable  Original callable.
+     * @param int             $timestamp Cron timestamp passed to the callable.
+     *
+     * @return callable
+     */
+    public function filter_mock_spawn_callable($callable, $timestamp) {
+        $this->spawn_callable_invocations++;
+        $this->last_spawn_timestamp = $timestamp;
+
+        return [$this, 'mock_spawn_cron_failure'];
+    }
+
+    /**
+     * Simulates a failing spawn_cron() call for the immediate execution path.
+     *
+     * @param int $timestamp Cron timestamp.
+     *
+     * @return WP_Error
+     */
+    public function mock_spawn_cron_failure($timestamp) {
+        return new WP_Error('sitepulse_no_traffic', 'No incoming traffic to trigger WP-Cron.');
     }
 
     /**

@@ -139,6 +139,42 @@ function sitepulse_ai_prepare_insight_variants($text, $html = '') {
 }
 
 /**
+ * Attempts to spawn WP-Cron so the scheduled AI insight job runs immediately.
+ *
+ * @param int $timestamp Cron timestamp used to trigger the spawn.
+ *
+ * @return mixed
+ */
+function sitepulse_ai_spawn_cron($timestamp) {
+    $timestamp = (int) $timestamp;
+
+    if ($timestamp <= 0) {
+        $timestamp = time();
+    }
+
+    $callable = 'spawn_cron';
+
+    if (function_exists('apply_filters')) {
+        $filtered_callable = apply_filters('sitepulse_ai_spawn_cron_callable', $callable, $timestamp);
+
+        if (null !== $filtered_callable) {
+            $callable = $filtered_callable;
+        }
+    }
+
+    if (is_callable($callable)) {
+        return call_user_func($callable, $timestamp);
+    }
+
+    if (class_exists('WP_Error')) {
+        /* translators: %s: callable name. */
+        return new WP_Error('sitepulse_ai_spawn_unavailable', sprintf(esc_html__('La fonction %s n’est pas disponible.', 'sitepulse'), (string) $callable));
+    }
+
+    return false;
+}
+
+/**
  * Determines whether WP-Cron is disabled for the current installation.
  *
  * @return bool
@@ -942,7 +978,9 @@ function sitepulse_ai_schedule_generation_job($force_refresh) {
         return sitepulse_ai_create_wp_error('sitepulse_ai_job_storage_failed', $error_message, 500);
     }
 
-    $scheduled = wp_schedule_single_event(time(), 'sitepulse_run_ai_insight_job', [$job_id]);
+    $current_time = time();
+
+    $scheduled = wp_schedule_single_event($current_time, 'sitepulse_run_ai_insight_job', [$job_id]);
 
     if (false === $scheduled) {
         $guidance_message = esc_html__('WP-Cron semble désactivé sur ce site. L’analyse IA sera exécutée immédiatement, mais pensez à réactiver WP-Cron (retirez DISABLE_WP_CRON de wp-config.php ou planifiez une tâche serveur).', 'sitepulse');
@@ -974,6 +1012,26 @@ function sitepulse_ai_schedule_generation_job($force_refresh) {
         $status_code   = isset($job_state['code']) ? (int) $job_state['code'] : 500;
 
         return sitepulse_ai_create_wp_error('sitepulse_ai_job_schedule_failed', $error_message, $status_code);
+    }
+
+    $spawn_result = sitepulse_ai_spawn_cron($current_time);
+
+    if (is_wp_error($spawn_result)) {
+        $spawn_error_message = $spawn_result->get_error_message();
+
+        if ('' !== $spawn_error_message) {
+            $spawn_message = sprintf(
+                /* translators: %s: Error details. */
+                esc_html__('Échec du déclenchement immédiat de WP-Cron pour l’analyse IA : %s', 'sitepulse'),
+                $spawn_error_message
+            );
+        } else {
+            $spawn_message = esc_html__('Échec du déclenchement immédiat de WP-Cron pour l’analyse IA.', 'sitepulse');
+        }
+
+        sitepulse_ai_record_critical_error($spawn_message);
+    } elseif (false === $spawn_result) {
+        sitepulse_ai_record_critical_error(esc_html__('Échec du déclenchement immédiat de WP-Cron pour l’analyse IA.', 'sitepulse'));
     }
 
     return $job_id;
