@@ -111,6 +111,44 @@ function sitepulse_uptime_tracker_get_schedule() {
 }
 
 /**
+ * Attempts to resolve the interval (in seconds) for the configured uptime schedule.
+ *
+ * @param int $default_interval Fallback interval when schedules cannot be resolved.
+ * @return int
+ */
+function sitepulse_uptime_tracker_resolve_schedule_interval($default_interval) {
+    if (!function_exists('wp_get_schedules')) {
+        return $default_interval;
+    }
+
+    $schedules = wp_get_schedules();
+
+    if (!is_array($schedules) || empty($schedules)) {
+        return $default_interval;
+    }
+
+    $schedule_candidates = array_unique(array_filter([
+        sitepulse_uptime_tracker_get_schedule(),
+        defined('SITEPULSE_DEFAULT_UPTIME_FREQUENCY') ? SITEPULSE_DEFAULT_UPTIME_FREQUENCY : null,
+        'hourly',
+    ]));
+
+    foreach ($schedule_candidates as $candidate) {
+        if (!isset($schedules[$candidate]) || !is_array($schedules[$candidate])) {
+            continue;
+        }
+
+        $candidate_interval = isset($schedules[$candidate]['interval']) ? (int) $schedules[$candidate]['interval'] : 0;
+
+        if ($candidate_interval > 0) {
+            return $candidate_interval;
+        }
+    }
+
+    return $default_interval;
+}
+
+/**
  * Ensures the uptime tracker cron hook is scheduled and reports failures.
  *
  * @return void
@@ -170,27 +208,7 @@ function sitepulse_normalize_uptime_log($log) {
     $now = (int) current_time('timestamp');
 
     $default_interval = defined('HOUR_IN_SECONDS') ? (int) HOUR_IN_SECONDS : 3600;
-    $interval = $default_interval;
-
-    $schedules = function_exists('wp_get_schedules') ? wp_get_schedules() : [];
-    $schedule_candidates = [
-        sitepulse_uptime_tracker_get_schedule(),
-        defined('SITEPULSE_DEFAULT_UPTIME_FREQUENCY') ? SITEPULSE_DEFAULT_UPTIME_FREQUENCY : null,
-        'hourly',
-    ];
-
-    foreach (array_unique(array_filter($schedule_candidates)) as $candidate) {
-        if (!isset($schedules[$candidate]) || !is_array($schedules[$candidate])) {
-            continue;
-        }
-
-        $candidate_interval = isset($schedules[$candidate]['interval']) ? (int) $schedules[$candidate]['interval'] : 0;
-
-        if ($candidate_interval > 0) {
-            $interval = $candidate_interval;
-            break;
-        }
-    }
+    $interval = sitepulse_uptime_tracker_resolve_schedule_interval($default_interval);
 
     $approximate_start = $now - max(0, ($count - 1) * $interval);
 

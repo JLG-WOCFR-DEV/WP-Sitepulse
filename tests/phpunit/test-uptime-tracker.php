@@ -234,6 +234,35 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $this->assertSame(15 * MINUTE_IN_SECONDS, $normalized[3]['timestamp'] - $normalized[2]['timestamp']);
     }
 
+    public function test_normalize_log_falls_back_to_default_interval_when_schedule_missing() {
+        update_option(SITEPULSE_OPTION_UPTIME_FREQUENCY, 'sitepulse_uptime_unknown');
+
+        $filter = static function () {
+            return 'not-an-array';
+        };
+
+        add_filter('cron_schedules', $filter, PHP_INT_MAX);
+
+        $log = [
+            ['status' => true],
+            ['status' => false],
+            ['status' => true],
+        ];
+
+        $normalized = sitepulse_normalize_uptime_log($log);
+
+        remove_filter('cron_schedules', $filter, PHP_INT_MAX);
+
+        $expected_interval = defined('HOUR_IN_SECONDS') ? (int) HOUR_IN_SECONDS : 3600;
+
+        $this->assertCount(3, $normalized);
+        $this->assertArrayHasKey('timestamp', $normalized[0]);
+        $this->assertArrayHasKey('timestamp', $normalized[1]);
+        $this->assertArrayHasKey('timestamp', $normalized[2]);
+        $this->assertSame($expected_interval, $normalized[1]['timestamp'] - $normalized[0]['timestamp']);
+        $this->assertSame($expected_interval, $normalized[2]['timestamp'] - $normalized[1]['timestamp']);
+    }
+
     public function test_uptime_tracker_page_includes_extended_metrics() {
         $now = time();
         $archive = [];
