@@ -228,4 +228,15 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
 
         $this->assertSame('stored-value', $sanitized);
     }
+
+    public function test_settings_page_displays_overview_tab_by_default(): void {
+        ob_start();
+        sitepulse_settings_page();
+        $output = ob_get_clean();
+
+        $this->assertStringContainsString('sitepulse-tab-overview-label', $output);
+        $this->assertStringContainsString('data-tab-target="sitepulse-tab-overview"', $output);
+        $this->assertStringContainsString('id="sitepulse-tab-overview"', $output);
+        $this->assertStringContainsString('id="sitepulse-tab-overview-label" class="nav-tab nav-tab-active"', $output);
+    }
 }
