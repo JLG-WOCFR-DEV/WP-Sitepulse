@@ -89,6 +89,269 @@ function sitepulse_speed_analyzer_get_thresholds() {
 }
 
 /**
+ * Returns the available status labels for summary badges.
+ *
+ * @return array<string,array{label:string,sr:string,icon:string}>
+ */
+function sitepulse_speed_analyzer_get_status_labels() {
+    return [
+        'status-ok'   => [
+            'label' => __('Bon', 'sitepulse'),
+            'sr'    => __('Statut : bon', 'sitepulse'),
+            'icon'  => '✔️',
+        ],
+        'status-warn' => [
+            'label' => __('Attention', 'sitepulse'),
+            'sr'    => __('Statut : attention', 'sitepulse'),
+            'icon'  => '⚠️',
+        ],
+        'status-bad'  => [
+            'label' => __('Critique', 'sitepulse'),
+            'sr'    => __('Statut : critique', 'sitepulse'),
+            'icon'  => '⛔',
+        ],
+    ];
+}
+
+/**
+ * Determines the status badge class for a metric value.
+ *
+ * @param float|null $value      Metric value.
+ * @param array      $thresholds Warning and critical thresholds.
+ *
+ * @return string
+ */
+function sitepulse_speed_analyzer_resolve_status($value, $thresholds) {
+    if (!is_array($thresholds)) {
+        $thresholds = [];
+    }
+
+    if (!is_numeric($value)) {
+        return 'status-warn';
+    }
+
+    $warning = isset($thresholds['warning']) ? (int) $thresholds['warning'] : 0;
+    $critical = isset($thresholds['critical']) ? (int) $thresholds['critical'] : 0;
+
+    if ($critical > 0 && $value >= $critical) {
+        return 'status-bad';
+    }
+
+    if ($warning > 0 && $value >= $warning) {
+        return 'status-warn';
+    }
+
+    return 'status-ok';
+}
+
+/**
+ * Calculates a percentile using linear interpolation.
+ *
+ * @param float[] $values     Sorted numeric values.
+ * @param float   $percentile Percentile between 0 and 100.
+ *
+ * @return float|null
+ */
+function sitepulse_speed_analyzer_calculate_percentile($values, $percentile) {
+    if (empty($values)) {
+        return null;
+    }
+
+    $count = count($values);
+
+    if ($count === 1) {
+        return (float) $values[0];
+    }
+
+    $percentile = max(0.0, min(100.0, (float) $percentile));
+    $index = ($percentile / 100) * ($count - 1);
+    $lower = (int) floor($index);
+    $upper = (int) ceil($index);
+
+    if ($lower === $upper) {
+        return (float) $values[$lower];
+    }
+
+    $fraction = $index - $lower;
+    $lower_value = (float) $values[$lower];
+    $upper_value = (float) $values[$upper];
+
+    return $lower_value + ($upper_value - $lower_value) * $fraction;
+}
+
+/**
+ * Filters out upper outliers using the interquartile range rule.
+ *
+ * @param float[] $values Sorted numeric values.
+ *
+ * @return float[]
+ */
+function sitepulse_speed_analyzer_filter_outliers($values) {
+    $count = count($values);
+
+    if ($count < 4) {
+        return $values;
+    }
+
+    $q1 = sitepulse_speed_analyzer_calculate_percentile($values, 25);
+    $q3 = sitepulse_speed_analyzer_calculate_percentile($values, 75);
+
+    if ($q1 === null || $q3 === null) {
+        return $values;
+    }
+
+    $iqr = $q3 - $q1;
+
+    if ($iqr <= 0) {
+        return $values;
+    }
+
+    $upper_bound = $q3 + (1.5 * $iqr);
+    $lower_bound = max(0.0, $q1 - (1.5 * $iqr));
+
+    $filtered = array_values(array_filter(
+        $values,
+        static function ($value) use ($lower_bound, $upper_bound) {
+            return $value >= $lower_bound && $value <= $upper_bound;
+        }
+    ));
+
+    return empty($filtered) ? $values : $filtered;
+}
+
+/**
+ * Provides the summary metric labels and descriptions.
+ *
+ * @return array<string,array{label:string,description:string}>
+ */
+function sitepulse_speed_analyzer_get_summary_meta() {
+    return [
+        'mean'   => [
+            'label'       => __('Moyenne', 'sitepulse'),
+            'description' => __('Temps moyen observé sur l’ensemble des relevés.', 'sitepulse'),
+        ],
+        'median' => [
+            'label'       => __('Médiane', 'sitepulse'),
+            'description' => __('Valeur centrale qui limite l’impact des variations ponctuelles.', 'sitepulse'),
+        ],
+        'p95'    => [
+            'label'       => __('95e percentile', 'sitepulse'),
+            'description' => __('Niveau en dessous duquel se trouvent 95% des mesures.', 'sitepulse'),
+        ],
+        'best'   => [
+            'label'       => __('Meilleure mesure', 'sitepulse'),
+            'description' => __('Temps de réponse le plus rapide observé.', 'sitepulse'),
+        ],
+        'worst'  => [
+            'label'       => __('Pire mesure', 'sitepulse'),
+            'description' => __('Temps de réponse le plus lent enregistré.', 'sitepulse'),
+        ],
+    ];
+}
+
+/**
+ * Calculates aggregated statistics over the history.
+ *
+ * @param array<int,array{timestamp:int,server_processing_ms:float}>|null $history    History entries.
+ * @param array{warning:int,critical:int}|null                            $thresholds Threshold configuration.
+ *
+ * @return array{
+ *     count:int,
+ *     filtered_count:int,
+ *     excluded_outliers:int,
+ *     metrics:array<string,array{value:float|null,status:string}>
+ * }
+ */
+function sitepulse_speed_analyzer_get_aggregates($history = null, $thresholds = null) {
+    if ($history === null) {
+        $history = sitepulse_speed_analyzer_get_history_data();
+    }
+
+    if ($thresholds === null) {
+        $thresholds = sitepulse_speed_analyzer_get_thresholds();
+    }
+
+    $values = [];
+
+    if (is_array($history)) {
+        foreach ($history as $entry) {
+            if (!is_array($entry) || !isset($entry['server_processing_ms'])) {
+                continue;
+            }
+
+            $value = (float) $entry['server_processing_ms'];
+
+            if (!is_finite($value) || $value < 0) {
+                continue;
+            }
+
+            $values[] = $value;
+        }
+    }
+
+    sort($values);
+
+    $count = count($values);
+
+    if ($count === 0) {
+        return [
+            'count'            => 0,
+            'filtered_count'   => 0,
+            'excluded_outliers'=> 0,
+            'metrics'          => [
+                'mean'   => ['value' => null, 'status' => 'status-warn'],
+                'median' => ['value' => null, 'status' => 'status-warn'],
+                'p95'    => ['value' => null, 'status' => 'status-warn'],
+                'best'   => ['value' => null, 'status' => 'status-warn'],
+                'worst'  => ['value' => null, 'status' => 'status-warn'],
+            ],
+        ];
+    }
+
+    $filtered_values = sitepulse_speed_analyzer_filter_outliers($values);
+    $filtered_count = count($filtered_values);
+
+    if ($filtered_count === 0) {
+        $filtered_values = $values;
+        $filtered_count = $count;
+    }
+
+    $mean = $filtered_count > 0 ? array_sum($filtered_values) / $filtered_count : null;
+    $median = sitepulse_speed_analyzer_calculate_percentile($filtered_values, 50);
+    $p95 = sitepulse_speed_analyzer_calculate_percentile($values, 95);
+    $best = min($values);
+    $worst = max($values);
+
+    return [
+        'count'            => $count,
+        'filtered_count'   => $filtered_count,
+        'excluded_outliers'=> max(0, $count - $filtered_count),
+        'metrics'          => [
+            'mean'   => [
+                'value'  => $mean,
+                'status' => sitepulse_speed_analyzer_resolve_status($mean, $thresholds),
+            ],
+            'median' => [
+                'value'  => $median,
+                'status' => sitepulse_speed_analyzer_resolve_status($median, $thresholds),
+            ],
+            'p95'    => [
+                'value'  => $p95,
+                'status' => sitepulse_speed_analyzer_resolve_status($p95, $thresholds),
+            ],
+            'best'   => [
+                'value'  => $best,
+                'status' => sitepulse_speed_analyzer_resolve_status($best, $thresholds),
+            ],
+            'worst'  => [
+                'value'  => $worst,
+                'status' => sitepulse_speed_analyzer_resolve_status($worst, $thresholds),
+            ],
+        ],
+    ];
+}
+
+/**
  * Returns the recorded speed history in a normalized format.
  *
  * @return array<int,array{timestamp:int,server_processing_ms:float}>
@@ -217,6 +480,7 @@ function sitepulse_ajax_run_speed_scan() {
         $remaining = max(0, $rate_limit - ($now - $last_run));
         $history = sitepulse_speed_analyzer_get_history_data();
         $latest = sitepulse_speed_analyzer_get_latest_entry($history);
+        $aggregates = sitepulse_speed_analyzer_get_aggregates($history, $thresholds);
 
         wp_send_json_error([
             'message'          => sprintf(
@@ -228,6 +492,7 @@ function sitepulse_ajax_run_speed_scan() {
             'history'          => $history,
             'recommendations'  => sitepulse_speed_analyzer_build_recommendations($latest, $thresholds),
             'latest'           => $latest,
+            'aggregates'       => $aggregates,
             'next_available'   => $last_run + $rate_limit,
             'rate_limit'       => $rate_limit,
             'remaining'        => $remaining,
@@ -248,12 +513,14 @@ function sitepulse_ajax_run_speed_scan() {
 
     $history = sitepulse_speed_analyzer_get_history_data();
     $latest = sitepulse_speed_analyzer_get_latest_entry($history);
+    $aggregates = sitepulse_speed_analyzer_get_aggregates($history, $thresholds);
 
     wp_send_json_success([
         'message'         => esc_html__('Un nouveau relevé a été ajouté à votre historique.', 'sitepulse'),
         'history'         => $history,
         'latest'          => $latest,
         'recommendations' => sitepulse_speed_analyzer_build_recommendations($latest, $thresholds),
+        'aggregates'      => $aggregates,
         'last_run'        => $now,
         'rate_limit'      => $rate_limit,
     ]);
@@ -274,6 +541,31 @@ function sitepulse_speed_analyzer_enqueue_assets($hook_suffix) {
     $history = sitepulse_speed_analyzer_get_history_data();
     $rate_limit = sitepulse_speed_analyzer_get_rate_limit();
     $last_run = (int) get_option('sitepulse_speed_scan_last_run', 0);
+    $aggregates = sitepulse_speed_analyzer_get_aggregates($history, $thresholds);
+    $summary_meta = sitepulse_speed_analyzer_get_summary_meta();
+    $status_labels = sitepulse_speed_analyzer_get_status_labels();
+    $summary_note_parts = [];
+
+    if (!empty($aggregates['count'])) {
+        $summary_note_parts[] = sprintf(
+            _n('Basé sur %d mesure.', 'Basé sur %d mesures.', (int) $aggregates['count'], 'sitepulse'),
+            (int) $aggregates['count']
+        );
+    }
+
+    if (!empty($aggregates['excluded_outliers'])) {
+        $summary_note_parts[] = sprintf(
+            _n(
+                '%d mesure extrême ignorée lors du calcul des moyennes.',
+                '%d mesures extrêmes ignorées lors du calcul des moyennes.',
+                (int) $aggregates['excluded_outliers'],
+                'sitepulse'
+            ),
+            (int) $aggregates['excluded_outliers']
+        );
+    }
+
+    $summary_note = trim(implode(' ', $summary_note_parts));
 
     wp_enqueue_style(
         'sitepulse-speed-analyzer',
@@ -329,6 +621,9 @@ function sitepulse_speed_analyzer_enqueue_assets($hook_suffix) {
                 'warning'  => (int) $thresholds['warning'],
                 'critical' => (int) $thresholds['critical'],
             ],
+            'aggregates'     => $aggregates,
+            'summaryMeta'    => $summary_meta,
+            'statusLabels'   => $status_labels,
             'rateLimit'      => $rate_limit,
             'lastRun'        => $last_run,
             'recommendations'=> sitepulse_speed_analyzer_build_recommendations(
@@ -345,6 +640,14 @@ function sitepulse_speed_analyzer_enqueue_assets($hook_suffix) {
                 'error'          => esc_html__("Une erreur est survenue pendant le test. Veuillez réessayer.", 'sitepulse'),
                 'throttled'      => esc_html__('Test bloqué temporairement par la limite de fréquence.', 'sitepulse'),
                 'rateLimitIntro' => esc_html__('Prochain test possible dans', 'sitepulse'),
+                'warningThresholdLabel' => esc_html__('Seuil d’alerte', 'sitepulse'),
+                'criticalThresholdLabel'=> esc_html__('Seuil critique', 'sitepulse'),
+                'summaryUnit'   => esc_html__('ms', 'sitepulse'),
+                'summaryNoData' => esc_html__('N/A', 'sitepulse'),
+                'summarySampleSingular' => esc_html__('Basé sur %d mesure.', 'sitepulse'),
+                'summarySamplePlural'   => esc_html__('Basé sur %d mesures.', 'sitepulse'),
+                'summaryOutlierSingular'=> esc_html__('%d mesure extrême ignorée lors du calcul des moyennes.', 'sitepulse'),
+                'summaryOutlierPlural'  => esc_html__('%d mesures extrêmes ignorées lors du calcul des moyennes.', 'sitepulse'),
             ],
         ]
     );
@@ -380,6 +683,9 @@ function sitepulse_speed_analyzer_page() {
     $rate_limit = sitepulse_speed_analyzer_get_rate_limit();
     $history = sitepulse_speed_analyzer_get_history_data();
     $latest_entry = sitepulse_speed_analyzer_get_latest_entry($history);
+    $aggregates = sitepulse_speed_analyzer_get_aggregates($history, $thresholds);
+    $summary_meta = sitepulse_speed_analyzer_get_summary_meta();
+    $status_labels = sitepulse_speed_analyzer_get_status_labels();
     $now_timestamp = current_time('timestamp');
     $rate_limit_label = human_time_diff($now_timestamp, $now_timestamp + max(1, $rate_limit));
 
@@ -402,24 +708,6 @@ function sitepulse_speed_analyzer_page() {
     // --- Server Configuration Checks ---
     $object_cache_active = wp_using_ext_object_cache();
     $php_version = PHP_VERSION;
-
-    $status_labels = [
-        'status-ok'   => [
-            'label' => __('Bon', 'sitepulse'),
-            'sr'    => __('Statut : bon', 'sitepulse'),
-            'icon'  => '✔️',
-        ],
-        'status-warn' => [
-            'label' => __('Attention', 'sitepulse'),
-            'sr'    => __('Statut : attention', 'sitepulse'),
-            'icon'  => '⚠️',
-        ],
-        'status-bad'  => [
-            'label' => __('Critique', 'sitepulse'),
-            'sr'    => __('Statut : critique', 'sitepulse'),
-            'icon'  => '⛔',
-        ],
-    ];
 
     $get_status_meta = static function ($status) use ($status_labels) {
         if (isset($status_labels[$status])) {
@@ -498,6 +786,40 @@ function sitepulse_speed_analyzer_page() {
                 }
                 ?>
             </ul>
+        </div>
+
+        <div id="sitepulse-speed-summary" class="speed-summary">
+            <h2><?php esc_html_e('Résumé', 'sitepulse'); ?></h2>
+            <div class="speed-grid summary-grid" id="sitepulse-speed-summary-grid">
+                <?php foreach ($summary_meta as $metric_key => $meta) : ?>
+                    <?php
+                    $metric_data = isset($aggregates['metrics'][$metric_key]) ? $aggregates['metrics'][$metric_key] : null;
+                    $metric_status = isset($metric_data['status']) ? $metric_data['status'] : 'status-warn';
+                    $status_meta = $get_status_meta($metric_status);
+                    $value = isset($metric_data['value']) ? $metric_data['value'] : null;
+                    $formatted_value = ($value !== null)
+                        ? sprintf(
+                            /* translators: %s: duration in milliseconds. */
+                            esc_html__('%s ms', 'sitepulse'),
+                            esc_html(number_format_i18n((float) $value, 2))
+                        )
+                        : esc_html__('N/A', 'sitepulse');
+                    ?>
+                    <div class="speed-card summary-card" data-metric="<?php echo esc_attr($metric_key); ?>">
+                        <h3 class="summary-title"><?php echo esc_html($meta['label']); ?></h3>
+                        <span class="metric-value">
+                            <span class="status-badge <?php echo esc_attr($metric_status); ?>" aria-hidden="true">
+                                <span class="status-icon"><?php echo esc_html($status_meta['icon']); ?></span>
+                                <span class="status-text"><?php echo esc_html($status_meta['label']); ?></span>
+                            </span>
+                            <span class="screen-reader-text" data-summary-sr><?php echo esc_html($status_meta['sr']); ?></span>
+                            <span class="status-reading" data-summary-value><?php echo $formatted_value; ?></span>
+                        </span>
+                        <p class="description"><?php echo esc_html($meta['description']); ?></p>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+            <p class="description" id="sitepulse-speed-summary-note" aria-live="polite"><?php echo esc_html($summary_note); ?></p>
         </div>
 
         <div class="speed-grid">
