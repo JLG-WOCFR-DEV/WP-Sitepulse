@@ -14,6 +14,8 @@ add_action('admin_menu', function() {
 add_action('admin_enqueue_scripts', 'sitepulse_ai_insights_enqueue_assets');
 add_action('wp_ajax_sitepulse_generate_ai_insight', 'sitepulse_generate_ai_insight');
 add_action('wp_ajax_sitepulse_get_ai_insight_status', 'sitepulse_get_ai_insight_status');
+add_action('wp_ajax_sitepulse_run_ai_insight_job', 'sitepulse_ai_handle_async_job_request');
+add_action('wp_ajax_nopriv_sitepulse_run_ai_insight_job', 'sitepulse_ai_handle_async_job_request');
 add_action('sitepulse_run_ai_insight_job', 'sitepulse_run_ai_insight_job', 10, 1);
 add_action('admin_notices', 'sitepulse_ai_render_error_notices');
 
@@ -27,6 +29,10 @@ if (!defined('SITEPULSE_OPTION_AI_INSIGHT_ERRORS')) {
 
 if (!defined('SITEPULSE_OPTION_AI_HISTORY')) {
     define('SITEPULSE_OPTION_AI_HISTORY', 'sitepulse_ai_history');
+}
+
+if (!defined('SITEPULSE_OPTION_AI_JOB_SECRET')) {
+    define('SITEPULSE_OPTION_AI_JOB_SECRET', 'sitepulse_ai_job_secret');
 }
 
 /**
@@ -172,6 +178,99 @@ function sitepulse_ai_spawn_cron($timestamp) {
     }
 
     return false;
+}
+
+/**
+ * Returns the shared secret used to trigger AI insight jobs via AJAX.
+ *
+ * @return string
+ */
+function sitepulse_ai_get_job_secret() {
+    $secret = get_option(SITEPULSE_OPTION_AI_JOB_SECRET, '');
+
+    if (!is_string($secret) || '' === $secret) {
+        $secret = wp_generate_password(64, false, false);
+
+        update_option(SITEPULSE_OPTION_AI_JOB_SECRET, $secret, false);
+    }
+
+    /**
+     * Filters the secret used when dispatching asynchronous AI insight jobs.
+     *
+     * @param string $secret Secret stored in the database.
+     */
+    return (string) apply_filters('sitepulse_ai_job_secret', $secret);
+}
+
+/**
+ * Attempts to trigger the AI insight job immediately via admin-ajax.php.
+ *
+ * @param string $job_id Job identifier.
+ *
+ * @return array|WP_Error HTTP response or error on failure.
+ */
+function sitepulse_ai_trigger_async_job_request($job_id) {
+    $job_id = (string) $job_id;
+
+    if ('' === $job_id) {
+        if (class_exists('WP_Error')) {
+            return new WP_Error('sitepulse_ai_missing_job_id', esc_html__('Identifiant de tâche manquant pour le déclenchement immédiat.', 'sitepulse'));
+        }
+
+        return false;
+    }
+
+    $request_args = [
+        'timeout'  => 5,
+        'blocking' => true,
+        'body'     => [
+            'action' => 'sitepulse_run_ai_insight_job',
+            'job_id' => $job_id,
+            'secret' => sitepulse_ai_get_job_secret(),
+        ],
+    ];
+
+    if (function_exists('apply_filters')) {
+        /**
+         * Filters the HTTP arguments used to trigger the AI insight job via AJAX.
+         *
+         * @param array  $request_args HTTP request arguments.
+         * @param string $job_id       Job identifier.
+         */
+        $request_args = (array) apply_filters('sitepulse_ai_async_request_args', $request_args, $job_id);
+    }
+
+    return wp_remote_post(admin_url('admin-ajax.php'), $request_args);
+}
+
+/**
+ * Handles AJAX requests used to trigger the AI insight job immediately.
+ *
+ * @return void
+ */
+function sitepulse_ai_handle_async_job_request() {
+    $provided_secret = isset($_REQUEST['secret']) ? (string) wp_unslash($_REQUEST['secret']) : '';
+    $expected_secret = sitepulse_ai_get_job_secret();
+
+    if (!hash_equals($expected_secret, $provided_secret)) {
+        wp_send_json_error([
+            'message' => esc_html__('Secret invalide pour l’exécution de l’analyse IA.', 'sitepulse'),
+        ], 403);
+    }
+
+    $job_id = isset($_REQUEST['job_id']) ? sanitize_text_field((string) wp_unslash($_REQUEST['job_id'])) : '';
+
+    if ('' === $job_id) {
+        wp_send_json_error([
+            'message' => esc_html__('Identifiant de tâche manquant.', 'sitepulse'),
+        ], 400);
+    }
+
+    sitepulse_run_ai_insight_job($job_id);
+
+    wp_send_json_success([
+        'job_id' => $job_id,
+    ]);
 }
 
 /**
@@ -1015,8 +1114,10 @@ function sitepulse_ai_schedule_generation_job($force_refresh) {
     }
 
     $spawn_result = sitepulse_ai_spawn_cron($current_time);
+    $spawn_failed = false;
 
     if (is_wp_error($spawn_result)) {
+        $spawn_failed        = true;
         $spawn_error_message = $spawn_result->get_error_message();
 
         if ('' !== $spawn_error_message) {
@@ -1031,7 +1132,40 @@ function sitepulse_ai_schedule_generation_job($force_refresh) {
 
         sitepulse_ai_record_critical_error($spawn_message);
     } elseif (false === $spawn_result) {
+        $spawn_failed = true;
         sitepulse_ai_record_critical_error(esc_html__('Échec du déclenchement immédiat de WP-Cron pour l’analyse IA.', 'sitepulse'));
+    }
+
+    if ($spawn_failed) {
+        $async_response = sitepulse_ai_trigger_async_job_request($job_id);
+
+        if (is_wp_error($async_response)) {
+            $async_message = $async_response->get_error_message();
+
+            if ('' !== $async_message) {
+                $async_error = sprintf(
+                    /* translators: %s: Error details. */
+                    esc_html__('Échec du déclenchement immédiat de l’analyse IA via AJAX : %s', 'sitepulse'),
+                    $async_message
+                );
+            } else {
+                $async_error = esc_html__('Échec du déclenchement immédiat de l’analyse IA via AJAX.', 'sitepulse');
+            }
+
+            sitepulse_ai_record_critical_error($async_error);
+        } else {
+            $response_code = (int) wp_remote_retrieve_response_code($async_response);
+
+            if ($response_code >= 400) {
+                $async_error = sprintf(
+                    /* translators: %d: HTTP status code. */
+                    esc_html__('Échec du déclenchement immédiat de l’analyse IA via AJAX (code HTTP %d).', 'sitepulse'),
+                    $response_code
+                );
+
+                sitepulse_ai_record_critical_error($async_error);
+            }
+        }
     }
 
     return $job_id;

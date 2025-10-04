@@ -46,6 +46,20 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
      */
     private $last_spawn_timestamp = null;
 
+    /**
+     * Number of asynchronous AI job requests triggered during a test.
+     *
+     * @var int
+     */
+    private $async_request_count = 0;
+
+    /**
+     * Arguments captured for the most recent asynchronous job request.
+     *
+     * @var array|null
+     */
+    private $last_async_request = null;
+
     public static function wpSetUpBeforeClass($factory) {
         require_once dirname(__DIR__, 2) . '/sitepulse_FR/includes/functions.php';
         require_once dirname(__DIR__, 2) . '/sitepulse_FR/modules/ai_insights.php';
@@ -67,6 +81,8 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->last_http_args      = null;
         $this->spawn_callable_invocations = 0;
         $this->last_spawn_timestamp = null;
+        $this->async_request_count = 0;
+        $this->last_async_request  = null;
 
         delete_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
         delete_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
@@ -74,6 +90,7 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         delete_option(SITEPULSE_PLUGIN_IMPACT_OPTION);
         delete_option(SITEPULSE_OPTION_UPTIME_LOG);
         delete_option(SITEPULSE_OPTION_AI_INSIGHT_ERRORS);
+        delete_option(SITEPULSE_OPTION_AI_JOB_SECRET);
         $this->reset_cached_insight_static();
     }
 
@@ -85,6 +102,7 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         delete_option(SITEPULSE_PLUGIN_IMPACT_OPTION);
         delete_option(SITEPULSE_OPTION_UPTIME_LOG);
         delete_option(SITEPULSE_OPTION_AI_INSIGHT_ERRORS);
+        delete_option(SITEPULSE_OPTION_AI_JOB_SECRET);
 
         parent::tear_down();
     }
@@ -528,6 +546,37 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
     }
 
     /**
+     * Ensures that when spawn_cron() fails we fallback to an authenticated AJAX request.
+     */
+    public function test_schedule_triggers_ajax_request_when_spawn_cron_fails() {
+        $secret = sitepulse_ai_get_job_secret();
+
+        add_filter('sitepulse_ai_spawn_cron_callable', [$this, 'filter_mock_spawn_callable'], 10, 2);
+        add_filter('pre_http_request', [$this, 'mock_async_job_request'], 10, 3);
+
+        $job_id = sitepulse_ai_schedule_generation_job(false);
+
+        remove_filter('pre_http_request', [$this, 'mock_async_job_request'], 10);
+        remove_filter('sitepulse_ai_spawn_cron_callable', [$this, 'filter_mock_spawn_callable'], 10);
+
+        $this->assertIsString($job_id, 'Scheduling should still provide a job identifier.');
+        $this->assertSame(1, $this->async_request_count, 'A single asynchronous request should be dispatched.');
+        $this->assertIsArray($this->last_async_request, 'Asynchronous request arguments should be captured.');
+        $this->assertArrayHasKey('body', $this->last_async_request);
+        $this->assertSame('sitepulse_run_ai_insight_job', $this->last_async_request['body']['action']);
+        $this->assertArrayHasKey('job_id', $this->last_async_request['body']);
+        $this->assertSame($job_id, $this->last_async_request['body']['job_id']);
+        $this->assertArrayHasKey('secret', $this->last_async_request['body']);
+        $this->assertSame($secret, $this->last_async_request['body']['secret']);
+
+        $logged_errors = get_option(SITEPULSE_OPTION_AI_INSIGHT_ERRORS, []);
+
+        $this->assertIsArray($logged_errors);
+        $this->assertNotEmpty($logged_errors, 'Spawn failure should be visible in Site Health.');
+        $this->assertStringContainsString('WP-Cron', end($logged_errors)['message']);
+    }
+
+    /**
      * Ensures that HTTP errors trigger the AI insight logger with sanitized output.
      */
     public function test_http_error_triggers_logger() {
@@ -593,6 +642,33 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
      */
     public function mock_spawn_cron_failure($timestamp) {
         return new WP_Error('sitepulse_no_traffic', 'No incoming traffic to trigger WP-Cron.');
+    }
+
+    /**
+     * Captures asynchronous AI job requests triggered after a spawn failure.
+     *
+     * @param false|array $preempt Whether to short-circuit the HTTP request.
+     * @param array        $args    HTTP request arguments.
+     * @param string       $url     Destination URL.
+     *
+     * @return array
+     */
+    public function mock_async_job_request($preempt, $args, $url) {
+        if (false === strpos($url, 'admin-ajax.php')) {
+            return $preempt;
+        }
+
+        $this->async_request_count++;
+        $this->last_async_request = $args;
+
+        return [
+            'headers'  => [],
+            'body'     => wp_json_encode(['success' => true]),
+            'response' => [
+                'code'    => 200,
+                'message' => 'OK',
+            ],
+        ];
     }
 
     /**
