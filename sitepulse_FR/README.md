@@ -17,6 +17,7 @@ Sitepulse - JLG takes the pulse of your WordPress site, offering modules for:
 - Maintenance checks and AI insights
 - Custom dashboards and multisite support
 - Customisable thresholds for speed alerts, uptime targets and revision cleanup suggestions
+- Site Health integration surfacing SitePulse alerts and AI requirements
 
 ### Key performance defaults
 
@@ -33,6 +34,15 @@ Toggle modules in the admin panel to keep it lightweight. Includes debug mode an
 1. Upload `sitepulse-jlg.zip` to your `/wp-content/plugins/` directory.
 2. Activate the plugin through the 'Plugins' menu in WordPress.
 3. Visit 'SitePulse' in your admin menu to configure the modules.
+
+## Diagnostic « Santé du site »
+
+SitePulse enregistre désormais deux tests visibles dans l’outil « Santé du site » de WordPress :
+
+- **État de SitePulse** récapitule les avertissements WP-Cron et les erreurs critiques générées par l’IA, en les classant selon leur gravité.
+- **Clé API Gemini SitePulse** vérifie que le module AI Insights dispose d’une clé API prête à l’emploi avant de lancer des analyses.
+
+Ces tests facilitent la détection proactive des problèmes susceptibles d’empêcher l’exécution des tâches planifiées ou des analyses IA.
 
 ## Sécuriser la clé API Gemini
 
