@@ -8,8 +8,8 @@ add_action(
     function () {
         add_submenu_page(
             'sitepulse-dashboard',
-            'Plugin Impact Scanner',
-            'Plugin Impact',
+            __('Plugin Impact Scanner', 'sitepulse'),
+            __('Plugin Impact', 'sitepulse'),
             sitepulse_get_capability(),
             'sitepulse-plugins',
             'sitepulse_plugin_impact_scanner_page'

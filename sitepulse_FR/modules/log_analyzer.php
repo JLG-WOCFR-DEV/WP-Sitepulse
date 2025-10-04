@@ -5,8 +5,8 @@ if (!defined('ABSPATH')) exit;
 add_action('admin_menu', function() {
     add_submenu_page(
         'sitepulse-dashboard',
-        'Log Analyzer',
-        'Logs',
+        __('Log Analyzer', 'sitepulse'),
+        __('Logs', 'sitepulse'),
         sitepulse_get_capability(),
         'sitepulse-logs',
         'sitepulse_log_analyzer_page'
@@ -42,7 +42,7 @@ function sitepulse_log_analyzer_page() {
     }
     ?>
     <div class="wrap">
-        <h1><span class="dashicons-before dashicons-hammer"></span> Analyseur de Logs</h1>
+        <h1><span class="dashicons-before dashicons-hammer"></span> <?php echo esc_html__('Analyseur de Logs', 'sitepulse'); ?></h1>
         <p><?php printf(esc_html__('Cet outil scanne le fichier %s de WordPress pour vous aider à trouver et corriger les problèmes sur votre site.', 'sitepulse'), $log_file_display); ?></p>
 
         <?php
