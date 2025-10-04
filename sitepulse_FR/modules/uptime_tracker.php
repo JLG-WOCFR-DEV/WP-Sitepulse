@@ -168,10 +168,34 @@ function sitepulse_normalize_uptime_log($log) {
     $normalized = [];
     $count = count($log);
     $now = (int) current_time('timestamp');
-    $approximate_start = $now - max(0, ($count - 1) * HOUR_IN_SECONDS);
+
+    $default_interval = defined('HOUR_IN_SECONDS') ? (int) HOUR_IN_SECONDS : 3600;
+    $interval = $default_interval;
+
+    $schedules = function_exists('wp_get_schedules') ? wp_get_schedules() : [];
+    $schedule_candidates = [
+        sitepulse_uptime_tracker_get_schedule(),
+        defined('SITEPULSE_DEFAULT_UPTIME_FREQUENCY') ? SITEPULSE_DEFAULT_UPTIME_FREQUENCY : null,
+        'hourly',
+    ];
+
+    foreach (array_unique(array_filter($schedule_candidates)) as $candidate) {
+        if (!isset($schedules[$candidate]) || !is_array($schedules[$candidate])) {
+            continue;
+        }
+
+        $candidate_interval = isset($schedules[$candidate]['interval']) ? (int) $schedules[$candidate]['interval'] : 0;
+
+        if ($candidate_interval > 0) {
+            $interval = $candidate_interval;
+            break;
+        }
+    }
+
+    $approximate_start = $now - max(0, ($count - 1) * $interval);
 
     foreach (array_values($log) as $index => $entry) {
-        $timestamp = $approximate_start + ($index * HOUR_IN_SECONDS);
+        $timestamp = $approximate_start + ($index * $interval);
         $status = null;
         $incident_start = null;
         $error_message = null;
