@@ -228,6 +228,21 @@ function sitepulse_ai_get_job_data($job_id) {
 }
 
 /**
+ * Deletes job metadata from the transient cache.
+ *
+ * @param string $job_id Job identifier.
+ *
+ * @return void
+ */
+function sitepulse_ai_delete_job_data($job_id) {
+    if ('' === $job_id) {
+        return;
+    }
+
+    delete_transient(sitepulse_ai_job_transient_key($job_id));
+}
+
+/**
  * Persists job metadata in the transient cache.
  *
  * @param string               $job_id     Job identifier.
@@ -1001,15 +1016,21 @@ function sitepulse_ai_schedule_generation_job($force_refresh) {
         $job_state = sitepulse_ai_get_job_data($job_id);
 
         if (!is_array($job_state) || !isset($job_state['status'])) {
+            sitepulse_ai_delete_job_data($job_id);
+
             return sitepulse_ai_create_wp_error('sitepulse_ai_job_schedule_failed', $fallback_message, 500);
         }
 
         if ('completed' === $job_state['status']) {
+            sitepulse_ai_delete_job_data($job_id);
+
             return $job_id;
         }
 
         $error_message = isset($job_state['message']) ? (string) $job_state['message'] : $fallback_message;
         $status_code   = isset($job_state['code']) ? (int) $job_state['code'] : 500;
+
+        sitepulse_ai_delete_job_data($job_id);
 
         return sitepulse_ai_create_wp_error('sitepulse_ai_job_schedule_failed', $error_message, $status_code);
     }
@@ -1746,6 +1767,10 @@ function sitepulse_get_ai_insight_status() {
         if (isset($job_data['code'])) {
             $response['code'] = (int) $job_data['code'];
         }
+    }
+
+    if (in_array($status, ['completed', 'failed'], true)) {
+        sitepulse_ai_delete_job_data($job_id);
     }
 
     wp_send_json_success($response);

@@ -490,11 +490,12 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
 
         $job_data = sitepulse_ai_get_job_data($job_id);
 
-        $this->assertIsArray($job_data, 'Job metadata should be stored.');
-        $this->assertArrayHasKey('fallback', $job_data);
-        $this->assertSame('synchronous', $job_data['fallback']);
-        $this->assertArrayHasKey('status', $job_data);
-        $this->assertSame('completed', $job_data['status']);
+        $this->assertSame([], $job_data, 'Job metadata should be cleared once the synchronous fallback responds.');
+
+        $history_entries = sitepulse_ai_get_history_entries();
+
+        $this->assertNotEmpty($history_entries, 'Synchronous fallback should record a history entry.');
+        $this->assertSame('Analyse générée en mode synchrone.', $history_entries[0]['text']);
 
         $this->assertSame(1, $this->http_request_count, 'Synchronous fallback should execute the HTTP request once.');
     }
