@@ -52,6 +52,9 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         delete_option(SITEPULSE_OPTION_UPTIME_URL);
         delete_option(SITEPULSE_OPTION_UPTIME_TIMEOUT);
         delete_option(SITEPULSE_OPTION_UPTIME_FREQUENCY);
+        delete_option(SITEPULSE_OPTION_UPTIME_AGENTS);
+        delete_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE);
+        delete_option(SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS);
     }
 
     protected function tear_down(): void {
@@ -64,6 +67,9 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         delete_option(SITEPULSE_OPTION_UPTIME_URL);
         delete_option(SITEPULSE_OPTION_UPTIME_TIMEOUT);
         delete_option(SITEPULSE_OPTION_UPTIME_FREQUENCY);
+        delete_option(SITEPULSE_OPTION_UPTIME_AGENTS);
+        delete_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE);
+        delete_option(SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS);
 
         parent::tear_down();
     }
@@ -111,6 +117,7 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $this->assertCount(1, $log, 'Expected one log entry after first WP_Error.');
         $this->assertSame('unknown', $log[0]['status']);
         $this->assertSame('Request timeout', $log[0]['error']);
+        $this->assertSame('default', $log[0]['agent']);
         $this->assertArrayNotHasKey('incident_start', $log[0], 'Unknown status should not record an incident start.');
         $this->assertSame(1, get_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0));
 
@@ -123,6 +130,7 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
         $this->assertCount(2, $log, 'Expected two log entries after consecutive WP_Error.');
         $this->assertSame(2, get_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0));
+        $this->assertSame('default', $log[1]['agent']);
 
         $last_log = end($GLOBALS['sitepulse_logger']);
         $this->assertSame('ALERT', $last_log['level']);
@@ -132,6 +140,7 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
 
         $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
         $this->assertTrue(end($log)['status']);
+        $this->assertSame('default', end($log)['agent']);
         $this->assertSame(0, get_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0));
     }
 
@@ -143,6 +152,7 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $this->assertFalse($log[0]['status']);
         $this->assertArrayHasKey('incident_start', $log[0]);
         $incident_start = $log[0]['incident_start'];
+        $this->assertSame('default', $log[0]['agent']);
 
         $this->enqueue_response(new WP_Error('timeout', 'Temporary glitch'));
         sitepulse_run_uptime_check();
@@ -150,6 +160,7 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
         $this->assertSame('unknown', $log[1]['status']);
         $this->assertArrayNotHasKey('incident_start', $log[1]);
+        $this->assertSame('default', $log[1]['agent']);
 
         $this->enqueue_response(['response' => ['code' => 500]]);
         sitepulse_run_uptime_check();
@@ -157,6 +168,7 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
         $this->assertFalse($log[2]['status']);
         $this->assertSame($incident_start, $log[2]['incident_start']);
+        $this->assertSame('default', $log[2]['agent']);
     }
 
     public function test_custom_uptime_settings_are_used_when_defined() {
@@ -171,6 +183,9 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $this->assertArrayHasKey('timeout', $this->last_http_args);
         $this->assertSame(25, $this->last_http_args['timeout']);
         $this->assertArrayHasKey('sslverify', $this->last_http_args);
+
+        $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+        $this->assertSame('default', end($log)['agent']);
     }
 
     public function test_run_updates_daily_archive() {
@@ -302,5 +317,82 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $this->assertStringContainsString('uptime-trend__bar', $output);
 
         wp_set_current_user(0);
+    }
+
+    public function test_remote_queue_processes_multiple_agents() {
+        update_option(SITEPULSE_OPTION_UPTIME_AGENTS, [
+            'default'        => [
+                'label'  => 'Paris',
+                'region' => 'eu',
+            ],
+            'north_america'  => [
+                'label'          => 'New York',
+                'region'         => 'us',
+                'expected_codes' => [200, 503],
+            ],
+        ]);
+
+        $this->enqueue_response(['response' => ['code' => 200]]);
+        $this->enqueue_response(['response' => ['code' => 503]]);
+
+        sitepulse_uptime_schedule_internal_request('default');
+        sitepulse_uptime_schedule_internal_request('north_america');
+
+        sitepulse_uptime_process_remote_queue();
+
+        $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+        $this->assertCount(2, $log);
+        $entries_by_agent = [];
+
+        foreach ($log as $entry) {
+            $entries_by_agent[$entry['agent']] = $entry;
+        }
+
+        $this->assertTrue($entries_by_agent['default']['status']);
+        $this->assertFalse($entries_by_agent['north_america']['status']);
+
+        $archive = get_option(SITEPULSE_OPTION_UPTIME_ARCHIVE, []);
+        $this->assertNotEmpty($archive);
+        $day_key = array_key_last($archive);
+        $this->assertSame(1, $archive[$day_key]['agents']['default']['up']);
+        $this->assertSame(1, $archive[$day_key]['agents']['north_america']['down']);
+
+        $agent_metrics = sitepulse_calculate_agent_uptime_metrics($archive, 7);
+        $this->assertArrayHasKey('default', $agent_metrics);
+        $this->assertArrayHasKey('north_america', $agent_metrics);
+        $this->assertSame(100.0, $agent_metrics['default']['uptime']);
+        $this->assertSame(0.0, $agent_metrics['north_america']['uptime']);
+
+        $region_metrics = sitepulse_calculate_region_uptime_metrics($agent_metrics, sitepulse_uptime_get_agents());
+        $this->assertArrayHasKey('eu', $region_metrics);
+        $this->assertArrayHasKey('us', $region_metrics);
+        $this->assertSame(['default'], $region_metrics['eu']['agents']);
+        $this->assertSame(['north_america'], $region_metrics['us']['agents']);
+    }
+
+    public function test_maintenance_window_skips_remote_requests() {
+        $now = current_time('timestamp');
+
+        update_option(SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS, [
+            [
+                'agent' => 'default',
+                'start' => $now - MINUTE_IN_SECONDS,
+                'end'   => $now + MINUTE_IN_SECONDS,
+                'label' => 'Upgrade',
+            ],
+        ]);
+
+        sitepulse_uptime_schedule_internal_request('default');
+        sitepulse_uptime_process_remote_queue();
+
+        $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+        $this->assertCount(1, $log);
+        $this->assertSame('maintenance', $log[0]['status']);
+        $this->assertSame('default', $log[0]['agent']);
+
+        $archive = get_option(SITEPULSE_OPTION_UPTIME_ARCHIVE, []);
+        $day_key = array_key_last($archive);
+        $this->assertSame(1, $archive[$day_key]['maintenance']);
+        $this->assertSame(1, $archive[$day_key]['agents']['default']['maintenance']);
     }
 }
