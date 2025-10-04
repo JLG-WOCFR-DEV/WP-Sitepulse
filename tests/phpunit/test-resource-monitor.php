@@ -24,11 +24,13 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
         parent::set_up();
 
         delete_transient(SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT);
+        sitepulse_resource_monitor_clear_history();
         $GLOBALS['sitepulse_logger'] = [];
     }
 
     protected function tear_down(): void {
         delete_transient(SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT);
+        sitepulse_resource_monitor_clear_history();
         $GLOBALS['sitepulse_logger'] = [];
 
         parent::tear_down();
@@ -63,6 +65,7 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
 
         $this->assertSame($cached_snapshot, $result, 'Cached snapshot should be returned untouched.');
         $this->assertSame(0, $filter_calls, 'Cache TTL filter should not run when cached data is returned.');
+        $this->assertSame([], sitepulse_resource_monitor_get_history(), 'History should remain empty when serving cached data.');
     }
 
     public function test_generates_snapshot_with_custom_ttl_and_caches() {
@@ -88,6 +91,9 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
         $this->assertSame(1, $filter_calls, 'Cache TTL filter should run once when generating a snapshot.');
         $this->assertSame($snapshot, $captured_snapshot, 'Filter should receive the freshly generated snapshot.');
 
+        $this->assertArrayHasKey('memory_usage_bytes', $snapshot, 'Snapshot should expose raw memory usage in bytes.');
+        $this->assertArrayHasKey('disk_free_bytes', $snapshot, 'Snapshot should expose raw disk space in bytes.');
+
         $cached_snapshot = get_transient(SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT);
         $this->assertSame($snapshot, $cached_snapshot, 'Snapshot should be cached for subsequent calls.');
 
@@ -95,6 +101,11 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
         $this->assertIsInt($timeout_option, 'Transient timeout option should be stored.');
         $this->assertGreaterThanOrEqual($start + $custom_ttl, $timeout_option, 'Timeout should be at least start time plus TTL.');
         $this->assertEqualsWithDelta($custom_ttl, $timeout_option - time(), 3, 'Stored TTL should respect the filter override.');
+
+        $history = sitepulse_resource_monitor_get_history();
+        $this->assertNotEmpty($history, 'History should include the newly generated snapshot.');
+        $latest_entry = end($history);
+        $this->assertSame($snapshot['generated_at'], $latest_entry['timestamp'], 'Latest history entry should match snapshot timestamp.');
     }
 
     public function test_unlimited_memory_limit_is_normalized_for_display() {
@@ -115,6 +126,7 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
             wp_set_current_user($administrator_id);
 
             try {
+                sitepulse_resource_monitor_enqueue_assets('sitepulse-dashboard_page_sitepulse-resources');
                 ob_start();
                 sitepulse_resource_monitor_page();
                 $output = ob_get_clean();
@@ -224,6 +236,7 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
         $administrator_id = self::factory()->user->create(['role' => 'administrator']);
         wp_set_current_user($administrator_id);
 
+        sitepulse_resource_monitor_enqueue_assets('sitepulse-dashboard_page_sitepulse-resources');
         ob_start();
         sitepulse_resource_monitor_page();
         $output = ob_get_clean();
@@ -261,5 +274,98 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
         } else {
             update_option('time_format', $original_time_format);
         }
+    }
+
+    public function test_history_normalization_applies_ttl_and_max_entries() {
+        $now = current_time('timestamp', true);
+
+        $history = [];
+
+        for ($i = 0; $i < 5; $i++) {
+            $history[] = [
+                'timestamp' => $now - ($i * MINUTE_IN_SECONDS),
+                'load'      => [0.1 + ($i * 0.01), null, null],
+                'memory'    => [
+                    'usage' => 1000000 + ($i * 1000),
+                    'limit' => 2000000,
+                ],
+                'disk'      => [
+                    'free'  => 1500000,
+                    'total' => 2000000,
+                ],
+            ];
+        }
+
+        $ttl_calls = 0;
+        $max_calls = 0;
+
+        $ttl_callback = function($default, $entries) use (&$ttl_calls) {
+            $ttl_calls++;
+            $this->assertIsArray($entries, 'TTL filter should receive normalized entries.');
+
+            return 2 * MINUTE_IN_SECONDS;
+        };
+
+        $max_callback = function($default, $entries) use (&$max_calls) {
+            $max_calls++;
+            $this->assertIsArray($entries, 'Max entries filter should receive normalized entries.');
+
+            return 2;
+        };
+
+        add_filter('sitepulse_resource_monitor_history_ttl', $ttl_callback, 10, 2);
+        add_filter('sitepulse_resource_monitor_history_max_entries', $max_callback, 10, 2);
+
+        $normalized = sitepulse_resource_monitor_normalize_history($history);
+
+        remove_filter('sitepulse_resource_monitor_history_ttl', $ttl_callback, 10);
+        remove_filter('sitepulse_resource_monitor_history_max_entries', $max_callback, 10);
+
+        $this->assertSame(1, $ttl_calls, 'TTL filter should run once.');
+        $this->assertSame(1, $max_calls, 'Max entries filter should run once.');
+        $this->assertCount(2, $normalized, 'History should be trimmed to the requested entry count.');
+
+        $first_entry = $normalized[0];
+        $second_entry = $normalized[1];
+
+        $this->assertSame($now - MINUTE_IN_SECONDS, $first_entry['timestamp'], 'Only the two most recent entries should remain.');
+        $this->assertSame($now, $second_entry['timestamp'], 'Newest history entry should retain the latest timestamp.');
+        $this->assertLessThan($first_entry['timestamp'], $second_entry['timestamp'], 'Entries should remain ordered chronologically.');
+    }
+
+    public function test_refresh_action_clears_history_and_rebuilds_snapshot() {
+        sitepulse_resource_monitor_clear_history();
+        delete_transient(SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT);
+
+        sitepulse_resource_monitor_get_snapshot();
+        delete_transient(SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT);
+        sitepulse_resource_monitor_get_snapshot();
+
+        $history_before = sitepulse_resource_monitor_get_history();
+        $this->assertGreaterThanOrEqual(2, count($history_before), 'History should contain multiple entries before refresh.');
+
+        $administrator_id = self::factory()->user->create(['role' => 'administrator']);
+        wp_set_current_user($administrator_id);
+
+        $_POST['sitepulse_resource_monitor_refresh'] = '1';
+        $_POST['_wpnonce'] = wp_create_nonce('sitepulse_refresh_resource_snapshot');
+
+        sitepulse_resource_monitor_enqueue_assets('sitepulse-dashboard_page_sitepulse-resources');
+        ob_start();
+        sitepulse_resource_monitor_page();
+        $output = ob_get_clean();
+
+        $history_after = sitepulse_resource_monitor_get_history();
+        $this->assertCount(1, $history_after, 'History should be rebuilt from a single fresh snapshot after refresh.');
+
+        $latest_before = end($history_before);
+        $this->assertIsArray($latest_before, 'History should return array entries.');
+        $latest_after = $history_after[0];
+
+        $this->assertGreaterThan($latest_before['timestamp'], $latest_after['timestamp'], 'Refreshed snapshot should have a newer timestamp.');
+        $this->assertStringContainsString(esc_html__('Les mesures et l’historique ont été actualisés.', 'sitepulse'), $output, 'Success notice should confirm history reset.');
+
+        wp_set_current_user(0);
+        $_POST = [];
     }
 }
