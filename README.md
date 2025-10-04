@@ -14,6 +14,11 @@ SitePulse - JLG est un plugin WordPress développé par Jérôme Le Gousse. Il s
 - **Conseiller de maintenance** : recense les mises à jour cœur et extensions afin de rappeler les bonnes pratiques avant intervention.【F:sitepulse_FR/modules/maintenance_advisor.php†L1-L22】
 - **Tableaux de bord personnalisés** : fournit une vue synthétique des indicateurs clés (TTFB, uptime, base de données, journal) et des raccourcis vers chaque module spécialisé.【F:sitepulse_FR/modules/custom_dashboards.php†L1-L121】
 
+## Export et partage des recommandations IA
+- Depuis le tableau de bord « Analyses par IA », la barre d’outils de l’historique propose deux actions : **Exporter en CSV** (télécharge un fichier UTF‑8 structuré avec la date, le modèle, la limitation, le texte et la note) et **Copier** (génère un résumé contextuel prêt à coller dans un e‑mail ou un ticket).【F:sitepulse_FR/modules/ai_insights.php†L1656-L1709】【F:sitepulse_FR/modules/js/sitepulse-ai-insights.js†L733-L845】
+- Chaque recommandation accepte désormais une **note personnelle** : saisissez vos commentaires dans le champ dédié, ils sont enregistrés automatiquement via AJAX et synchronisés avec l’export CSV comme avec la copie presse‑papier.【F:sitepulse_FR/modules/ai_insights.php†L1709-L1718】【F:sitepulse_FR/modules/js/sitepulse-ai-insights.js†L847-L930】
+- Un retour vocal est fourni via `aria-live` pour confirmer la réussite ou l’échec des exports, copies et sauvegardes de notes, garantissant une utilisation accessible au clavier comme aux lecteurs d’écran.【F:sitepulse_FR/modules/ai_insights.php†L1650-L1665】【F:sitepulse_FR/modules/js/sitepulse-ai-insights.js†L430-L503】
+
 ## Installation et configuration
 > ⚠️ **Prérequis PHP** : SitePulse requiert PHP 7.1 ou supérieur. Vérifiez la version disponible sur l'hébergement de vos environnements (production, préproduction, staging) avant d'activer l'extension pour éviter toute interruption.
 1. **Activation** : installez le plugin via l'administration WordPress puis activez-le depuis la page des extensions pour créer le menu « Sitepulse - JLG » dans le tableau de bord.【F:sitepulse_FR/includes/admin-settings.php†L40-L81】
