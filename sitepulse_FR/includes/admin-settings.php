@@ -123,11 +123,22 @@ function sitepulse_admin_settings_enqueue_assets($hook_suffix) {
     $style_deps   = [];
     $style_ver    = defined('SITEPULSE_VERSION') ? SITEPULSE_VERSION : false;
 
+    $script_handle = 'sitepulse-admin-settings-tabs';
+    $script_src    = SITEPULSE_URL . 'modules/js/admin-settings-tabs.js';
+    $script_deps   = ['wp-a11y'];
+    $script_ver    = defined('SITEPULSE_VERSION') ? SITEPULSE_VERSION : false;
+
     if (!wp_style_is($style_handle, 'registered')) {
         wp_register_style($style_handle, $style_src, $style_deps, $style_ver);
     }
 
     wp_enqueue_style($style_handle);
+
+    if (!wp_script_is($script_handle, 'registered')) {
+        wp_register_script($script_handle, $script_src, $script_deps, $script_ver, true);
+    }
+
+    wp_enqueue_script($script_handle);
 }
 add_action('admin_enqueue_scripts', 'sitepulse_admin_settings_enqueue_assets');
 
@@ -1319,29 +1330,29 @@ function sitepulse_settings_page() {
             <nav class="sitepulse-settings-toc" aria-label="<?php esc_attr_e('Sommaire des réglages', 'sitepulse'); ?>">
                 <h2 class="screen-reader-text"><?php esc_html_e('Sommaire des réglages', 'sitepulse'); ?></h2>
                 <ul>
-                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-ai" href="#sitepulse-section-api"><?php esc_html_e('Connexion IA', 'sitepulse'); ?></a></li>
-                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-ai" href="#sitepulse-section-ai"><?php esc_html_e('Réglages IA', 'sitepulse'); ?></a></li>
-                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-performance" href="#sitepulse-section-performance"><?php esc_html_e('Performances', 'sitepulse'); ?></a></li>
-                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-alerts" href="#sitepulse-section-alerts"><?php esc_html_e('Alertes', 'sitepulse'); ?></a></li>
-                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-uptime" href="#sitepulse-section-uptime"><?php esc_html_e('Disponibilité', 'sitepulse'); ?></a></li>
-                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-modules" href="#sitepulse-section-modules"><?php esc_html_e('Modules', 'sitepulse'); ?></a></li>
-                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-maintenance" href="#sitepulse-section-maintenance"><?php esc_html_e('Maintenance', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-ai" href="#sitepulse-section-api"><?php esc_html_e('Connexion IA', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-ai" href="#sitepulse-section-ai"><?php esc_html_e('Réglages IA', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-performance" href="#sitepulse-section-performance"><?php esc_html_e('Performances', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-alerts" href="#sitepulse-section-alerts"><?php esc_html_e('Alertes', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-uptime" href="#sitepulse-section-uptime"><?php esc_html_e('Disponibilité', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-modules" href="#sitepulse-section-modules"><?php esc_html_e('Modules', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-maintenance" href="#sitepulse-section-maintenance"><?php esc_html_e('Maintenance', 'sitepulse'); ?></a></li>
                 </ul>
             </nav>
             <div class="sitepulse-settings-content">
                 <div class="sitepulse-settings-tabs-container">
                     <h2 class="nav-tab-wrapper sitepulse-settings-tabs" role="tablist">
-                        <a id="sitepulse-tab-ai-label" class="nav-tab nav-tab-active" href="#sitepulse-tab-ai" data-tab-target="sitepulse-tab-ai" role="tab" aria-controls="sitepulse-tab-ai" aria-selected="true" tabindex="0"><?php esc_html_e('IA', 'sitepulse'); ?></a>
-                        <a id="sitepulse-tab-performance-label" class="nav-tab" href="#sitepulse-tab-performance" data-tab-target="sitepulse-tab-performance" role="tab" aria-controls="sitepulse-tab-performance" aria-selected="false" tabindex="-1"><?php esc_html_e('Performances', 'sitepulse'); ?></a>
-                        <a id="sitepulse-tab-alerts-label" class="nav-tab" href="#sitepulse-tab-alerts" data-tab-target="sitepulse-tab-alerts" role="tab" aria-controls="sitepulse-tab-alerts" aria-selected="false" tabindex="-1"><?php esc_html_e('Alertes', 'sitepulse'); ?></a>
-                        <a id="sitepulse-tab-uptime-label" class="nav-tab" href="#sitepulse-tab-uptime" data-tab-target="sitepulse-tab-uptime" role="tab" aria-controls="sitepulse-tab-uptime" aria-selected="false" tabindex="-1"><?php esc_html_e('Disponibilité', 'sitepulse'); ?></a>
-                        <a id="sitepulse-tab-modules-label" class="nav-tab" href="#sitepulse-tab-modules" data-tab-target="sitepulse-tab-modules" role="tab" aria-controls="sitepulse-tab-modules" aria-selected="false" tabindex="-1"><?php esc_html_e('Modules', 'sitepulse'); ?></a>
-                        <a id="sitepulse-tab-maintenance-label" class="nav-tab" href="#sitepulse-tab-maintenance" data-tab-target="sitepulse-tab-maintenance" role="tab" aria-controls="sitepulse-tab-maintenance" aria-selected="false" tabindex="-1"><?php esc_html_e('Maintenance', 'sitepulse'); ?></a>
+                        <a id="sitepulse-tab-ai-label" class="nav-tab sitepulse-tab-link nav-tab-active" href="#sitepulse-tab-ai" data-tab-target="sitepulse-tab-ai" role="tab" aria-controls="sitepulse-tab-ai" aria-selected="true" tabindex="0"><?php esc_html_e('IA', 'sitepulse'); ?></a>
+                        <a id="sitepulse-tab-performance-label" class="nav-tab sitepulse-tab-link" href="#sitepulse-tab-performance" data-tab-target="sitepulse-tab-performance" role="tab" aria-controls="sitepulse-tab-performance" aria-selected="false" tabindex="-1"><?php esc_html_e('Performances', 'sitepulse'); ?></a>
+                        <a id="sitepulse-tab-alerts-label" class="nav-tab sitepulse-tab-link" href="#sitepulse-tab-alerts" data-tab-target="sitepulse-tab-alerts" role="tab" aria-controls="sitepulse-tab-alerts" aria-selected="false" tabindex="-1"><?php esc_html_e('Alertes', 'sitepulse'); ?></a>
+                        <a id="sitepulse-tab-uptime-label" class="nav-tab sitepulse-tab-link" href="#sitepulse-tab-uptime" data-tab-target="sitepulse-tab-uptime" role="tab" aria-controls="sitepulse-tab-uptime" aria-selected="false" tabindex="-1"><?php esc_html_e('Disponibilité', 'sitepulse'); ?></a>
+                        <a id="sitepulse-tab-modules-label" class="nav-tab sitepulse-tab-link" href="#sitepulse-tab-modules" data-tab-target="sitepulse-tab-modules" role="tab" aria-controls="sitepulse-tab-modules" aria-selected="false" tabindex="-1"><?php esc_html_e('Modules', 'sitepulse'); ?></a>
+                        <a id="sitepulse-tab-maintenance-label" class="nav-tab sitepulse-tab-link" href="#sitepulse-tab-maintenance" data-tab-target="sitepulse-tab-maintenance" role="tab" aria-controls="sitepulse-tab-maintenance" aria-selected="false" tabindex="-1"><?php esc_html_e('Maintenance', 'sitepulse'); ?></a>
                     </h2>
                     <div class="sitepulse-tab-panels">
                         <form method="post" action="options.php" class="sitepulse-settings-form">
                             <?php settings_fields('sitepulse_settings'); do_settings_sections('sitepulse_settings'); ?>
-            <div class="sitepulse-tab-panel" id="sitepulse-tab-ai" role="tabpanel" aria-labelledby="sitepulse-tab-ai-label">
+            <div class="sitepulse-tab-panel" id="sitepulse-tab-ai" role="tabpanel" aria-labelledby="sitepulse-tab-ai-label" tabindex="0">
                 <div class="sitepulse-settings-section" id="sitepulse-section-api">
                 <h2><?php esc_html_e("Paramètres de l'API", 'sitepulse'); ?></h2>
                 <div class="sitepulse-settings-grid">
@@ -1427,7 +1438,7 @@ function sitepulse_settings_page() {
                 </div>
                 </div>
             </div>
-            <div class="sitepulse-tab-panel" id="sitepulse-tab-performance" role="tabpanel" aria-labelledby="sitepulse-tab-performance-label">
+            <div class="sitepulse-tab-panel" id="sitepulse-tab-performance" role="tabpanel" aria-labelledby="sitepulse-tab-performance-label" tabindex="0">
                 <div class="sitepulse-settings-section" id="sitepulse-section-performance">
                 <h2><?php esc_html_e('Seuils de performance', 'sitepulse'); ?></h2>
                 <div class="sitepulse-settings-grid">
@@ -1605,7 +1616,7 @@ function sitepulse_settings_page() {
                 </div>
             </div>
             </div>
-            <div class="sitepulse-tab-panel" id="sitepulse-tab-modules" role="tabpanel" aria-labelledby="sitepulse-tab-modules-label">
+            <div class="sitepulse-tab-panel" id="sitepulse-tab-modules" role="tabpanel" aria-labelledby="sitepulse-tab-modules-label" tabindex="0">
                 <div class="sitepulse-settings-section" id="sitepulse-section-modules">
                 <h2><?php esc_html_e('Activer les Modules', 'sitepulse'); ?></h2>
                 <p class="sitepulse-section-intro"><?php esc_html_e('Sélectionnez les modules de surveillance à activer.', 'sitepulse'); ?></p>
@@ -1668,7 +1679,7 @@ function sitepulse_settings_page() {
                 </div>
                 </div>
             </div>
-            <div class="sitepulse-tab-panel" id="sitepulse-tab-alerts" role="tabpanel" aria-labelledby="sitepulse-tab-alerts-label">
+            <div class="sitepulse-tab-panel" id="sitepulse-tab-alerts" role="tabpanel" aria-labelledby="sitepulse-tab-alerts-label" tabindex="0">
                 <div class="sitepulse-settings-section" id="sitepulse-section-alerts">
                 <h2><?php esc_html_e('Alertes', 'sitepulse'); ?></h2>
                 <div class="sitepulse-settings-grid">
@@ -1776,7 +1787,7 @@ function sitepulse_settings_page() {
                 </div>
             </div>
             </div>
-            <div class="sitepulse-tab-panel" id="sitepulse-tab-uptime" role="tabpanel" aria-labelledby="sitepulse-tab-uptime-label">
+            <div class="sitepulse-tab-panel" id="sitepulse-tab-uptime" role="tabpanel" aria-labelledby="sitepulse-tab-uptime-label" tabindex="0">
                 <div class="sitepulse-settings-section" id="sitepulse-section-uptime">
                 <h2><?php esc_html_e('Disponibilité', 'sitepulse'); ?></h2>
                 <div class="sitepulse-settings-grid">
@@ -1865,7 +1876,7 @@ function sitepulse_settings_page() {
                 <?php submit_button(esc_html__('Enregistrer les modifications', 'sitepulse')); ?>
             </div>
         </form>
-                        <div class="sitepulse-tab-panel" id="sitepulse-tab-maintenance" role="tabpanel" aria-labelledby="sitepulse-tab-maintenance-label">
+                        <div class="sitepulse-tab-panel" id="sitepulse-tab-maintenance" role="tabpanel" aria-labelledby="sitepulse-tab-maintenance-label" tabindex="0">
                             <div class="sitepulse-settings-section" id="sitepulse-section-maintenance">
                             <h2><?php esc_html_e('Nettoyage & Réinitialisation', 'sitepulse'); ?></h2>
                             <p class="sitepulse-section-intro"><?php esc_html_e('Gérez les données du plugin.', 'sitepulse'); ?></p>
@@ -1914,128 +1925,6 @@ function sitepulse_settings_page() {
             </div>
         </div>
     </div>
-    <?php // phpcs:disable WordPress.WP.EnqueuedResources.NonEnqueuedScript ?>
-    <script>
-        (function () {
-            const container = document.querySelector('.sitepulse-settings-tabs-container');
-            if (!container) {
-                return;
-            }
-            const tabLinks = Array.from(container.querySelectorAll('.sitepulse-settings-tabs .nav-tab'));
-            const tabPanels = Array.from(container.querySelectorAll('.sitepulse-tab-panel'));
-            const tocLinks = document.querySelectorAll('.sitepulse-toc-link[data-tab-target]');
-            if (!tabLinks.length || !tabPanels.length) {
-                return;
-            }
-            container.classList.add('js');
-            function activateTab(targetId) {
-                tabLinks.forEach((link) => {
-                    const isActive = link.dataset.tabTarget === targetId;
-                    link.classList.toggle('nav-tab-active', isActive);
-                    link.setAttribute('aria-selected', isActive ? 'true' : 'false');
-                    link.setAttribute('tabindex', isActive ? '0' : '-1');
-                });
-                if (!container.classList.contains('js')) {
-                    return;
-                }
-                tabPanels.forEach((panel) => {
-                    const isActive = panel.id === targetId;
-                    panel.classList.toggle('is-active', isActive);
-                    if (isActive) {
-                        panel.removeAttribute('hidden');
-                    } else {
-                        panel.setAttribute('hidden', 'hidden');
-                    }
-                });
-            }
-            function findPanelFromHash(hashValue) {
-                if (!hashValue) {
-                    return null;
-                }
-                const directTarget = document.getElementById(hashValue);
-                if (!directTarget) {
-                    return null;
-                }
-                if (directTarget.classList && directTarget.classList.contains('sitepulse-tab-panel')) {
-                    return directTarget;
-                }
-                return directTarget.closest('.sitepulse-tab-panel');
-            }
-            function updateHash(targetId) {
-                const panel = document.getElementById(targetId);
-                if (!panel) {
-                    window.location.hash = targetId;
-                    return;
-                }
-                const firstSection = panel.querySelector('.sitepulse-settings-section');
-                if (firstSection && firstSection.id) {
-                    window.location.hash = firstSection.id;
-                } else {
-                    window.location.hash = targetId;
-                }
-            }
-            tabLinks.forEach((link, index) => {
-                link.addEventListener('click', (event) => {
-                    event.preventDefault();
-                    const targetId = link.dataset.tabTarget;
-                    if (!targetId) {
-                        return;
-                    }
-                    activateTab(targetId);
-                    updateHash(targetId);
-                });
-                link.addEventListener('keydown', (event) => {
-                    const { key } = event;
-                    let targetLink = null;
-                    if (key === 'ArrowRight') {
-                        event.preventDefault();
-                        targetLink = tabLinks[(index + 1) % tabLinks.length];
-                    } else if (key === 'ArrowLeft') {
-                        event.preventDefault();
-                        targetLink = tabLinks[(index - 1 + tabLinks.length) % tabLinks.length];
-                    } else if (key === 'Home') {
-                        event.preventDefault();
-                        targetLink = tabLinks[0];
-                    } else if (key === 'End') {
-                        event.preventDefault();
-                        targetLink = tabLinks[tabLinks.length - 1];
-                    } else if (key === 'Enter' || key === ' ') {
-                        event.preventDefault();
-                        targetLink = link;
-                    }
-                    if (!targetLink) {
-                        return;
-                    }
-                    const targetId = targetLink.dataset.tabTarget;
-                    if (!targetId) {
-                        return;
-                    }
-                    activateTab(targetId);
-                    updateHash(targetId);
-                    targetLink.focus();
-                });
-            });
-            tocLinks.forEach((link) => {
-                link.addEventListener('click', () => {
-                    const targetId = link.dataset.tabTarget;
-                    if (targetId) {
-                        activateTab(targetId);
-                    }
-                });
-            });
-            window.addEventListener('hashchange', () => {
-                const panel = findPanelFromHash(window.location.hash.substring(1));
-                if (panel) {
-                    activateTab(panel.id);
-                }
-            });
-            const initialPanel = findPanelFromHash(window.location.hash.substring(1)) || tabPanels[0];
-            if (initialPanel) {
-                activateTab(initialPanel.id);
-            }
-        })();
-    </script>
-    <?php // phpcs:enable WordPress.WP.EnqueuedResources.NonEnqueuedScript ?>
     <?php
 }
 
