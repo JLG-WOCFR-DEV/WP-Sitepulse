@@ -650,16 +650,14 @@ function sitepulse_register_site_health_tests($tests) {
 add_filter('site_status_tests', 'sitepulse_register_site_health_tests');
 
 /**
- * Site Health test summarizing SitePulse alerts stored in options.
+ * Retrieves SitePulse alerts stored in the WordPress options table.
  *
- * @return array
+ * @return array{
+ *     cron: string[],
+ *     ai: string[],
+ * }
  */
-function sitepulse_site_health_status_test() {
-    $badge = [
-        'label' => __('SitePulse', 'sitepulse'),
-        'color' => 'blue',
-    ];
-
+function sitepulse_get_site_health_alert_messages() {
     $cron_warnings_option = get_option(SITEPULSE_OPTION_CRON_WARNINGS, []);
     $cron_messages         = [];
 
@@ -706,8 +704,26 @@ function sitepulse_site_health_status_test() {
         }
     }
 
-    $cron_messages = array_values(array_unique($cron_messages));
-    $ai_messages   = array_values(array_unique($ai_messages));
+    return [
+        'cron' => array_values(array_unique($cron_messages)),
+        'ai'   => array_values(array_unique($ai_messages)),
+    ];
+}
+
+/**
+ * Site Health test summarizing SitePulse alerts stored in options.
+ *
+ * @return array
+ */
+function sitepulse_site_health_status_test() {
+    $badge = [
+        'label' => __('SitePulse', 'sitepulse'),
+        'color' => 'blue',
+    ];
+
+    $alerts = sitepulse_get_site_health_alert_messages();
+    $cron_messages = $alerts['cron'];
+    $ai_messages   = $alerts['ai'];
 
     $status      = 'good';
     $label       = __('Aucune alerte active signalée par SitePulse.', 'sitepulse');
