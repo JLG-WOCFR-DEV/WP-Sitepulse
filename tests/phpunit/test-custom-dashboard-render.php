@@ -17,6 +17,22 @@ if (!defined('SITEPULSE_OPTION_SPEED_SCAN_HISTORY')) {
     define('SITEPULSE_OPTION_SPEED_SCAN_HISTORY', 'sitepulse_speed_scan_history');
 }
 
+if (!defined('SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT')) {
+    define('SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT', 'sitepulse_resource_monitor_snapshot');
+}
+
+if (!defined('SITEPULSE_OPTION_IMPACT_THRESHOLDS')) {
+    define('SITEPULSE_OPTION_IMPACT_THRESHOLDS', 'sitepulse_impact_thresholds');
+}
+
+if (!defined('SITEPULSE_PLUGIN_IMPACT_OPTION')) {
+    define('SITEPULSE_PLUGIN_IMPACT_OPTION', 'sitepulse_plugin_impact_stats');
+}
+
+if (!defined('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX')) {
+    define('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX', 'sitepulse_plugin_dir_size_');
+}
+
 if (!function_exists('sitepulse_get_capability')) {
     function sitepulse_get_capability() {
         return 'manage_options';
@@ -24,6 +40,8 @@ if (!function_exists('sitepulse_get_capability')) {
 }
 
 require_once dirname(__DIR__, 2) . '/sitepulse_FR/modules/custom_dashboards.php';
+require_once dirname(__DIR__, 2) . '/sitepulse_FR/modules/resource_monitor.php';
+require_once dirname(__DIR__, 2) . '/sitepulse_FR/modules/plugin_impact_scanner.php';
 
 class Sitepulse_Custom_Dashboard_Render_Test extends WP_UnitTestCase {
     /**
@@ -43,6 +61,10 @@ class Sitepulse_Custom_Dashboard_Render_Test extends WP_UnitTestCase {
         delete_option(SITEPULSE_OPTION_SPEED_CRITICAL_MS);
         delete_option(SITEPULSE_OPTION_UPTIME_WARNING_PERCENT);
         delete_option(SITEPULSE_OPTION_REVISION_LIMIT);
+        delete_transient(SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT);
+        delete_option(SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY);
+        delete_option(SITEPULSE_PLUGIN_IMPACT_OPTION);
+        delete_option(SITEPULSE_OPTION_IMPACT_THRESHOLDS);
 
         $scripts = wp_scripts();
         $scripts->remove('sitepulse-chartjs');
@@ -125,6 +147,79 @@ class Sitepulse_Custom_Dashboard_Render_Test extends WP_UnitTestCase {
                 'post_content' => 'Updated content to create revision',
             ]);
         }
+
+        $resource_snapshot = [
+            'load'                 => [1.2, 0.9, 0.6],
+            'load_display'         => '1.20 / 0.90 / 0.60',
+            'memory_usage'         => '128 MB',
+            'memory_usage_bytes'   => 128 * MB_IN_BYTES,
+            'memory_limit'         => '256M',
+            'memory_limit_bytes'   => 256 * MB_IN_BYTES,
+            'disk_free'            => '20 GB',
+            'disk_free_bytes'      => 20 * GB_IN_BYTES,
+            'disk_total'           => '40 GB',
+            'disk_total_bytes'     => 40 * GB_IN_BYTES,
+            'notices'              => [],
+            'generated_at'         => time(),
+        ];
+
+        set_transient(
+            SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT,
+            $resource_snapshot,
+            MINUTE_IN_SECONDS
+        );
+
+        update_option(
+            SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY,
+            [
+                [
+                    'timestamp' => time() - HOUR_IN_SECONDS,
+                    'load'      => [1.1, 0.8, 0.5],
+                    'memory'    => [
+                        'usage' => 120 * MB_IN_BYTES,
+                        'limit' => 256 * MB_IN_BYTES,
+                    ],
+                    'disk'      => [
+                        'free'  => 22 * GB_IN_BYTES,
+                        'total' => 40 * GB_IN_BYTES,
+                    ],
+                ],
+                [
+                    'timestamp' => time(),
+                    'load'      => [1.2, 0.9, 0.6],
+                    'memory'    => [
+                        'usage' => 128 * MB_IN_BYTES,
+                        'limit' => 256 * MB_IN_BYTES,
+                    ],
+                    'disk'      => [
+                        'free'  => 20 * GB_IN_BYTES,
+                        'total' => 40 * GB_IN_BYTES,
+                    ],
+                ],
+            ]
+        );
+
+        update_option(
+            SITEPULSE_PLUGIN_IMPACT_OPTION,
+            [
+                'last_updated' => time() - MINUTE_IN_SECONDS,
+                'interval'     => 15 * MINUTE_IN_SECONDS,
+                'samples'      => [
+                    'plugin-one/plugin-one.php' => [
+                        'avg_ms'        => 45.5,
+                        'last_ms'       => 50.0,
+                        'samples'       => 12,
+                        'last_recorded' => time() - MINUTE_IN_SECONDS,
+                    ],
+                    'plugin-two/plugin-two.php' => [
+                        'avg_ms'        => 18.2,
+                        'last_ms'       => 16.0,
+                        'samples'       => 8,
+                        'last_recorded' => time() - (2 * MINUTE_IN_SECONDS),
+                    ],
+                ],
+            ]
+        );
     }
 
     private function getModuleExpectations(): array {
@@ -152,6 +247,18 @@ class Sitepulse_Custom_Dashboard_Render_Test extends WP_UnitTestCase {
                 'link'      => 'admin.php?page=sitepulse-logs',
                 'chart_key' => 'logs',
                 'summary_id' => null,
+            ],
+            'resource_monitor'   => [
+                'chart_id'  => 'sitepulse-resource-chart',
+                'link'      => 'admin.php?page=sitepulse-resources',
+                'chart_key' => 'resource',
+                'summary_id' => sitepulse_get_chart_summary_id('sitepulse-resource-chart'),
+            ],
+            'plugin_impact_scanner' => [
+                'chart_id'  => 'sitepulse-plugins-chart',
+                'link'      => 'admin.php?page=sitepulse-plugins',
+                'chart_key' => 'plugins',
+                'summary_id' => sitepulse_get_chart_summary_id('sitepulse-plugins-chart'),
             ],
         ];
     }
@@ -193,12 +300,20 @@ class Sitepulse_Custom_Dashboard_Render_Test extends WP_UnitTestCase {
         $this->assertStringNotContainsString(sitepulse_get_chart_summary_id('sitepulse-database-chart'), $output);
         $this->assertStringNotContainsString('sitepulse-log-chart', $output);
         $this->assertStringNotContainsString('admin.php?page=sitepulse-logs', $output);
+        $this->assertStringNotContainsString('sitepulse-resource-chart', $output);
+        $this->assertStringNotContainsString('admin.php?page=sitepulse-resources', $output);
+        $this->assertStringNotContainsString(sitepulse_get_chart_summary_id('sitepulse-resource-chart'), $output);
+        $this->assertStringNotContainsString('sitepulse-plugins-chart', $output);
+        $this->assertStringNotContainsString('admin.php?page=sitepulse-plugins', $output);
+        $this->assertStringNotContainsString(sitepulse_get_chart_summary_id('sitepulse-plugins-chart'), $output);
 
         $charts = $this->getLocalizedCharts();
         $this->assertArrayNotHasKey('speed', $charts);
         $this->assertArrayNotHasKey('uptime', $charts);
         $this->assertArrayNotHasKey('database', $charts);
         $this->assertArrayNotHasKey('logs', $charts);
+        $this->assertArrayNotHasKey('resource', $charts);
+        $this->assertArrayNotHasKey('plugins', $charts);
     }
 
     /**
@@ -210,6 +325,8 @@ class Sitepulse_Custom_Dashboard_Render_Test extends WP_UnitTestCase {
             'uptime tracker disabled' => ['module' => 'uptime_tracker'],
             'database optimizer disabled' => ['module' => 'database_optimizer'],
             'log analyzer disabled' => ['module' => 'log_analyzer'],
+            'resource monitor disabled' => ['module' => 'resource_monitor'],
+            'plugin impact scanner disabled' => ['module' => 'plugin_impact_scanner'],
         ];
     }
 

@@ -253,7 +253,7 @@ function sitepulse_render_chart_summary($chart_id, $chart_data) {
  * @return string[]
  */
 function sitepulse_get_dashboard_card_keys() {
-    return ['speed', 'uptime', 'database', 'logs'];
+    return ['speed', 'uptime', 'database', 'logs', 'resource', 'plugins'];
 }
 
 /**
@@ -1137,12 +1137,18 @@ function sitepulse_custom_dashboards_page() {
     $database_chart = null;
     $logs_card = null;
     $log_chart = null;
+    $resource_card = null;
+    $resource_chart = null;
+    $plugins_card = null;
+    $plugins_chart = null;
     $speed_warning_threshold = defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200;
     $speed_critical_threshold = defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? (int) SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500;
     $is_speed_enabled = false;
     $is_uptime_enabled = false;
     $is_database_enabled = false;
     $is_logs_enabled = false;
+    $is_resource_enabled = false;
+    $is_plugins_enabled = false;
     $active_modules = [];
 
     if (is_array($context) && !empty($context)) {
@@ -1161,11 +1167,15 @@ function sitepulse_custom_dashboards_page() {
         $uptime_data = isset($modules['uptime']) && is_array($modules['uptime']) ? $modules['uptime'] : [];
         $database_data = isset($modules['database']) && is_array($modules['database']) ? $modules['database'] : [];
         $logs_data = isset($modules['logs']) && is_array($modules['logs']) ? $modules['logs'] : [];
+        $resource_data = isset($modules['resource']) && is_array($modules['resource']) ? $modules['resource'] : [];
+        $plugins_data = isset($modules['plugins']) && is_array($modules['plugins']) ? $modules['plugins'] : [];
 
         $is_speed_enabled = !empty($speed_data['enabled']);
         $is_uptime_enabled = !empty($uptime_data['enabled']);
         $is_database_enabled = !empty($database_data['enabled']);
         $is_logs_enabled = !empty($logs_data['enabled']);
+        $is_resource_enabled = !empty($resource_data['enabled']);
+        $is_plugins_enabled = !empty($plugins_data['enabled']);
 
         $speed_card = isset($speed_data['card']) && is_array($speed_data['card']) ? $speed_data['card'] : null;
         $speed_chart = isset($speed_data['chart']) && is_array($speed_data['chart']) ? $speed_data['chart'] : null;
@@ -1188,6 +1198,12 @@ function sitepulse_custom_dashboards_page() {
         $logs_card = isset($logs_data['card']) && is_array($logs_data['card']) ? $logs_data['card'] : null;
         $log_chart = isset($logs_data['chart']) && is_array($logs_data['chart']) ? $logs_data['chart'] : null;
 
+        $resource_card = isset($resource_data['card']) && is_array($resource_data['card']) ? $resource_data['card'] : null;
+        $resource_chart = isset($resource_data['chart']) && is_array($resource_data['chart']) ? $resource_data['chart'] : null;
+
+        $plugins_card = isset($plugins_data['card']) && is_array($plugins_data['card']) ? $plugins_data['card'] : null;
+        $plugins_chart = isset($plugins_data['chart']) && is_array($plugins_data['chart']) ? $plugins_data['chart'] : null;
+
         $charts_payload = isset($context['charts_payload']) && is_array($context['charts_payload'])
             ? $context['charts_payload']
             : [];
@@ -1198,6 +1214,8 @@ function sitepulse_custom_dashboards_page() {
         $is_uptime_enabled = in_array('uptime_tracker', $active_modules, true);
         $is_database_enabled = in_array('database_optimizer', $active_modules, true);
         $is_logs_enabled = in_array('log_analyzer', $active_modules, true);
+        $is_resource_enabled = in_array('resource_monitor', $active_modules, true);
+        $is_plugins_enabled = in_array('plugin_impact_scanner', $active_modules, true);
 
     $palette = $default_palette;
     $status_labels = $default_status_labels;
@@ -1712,6 +1730,370 @@ function sitepulse_custom_dashboards_page() {
         ];
     }
 
+    $resource_card = null;
+
+    if ($is_resource_enabled && function_exists('sitepulse_resource_monitor_get_snapshot')) {
+        $snapshot = sitepulse_resource_monitor_get_snapshot();
+        $load_display = '';
+        $load_values = [null, null, null];
+
+        if (is_array($snapshot)) {
+            $raw_load_values = [];
+
+            if (isset($snapshot['load_raw']) && is_array($snapshot['load_raw'])) {
+                $raw_load_values = $snapshot['load_raw'];
+            } elseif (isset($snapshot['load']) && is_array($snapshot['load'])) {
+                $raw_load_values = $snapshot['load'];
+            }
+
+            foreach (array_slice(array_values((array) $raw_load_values), 0, 3) as $index => $value) {
+                if (is_numeric($value)) {
+                    $load_values[$index] = (float) $value;
+                }
+            }
+
+            if (function_exists('sitepulse_resource_monitor_format_load_display')) {
+                $load_display = sitepulse_resource_monitor_format_load_display(isset($snapshot['load']) ? $snapshot['load'] : $load_values);
+            } else {
+                $load_display = implode(' / ', array_map(static function ($value) {
+                    if ($value === null) {
+                        return __('N/A', 'sitepulse');
+                    }
+
+                    return number_format_i18n((float) $value, 2);
+                }, $load_values));
+            }
+        }
+
+        $memory_usage = isset($snapshot['memory_usage']) ? (string) $snapshot['memory_usage'] : '';
+        $memory_limit = isset($snapshot['memory_limit']) && $snapshot['memory_limit'] !== false
+            ? (string) $snapshot['memory_limit']
+            : '';
+        $memory_usage_bytes = isset($snapshot['memory_usage_bytes']) ? (float) $snapshot['memory_usage_bytes'] : 0.0;
+        $memory_limit_bytes = isset($snapshot['memory_limit_bytes']) ? (float) $snapshot['memory_limit_bytes'] : 0.0;
+
+        $memory_percent = null;
+
+        if (function_exists('sitepulse_resource_monitor_calculate_percentage')) {
+            $memory_percent = sitepulse_resource_monitor_calculate_percentage(
+                $snapshot['memory_usage_bytes'] ?? null,
+                $snapshot['memory_limit_bytes'] ?? null
+            );
+        } elseif ($memory_limit_bytes > 0) {
+            $memory_percent = min(100.0, max(0.0, ($memory_usage_bytes / $memory_limit_bytes) * 100));
+        }
+
+        $disk_free = isset($snapshot['disk_free']) ? (string) $snapshot['disk_free'] : '';
+        $disk_total = isset($snapshot['disk_total']) ? (string) $snapshot['disk_total'] : '';
+        $disk_free_bytes = isset($snapshot['disk_free_bytes']) ? (float) $snapshot['disk_free_bytes'] : 0.0;
+        $disk_total_bytes = isset($snapshot['disk_total_bytes']) ? (float) $snapshot['disk_total_bytes'] : 0.0;
+
+        $disk_free_percent = null;
+
+        if (function_exists('sitepulse_resource_monitor_calculate_percentage')) {
+            $disk_free_percent = sitepulse_resource_monitor_calculate_percentage(
+                $snapshot['disk_free_bytes'] ?? null,
+                $snapshot['disk_total_bytes'] ?? null
+            );
+        } elseif ($disk_total_bytes > 0) {
+            $disk_free_percent = min(100.0, max(0.0, ($disk_free_bytes / $disk_total_bytes) * 100));
+        }
+
+        $status_order = [
+            'status-ok'   => 0,
+            'status-warn' => 1,
+            'status-bad'  => 2,
+        ];
+
+        $resource_status = 'status-ok';
+
+        $adjust_status = static function ($current, $candidate) use ($status_order) {
+            if (!isset($status_order[$candidate])) {
+                return $current;
+            }
+
+            if (!isset($status_order[$current]) || $status_order[$candidate] > $status_order[$current]) {
+                return $candidate;
+            }
+
+            return $current;
+        };
+
+        if ($load_values[0] !== null) {
+            if ($load_values[0] >= 4.0) {
+                $resource_status = $adjust_status($resource_status, 'status-bad');
+            } elseif ($load_values[0] >= 2.0) {
+                $resource_status = $adjust_status($resource_status, 'status-warn');
+            }
+        }
+
+        if ($memory_percent !== null) {
+            if ($memory_percent >= 90.0) {
+                $resource_status = $adjust_status($resource_status, 'status-bad');
+            } elseif ($memory_percent >= 75.0) {
+                $resource_status = $adjust_status($resource_status, 'status-warn');
+            }
+        }
+
+        if ($disk_free_percent !== null) {
+            if ($disk_free_percent <= 10.0) {
+                $resource_status = $adjust_status($resource_status, 'status-bad');
+            } elseif ($disk_free_percent <= 20.0) {
+                $resource_status = $adjust_status($resource_status, 'status-warn');
+            }
+        }
+
+        $resource_card = [
+            'status'             => $resource_status,
+            'load_display'       => $load_display,
+            'memory_usage'       => $memory_usage,
+            'memory_limit'       => $memory_limit,
+            'memory_percent'     => $memory_percent,
+            'disk_free'          => $disk_free,
+            'disk_total'         => $disk_total,
+            'disk_free_percent'  => $disk_free_percent,
+            'generated_at'       => isset($snapshot['generated_at']) ? (int) $snapshot['generated_at'] : 0,
+        ];
+
+        $memory_dataset = [];
+        $memory_chart_empty = true;
+
+        if ($memory_limit_bytes > 0 && $memory_usage_bytes >= 0 && $memory_usage_bytes <= $memory_limit_bytes) {
+            $memory_used_mb = $memory_usage_bytes / MB_IN_BYTES;
+            $memory_free_mb = ($memory_limit_bytes - $memory_usage_bytes) / MB_IN_BYTES;
+            $memory_chart_empty = false;
+
+            $memory_dataset[] = [
+                'data' => [
+                    round($memory_used_mb, 2),
+                    max(0, round($memory_free_mb, 2)),
+                ],
+                'backgroundColor' => [
+                    $palette['amber'],
+                    $palette['green'],
+                ],
+                'borderWidth' => 0,
+            ];
+        }
+
+        $resource_chart = [
+            'type'     => 'doughnut',
+            'labels'   => [
+                __('Memory used', 'sitepulse'),
+                __('Memory available', 'sitepulse'),
+            ],
+            'datasets' => $memory_dataset,
+            'unit'     => __('MB', 'sitepulse'),
+            'empty'    => $memory_chart_empty,
+            'status'   => $resource_status,
+        ];
+
+        $charts_payload['resource'] = $resource_chart;
+    }
+
+    $plugins_card = null;
+
+    if ($is_plugins_enabled && function_exists('sitepulse_plugin_impact_get_measurements')) {
+        $measurements = sitepulse_plugin_impact_get_measurements();
+        $samples = isset($measurements['samples']) && is_array($measurements['samples']) ? $measurements['samples'] : [];
+        $plugin_entries = [];
+        $total_impact = 0.0;
+
+        foreach ($samples as $plugin_file => $sample) {
+            if (!is_array($sample) || !isset($sample['avg_ms']) || !is_numeric($sample['avg_ms'])) {
+                continue;
+            }
+
+            $avg_ms = max(0.0, (float) $sample['avg_ms']);
+            $last_ms = isset($sample['last_ms']) && is_numeric($sample['last_ms']) ? max(0.0, (float) $sample['last_ms']) : null;
+            $count = isset($sample['samples']) ? max(0, (int) $sample['samples']) : 0;
+            $last_recorded = isset($sample['last_recorded']) ? (int) $sample['last_recorded'] : 0;
+
+            $label = $plugin_file;
+
+            if (function_exists('sitepulse_plugin_impact_guess_slug')) {
+                $slug = sitepulse_plugin_impact_guess_slug($plugin_file, []);
+                if (is_string($slug) && $slug !== '') {
+                    $label = ucwords(str_replace('-', ' ', str_replace('_', ' ', $slug)));
+                }
+            }
+
+            $total_impact += $avg_ms;
+
+            $plugin_entries[] = [
+                'file'          => (string) $plugin_file,
+                'label'         => (string) $label,
+                'impact'        => $avg_ms,
+                'last_ms'       => $last_ms,
+                'samples'       => $count,
+                'last_recorded' => $last_recorded,
+            ];
+        }
+
+        if (!empty($plugin_entries)) {
+            usort($plugin_entries, static function ($a, $b) {
+                if ($a['impact'] === $b['impact']) {
+                    return strcmp($a['label'], $b['label']);
+                }
+
+                return ($a['impact'] < $b['impact']) ? 1 : -1;
+            });
+        }
+
+        $weights = [];
+        $top_labels = [];
+        $top_entries = array_slice($plugin_entries, 0, 5);
+
+        foreach ($top_entries as $index => $entry) {
+            $weight = null;
+
+            if ($total_impact > 0) {
+                $weight = ($entry['impact'] / $total_impact) * 100;
+            }
+
+            $weights[$index] = $weight !== null ? round($weight, 2) : null;
+            $top_labels[$index] = $entry['label'];
+        }
+
+        $palette_cycle = [$palette['blue'], $palette['amber'], $palette['purple'], $palette['green'], $palette['red']];
+        $dataset_colors = [];
+
+        foreach ($top_entries as $i => $entry) {
+            $dataset_colors[] = $palette_cycle[$i % count($palette_cycle)];
+        }
+
+        $plugins_chart = [
+            'type'     => 'bar',
+            'labels'   => array_values($top_labels),
+            'datasets' => empty($top_entries) ? [] : [
+                [
+                    'data'            => array_values(array_map(static function ($value) {
+                        return $value === null ? null : (float) $value;
+                    }, $weights)),
+                    'backgroundColor' => $dataset_colors,
+                    'borderWidth'     => 0,
+                ],
+            ],
+            'unit'     => __('%', 'sitepulse'),
+            'empty'    => empty($top_entries),
+            'status'   => 'status-ok',
+            'options'  => [
+                'indexAxis' => 'y',
+            ],
+            'meta'     => [
+                'impacts' => array_values(array_map(static function ($entry) {
+                    return isset($entry['impact']) ? (float) $entry['impact'] : null;
+                }, $top_entries)),
+            ],
+        ];
+
+        $threshold_defaults = function_exists('sitepulse_get_default_plugin_impact_thresholds')
+            ? sitepulse_get_default_plugin_impact_thresholds()
+            : [
+                'impactWarning'  => 30.0,
+                'impactCritical' => 60.0,
+                'weightWarning'  => 10.0,
+                'weightCritical' => 20.0,
+            ];
+
+        $thresholds = $threshold_defaults;
+
+        if (defined('SITEPULSE_OPTION_IMPACT_THRESHOLDS')) {
+            $stored_thresholds = get_option(
+                SITEPULSE_OPTION_IMPACT_THRESHOLDS,
+                [
+                    'default' => $threshold_defaults,
+                    'roles'   => [],
+                ]
+            );
+
+            if (function_exists('sitepulse_sanitize_impact_thresholds')) {
+                $stored_thresholds = sitepulse_sanitize_impact_thresholds($stored_thresholds);
+            }
+
+            if (is_array($stored_thresholds)) {
+                $effective_thresholds = isset($stored_thresholds['default']) && is_array($stored_thresholds['default'])
+                    ? $stored_thresholds['default']
+                    : $threshold_defaults;
+
+                if (isset($stored_thresholds['roles']) && is_array($stored_thresholds['roles'])) {
+                    $current_user = function_exists('wp_get_current_user') ? wp_get_current_user() : null;
+
+                    if ($current_user instanceof WP_User) {
+                        foreach ((array) $current_user->roles as $role) {
+                            $role_key = sanitize_key($role);
+
+                            if ($role_key !== '' && isset($stored_thresholds['roles'][$role_key])) {
+                                $effective_thresholds = $stored_thresholds['roles'][$role_key];
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (function_exists('sitepulse_normalize_impact_threshold_set')) {
+                    $thresholds = sitepulse_normalize_impact_threshold_set($effective_thresholds, $threshold_defaults);
+                } else {
+                    $thresholds = wp_parse_args(is_array($effective_thresholds) ? $effective_thresholds : [], $threshold_defaults);
+                }
+            }
+        }
+
+        $top_plugin = isset($plugin_entries[0]) ? $plugin_entries[0] : null;
+        $top_weight = null;
+
+        if ($top_plugin !== null && $total_impact > 0) {
+            $top_weight = ($top_plugin['impact'] / $total_impact) * 100;
+        }
+
+        $plugins_status = 'status-ok';
+
+        if ($top_plugin !== null) {
+            if (($top_plugin['impact'] >= $thresholds['impactCritical']) || ($top_weight !== null && $top_weight >= $thresholds['weightCritical'])) {
+                $plugins_status = 'status-bad';
+            } elseif (($top_plugin['impact'] >= $thresholds['impactWarning']) || ($top_weight !== null && $top_weight >= $thresholds['weightWarning'])) {
+                $plugins_status = 'status-warn';
+            }
+        } elseif (empty($plugin_entries)) {
+            $plugins_status = 'status-warn';
+        }
+
+        $plugins_chart['status'] = $plugins_status;
+
+        $last_updated = isset($measurements['last_updated']) ? (int) $measurements['last_updated'] : 0;
+        $interval = isset($measurements['interval']) ? (int) $measurements['interval'] : 0;
+        $interval_label = '';
+
+        if (function_exists('sitepulse_plugin_impact_format_interval')) {
+            $interval_label = sitepulse_plugin_impact_format_interval($interval);
+        }
+
+        $last_updated_label = '';
+
+        if ($last_updated > 0) {
+            $display_timestamp = $last_updated;
+
+            if (function_exists('sitepulse_plugin_impact_normalize_timestamp_for_display')) {
+                $display_timestamp = sitepulse_plugin_impact_normalize_timestamp_for_display($last_updated);
+            }
+
+            $last_updated_label = wp_date(get_option('date_format') . ' ' . get_option('time_format'), $display_timestamp);
+        }
+
+        $plugins_card = [
+            'status'         => $plugins_status,
+            'top_plugin'     => $top_plugin,
+            'top_weight'     => $top_weight,
+            'total_impact'   => $total_impact,
+            'entries'        => $plugin_entries,
+            'measured_count' => count($plugin_entries),
+            'interval'       => $interval_label,
+            'last_updated'   => $last_updated_label,
+        ];
+
+        $charts_payload['plugins'] = $plugins_chart;
+    }
+
     }
 
     $module_chart_keys = [
@@ -1719,6 +2101,8 @@ function sitepulse_custom_dashboards_page() {
         'uptime_tracker'     => 'uptime',
         'database_optimizer' => 'database',
         'log_analyzer'       => 'logs',
+        'resource_monitor'   => 'resource',
+        'plugin_impact_scanner' => 'plugins',
     ];
 
     foreach ($module_chart_keys as $module_key => $chart_key) {
@@ -1743,6 +2127,9 @@ function sitepulse_custom_dashboards_page() {
             'speedOverBudgetLabel'=> __('Over budget', 'sitepulse'),
             'revisionsTooltip'    => __('Revisions', 'sitepulse'),
             'logEventsLabel'      => __('Events', 'sitepulse'),
+            'pluginsImpactLabel'  => __('Impact', 'sitepulse'),
+            'pluginsShareLabel'   => __('Share', 'sitepulse'),
+            'pluginsImpactUnit'   => __('ms', 'sitepulse'),
         ],
     ];
 
@@ -1856,6 +2243,18 @@ function sitepulse_custom_dashboards_page() {
             'label'        => __('Error Log', 'sitepulse'),
             'default_size' => 'medium',
             'available'    => ($is_logs_enabled && $logs_card !== null),
+            'content'      => '',
+        ],
+        'resource' => [
+            'label'        => __('Resources', 'sitepulse'),
+            'default_size' => 'medium',
+            'available'    => ($is_resource_enabled && $resource_card !== null),
+            'content'      => '',
+        ],
+        'plugins' => [
+            'label'        => __('Plugin Impact', 'sitepulse'),
+            'default_size' => 'medium',
+            'available'    => ($is_plugins_enabled && $plugins_card !== null),
             'content'      => '',
         ],
     ];
@@ -2013,6 +2412,155 @@ function sitepulse_custom_dashboards_page() {
         <p id="sitepulse-log-description" class="description"><?php esc_html_e('Use the analyzer to inspect full stack traces and silence recurring issues.', 'sitepulse'); ?></p>
         <?php
         $card_definitions['logs']['content'] = ob_get_clean();
+    }
+
+    if (!empty($card_definitions['resource']['available'])) {
+        ob_start();
+        ?>
+        <div class="sitepulse-card-header">
+            <h2><span class="dashicons dashicons-chart-area"></span> <?php esc_html_e('Resources', 'sitepulse'); ?></h2>
+            <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-resources')); ?>" class="button button-secondary"><?php esc_html_e('Details', 'sitepulse'); ?></a>
+        </div>
+        <p class="sitepulse-card-subtitle"><?php esc_html_e('Server load, memory, and disk headroom at a glance.', 'sitepulse'); ?></p>
+        <?php
+            $resource_summary_html = sitepulse_render_chart_summary('sitepulse-resource-chart', $resource_chart);
+            $resource_summary_id = sitepulse_get_chart_summary_id('sitepulse-resource-chart');
+            $resource_canvas_describedby = ['sitepulse-resource-description'];
+
+            if ('' !== $resource_summary_html) {
+                $resource_canvas_describedby[] = $resource_summary_id;
+            }
+        ?>
+        <div class="sitepulse-chart-container">
+            <canvas id="sitepulse-resource-chart" aria-describedby="<?php echo esc_attr(implode(' ', $resource_canvas_describedby)); ?>"></canvas>
+            <?php echo $resource_summary_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+        </div>
+        <?php $resource_status_meta = $get_status_meta($resource_card['status']); ?>
+        <p class="sitepulse-metric">
+            <span class="status-badge <?php echo esc_attr($resource_card['status']); ?>" aria-hidden="true">
+                <span class="status-icon"><?php echo esc_html($resource_status_meta['icon']); ?></span>
+                <span class="status-text"><?php echo esc_html($resource_status_meta['label']); ?></span>
+            </span>
+            <span class="screen-reader-text"><?php echo esc_html($resource_status_meta['sr']); ?></span>
+            <span class="sitepulse-metric-value"><?php echo esc_html($resource_card['load_display']); ?></span>
+            <span class="sitepulse-metric-unit"><?php esc_html_e('CPU (1/5/15)', 'sitepulse'); ?></span>
+        </p>
+        <ul class="sitepulse-legend">
+            <li>
+                <span class="label"><?php esc_html_e('Memory', 'sitepulse'); ?></span>
+                <span class="value">
+                    <?php echo esc_html($resource_card['memory_usage']); ?>
+                    <?php if ($resource_card['memory_limit'] !== '') : ?>
+                        <span class="sitepulse-metric-unit"><?php printf(esc_html__('of %s limit', 'sitepulse'), esc_html($resource_card['memory_limit'])); ?></span>
+                    <?php endif; ?>
+                    <?php if ($resource_card['memory_percent'] !== null) : ?>
+                        <span class="sitepulse-metric-unit"><?php printf(esc_html__('(%s%% used)', 'sitepulse'), esc_html(number_format_i18n($resource_card['memory_percent'], 0))); ?></span>
+                    <?php endif; ?>
+                </span>
+            </li>
+            <li>
+                <span class="label"><?php esc_html_e('Disk free', 'sitepulse'); ?></span>
+                <span class="value">
+                    <?php echo esc_html($resource_card['disk_free']); ?>
+                    <?php if ($resource_card['disk_total'] !== '') : ?>
+                        <span class="sitepulse-metric-unit"><?php printf(esc_html__('of %s total', 'sitepulse'), esc_html($resource_card['disk_total'])); ?></span>
+                    <?php endif; ?>
+                    <?php if ($resource_card['disk_free_percent'] !== null) : ?>
+                        <span class="sitepulse-metric-unit"><?php printf(esc_html__('(%s%% free)', 'sitepulse'), esc_html(number_format_i18n($resource_card['disk_free_percent'], 0))); ?></span>
+                    <?php endif; ?>
+                </span>
+            </li>
+        </ul>
+        <p id="sitepulse-resource-description" class="description">
+            <?php
+            if (!empty($resource_card['generated_at'])) {
+                printf(
+                    esc_html__('Snapshot generated on %s.', 'sitepulse'),
+                    esc_html(wp_date(get_option('date_format') . ' ' . get_option('time_format'), $resource_card['generated_at']))
+                );
+            } else {
+                esc_html_e('Snapshot timing unavailable.', 'sitepulse');
+            }
+            ?>
+        </p>
+        <?php
+        $card_definitions['resource']['content'] = ob_get_clean();
+    }
+
+    if (!empty($card_definitions['plugins']['available'])) {
+        ob_start();
+        ?>
+        <div class="sitepulse-card-header">
+            <h2><span class="dashicons dashicons-admin-plugins"></span> <?php esc_html_e('Plugin Impact', 'sitepulse'); ?></h2>
+            <a href="<?php echo esc_url(admin_url('admin.php?page=sitepulse-plugins')); ?>" class="button button-secondary"><?php esc_html_e('Inspect', 'sitepulse'); ?></a>
+        </div>
+        <p class="sitepulse-card-subtitle"><?php esc_html_e('Average load time added by the most expensive plugins.', 'sitepulse'); ?></p>
+        <?php
+            $plugins_summary_html = sitepulse_render_chart_summary('sitepulse-plugins-chart', $plugins_chart);
+            $plugins_summary_id = sitepulse_get_chart_summary_id('sitepulse-plugins-chart');
+            $plugins_canvas_describedby = ['sitepulse-plugins-description'];
+
+            if ('' !== $plugins_summary_html) {
+                $plugins_canvas_describedby[] = $plugins_summary_id;
+            }
+        ?>
+        <div class="sitepulse-chart-container">
+            <canvas id="sitepulse-plugins-chart" aria-describedby="<?php echo esc_attr(implode(' ', $plugins_canvas_describedby)); ?>"></canvas>
+            <?php echo $plugins_summary_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+        </div>
+        <?php $plugins_status_meta = $get_status_meta($plugins_card['status']); ?>
+        <p class="sitepulse-metric">
+            <span class="status-badge <?php echo esc_attr($plugins_card['status']); ?>" aria-hidden="true">
+                <span class="status-icon"><?php echo esc_html($plugins_status_meta['icon']); ?></span>
+                <span class="status-text"><?php echo esc_html($plugins_status_meta['label']); ?></span>
+            </span>
+            <span class="screen-reader-text"><?php echo esc_html($plugins_status_meta['sr']); ?></span>
+            <?php if (!empty($plugins_card['top_plugin'])) : ?>
+                <span class="sitepulse-metric-value"><?php echo esc_html(number_format_i18n($plugins_card['top_plugin']['impact'], 2)); ?><span class="sitepulse-metric-unit"><?php esc_html_e('ms', 'sitepulse'); ?></span></span>
+                <span class="sitepulse-metric-unit"><?php printf(esc_html__('Top: %s', 'sitepulse'), esc_html($plugins_card['top_plugin']['label'])); ?></span>
+                <?php if ($plugins_card['top_weight'] !== null) : ?>
+                    <span class="sitepulse-metric-unit"><?php printf(esc_html__('(%s%% share)', 'sitepulse'), esc_html(number_format_i18n($plugins_card['top_weight'], 1))); ?></span>
+                <?php endif; ?>
+            <?php else : ?>
+                <span class="sitepulse-metric-value"><?php esc_html_e('No measurements yet', 'sitepulse'); ?></span>
+            <?php endif; ?>
+        </p>
+        <?php $top_display_entries = array_slice($plugins_card['entries'], 0, 3); ?>
+        <?php if (!empty($top_display_entries)) : ?>
+            <ul class="sitepulse-legend">
+                <?php foreach ($top_display_entries as $entry) :
+                    $share = ($plugins_card['total_impact'] > 0)
+                        ? ($entry['impact'] / $plugins_card['total_impact']) * 100
+                        : null;
+                ?>
+                    <li>
+                        <span class="label"><?php echo esc_html($entry['label']); ?></span>
+                        <span class="value">
+                            <?php echo esc_html(number_format_i18n($entry['impact'], 2)); ?>
+                            <span class="sitepulse-metric-unit"><?php esc_html_e('ms', 'sitepulse'); ?></span>
+                            <?php if ($share !== null) : ?>
+                                <span class="sitepulse-metric-unit"><?php printf(esc_html__('(%s%% share)', 'sitepulse'), esc_html(number_format_i18n($share, 1))); ?></span>
+                            <?php endif; ?>
+                        </span>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+        <?php endif; ?>
+        <p id="sitepulse-plugins-description" class="description">
+            <?php if (!empty($plugins_card['last_updated'])) : ?>
+                <?php if ($plugins_card['interval'] !== '') : ?>
+                    <?php printf(esc_html__('Sampled %1$s (refresh interval: %2$s).', 'sitepulse'), esc_html($plugins_card['last_updated']), esc_html($plugins_card['interval'])); ?>
+                <?php else : ?>
+                    <?php printf(esc_html__('Sampled %s.', 'sitepulse'), esc_html($plugins_card['last_updated'])); ?>
+                <?php endif; ?>
+            <?php elseif ($plugins_card['interval'] !== '') : ?>
+                <?php printf(esc_html__('Next measurement expected every %s.', 'sitepulse'), esc_html($plugins_card['interval'])); ?>
+            <?php else : ?>
+                <?php esc_html_e('Measurements will appear after the scanner collects data.', 'sitepulse'); ?>
+            <?php endif; ?>
+        </p>
+        <?php
+        $card_definitions['plugins']['content'] = ob_get_clean();
     }
 
     $render_order = array_values(array_unique(array_merge(

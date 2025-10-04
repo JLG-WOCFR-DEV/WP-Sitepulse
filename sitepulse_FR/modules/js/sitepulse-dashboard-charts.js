@@ -358,6 +358,106 @@
         } else {
             showFallback(document.getElementById('sitepulse-log-chart'), strings.noData || 'No data');
         }
+
+        if (charts.resource) {
+            createChart(
+                'sitepulse-resource-chart',
+                charts.resource,
+                {
+                    cutout: '60%',
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function (context) {
+                                    var label = context.label || '';
+                                    var raw = typeof context.raw === 'number' ? context.raw : 0;
+                                    var unit = charts.resource.unit || 'MB';
+                                    var parts = [];
+
+                                    if (label) {
+                                        parts.push(label);
+                                    }
+
+                                    parts.push(formatValue(raw, unit, 1));
+
+                                    return parts.join(': ');
+                                },
+                            },
+                        },
+                    },
+                },
+                strings
+            );
+        } else {
+            showFallback(document.getElementById('sitepulse-resource-chart'), strings.noData || 'No data');
+        }
+
+        if (charts.plugins) {
+            var pluginImpacts = charts.plugins.meta && Array.isArray(charts.plugins.meta.impacts)
+                ? charts.plugins.meta.impacts
+                : [];
+
+            createChart(
+                'sitepulse-plugins-chart',
+                charts.plugins,
+                {
+                    indexAxis: charts.plugins.options && charts.plugins.options.indexAxis ? charts.plugins.options.indexAxis : 'y',
+                    plugins: {
+                        legend: {
+                            display: false,
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function (context) {
+                                    var labelParts = [];
+                                    var impactValue = pluginImpacts[context.dataIndex];
+                                    var impactLabel = strings.pluginsImpactLabel || 'Impact';
+                                    var impactUnit = strings.pluginsImpactUnit || 'ms';
+                                    var shareLabel = strings.pluginsShareLabel || 'Share';
+                                    var rawShare = typeof context.raw === 'number' ? context.raw : 0;
+
+                                    if (typeof impactValue === 'number' && !isNaN(impactValue)) {
+                                        labelParts.push(impactLabel + ': ' + formatValue(impactValue, impactUnit, 2));
+                                    }
+
+                                    labelParts.push(shareLabel + ': ' + formatValue(rawShare, charts.plugins.unit || '%', 1));
+
+                                    var name = context.label || '';
+
+                                    if (name) {
+                                        return name + ' — ' + labelParts.join(' · ');
+                                    }
+
+                                    return labelParts.join(' · ');
+                                },
+                            },
+                        },
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            max: 100,
+                            ticks: {
+                                callback: function (value) {
+                                    return value + '%';
+                                },
+                            },
+                        },
+                        y: {
+                            ticks: {
+                                autoSkip: false,
+                            },
+                        },
+                    },
+                },
+                strings
+            );
+        } else {
+            showFallback(document.getElementById('sitepulse-plugins-chart'), strings.noData || 'No data');
+        }
     }
 
     if (document.readyState === 'loading') {
