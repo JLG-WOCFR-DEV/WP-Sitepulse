@@ -1311,6 +1311,159 @@ function sitepulse_settings_page() {
     if ($test_notice !== '') {
         printf('<div class="notice notice-%1$s is-dismissible"><p>%2$s</p></div>', esc_attr($test_notice_class), $test_notice);
     }
+
+    $active_modules = array_values(array_filter(array_map('strval', (array) $active_modules), static function ($module) {
+        return $module !== '';
+    }));
+    $essential_module_keys = ['resource_monitor', 'uptime_tracker', 'error_alerts'];
+    $essential_modules_details = [];
+
+    foreach ($essential_module_keys as $module_key) {
+        $module_label = isset($modules[$module_key]['label']) ? $modules[$module_key]['label'] : $module_key;
+        $is_active = in_array($module_key, $active_modules, true);
+
+        $essential_modules_details[] = [
+            'key'       => $module_key,
+            'label'     => $module_label,
+            'is_active' => $is_active,
+        ];
+    }
+
+    $essential_total = count($essential_modules_details);
+    $enabled_essential_count = count(array_filter($essential_modules_details, static function ($module) {
+        return !empty($module['is_active']);
+    }));
+    $modules_state = $enabled_essential_count === $essential_total
+        ? 'complete'
+        : ($enabled_essential_count > 0 ? 'partial' : 'action');
+    $missing_modules_labels = array_map(static function ($module) {
+        return $module['label'];
+    }, array_filter($essential_modules_details, static function ($module) {
+        return empty($module['is_active']);
+    }));
+    $missing_modules_list = implode(', ', $missing_modules_labels);
+
+    if ($modules_state === 'complete') {
+        $modules_description = __('Tous les modules essentiels sont activés.', 'sitepulse');
+    } elseif ($modules_state === 'partial') {
+        $modules_description = sprintf(
+            _n(
+                'Activez le module restant pour bénéficier du suivi complet : %s.',
+                'Activez les modules restants pour bénéficier du suivi complet : %s.',
+                $essential_total - $enabled_essential_count,
+                'sitepulse'
+            ),
+            $missing_modules_list
+        );
+    } else {
+        $modules_description = sprintf(
+            __('Activez les modules essentiels suivants pour démarrer la surveillance : %s.', 'sitepulse'),
+            $missing_modules_list
+        );
+    }
+
+    $alert_channels_option = get_option(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS, []);
+    $alert_channels = array_values(array_filter(array_map('strval', (array) $alert_channels_option), static function ($channel) {
+        return $channel !== '';
+    }));
+    $alert_recipients_option = get_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, []);
+    $alert_recipients = array_values(array_filter(array_map('trim', (array) $alert_recipients_option), static function ($recipient) {
+        return $recipient !== '';
+    }));
+
+    $has_alert_channels = !empty($alert_channels);
+    $has_alert_recipients = !empty($alert_recipients);
+
+    if ($has_alert_channels && $has_alert_recipients) {
+        $alerts_state = 'complete';
+    } elseif ($has_alert_channels || $has_alert_recipients) {
+        $alerts_state = 'partial';
+    } else {
+        $alerts_state = 'action';
+    }
+
+    if ($alerts_state === 'complete') {
+        $alerts_description = __('Les alertes sont prêtes : canaux actifs et destinataires renseignés.', 'sitepulse');
+    } elseif ($has_alert_channels) {
+        $alerts_description = __('Ajoutez au moins un destinataire pour recevoir les alertes critiques.', 'sitepulse');
+    } elseif ($has_alert_recipients) {
+        $alerts_description = __('Activez au moins un canal d’alerte pour déclencher les notifications.', 'sitepulse');
+    } else {
+        $alerts_description = __('Configurez vos canaux et destinataires pour être averti des incidents critiques.', 'sitepulse');
+    }
+
+    $ai_state = $has_effective_gemini_api_key ? 'complete' : 'action';
+    $ai_description = $has_effective_gemini_api_key
+        ? __('L’IA est prête à générer des recommandations automatiques.', 'sitepulse')
+        : __('Ajoutez votre clé API Google Gemini pour activer les analyses IA.', 'sitepulse');
+
+    $status_badges = [
+        'complete' => [
+            'variant' => 'success',
+            'label'   => __('Prêt', 'sitepulse'),
+        ],
+        'partial'  => [
+            'variant' => 'warning',
+            'label'   => __('À vérifier', 'sitepulse'),
+        ],
+        'action'   => [
+            'variant' => 'danger',
+            'label'   => __('À configurer', 'sitepulse'),
+        ],
+    ];
+
+    $setup_steps = [
+        'modules' => [
+            'badge_variant' => $status_badges[$modules_state]['variant'],
+            'badge_label'   => $status_badges[$modules_state]['label'],
+            'title'         => __('Activer les modules essentiels', 'sitepulse'),
+            'description'   => $modules_description,
+            'details'       => $essential_modules_details,
+            'action'        => [
+                'label'  => __('Gérer les modules', 'sitepulse'),
+                'target' => 'sitepulse-tab-modules',
+                'href'   => '#sitepulse-section-modules',
+            ],
+        ],
+        'alerts'  => [
+            'badge_variant' => $status_badges[$alerts_state]['variant'],
+            'badge_label'   => $status_badges[$alerts_state]['label'],
+            'title'         => __('Configurer les alertes critiques', 'sitepulse'),
+            'description'   => $alerts_description,
+            'details'       => [
+                [
+                    'label'     => __('Canaux d’alerte actifs', 'sitepulse'),
+                    'is_active' => $has_alert_channels,
+                ],
+                [
+                    'label'     => __('Destinataires configurés', 'sitepulse'),
+                    'is_active' => $has_alert_recipients,
+                ],
+            ],
+            'action'        => [
+                'label'  => __('Configurer les alertes', 'sitepulse'),
+                'target' => 'sitepulse-tab-alerts',
+                'href'   => '#sitepulse-section-alerts',
+            ],
+        ],
+        'ai'      => [
+            'badge_variant' => $status_badges[$ai_state]['variant'],
+            'badge_label'   => $status_badges[$ai_state]['label'],
+            'title'         => __('Connecter l’assistant IA', 'sitepulse'),
+            'description'   => $ai_description,
+            'details'       => [
+                [
+                    'label'     => __('Clé API enregistrée', 'sitepulse'),
+                    'is_active' => $has_effective_gemini_api_key,
+                ],
+            ],
+            'action'        => [
+                'label'  => __('Ajouter la clé IA', 'sitepulse'),
+                'target' => 'sitepulse-tab-ai',
+                'href'   => '#sitepulse-section-api',
+            ],
+        ],
+    ];
     ?>
     <div class="wrap sitepulse-settings-wrap">
         <h1><?php esc_html_e('Réglages de SitePulse', 'sitepulse'); ?></h1>
@@ -1319,28 +1472,95 @@ function sitepulse_settings_page() {
             <nav class="sitepulse-settings-toc" aria-label="<?php esc_attr_e('Sommaire des réglages', 'sitepulse'); ?>">
                 <h2 class="screen-reader-text"><?php esc_html_e('Sommaire des réglages', 'sitepulse'); ?></h2>
                 <ul>
+                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-overview" href="#sitepulse-section-overview"><?php esc_html_e('Vue d’ensemble', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-modules" href="#sitepulse-section-modules"><?php esc_html_e('Modules', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-alerts" href="#sitepulse-section-alerts"><?php esc_html_e('Alertes', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-performance" href="#sitepulse-section-performance"><?php esc_html_e('Performances', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-uptime" href="#sitepulse-section-uptime"><?php esc_html_e('Disponibilité', 'sitepulse'); ?></a></li>
                     <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-ai" href="#sitepulse-section-api"><?php esc_html_e('Connexion IA', 'sitepulse'); ?></a></li>
                     <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-ai" href="#sitepulse-section-ai"><?php esc_html_e('Réglages IA', 'sitepulse'); ?></a></li>
-                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-performance" href="#sitepulse-section-performance"><?php esc_html_e('Performances', 'sitepulse'); ?></a></li>
-                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-alerts" href="#sitepulse-section-alerts"><?php esc_html_e('Alertes', 'sitepulse'); ?></a></li>
-                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-uptime" href="#sitepulse-section-uptime"><?php esc_html_e('Disponibilité', 'sitepulse'); ?></a></li>
-                    <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-modules" href="#sitepulse-section-modules"><?php esc_html_e('Modules', 'sitepulse'); ?></a></li>
                     <li><a class="sitepulse-toc-link" data-tab-target="sitepulse-tab-maintenance" href="#sitepulse-section-maintenance"><?php esc_html_e('Maintenance', 'sitepulse'); ?></a></li>
                 </ul>
             </nav>
             <div class="sitepulse-settings-content">
+                <div class="sitepulse-overview-callout" role="region" aria-label="<?php esc_attr_e('Résumé de l’état des réglages SitePulse', 'sitepulse'); ?>">
+                    <span class="sitepulse-overview-callout__icon dashicons dashicons-visibility" aria-hidden="true"></span>
+                    <div class="sitepulse-overview-callout__body">
+                        <h2 class="sitepulse-overview-callout__title"><?php esc_html_e('Vue d’ensemble rapide', 'sitepulse'); ?></h2>
+                        <p class="sitepulse-overview-callout__intro"><?php esc_html_e('Passez en revue les étapes clés pour tirer parti de la surveillance intelligente.', 'sitepulse'); ?></p>
+                        <ul class="sitepulse-overview-callout__steps">
+                            <?php foreach ($setup_steps as $step) : ?>
+                                <li class="sitepulse-overview-callout__step">
+                                    <span class="sitepulse-overview-badge sitepulse-overview-badge--<?php echo esc_attr($step['badge_variant']); ?>"><?php echo esc_html($step['badge_label']); ?></span>
+                                    <div class="sitepulse-overview-callout__step-content">
+                                        <strong class="sitepulse-overview-callout__step-title"><?php echo esc_html($step['title']); ?></strong>
+                                        <p class="sitepulse-overview-callout__step-description"><?php echo esc_html($step['description']); ?></p>
+                                        <?php if (!empty($step['details'])) : ?>
+                                            <ul class="sitepulse-overview-callout__status-list">
+                                                <?php foreach ($step['details'] as $detail) : ?>
+                                                    <li class="<?php echo !empty($detail['is_active']) ? 'is-complete' : 'is-pending'; ?>">
+                                                        <span class="dashicons <?php echo !empty($detail['is_active']) ? 'dashicons-yes-alt' : 'dashicons-info'; ?>" aria-hidden="true"></span>
+                                                        <span><?php echo esc_html($detail['label']); ?></span>
+                                                    </li>
+                                                <?php endforeach; ?>
+                                            </ul>
+                                        <?php endif; ?>
+                                        <?php if (!empty($step['action'])) : ?>
+                                            <a class="sitepulse-overview-callout__action sitepulse-toc-link" data-tab-target="<?php echo esc_attr($step['action']['target']); ?>" href="<?php echo esc_url($step['action']['href']); ?>"><?php echo esc_html($step['action']['label']); ?></a>
+                                        <?php endif; ?>
+                                    </div>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </div>
+                </div>
                 <div class="sitepulse-settings-tabs-container">
                     <h2 class="nav-tab-wrapper sitepulse-settings-tabs" role="tablist">
-                        <a id="sitepulse-tab-ai-label" class="nav-tab nav-tab-active" href="#sitepulse-tab-ai" data-tab-target="sitepulse-tab-ai" role="tab" aria-controls="sitepulse-tab-ai" aria-selected="true" tabindex="0"><?php esc_html_e('IA', 'sitepulse'); ?></a>
-                        <a id="sitepulse-tab-performance-label" class="nav-tab" href="#sitepulse-tab-performance" data-tab-target="sitepulse-tab-performance" role="tab" aria-controls="sitepulse-tab-performance" aria-selected="false" tabindex="-1"><?php esc_html_e('Performances', 'sitepulse'); ?></a>
-                        <a id="sitepulse-tab-alerts-label" class="nav-tab" href="#sitepulse-tab-alerts" data-tab-target="sitepulse-tab-alerts" role="tab" aria-controls="sitepulse-tab-alerts" aria-selected="false" tabindex="-1"><?php esc_html_e('Alertes', 'sitepulse'); ?></a>
-                        <a id="sitepulse-tab-uptime-label" class="nav-tab" href="#sitepulse-tab-uptime" data-tab-target="sitepulse-tab-uptime" role="tab" aria-controls="sitepulse-tab-uptime" aria-selected="false" tabindex="-1"><?php esc_html_e('Disponibilité', 'sitepulse'); ?></a>
+                        <a id="sitepulse-tab-overview-label" class="nav-tab nav-tab-active" href="#sitepulse-tab-overview" data-tab-target="sitepulse-tab-overview" role="tab" aria-controls="sitepulse-tab-overview" aria-selected="true" tabindex="0"><?php esc_html_e('Vue d’ensemble', 'sitepulse'); ?></a>
                         <a id="sitepulse-tab-modules-label" class="nav-tab" href="#sitepulse-tab-modules" data-tab-target="sitepulse-tab-modules" role="tab" aria-controls="sitepulse-tab-modules" aria-selected="false" tabindex="-1"><?php esc_html_e('Modules', 'sitepulse'); ?></a>
+                        <a id="sitepulse-tab-alerts-label" class="nav-tab" href="#sitepulse-tab-alerts" data-tab-target="sitepulse-tab-alerts" role="tab" aria-controls="sitepulse-tab-alerts" aria-selected="false" tabindex="-1"><?php esc_html_e('Alertes', 'sitepulse'); ?></a>
+                        <a id="sitepulse-tab-performance-label" class="nav-tab" href="#sitepulse-tab-performance" data-tab-target="sitepulse-tab-performance" role="tab" aria-controls="sitepulse-tab-performance" aria-selected="false" tabindex="-1"><?php esc_html_e('Performances', 'sitepulse'); ?></a>
+                        <a id="sitepulse-tab-uptime-label" class="nav-tab" href="#sitepulse-tab-uptime" data-tab-target="sitepulse-tab-uptime" role="tab" aria-controls="sitepulse-tab-uptime" aria-selected="false" tabindex="-1"><?php esc_html_e('Disponibilité', 'sitepulse'); ?></a>
+                        <a id="sitepulse-tab-ai-label" class="nav-tab" href="#sitepulse-tab-ai" data-tab-target="sitepulse-tab-ai" role="tab" aria-controls="sitepulse-tab-ai" aria-selected="false" tabindex="-1"><?php esc_html_e('IA', 'sitepulse'); ?></a>
                         <a id="sitepulse-tab-maintenance-label" class="nav-tab" href="#sitepulse-tab-maintenance" data-tab-target="sitepulse-tab-maintenance" role="tab" aria-controls="sitepulse-tab-maintenance" aria-selected="false" tabindex="-1"><?php esc_html_e('Maintenance', 'sitepulse'); ?></a>
                     </h2>
                     <div class="sitepulse-tab-panels">
                         <form method="post" action="options.php" class="sitepulse-settings-form">
                             <?php settings_fields('sitepulse_settings'); do_settings_sections('sitepulse_settings'); ?>
+            <div class="sitepulse-tab-panel" id="sitepulse-tab-overview" role="tabpanel" aria-labelledby="sitepulse-tab-overview-label">
+                <div class="sitepulse-settings-section" id="sitepulse-section-overview">
+                <h2><?php esc_html_e('Vue d’ensemble', 'sitepulse'); ?></h2>
+                <p class="sitepulse-section-intro"><?php esc_html_e('Vérifiez l’état des éléments indispensables pour un suivi complet.', 'sitepulse'); ?></p>
+                <div class="sitepulse-settings-grid">
+                    <?php foreach ($setup_steps as $step) : ?>
+                        <div class="sitepulse-module-card sitepulse-module-card--setting">
+                            <div class="sitepulse-card-header">
+                                <h3 class="sitepulse-card-title"><?php echo esc_html($step['title']); ?></h3>
+                                <span class="sitepulse-overview-badge sitepulse-overview-badge--<?php echo esc_attr($step['badge_variant']); ?>"><?php echo esc_html($step['badge_label']); ?></span>
+                            </div>
+                            <div class="sitepulse-card-body">
+                                <p class="sitepulse-card-description"><?php echo esc_html($step['description']); ?></p>
+                                <?php if (!empty($step['details'])) : ?>
+                                    <ul class="sitepulse-card-list sitepulse-card-list--status">
+                                        <?php foreach ($step['details'] as $detail) : ?>
+                                            <li class="<?php echo !empty($detail['is_active']) ? 'is-complete' : 'is-pending'; ?>">
+                                                <span class="dashicons <?php echo !empty($detail['is_active']) ? 'dashicons-yes-alt' : 'dashicons-info'; ?>" aria-hidden="true"></span>
+                                                <span><?php echo esc_html($detail['label']); ?></span>
+                                            </li>
+                                        <?php endforeach; ?>
+                                    </ul>
+                                <?php endif; ?>
+                            </div>
+                            <?php if (!empty($step['action'])) : ?>
+                                <div class="sitepulse-card-footer">
+                                    <a class="sitepulse-card-link sitepulse-toc-link" data-tab-target="<?php echo esc_attr($step['action']['target']); ?>" href="<?php echo esc_url($step['action']['href']); ?>"><?php echo esc_html($step['action']['label']); ?></a>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+                </div>
+            </div>
             <div class="sitepulse-tab-panel" id="sitepulse-tab-ai" role="tabpanel" aria-labelledby="sitepulse-tab-ai-label">
                 <div class="sitepulse-settings-section" id="sitepulse-section-api">
                 <h2><?php esc_html_e("Paramètres de l'API", 'sitepulse'); ?></h2>

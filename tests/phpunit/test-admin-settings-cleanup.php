@@ -213,6 +213,19 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
         $this->assertStringContainsString('SitePulse a été réinitialisé.', $output);
     }
 
+    public function test_settings_page_displays_overview_tab_and_summary(): void {
+        ob_start();
+        sitepulse_settings_page();
+        $output = ob_get_clean();
+
+        $this->assertStringContainsString('sitepulse-overview-callout', $output);
+        $this->assertMatchesRegularExpression(
+            '/<a[^>]+data-tab-target="sitepulse-tab-overview"[^>]+class="nav-tab nav-tab-active"/i',
+            $output
+        );
+        $this->assertStringContainsString('Vue d’ensemble rapide', $output);
+    }
+
     public function test_sanitize_gemini_api_key_preserves_value_when_override_active(): void {
         update_option(SITEPULSE_OPTION_GEMINI_API_KEY, 'stored-value');
 
