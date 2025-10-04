@@ -367,6 +367,17 @@ $GLOBALS['sitepulse_debug_log_security_context'] = $sitepulse_security_context;
  */
 define('SITEPULSE_DEBUG_LOG', rtrim($sitepulse_debug_directory, '/\\') . '/sitepulse-debug.log');
 
+if (!defined('SITEPULSE_DEBUG_LOG_RETENTION')) {
+    /**
+     * Maximum number of rotated SitePulse debug log archives to keep.
+     *
+     * Hosts can override the `SITEPULSE_DEBUG_LOG_RETENTION` constant or use the
+     * `sitepulse_debug_log_retention` filter to raise or lower the retention cap.
+     * Set the value to -1 to disable automatic pruning.
+     */
+    define('SITEPULSE_DEBUG_LOG_RETENTION', 5);
+}
+
 require_once SITEPULSE_PATH . 'includes/debug-notices.php';
 require_once SITEPULSE_PATH . 'includes/plugin-impact-tracker.php';
 sitepulse_plugin_impact_tracker_bootstrap();
@@ -1108,6 +1119,111 @@ function sitepulse_real_log($message, $level = 'INFO') {
                 $error_message = sprintf('SitePulse: unable to rotate debug log file (%s).', SITEPULSE_DEBUG_LOG);
                 error_log($error_message);
                 sitepulse_schedule_debug_admin_notice($error_message);
+            }
+        }
+
+        $log_basename = basename(SITEPULSE_DEBUG_LOG);
+        $retention_limit = defined('SITEPULSE_DEBUG_LOG_RETENTION')
+            ? (int) SITEPULSE_DEBUG_LOG_RETENTION
+            : 5;
+
+        if (function_exists('apply_filters')) {
+            $filtered_retention = apply_filters('sitepulse_debug_log_retention', $retention_limit, $log_basename, $log_dir);
+
+            if (is_numeric($filtered_retention)) {
+                $retention_limit = (int) $filtered_retention;
+            }
+        }
+
+        if ($retention_limit < -1) {
+            $retention_limit = -1;
+        }
+
+        $archive_glob = glob($log_dir . '/' . $log_basename . '.*');
+        $archives = [];
+
+        if ($archive_glob !== false) {
+            foreach ($archive_glob as $archive_path) {
+                if (!is_string($archive_path) || $archive_path === '') {
+                    continue;
+                }
+
+                if (!is_file($archive_path)) {
+                    continue;
+                }
+
+                $archive_name = basename($archive_path);
+
+                if (!preg_match('/^' . preg_quote($log_basename, '/') . '\.\d+$/', $archive_name)) {
+                    continue;
+                }
+
+                $timestamp = null;
+
+                if (preg_match('/\.([0-9]+)$/', $archive_name, $matches)) {
+                    $timestamp = (int) $matches[1];
+                }
+
+                if ($timestamp === null && $filesystem instanceof WP_Filesystem_Base) {
+                    $fs_mtime = $filesystem->mtime($archive_path);
+
+                    if (is_numeric($fs_mtime)) {
+                        $timestamp = (int) $fs_mtime;
+                    }
+                }
+
+                if ($timestamp === null) {
+                    $file_mtime = @filemtime($archive_path);
+
+                    if ($file_mtime !== false) {
+                        $timestamp = (int) $file_mtime;
+                    }
+                }
+
+                if ($timestamp === null) {
+                    $timestamp = PHP_INT_MAX;
+                }
+
+                $archives[] = [
+                    'path'      => $archive_path,
+                    'timestamp' => $timestamp,
+                ];
+            }
+        }
+
+        if (!empty($archives)) {
+            usort(
+                $archives,
+                static function ($a, $b) {
+                    if ($a['timestamp'] === $b['timestamp']) {
+                        return strcmp($a['path'], $b['path']);
+                    }
+
+                    return ($a['timestamp'] < $b['timestamp']) ? -1 : 1;
+                }
+            );
+
+            if ($retention_limit >= 0 && count($archives) > $retention_limit) {
+                $excess = array_slice($archives, 0, count($archives) - $retention_limit);
+
+                foreach ($excess as $archive_data) {
+                    $archive_path = $archive_data['path'];
+                    $deleted = false;
+
+                    if ($filesystem instanceof WP_Filesystem_Base) {
+                        $deleted = $filesystem->delete($archive_path);
+                    }
+
+                    if (!$deleted && file_exists($archive_path)) {
+                        $deleted = @unlink($archive_path);
+                    }
+
+                    if (!$deleted && file_exists($archive_path)) {
+                        $error_message = sprintf('SitePulse: unable to delete old debug log archive (%s).', $archive_path);
+                        error_log($error_message);
+                        sitepulse_schedule_debug_admin_notice($error_message);
+                    }
+                }
             }
         }
     }
