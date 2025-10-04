@@ -14,6 +14,34 @@
     margin-top: 24px;
 }
 
+.sitepulse-settings-tabs {
+    margin-bottom: 0;
+}
+
+.sitepulse-settings-tabs .sitepulse-tab-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.sitepulse-settings-tabs .sitepulse-tab-link.nav-tab-active {
+    background: #fff;
+    border-bottom-color: #fff;
+    box-shadow: 0 1px 0 #fff;
+    color: #1d2327;
+    font-weight: 600;
+}
+
+.sitepulse-settings-tabs .sitepulse-tab-link:focus-visible {
+    outline: 2px solid #2271b1;
+    outline-offset: 2px;
+}
+
+.sitepulse-settings-tabs-container.is-enhanced .sitepulse-tab-panel[hidden] {
+    display: none;
+}
+
 .sitepulse-settings-form--secondary {
     margin-top: 0;
 }
