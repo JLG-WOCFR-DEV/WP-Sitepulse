@@ -91,6 +91,7 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         delete_option(SITEPULSE_OPTION_UPTIME_LOG);
         delete_option(SITEPULSE_OPTION_AI_INSIGHT_ERRORS);
         delete_option(SITEPULSE_OPTION_AI_JOB_SECRET);
+        delete_option(SITEPULSE_OPTION_AI_RETRY_AFTER);
         $this->reset_cached_insight_static();
     }
 
@@ -103,6 +104,7 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         delete_option(SITEPULSE_OPTION_UPTIME_LOG);
         delete_option(SITEPULSE_OPTION_AI_INSIGHT_ERRORS);
         delete_option(SITEPULSE_OPTION_AI_JOB_SECRET);
+        delete_option(SITEPULSE_OPTION_AI_RETRY_AFTER);
 
         parent::tear_down();
     }
@@ -620,6 +622,47 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
     }
 
     /**
+     * Ensures retry-after hints propagate to job data and scheduling options.
+     */
+    public function test_rate_limit_response_updates_retry_after_option() {
+        update_option(SITEPULSE_OPTION_GEMINI_API_KEY, 'test-api-key');
+
+        add_filter('pre_http_request', [$this, 'mock_gemini_rate_limited'], 10, 3);
+
+        $job_id = 'sitepulse-rate-limit-test';
+
+        sitepulse_ai_save_job_data($job_id, [
+            'status'     => 'queued',
+            'created_at' => time(),
+        ]);
+
+        try {
+            sitepulse_run_ai_insight_job($job_id);
+        } finally {
+            remove_filter('pre_http_request', [$this, 'mock_gemini_rate_limited'], 10);
+        }
+
+        $job_state = sitepulse_ai_get_job_data($job_id);
+
+        $this->assertIsArray($job_state, 'Job state should be recorded.');
+        $this->assertArrayHasKey('status', $job_state);
+        $this->assertSame('failed', $job_state['status'], 'Rate limit responses should mark the job as failed.');
+
+        $this->assertArrayHasKey('retry_after', $job_state);
+        $this->assertSame(60, $job_state['retry_after'], 'Retry delay should match the Retry-After header.');
+
+        $this->assertArrayHasKey('retry_at', $job_state);
+        $now = absint(current_time('timestamp', true));
+        $this->assertGreaterThan($now, $job_state['retry_at'], 'Retry timestamp must be in the future.');
+        $this->assertLessThanOrEqual($now + 60, $job_state['retry_at'], 'Retry timestamp should align with the declared delay.');
+
+        $option_value = (int) get_option(SITEPULSE_OPTION_AI_RETRY_AFTER, 0);
+        $this->assertSame($job_state['retry_at'], $option_value, 'Retry option should mirror the stored job timestamp.');
+
+        sitepulse_ai_delete_job_data($job_id);
+    }
+
+    /**
      * Returns a callable used to mock spawn_cron() invocations during tests.
      *
      * @param callable|string $callable  Original callable.
@@ -786,6 +829,38 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
             'body' => wp_json_encode([
                 'error' => [
                     'message' => '<b>Server exploded</b>',
+                ],
+            ]),
+        ];
+    }
+
+    /**
+     * Simulates a rate-limited Gemini response including Retry-After hints.
+     *
+     * @param false|array $preempt Whether to short-circuit the request.
+     * @param array       $args    The request arguments.
+     * @param string      $url     The request URL.
+     *
+     * @return array
+     */
+    public function mock_gemini_rate_limited($preempt, $args, $url) {
+        $this->http_request_count++;
+        $this->last_http_args = $args;
+
+        return [
+            'headers'  => [
+                'retry-after' => '60',
+            ],
+            'response' => [
+                'code'    => 429,
+                'message' => 'Too Many Requests',
+            ],
+            'body'     => wp_json_encode([
+                'error' => [
+                    'message'   => 'Quota exceeded',
+                    'rateLimit' => [
+                        'retryDelay' => '60s',
+                    ],
                 ],
             ]),
         ];
