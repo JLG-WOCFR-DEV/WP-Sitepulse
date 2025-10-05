@@ -40,6 +40,10 @@ if (!defined('SITEPULSE_OPTION_AI_JOB_SECRET')) {
     define('SITEPULSE_OPTION_AI_JOB_SECRET', 'sitepulse_ai_job_secret');
 }
 
+if (!defined('SITEPULSE_OPTION_AI_RETRY_AFTER')) {
+    define('SITEPULSE_OPTION_AI_RETRY_AFTER', 'sitepulse_ai_retry_after');
+}
+
 /**
  * Returns the HTML tags allowed in AI insight content.
  *
@@ -1022,6 +1026,360 @@ function sitepulse_ai_get_rate_limit_window_seconds($rate_limit) {
 }
 
 /**
+ * Returns the timestamp when Gemini requests can resume after a rate limit.
+ *
+ * @return int UTC timestamp or 0 when no delay applies.
+ */
+function sitepulse_ai_get_retry_after_timestamp() {
+    $timestamp = (int) get_option(SITEPULSE_OPTION_AI_RETRY_AFTER, 0);
+
+    if ($timestamp <= 0) {
+        return 0;
+    }
+
+    return $timestamp;
+}
+
+/**
+ * Stores the timestamp when Gemini requests can resume after a rate limit.
+ *
+ * @param int $timestamp UTC timestamp. Use 0 to clear.
+ *
+ * @return void
+ */
+function sitepulse_ai_set_retry_after_timestamp($timestamp) {
+    $timestamp = (int) $timestamp;
+
+    if ($timestamp <= 0) {
+        delete_option(SITEPULSE_OPTION_AI_RETRY_AFTER);
+
+        return;
+    }
+
+    update_option(SITEPULSE_OPTION_AI_RETRY_AFTER, $timestamp, false);
+}
+
+/**
+ * Converts human readable durations (e.g. "30s", "5m", "PT1M30S") to seconds.
+ *
+ * @param mixed $duration Duration string or numeric value.
+ *
+ * @return int Duration in seconds.
+ */
+function sitepulse_ai_parse_duration_string($duration, $now = null) {
+    if (null === $now) {
+        $now = absint(current_time('timestamp', true));
+    }
+
+    if (is_numeric($duration)) {
+        $seconds = (float) $duration;
+
+        return (int) max(0, round($seconds));
+    }
+
+    if (!is_string($duration)) {
+        return 0;
+    }
+
+    $duration = trim($duration);
+
+    if ('' === $duration) {
+        return 0;
+    }
+
+    if (preg_match('/^P/i', $duration)) {
+        try {
+            $base     = new \DateTimeImmutable('@0');
+            $interval = new \DateInterval($duration);
+            $target   = $base->add($interval);
+
+            return (int) max(0, $target->getTimestamp());
+        } catch (\Exception $exception) {
+            // Fall back to heuristic parsing below.
+        }
+    }
+
+    if (preg_match('/^(?P<value>\d+(?:\.\d+)?)(?P<unit>[a-z]+)/i', strtolower($duration), $matches)) {
+        $value = (float) $matches['value'];
+        $unit  = $matches['unit'];
+
+        switch ($unit) {
+            case 's':
+            case 'sec':
+            case 'secs':
+            case 'second':
+            case 'seconds':
+                return (int) round($value);
+            case 'm':
+            case 'min':
+            case 'mins':
+            case 'minute':
+            case 'minutes':
+                return (int) round($value * MINUTE_IN_SECONDS);
+            case 'h':
+            case 'hr':
+            case 'hrs':
+            case 'hour':
+            case 'hours':
+                return (int) round($value * HOUR_IN_SECONDS);
+            case 'd':
+            case 'day':
+            case 'days':
+                return (int) round($value * DAY_IN_SECONDS);
+        }
+    }
+
+    $timestamp = strtotime($duration);
+
+    if (false !== $timestamp && $timestamp > $now) {
+        return (int) max(0, $timestamp - $now);
+    }
+
+    return 0;
+}
+
+/**
+ * Calculates the number of seconds until a given timestamp value.
+ *
+ * @param mixed $value Raw timestamp value (string/number).
+ * @param int   $now   Current UTC timestamp.
+ *
+ * @return int
+ */
+function sitepulse_ai_seconds_until_timestamp($value, $now) {
+    if (is_numeric($value)) {
+        $candidate = (float) $value;
+
+        if ($candidate > 1_000_000_000_000) {
+            $candidate /= 1_000;
+        }
+
+        $candidate = (int) round($candidate);
+
+        if ($candidate > $now) {
+            return (int) max(0, $candidate - $now);
+        }
+
+        return 0;
+    }
+
+    if (!is_string($value)) {
+        return 0;
+    }
+
+    $value = trim($value);
+
+    if ('' === $value) {
+        return 0;
+    }
+
+    $timestamp = strtotime($value);
+
+    if (false === $timestamp) {
+        return 0;
+    }
+
+    if ($timestamp <= $now) {
+        return 0;
+    }
+
+    return (int) ($timestamp - $now);
+}
+
+/**
+ * Parses retry-after hints from mixed values.
+ *
+ * @param mixed $value Raw value to inspect.
+ * @param int   $now   Current UTC timestamp.
+ *
+ * @return int Seconds until retry.
+ */
+function sitepulse_ai_parse_retry_value($value, $now) {
+    if (is_array($value)) {
+        return sitepulse_ai_collect_retry_after_seconds($value, $now);
+    }
+
+    if (is_numeric($value)) {
+        $numeric = (float) $value;
+
+        if ($numeric > 1_000_000_000_000) {
+            $numeric /= 1_000;
+        }
+
+        if ($numeric > $now + 5) {
+            return sitepulse_ai_seconds_until_timestamp($numeric, $now);
+        }
+
+        return (int) max(0, round($numeric));
+    }
+
+    if (!is_string($value)) {
+        return 0;
+    }
+
+    $value = trim($value);
+
+    if ('' === $value) {
+        return 0;
+    }
+
+    if (is_numeric($value)) {
+        return sitepulse_ai_parse_retry_value((float) $value, $now);
+    }
+
+    $duration = sitepulse_ai_parse_duration_string($value, $now);
+
+    if ($duration > 0) {
+        return $duration;
+    }
+
+    return sitepulse_ai_seconds_until_timestamp($value, $now);
+}
+
+/**
+ * Recursively scans decoded JSON payloads for retry-after hints.
+ *
+ * @param array<string,mixed> $data Decoded JSON payload.
+ * @param int                 $now  Current UTC timestamp.
+ *
+ * @return int Seconds until retry.
+ */
+function sitepulse_ai_collect_retry_after_seconds($data, $now) {
+    $max_delay = 0;
+
+    foreach ($data as $key => $value) {
+        if (is_array($value)) {
+            $max_delay = max($max_delay, sitepulse_ai_collect_retry_after_seconds($value, $now));
+
+            continue;
+        }
+
+        if (!is_string($key)) {
+            continue;
+        }
+
+        $normalized_key = strtolower(str_replace(['-', '_', ' '], '', $key));
+
+        if ('' === $normalized_key) {
+            continue;
+        }
+
+        $duration_keys = [
+            'retryafter',
+            'retryafterseconds',
+            'retrydelay',
+            'retrydelayseconds',
+            'retrydelaysec',
+            'interval',
+            'duration',
+            'period',
+            'remainingtime',
+            'remaining',
+            'waittime',
+            'seconds',
+        ];
+
+        $timestamp_keys = [
+            'retryat',
+            'resumetime',
+            'resumeat',
+            'resettime',
+            'resetat',
+            'reset',
+            'resettimestamp',
+            'resettimeseconds',
+            'retrytimestamp',
+            'retrytimestampseconds',
+        ];
+
+        if (in_array($normalized_key, $duration_keys, true)) {
+            $max_delay = max($max_delay, sitepulse_ai_parse_retry_value($value, $now));
+
+            continue;
+        }
+
+        if (in_array($normalized_key, $timestamp_keys, true)) {
+            $candidate = sitepulse_ai_seconds_until_timestamp($value, $now);
+
+            if ($candidate <= 0) {
+                $candidate = sitepulse_ai_parse_retry_value($value, $now);
+            }
+
+            $max_delay = max($max_delay, $candidate);
+        }
+    }
+
+    return (int) $max_delay;
+}
+
+/**
+ * Extracts retry-after hints from HTTP headers.
+ *
+ * @param mixed $headers Response headers.
+ * @param int   $now     Current UTC timestamp.
+ *
+ * @return int Seconds until retry.
+ */
+function sitepulse_ai_retry_after_from_headers($headers, $now) {
+    if ($headers instanceof WP_HTTP_Headers) {
+        $headers = $headers->getAll();
+    }
+
+    if (!is_array($headers)) {
+        return 0;
+    }
+
+    foreach ($headers as $name => $value) {
+        if (!is_string($name)) {
+            continue;
+        }
+
+        if (is_array($value)) {
+            $value = end($value);
+        }
+
+        if (!is_string($value)) {
+            continue;
+        }
+
+        if ('retry-after' !== strtolower($name)) {
+            continue;
+        }
+
+        $seconds = sitepulse_ai_parse_retry_value($value, $now);
+
+        if ($seconds > 0) {
+            return $seconds;
+        }
+    }
+
+    return 0;
+}
+
+/**
+ * Determines the retry-after delay from HTTP headers and JSON payload.
+ *
+ * @param mixed                       $headers       HTTP headers.
+ * @param array<string,mixed>|null    $decoded_error Optional decoded error payload.
+ * @param int                         $now           Current UTC timestamp.
+ *
+ * @return int Seconds until retry.
+ */
+function sitepulse_ai_extract_retry_after_delay($headers, $decoded_error, $now) {
+    $delay = sitepulse_ai_retry_after_from_headers($headers, $now);
+
+    if ($delay > 0) {
+        return $delay;
+    }
+
+    if (is_array($decoded_error)) {
+        $delay = sitepulse_ai_collect_retry_after_seconds($decoded_error, $now);
+    }
+
+    return (int) max(0, $delay);
+}
+
+/**
  * Creates a WP_Error instance while logging the associated message.
  *
  * @param string   $code        Error code.
@@ -1030,13 +1388,17 @@ function sitepulse_ai_get_rate_limit_window_seconds($rate_limit) {
  *
  * @return WP_Error
  */
-function sitepulse_ai_create_wp_error($code, $message, $status_code = null) {
+function sitepulse_ai_create_wp_error($code, $message, $status_code = null, array $extra_data = []) {
     sitepulse_ai_record_critical_error($message, $status_code);
 
     $data = [];
 
     if (null !== $status_code) {
         $data['status_code'] = (int) $status_code;
+    }
+
+    foreach ($extra_data as $key => $value) {
+        $data[$key] = $value;
     }
 
     return new WP_Error($code, $message, $data);
@@ -1058,6 +1420,64 @@ function sitepulse_ai_get_error_status_code(WP_Error $error, $default_code = 500
     }
 
     return (int) $default_code;
+}
+
+/**
+ * Retrieves the retry-after delay attached to an error when available.
+ *
+ * @param WP_Error $error Error object.
+ *
+ * @return int Seconds until retry.
+ */
+function sitepulse_ai_get_error_retry_after(WP_Error $error) {
+    $data = $error->get_error_data();
+
+    if (!is_array($data)) {
+        return 0;
+    }
+
+    if (isset($data['retry_after'])) {
+        return (int) max(0, $data['retry_after']);
+    }
+
+    if (isset($data['retry_at'])) {
+        $retry_at = (int) $data['retry_at'];
+
+        if ($retry_at > 0) {
+            $now = absint(current_time('timestamp', true));
+
+            return (int) max(0, $retry_at - $now);
+        }
+    }
+
+    return 0;
+}
+
+/**
+ * Retrieves the retry-at timestamp attached to an error when available.
+ *
+ * @param WP_Error $error Error object.
+ *
+ * @return int UTC timestamp or 0 when missing.
+ */
+function sitepulse_ai_get_error_retry_at(WP_Error $error) {
+    $data = $error->get_error_data();
+
+    if (is_array($data) && isset($data['retry_at'])) {
+        return (int) max(0, $data['retry_at']);
+    }
+
+    if (is_array($data) && isset($data['retry_after'])) {
+        $delay = (int) max(0, $data['retry_after']);
+
+        if ($delay > 0) {
+            $now = absint(current_time('timestamp', true));
+
+            return $now + $delay;
+        }
+    }
+
+    return 0;
 }
 
 /**
@@ -1217,9 +1637,11 @@ function sitepulse_ai_execute_generation($api_key, $selected_model, array $avail
 
     $status_code = (int) wp_remote_retrieve_response_code($response);
     $body        = wp_remote_retrieve_body($response);
+    $headers     = wp_remote_retrieve_headers($response);
 
     if ($status_code < 200 || $status_code >= 300) {
         $error_detail = '';
+        $decoded_error = null;
 
         if (!empty($body)) {
             $decoded_error = json_decode($body, true);
@@ -1241,8 +1663,36 @@ function sitepulse_ai_execute_generation($api_key, $selected_model, array $avail
             esc_html__('Erreur lors de la génération de l’analyse IA : %s', 'sitepulse'),
             $sanitized_error_detail
         );
+        $extra_data = [];
 
-        return sitepulse_ai_create_wp_error('sitepulse_ai_http_error', $error_message, $status_code);
+        if (in_array($status_code, [429, 503], true)) {
+            $now_utc             = absint(current_time('timestamp', true));
+            $retry_after_seconds = sitepulse_ai_extract_retry_after_delay($headers, is_array($decoded_error) ? $decoded_error : null, $now_utc);
+
+            if ($retry_after_seconds > 0) {
+                $retry_at = $now_utc + $retry_after_seconds;
+
+                sitepulse_ai_set_retry_after_timestamp($retry_at);
+
+                $human_delay = function_exists('human_time_diff')
+                    ? human_time_diff($now_utc, $retry_at)
+                    : sprintf('%ds', max(1, (int) $retry_after_seconds));
+
+                $error_message = sprintf(
+                    /* translators: 1: error message, 2: human readable delay. */
+                    esc_html__('Erreur lors de la génération de l’analyse IA : %1$s. Réessayez dans %2$s.', 'sitepulse'),
+                    $sanitized_error_detail,
+                    $human_delay
+                );
+
+                $extra_data = [
+                    'retry_after' => (int) $retry_after_seconds,
+                    'retry_at'    => (int) $retry_at,
+                ];
+            }
+        }
+
+        return sitepulse_ai_create_wp_error('sitepulse_ai_http_error', $error_message, $status_code, $extra_data);
     }
 
     $decoded_body = json_decode($body, true);
@@ -1367,10 +1817,19 @@ function sitepulse_ai_schedule_generation_job($force_refresh) {
 
         $error_message = isset($job_state['message']) ? (string) $job_state['message'] : $fallback_message;
         $status_code   = isset($job_state['code']) ? (int) $job_state['code'] : 500;
+        $extra_data    = [];
+
+        if (isset($job_state['retry_after'])) {
+            $extra_data['retry_after'] = (int) $job_state['retry_after'];
+        }
+
+        if (isset($job_state['retry_at'])) {
+            $extra_data['retry_at'] = (int) $job_state['retry_at'];
+        }
 
         sitepulse_ai_delete_job_data($job_id);
 
-        return sitepulse_ai_create_wp_error('sitepulse_ai_job_schedule_failed', $error_message, $status_code);
+        return sitepulse_ai_create_wp_error('sitepulse_ai_job_schedule_failed', $error_message, $status_code, $extra_data);
     }
 
     $spawn_result = sitepulse_ai_spawn_cron($current_time);
@@ -1477,13 +1936,33 @@ function sitepulse_run_ai_insight_job($job_id) {
         if (is_wp_error($result)) {
             $error_message = $result->get_error_message();
             $status_code   = sitepulse_ai_get_error_status_code($result, 500);
+            $retry_after   = sitepulse_ai_get_error_retry_after($result);
+            $retry_at      = sitepulse_ai_get_error_retry_at($result);
 
-            sitepulse_ai_save_job_data($job_id, array_merge($job_data, [
+            if ($retry_at > 0) {
+                sitepulse_ai_set_retry_after_timestamp($retry_at);
+            } elseif ($retry_after > 0) {
+                $calculated_retry_at = absint(current_time('timestamp', true)) + $retry_after;
+                sitepulse_ai_set_retry_after_timestamp($calculated_retry_at);
+                $retry_at = $calculated_retry_at;
+            }
+
+            $job_failure = array_merge($job_data, [
                 'status'   => 'failed',
                 'message'  => $error_message,
                 'code'     => $status_code,
                 'finished' => time(),
-            ]));
+            ]);
+
+            if ($retry_after > 0) {
+                $job_failure['retry_after'] = (int) $retry_after;
+            }
+
+            if ($retry_at > 0) {
+                $job_failure['retry_at'] = (int) $retry_at;
+            }
+
+            sitepulse_ai_save_job_data($job_id, $job_failure);
 
             return;
         }
@@ -1533,6 +2012,7 @@ function sitepulse_run_ai_insight_job($job_id) {
         sitepulse_ai_record_history_entry($history_entry);
 
         update_option(SITEPULSE_OPTION_AI_LAST_RUN, absint(current_time('timestamp', true)));
+        sitepulse_ai_set_retry_after_timestamp(0);
     } catch (Throwable $throwable) {
         $message = sprintf(
             /* translators: %s: error message */
@@ -2144,21 +2624,61 @@ function sitepulse_generate_ai_insight() {
         ], $status_code);
     }
 
+    $now_utc              = absint(current_time('timestamp', true));
+    $retry_after_timestamp = sitepulse_ai_get_retry_after_timestamp();
+
+    if ($retry_after_timestamp > 0) {
+        if ($retry_after_timestamp <= $now_utc) {
+            sitepulse_ai_set_retry_after_timestamp(0);
+        } else {
+            $time_remaining = max(0, $retry_after_timestamp - $now_utc);
+            $delay_payload  = [
+                'retry_after' => $time_remaining,
+                'retry_at'    => $retry_after_timestamp,
+            ];
+            $human_delay    = function_exists('human_time_diff')
+                ? human_time_diff($now_utc, $retry_after_timestamp)
+                : sprintf('%ds', max(1, $time_remaining));
+
+            if (!empty($cached_payload)) {
+                $cached_payload['cached'] = true;
+                $cached_payload = array_merge($cached_payload, $delay_payload);
+
+                wp_send_json_success($cached_payload);
+            }
+
+            $error_message = sprintf(
+                /* translators: %s: human readable delay. */
+                esc_html__('Gemini impose une période d’attente. Réessayez dans %s.', 'sitepulse'),
+                $human_delay
+            );
+
+            wp_send_json_error(array_merge([
+                'message' => $error_message,
+            ], $delay_payload), 429);
+        }
+    }
+
     $rate_limit_value   = sitepulse_ai_get_current_rate_limit_value();
     $rate_limit_window  = sitepulse_ai_get_rate_limit_window_seconds($rate_limit_value);
     $last_run_timestamp = (int) get_option(SITEPULSE_OPTION_AI_LAST_RUN, 0);
 
     if ($rate_limit_window > 0 && $last_run_timestamp > 0) {
-        $now_utc = absint(current_time('timestamp', true));
         $next_allowed = $last_run_timestamp + $rate_limit_window;
 
         if ($next_allowed > $now_utc) {
+            $time_remaining = max(0, $next_allowed - $now_utc);
+            $delay_payload  = [
+                'retry_after' => $time_remaining,
+                'retry_at'    => $next_allowed,
+            ];
+
             if (!empty($cached_payload)) {
                 $cached_payload['cached'] = true;
+                $cached_payload = array_merge($cached_payload, $delay_payload);
                 wp_send_json_success($cached_payload);
             }
 
-            $time_remaining = max(0, $next_allowed - $now_utc);
             $human_delay = human_time_diff($now_utc, $next_allowed);
             $error_message = sprintf(
                 /* translators: 1: Human readable delay (e.g. "5 minutes"), 2: rate limit label. */
@@ -2167,10 +2687,9 @@ function sitepulse_generate_ai_insight() {
                 sitepulse_ai_get_rate_limit_label($rate_limit_value)
             );
 
-            wp_send_json_error([
+            wp_send_json_error(array_merge([
                 'message' => $error_message,
-                'retry_after' => $time_remaining,
-            ], 429);
+            ], $delay_payload), 429);
         }
     }
 
@@ -2182,10 +2701,23 @@ function sitepulse_generate_ai_insight() {
 
     if (is_wp_error($job_id)) {
         $status_code = sitepulse_ai_get_error_status_code($job_id, 500);
-
-        wp_send_json_error([
+        $error_payload = [
             'message' => $job_id->get_error_message(),
-        ], $status_code);
+        ];
+
+        $retry_after = sitepulse_ai_get_error_retry_after($job_id);
+
+        if ($retry_after > 0) {
+            $error_payload['retry_after'] = $retry_after;
+
+            $retry_at = sitepulse_ai_get_error_retry_at($job_id);
+
+            if ($retry_at > 0) {
+                $error_payload['retry_at'] = $retry_at;
+            }
+        }
+
+        wp_send_json_error($error_payload, $status_code);
     }
 
     wp_send_json_success([
@@ -2250,6 +2782,13 @@ function sitepulse_get_ai_insight_status() {
         $response['message'] = isset($job_data['message']) ? (string) $job_data['message'] : esc_html__('La génération de l’analyse IA a échoué.', 'sitepulse');
         if (isset($job_data['code'])) {
             $response['code'] = (int) $job_data['code'];
+        }
+        if (isset($job_data['retry_after'])) {
+            $response['retry_after'] = (int) $job_data['retry_after'];
+        }
+
+        if (isset($job_data['retry_at'])) {
+            $response['retry_at'] = (int) $job_data['retry_at'];
         }
     }
 
