@@ -14,6 +14,198 @@
     margin-top: 24px;
 }
 
+.sitepulse-overview-callout {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+    background: #fff;
+    border: 1px solid #dcdfe5;
+    border-left: 4px solid #2271b1;
+    border-radius: 6px;
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.sitepulse-overview-callout__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: #f0f6fc;
+    color: #1d2327;
+    flex-shrink: 0;
+}
+
+.sitepulse-overview-callout__icon .dashicons {
+    font-size: 28px;
+    line-height: 1;
+}
+
+.sitepulse-overview-callout__content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.sitepulse-overview-callout__header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.sitepulse-overview-callout__title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #1d2327;
+    margin: 0;
+}
+
+.sitepulse-overview-callout__badge {
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.sitepulse-overview-callout__badge.is-complete {
+    background: #ecfdf5;
+    color: #047857;
+}
+
+.sitepulse-overview-callout__badge.is-progress {
+    background: #fef3c7;
+    color: #b45309;
+}
+
+.sitepulse-overview-callout__body {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+}
+
+.sitepulse-overview-callout__section {
+    flex: 1 1 220px;
+}
+
+.sitepulse-overview-callout__section-title {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: #4a5568;
+    margin: 0 0 8px;
+}
+
+.sitepulse-overview-callout__status-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.sitepulse-overview-callout__status-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.sitepulse-overview-callout__status-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1d2327;
+}
+
+.sitepulse-overview-callout__status-content {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.sitepulse-overview-callout__description {
+    margin: 0;
+    color: #4a5568;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.sitepulse-overview-callout__inline-link {
+    font-size: 12px;
+    font-weight: 600;
+    color: #2271b1;
+    text-decoration: none;
+}
+
+.sitepulse-overview-callout__inline-link:hover,
+.sitepulse-overview-callout__inline-link:focus {
+    text-decoration: underline;
+}
+
+.sitepulse-overview-callout__footer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.sitepulse-overview-callout__action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 4px;
+    border: 1px solid #d0d5dd;
+    background: #f8fafc;
+    color: #1d2327;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.sitepulse-overview-callout__action.is-primary {
+    background: #2271b1;
+    border-color: #2271b1;
+    color: #fff;
+}
+
+.sitepulse-overview-callout__action:hover,
+.sitepulse-overview-callout__action:focus {
+    text-decoration: none;
+    box-shadow: 0 0 0 1px rgba(34, 113, 177, 0.15);
+}
+
+.sitepulse-overview-callout__action:focus-visible {
+    outline: 2px solid #2271b1;
+    outline-offset: 2px;
+}
+
+.sitepulse-overview-callout__action.is-primary:hover,
+.sitepulse-overview-callout__action.is-primary:focus {
+    background: #195c8f;
+    border-color: #195c8f;
+}
+
+@media (max-width: 782px) {
+    .sitepulse-overview-callout {
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .sitepulse-overview-callout__icon {
+        width: 44px;
+        height: 44px;
+    }
+}
+
 .sitepulse-settings-tabs {
     margin-bottom: 0;
 }
