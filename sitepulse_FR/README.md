@@ -18,6 +18,7 @@ Sitepulse - JLG takes the pulse of your WordPress site, offering modules for:
 - Custom dashboards and multisite support
 - Customisable thresholds for speed alerts, uptime targets and revision cleanup suggestions
 - Site Health integration surfacing SitePulse alerts and AI requirements
+- Accessible sharing tools for AI recommendations (CSV export, clipboard copy, contextual notes)
 
 ### Key performance defaults
 
@@ -43,6 +44,17 @@ SitePulse enregistre désormais deux tests visibles dans l’outil « Santé du
 - **Clé API Gemini SitePulse** vérifie que le module AI Insights dispose d’une clé API prête à l’emploi avant de lancer des analyses.
 
 Ces tests facilitent la détection proactive des problèmes susceptibles d’empêcher l’exécution des tâches planifiées ou des analyses IA.
+
+## Exporter et partager les recommandations IA
+
+Depuis la page **Analyses par IA**, la section « Historique des recommandations » répertorie les réponses générées et propose plusieurs actions accessibles :
+
+- Filtrez les recommandations par modèle ou limitation avant d’exporter.
+- Cliquez sur **Exporter en CSV** pour télécharger un fichier structuré (format UTF-8, séparateur « ; ») contenant la date, le modèle, la limitation, le texte et vos éventuelles notes personnelles.
+- Cliquez sur **Copier** pour envoyer le même contenu (y compris les notes) dans le presse-papiers. SitePulse prépare automatiquement un texte brut et utilise l’API du presse-papiers quand elle est disponible, avec une annonce via `aria-live` pour les lecteurs d’écran.
+- Chaque élément d’historique propose un champ « Note personnelle ». Les commentaires saisis sont enregistrés en base via une option dédiée et sont inclus dans les exports ultérieurs.
+
+Les actions d’export et de copie prennent en compte vos filtres actifs : seules les recommandations visibles sont partagées. Un message de confirmation accessible informe systématiquement du résultat (succès ou erreur) pour garantir une expérience inclusive.
 
 ## Sécuriser la clé API Gemini
 
