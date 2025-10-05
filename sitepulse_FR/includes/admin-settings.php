@@ -179,6 +179,15 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_ALERT_RECIPIENTS, [
         'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_alert_recipients', 'default' => []
     ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS, [
+        'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_error_alert_delivery_channels', 'default' => ['email']
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS, [
+        'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_error_alert_webhooks', 'default' => []
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES, [
+        'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_error_alert_severities', 'default' => ['warning', 'critical']
+    ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_URL, [
         'type' => 'string', 'sanitize_callback' => 'esc_url_raw', 'default' => ''
     ]);
@@ -447,6 +456,153 @@ function sitepulse_sanitize_alert_recipients($value) {
     }
 
     return array_values(array_unique($sanitized));
+}
+
+/**
+ * Returns the available delivery channel labels for error alerts.
+ *
+ * @return array<string, string> Associative array of channel => label.
+ */
+function sitepulse_get_error_alert_delivery_channel_choices() {
+    return [
+        'email'   => __('E-mail', 'sitepulse'),
+        'webhook' => __('Webhooks', 'sitepulse'),
+    ];
+}
+
+/**
+ * Sanitizes the delivery channels enabled for error alerts.
+ *
+ * @param mixed $value Raw user input value.
+ * @return array List of allowed delivery channels.
+ */
+function sitepulse_sanitize_error_alert_delivery_channels($value) {
+    if (is_string($value)) {
+        $value = [$value];
+    } elseif (!is_array($value)) {
+        $value = [];
+    }
+
+    $choices   = sitepulse_get_error_alert_delivery_channel_choices();
+    $sanitized = [];
+
+    foreach ($value as $channel) {
+        if (!is_string($channel)) {
+            continue;
+        }
+
+        $channel = sanitize_key($channel);
+
+        if ($channel === '' || !isset($choices[$channel])) {
+            continue;
+        }
+
+        if (!in_array($channel, $sanitized, true)) {
+            $sanitized[] = $channel;
+        }
+    }
+
+    if (empty($sanitized)) {
+        $sanitized[] = 'email';
+    }
+
+    return $sanitized;
+}
+
+/**
+ * Sanitizes the list of webhook URLs used for error alert delivery.
+ *
+ * @param mixed $value Raw user input value.
+ * @return array List of validated webhook URLs.
+ */
+function sitepulse_sanitize_error_alert_webhooks($value) {
+    if (is_string($value)) {
+        $value = preg_split('/[\r\n]+/', $value);
+    } elseif (!is_array($value)) {
+        $value = [];
+    }
+
+    $sanitized = [];
+
+    foreach ($value as $url) {
+        if (!is_string($url)) {
+            continue;
+        }
+
+        $url = trim($url);
+
+        if ($url === '') {
+            continue;
+        }
+
+        $normalized = esc_url_raw($url);
+
+        if ($normalized === '') {
+            continue;
+        }
+
+        if (function_exists('wp_http_validate_url') && !wp_http_validate_url($normalized)) {
+            continue;
+        }
+
+        if (!in_array($normalized, $sanitized, true)) {
+            $sanitized[] = $normalized;
+        }
+    }
+
+    return $sanitized;
+}
+
+/**
+ * Returns the severity labels available for error alerts.
+ *
+ * @return array<string, string> Associative array of severity => label.
+ */
+function sitepulse_get_error_alert_severity_choices() {
+    return [
+        'info'     => __('Information', 'sitepulse'),
+        'warning'  => __('Avertissement', 'sitepulse'),
+        'critical' => __('Critique', 'sitepulse'),
+    ];
+}
+
+/**
+ * Sanitizes the list of severities that should trigger notifications.
+ *
+ * @param mixed $value Raw user input value.
+ * @return array List of allowed severity identifiers.
+ */
+function sitepulse_sanitize_error_alert_severities($value) {
+    if (is_string($value)) {
+        $value = [$value];
+    } elseif (!is_array($value)) {
+        $value = [];
+    }
+
+    $choices   = sitepulse_get_error_alert_severity_choices();
+    $sanitized = [];
+
+    foreach ($value as $severity) {
+        if (!is_string($severity)) {
+            continue;
+        }
+
+        $severity = sanitize_key($severity);
+
+        if ($severity === '' || !isset($choices[$severity])) {
+            continue;
+        }
+
+        if (!in_array($severity, $sanitized, true)) {
+            $sanitized[] = $severity;
+        }
+    }
+
+    if (empty($sanitized)) {
+        $sanitized = ['warning', 'critical'];
+    }
+
+    return $sanitized;
 }
 
 /**
@@ -1417,17 +1573,40 @@ function sitepulse_settings_page() {
     $test_notice_class = 'updated';
 
     if (isset($_GET['sitepulse_alert_test'])) {
-        $test_status = sanitize_key(wp_unslash($_GET['sitepulse_alert_test']));
+        $test_status  = sanitize_key(wp_unslash($_GET['sitepulse_alert_test']));
+        $test_channel = isset($_GET['sitepulse_alert_channel']) ? sanitize_key(wp_unslash($_GET['sitepulse_alert_channel'])) : '';
+
+        $channel_labels = [
+            'email'   => esc_html__('e-mail', 'sitepulse'),
+            'webhook' => esc_html__('webhook', 'sitepulse'),
+        ];
+
+        $channel_label = $test_channel !== '' && isset($channel_labels[$test_channel])
+            ? $channel_labels[$test_channel]
+            : esc_html__('canal', 'sitepulse');
 
         if ($test_status !== '') {
             if ($test_status === 'success') {
-                $test_notice       = esc_html__('E-mail de test envoyé. Vérifiez votre boîte de réception.', 'sitepulse');
+                if ($test_channel === 'email') {
+                    $test_notice = esc_html__('E-mail de test envoyé. Vérifiez votre boîte de réception.', 'sitepulse');
+                } elseif ($test_channel === 'webhook') {
+                    $test_notice = esc_html__('Webhook de test déclenché avec succès.', 'sitepulse');
+                } else {
+                    $test_notice = esc_html__('Test de canal exécuté avec succès.', 'sitepulse');
+                }
                 $test_notice_class = 'updated';
             } elseif ($test_status === 'no_recipients') {
                 $test_notice       = esc_html__('Impossible d’envoyer le test : aucun destinataire valide.', 'sitepulse');
                 $test_notice_class = 'error';
+            } elseif ($test_status === 'no_webhooks') {
+                $test_notice       = esc_html__('Aucune URL de webhook valide n’a été trouvée pour le test.', 'sitepulse');
+                $test_notice_class = 'error';
+            } elseif ($test_status === 'no_channels') {
+                $test_notice       = esc_html__('Impossible d’exécuter le test : aucun canal de diffusion n’est actif.', 'sitepulse');
+                $test_notice_class = 'error';
             } elseif ($test_status === 'error') {
-                $test_notice       = esc_html__('L’envoi de l’e-mail de test a échoué. Consultez les journaux ou réessayez.', 'sitepulse');
+                /* translators: %s is the channel label (e-mail or webhook). */
+                $test_notice       = sprintf(esc_html__('L’envoi de test pour le canal %s a échoué. Consultez les journaux ou réessayez.', 'sitepulse'), $channel_label);
                 $test_notice_class = 'error';
             }
         }
@@ -1540,17 +1719,30 @@ function sitepulse_settings_page() {
     });
 
     $alert_recipients_option = (array) get_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, []);
-    $alert_recipients_value = implode("\n", $alert_recipients_option);
-    $alert_recipients_clean = array_values(array_filter(array_map('trim', $alert_recipients_option), static function ($recipient) {
-        return $recipient !== '';
-    }));
+    $alert_recipients_clean = sitepulse_sanitize_alert_recipients($alert_recipients_option);
+    $alert_recipients_value = implode("\n", $alert_recipients_clean);
     $enabled_alert_channels_option = (array) get_option(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS, ['cpu', 'php_fatal']);
     $enabled_alert_channels = array_values(array_filter(array_map('strval', $enabled_alert_channels_option), static function ($channel) {
         return $channel !== '';
     }));
     $has_alert_channels = !empty($enabled_alert_channels);
-    $has_alert_recipients = !empty($alert_recipients_clean);
-    $has_alerts_configured = $has_alert_channels && $has_alert_recipients;
+    $delivery_channel_choices = sitepulse_get_error_alert_delivery_channel_choices();
+    $configured_delivery_channels = sitepulse_sanitize_error_alert_delivery_channels(
+        (array) get_option(SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS, ['email'])
+    );
+    $email_delivery_enabled = in_array('email', $configured_delivery_channels, true);
+    $webhook_delivery_enabled = in_array('webhook', $configured_delivery_channels, true);
+    $webhook_urls_clean = sitepulse_sanitize_error_alert_webhooks(
+        (array) get_option(SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS, [])
+    );
+    $webhook_urls_value = implode("\n", $webhook_urls_clean);
+    $severity_choices = sitepulse_get_error_alert_severity_choices();
+    $enabled_severities = sitepulse_sanitize_error_alert_severities(
+        (array) get_option(SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES, ['warning', 'critical'])
+    );
+    $has_alert_recipients = !$email_delivery_enabled || !empty($alert_recipients_clean);
+    $has_webhook_targets = !$webhook_delivery_enabled || !empty($webhook_urls_clean);
+    $has_alerts_configured = $has_alert_channels && $has_alert_recipients && $has_webhook_targets;
 
     $next_steps_overview = [
         [
@@ -1564,7 +1756,7 @@ function sitepulse_settings_page() {
         [
             'key'          => 'alerts',
             'label'        => esc_html__('Configurer les alertes critiques', 'sitepulse'),
-            'description'  => esc_html__('Sélectionnez les canaux et saisissez au moins un destinataire pour recevoir les notifications.', 'sitepulse'),
+            'description'  => esc_html__('Sélectionnez les canaux et configurez les destinataires (e-mails ou webhooks) pour recevoir les notifications.', 'sitepulse'),
             'is_complete'  => $has_alerts_configured,
             'target'       => 'sitepulse-tab-alerts',
             'href'         => '#sitepulse-section-alerts',
@@ -2406,6 +2598,52 @@ function sitepulse_settings_page() {
                             <p class="sitepulse-card-description"><?php esc_html_e("Entrez une adresse par ligne (ou séparées par des virgules). L'adresse e-mail de l'administrateur sera toujours incluse si elle est valide.", 'sitepulse'); ?></p>
                         </div>
                     </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Canaux de diffusion', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <input type="hidden" name="<?php echo esc_attr(SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS); ?>[]" value="">
+                            <?php foreach ($delivery_channel_choices as $channel_key => $channel_label) :
+                                $channel_id = 'sitepulse-alert-delivery-' . $channel_key;
+                                $is_checked = in_array($channel_key, $configured_delivery_channels, true);
+                            ?>
+                                <label class="sitepulse-toggle" for="<?php echo esc_attr($channel_id); ?>">
+                                    <input type="checkbox" id="<?php echo esc_attr($channel_id); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS); ?>[]" value="<?php echo esc_attr($channel_key); ?>" <?php checked($is_checked); ?>>
+                                    <span><?php echo esc_html($channel_label); ?></span>
+                                </label>
+                            <?php endforeach; ?>
+                            <p class="sitepulse-card-description"><?php esc_html_e('Activez au moins un canal pour recevoir les alertes critiques.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Webhooks sortants', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <label class="sitepulse-field-label" for="sitepulse-alert-webhooks"><?php esc_html_e('URL de webhook', 'sitepulse'); ?></label>
+                            <textarea id="sitepulse-alert-webhooks" name="<?php echo esc_attr(SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS); ?>" rows="4" class="large-text code sitepulse-textarea" placeholder="https://example.com/webhook"><?php echo esc_textarea($webhook_urls_value); ?></textarea>
+                            <p class="sitepulse-card-description"><?php esc_html_e('Indiquez une URL par ligne. Les requêtes contiendront un corps JSON avec le type, le sujet, le message et la sévérité.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Niveaux de sévérité suivis', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <input type="hidden" name="<?php echo esc_attr(SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES); ?>[]" value="">
+                            <?php foreach ($severity_choices as $severity_key => $severity_label) :
+                                $severity_id = 'sitepulse-alert-severity-' . $severity_key;
+                                $is_selected = in_array($severity_key, $enabled_severities, true);
+                            ?>
+                                <label class="sitepulse-toggle" for="<?php echo esc_attr($severity_id); ?>">
+                                    <input type="checkbox" id="<?php echo esc_attr($severity_id); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES); ?>[]" value="<?php echo esc_attr($severity_key); ?>" <?php checked($is_selected); ?>>
+                                    <span><?php echo esc_html($severity_label); ?></span>
+                                </label>
+                            <?php endforeach; ?>
+                            <p class="sitepulse-card-description"><?php esc_html_e('Les alertes dont la sévérité est désactivée sont ignorées mais restent visibles dans les journaux.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
                     <?php
                     $cpu_enabled = in_array('cpu', $enabled_alert_channels, true);
                     $php_enabled = in_array('php_fatal', $enabled_alert_channels, true);
@@ -2477,19 +2715,19 @@ function sitepulse_settings_page() {
                             <h3 class="sitepulse-card-title"><?php esc_html_e('Tester la configuration', 'sitepulse'); ?></h3>
                         </div>
                         <div class="sitepulse-card-body">
-                            <p class="sitepulse-card-description"><?php esc_html_e('Envoyez un e-mail de démonstration aux destinataires configurés pour vérifier l’acheminement.', 'sitepulse'); ?></p>
+                            <p class="sitepulse-card-description"><?php esc_html_e('Déclenchez un test pour chaque canal configuré. Les résultats sont consignés dans les journaux SitePulse.', 'sitepulse'); ?></p>
                         </div>
                         <div class="sitepulse-card-footer">
                             <?php
-                            $test_url = add_query_arg(
-                                [
-                                    'action'   => 'sitepulse_send_alert_test',
-                                    '_wpnonce' => wp_create_nonce(SITEPULSE_NONCE_ACTION_ALERT_TEST),
-                                ],
-                                admin_url('admin-post.php')
-                            );
+                            $test_base_args = [
+                                'action'   => 'sitepulse_send_alert_test',
+                                '_wpnonce' => wp_create_nonce(SITEPULSE_NONCE_ACTION_ALERT_TEST),
+                            ];
+                            $email_test_url = add_query_arg(array_merge($test_base_args, ['channel' => 'email']), admin_url('admin-post.php'));
+                            $webhook_test_url = add_query_arg(array_merge($test_base_args, ['channel' => 'webhook']), admin_url('admin-post.php'));
                             ?>
-                            <button type="submit" class="button button-secondary" formaction="<?php echo esc_url($test_url); ?>" formmethod="post"><?php esc_html_e('Envoyer un test', 'sitepulse'); ?></button>
+                            <button type="submit" class="button button-secondary" formaction="<?php echo esc_url($email_test_url); ?>" formmethod="post" <?php disabled(!$email_delivery_enabled); ?>><?php esc_html_e('Tester l’e-mail', 'sitepulse'); ?></button>
+                            <button type="submit" class="button" formaction="<?php echo esc_url($webhook_test_url); ?>" formmethod="post" <?php disabled(!$webhook_delivery_enabled); ?>><?php esc_html_e('Tester le webhook', 'sitepulse'); ?></button>
                         </div>
                     </div>
                 </div>
