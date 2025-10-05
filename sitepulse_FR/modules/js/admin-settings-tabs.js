@@ -19,6 +19,14 @@
         }
     };
 
+    const normalizeHash = (hashValue) => {
+        if (!hashValue) {
+            return '';
+        }
+
+        return hashValue.charAt(0) === '#' ? hashValue.substring(1) : hashValue;
+    };
+
     onReady(() => {
         const container = document.querySelector('.sitepulse-settings-tabs-container');
 
@@ -27,7 +35,7 @@
         }
 
         const tabLinks = Array.from(container.querySelectorAll('.sitepulse-tab-link[data-tab-target]'));
-        const tabPanels = Array.from(container.querySelectorAll('.sitepulse-tab-panel'));
+        const tabPanels = Array.from(container.querySelectorAll('.sitepulse-tab-panel[id]'));
         const tocLinks = Array.from(document.querySelectorAll('.sitepulse-tab-trigger[data-tab-target]'));
 
         if (!tabLinks.length || !tabPanels.length) {
@@ -36,7 +44,7 @@
 
         container.classList.add('is-enhanced');
 
-        const getLinkForTarget = (targetId) => tabLinks.find((link) => link.dataset.tabTarget === targetId);
+        const getLinkForTarget = (targetId) => tabLinks.find((link) => link.dataset.tabTarget === targetId) || null;
 
         const setTabState = (targetId) => {
             const panel = tabPanels.find((element) => element.id === targetId);
@@ -56,11 +64,9 @@
             tabPanels.forEach((panelElement) => {
                 const isActive = panelElement.id === targetId;
                 panelElement.classList.toggle('is-active', isActive);
-                if (isActive) {
-                    panelElement.removeAttribute('hidden');
-                } else {
-                    panelElement.setAttribute('hidden', 'hidden');
-                }
+                panelElement.toggleAttribute('hidden', !isActive);
+                panelElement.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+                panelElement.setAttribute('tabindex', isActive ? '0' : '-1');
             });
 
             return {
@@ -85,11 +91,13 @@
         };
 
         const findPanelFromHash = (hashValue) => {
-            if (!hashValue) {
+            const normalizedHash = normalizeHash(hashValue);
+
+            if (!normalizedHash) {
                 return null;
             }
 
-            const directTarget = document.getElementById(hashValue);
+            const directTarget = document.getElementById(normalizedHash);
 
             if (!directTarget) {
                 return null;
@@ -182,19 +190,19 @@
                     return;
                 }
 
-                activateTab(targetId);
+                activateTab(targetId, { announce: true });
             });
         });
 
         window.addEventListener('hashchange', () => {
-            const panel = findPanelFromHash(window.location.hash.substring(1));
+            const panel = findPanelFromHash(window.location.hash);
 
             if (panel) {
                 activateTab(panel.id);
             }
         });
 
-        const initialPanel = findPanelFromHash(window.location.hash.substring(1)) || tabPanels[0];
+        const initialPanel = findPanelFromHash(window.location.hash) || tabPanels[0];
 
         if (initialPanel) {
             activateTab(initialPanel.id);
