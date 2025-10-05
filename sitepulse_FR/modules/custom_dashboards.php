@@ -518,6 +518,8 @@ function sitepulse_get_dashboard_preview_context() {
         ],
     ];
 
+    $default_status_labels = $status_labels;
+
     $context = [
         'active_modules' => $active_modules,
         'palette'        => $palette,
