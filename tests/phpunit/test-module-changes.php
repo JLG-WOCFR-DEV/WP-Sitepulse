@@ -140,13 +140,13 @@ class Sitepulse_Module_Changes_Test extends WP_UnitTestCase {
         $output = ob_get_clean();
 
         $this->assertStringContainsString('Alertes', $output);
-        $this->assertStringContainsString('1 en attente', $output);
+        $this->assertMatchesRegularExpression('/sitepulse-status\s+is-critical[^>]*>[^<]*en attente/i', $output);
         $this->assertStringContainsString('Temps de réponse', $output);
-        $this->assertStringContainsString('150', $output);
+        $this->assertMatchesRegularExpression('/Temps de réponse[\s\S]*sitepulse-status\s+is-success[^>]*>[^<]*150/', $output);
         $this->assertStringContainsString('Statut actuel', $output);
-        $this->assertStringContainsString('En ligne', $output);
+        $this->assertMatchesRegularExpression('/Statut actuel[\s\S]*sitepulse-status\s+is-success[^>]*>[^<]*En ligne/', $output);
         $this->assertStringContainsString('Dernière analyse', $output);
-        $this->assertStringContainsString('Il y a', $output);
+        $this->assertMatchesRegularExpression('/Dernière analyse[\s\S]*sitepulse-status\s+is-success[^>]*>[^<]*Il y a/', $output);
         $this->assertStringContainsString('Aucun relevé', $output);
     }
 }
