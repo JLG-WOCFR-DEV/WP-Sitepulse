@@ -210,6 +210,10 @@
     margin-bottom: 0;
 }
 
+.sitepulse-settings-wrap [hidden] {
+    display: none !important;
+}
+
 .sitepulse-settings-tabs .sitepulse-tab-link {
     display: inline-flex;
     align-items: center;
@@ -217,7 +221,8 @@
     transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-.sitepulse-settings-tabs .sitepulse-tab-link.nav-tab-active {
+.sitepulse-settings-tabs .sitepulse-tab-link.nav-tab-active,
+.sitepulse-settings-tabs .sitepulse-tab-link.is-active {
     background: #fff;
     border-bottom-color: #fff;
     box-shadow: 0 1px 0 #fff;
@@ -232,6 +237,10 @@
 
 .sitepulse-settings-tabs-container.is-enhanced .sitepulse-tab-panel[hidden] {
     display: none;
+}
+
+.sitepulse-settings-tabs-container.is-enhanced .sitepulse-tab-panel.is-active {
+    display: block;
 }
 
 .sitepulse-settings-form--secondary {
