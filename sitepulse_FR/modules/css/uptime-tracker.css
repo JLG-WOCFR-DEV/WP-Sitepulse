@@ -191,6 +191,32 @@
     margin-top: 20px;
 }
 
+.sitepulse-uptime-metric {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 500;
+}
+
+.sitepulse-uptime-metric--neutral {
+    color: var(--sitepulse-uptime-text-subtle);
+    font-weight: 400;
+}
+
+.sitepulse-uptime-metric--ok {
+    color: var(--sitepulse-uptime-up);
+}
+
+.sitepulse-uptime-metric--warning {
+    color: var(--sitepulse-uptime-medium);
+    font-weight: 600;
+}
+
+.sitepulse-uptime-metric--critical {
+    color: var(--sitepulse-uptime-low);
+    font-weight: 600;
+}
+
 .screen-reader-text {
     position: absolute;
     width: 1px;

@@ -206,6 +206,12 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_EXPECTED_CODES, [
         'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_uptime_expected_codes', 'default' => []
     ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_LATENCY_THRESHOLD, [
+        'type' => 'number', 'sanitize_callback' => 'sitepulse_sanitize_uptime_latency_threshold', 'default' => SITEPULSE_DEFAULT_UPTIME_LATENCY_THRESHOLD
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_KEYWORD, [
+        'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_uptime_keyword', 'default' => ''
+    ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS, [
         'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_uptime_maintenance_windows', 'default' => []
     ]);
@@ -628,6 +634,32 @@ function sitepulse_sanitize_uptime_timeout($value) {
 }
 
 /**
+ * Sanitizes the latency threshold (in seconds) for uptime validation.
+ *
+ * @param mixed $value Raw user input value.
+ * @return float Normalized latency threshold. Returns 0 to disable validation.
+ */
+function sitepulse_sanitize_uptime_latency_threshold($value) {
+    $default = defined('SITEPULSE_DEFAULT_UPTIME_LATENCY_THRESHOLD') ? (float) SITEPULSE_DEFAULT_UPTIME_LATENCY_THRESHOLD : 0.0;
+
+    if (is_string($value)) {
+        $value = str_replace(',', '.', $value);
+    }
+
+    if (!is_scalar($value) || !is_numeric($value)) {
+        return $default;
+    }
+
+    $value = (float) $value;
+
+    if ($value <= 0) {
+        return 0.0;
+    }
+
+    return round($value, 4);
+}
+
+/**
  * Returns the available frequency choices for uptime checks.
  *
  * @return array<string,array<string,mixed>> List of frequency configurations.
@@ -845,6 +877,30 @@ function sitepulse_sanitize_uptime_expected_codes($value) {
     sort($codes, SORT_NUMERIC);
 
     return $codes;
+}
+
+/**
+ * Sanitizes the expected keyword used to validate uptime responses.
+ *
+ * @param mixed $value Raw user input value.
+ * @return string Clean keyword or empty string when disabled.
+ */
+function sitepulse_sanitize_uptime_keyword($value) {
+    if (is_array($value)) {
+        $value = implode(' ', $value);
+    }
+
+    if (!is_scalar($value)) {
+        return '';
+    }
+
+    $value = trim((string) $value);
+
+    if ($value === '') {
+        return '';
+    }
+
+    return sanitize_text_field($value);
 }
 
 /**
@@ -1799,6 +1855,13 @@ function sitepulse_settings_page() {
     $uptime_expected_codes_option = get_option(SITEPULSE_OPTION_UPTIME_EXPECTED_CODES, []);
     $uptime_expected_codes = sitepulse_sanitize_uptime_expected_codes($uptime_expected_codes_option);
     $uptime_expected_codes_text = implode(', ', $uptime_expected_codes);
+    $uptime_latency_threshold_option = get_option(
+        SITEPULSE_OPTION_UPTIME_LATENCY_THRESHOLD,
+        SITEPULSE_DEFAULT_UPTIME_LATENCY_THRESHOLD
+    );
+    $uptime_latency_threshold = sitepulse_sanitize_uptime_latency_threshold($uptime_latency_threshold_option);
+    $uptime_keyword_option = get_option(SITEPULSE_OPTION_UPTIME_KEYWORD, '');
+    $uptime_keyword = sitepulse_sanitize_uptime_keyword($uptime_keyword_option);
     $uptime_maintenance_windows_option = get_option(SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS, []);
     $uptime_maintenance_windows = sitepulse_sanitize_uptime_maintenance_windows($uptime_maintenance_windows_option);
     $uptime_maintenance_rows_to_render = max(count($uptime_maintenance_windows) + 1, 1);
@@ -2778,6 +2841,28 @@ function sitepulse_settings_page() {
                                 <?php endforeach; ?>
                             </select>
                             <p class="sitepulse-card-description"><?php esc_html_e('Sélectionnez la fréquence d’exécution de la tâche de surveillance.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Seuil de latence', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <?php $uptime_latency_description_id = 'sitepulse-uptime-latency-description'; ?>
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_LATENCY_THRESHOLD); ?>"><?php esc_html_e('Temps maximal toléré (secondes)', 'sitepulse'); ?></label>
+                            <input type="number" min="0" step="0.1" id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_LATENCY_THRESHOLD); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_LATENCY_THRESHOLD); ?>" value="<?php echo esc_attr($uptime_latency_threshold); ?>" class="small-text" aria-describedby="<?php echo esc_attr($uptime_latency_description_id); ?>">
+                            <p class="sitepulse-card-description" id="<?php echo esc_attr($uptime_latency_description_id); ?>"><?php esc_html_e('Déclenche un incident si la réponse dépasse cette durée. Utilisez 0 pour désactiver.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Mot-clé attendu', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <?php $uptime_keyword_description_id = 'sitepulse-uptime-keyword-description'; ?>
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_KEYWORD); ?>"><?php esc_html_e('Chaîne à rechercher dans la réponse', 'sitepulse'); ?></label>
+                            <input type="text" id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_KEYWORD); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_KEYWORD); ?>" value="<?php echo esc_attr($uptime_keyword); ?>" class="regular-text" aria-describedby="<?php echo esc_attr($uptime_keyword_description_id); ?>">
+                            <p class="sitepulse-card-description" id="<?php echo esc_attr($uptime_keyword_description_id); ?>"><?php esc_html_e('Laisser vide pour ignorer cette vérification. La recherche n’est pas sensible à la casse.', 'sitepulse'); ?></p>
                         </div>
                     </div>
                     <div class="sitepulse-module-card sitepulse-module-card--setting">
