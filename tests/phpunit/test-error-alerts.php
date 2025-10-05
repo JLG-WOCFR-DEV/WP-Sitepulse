@@ -11,6 +11,20 @@ class Sitepulse_Error_Alerts_Test extends WP_UnitTestCase {
      */
     private $sent_mail = [];
 
+    /**
+     * Captured webhook requests.
+     *
+     * @var array
+     */
+    private $webhook_requests = [];
+
+    /**
+     * Next webhook response override.
+     *
+     * @var mixed
+     */
+    private $next_webhook_response = null;
+
     public static function wpSetUpBeforeClass($factory) {
         $plugin_root = dirname(__DIR__, 2) . '/sitepulse_FR/';
 
@@ -35,27 +49,37 @@ class Sitepulse_Error_Alerts_Test extends WP_UnitTestCase {
         parent::set_up();
 
         $this->sent_mail = [];
+        $this->webhook_requests = [];
+        $this->next_webhook_response = null;
         $GLOBALS['sitepulse_logger'] = [];
         $GLOBALS['sitepulse_test_log_path'] = null;
 
         add_filter('pre_wp_mail', [$this, 'intercept_mail'], 10, 2);
+        add_filter('pre_http_request', [$this, 'intercept_http_request'], 10, 3);
 
         delete_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER);
         delete_option(SITEPULSE_OPTION_ALERT_RECIPIENTS);
         delete_option(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS);
         delete_option(SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD);
+        delete_option(SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS);
+        delete_option(SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS);
+        delete_option(SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES);
         delete_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK);
         delete_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK);
     }
 
     protected function tear_down(): void {
         remove_filter('pre_wp_mail', [$this, 'intercept_mail'], 10);
+        remove_filter('pre_http_request', [$this, 'intercept_http_request'], 10);
 
         delete_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER);
         delete_option(SITEPULSE_OPTION_ALERT_RECIPIENTS);
         delete_option(SITEPULSE_OPTION_ALERT_INTERVAL);
         delete_option(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS);
         delete_option(SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD);
+        delete_option(SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS);
+        delete_option(SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS);
+        delete_option(SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES);
         delete_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK);
         delete_transient(SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK);
 
@@ -72,6 +96,27 @@ class Sitepulse_Error_Alerts_Test extends WP_UnitTestCase {
         $this->sent_mail[] = $atts;
 
         return true;
+    }
+
+    public function intercept_http_request($preempt, $args, $url) {
+        $this->webhook_requests[] = [
+            'url'  => $url,
+            'args' => $args,
+        ];
+
+        if ($this->next_webhook_response instanceof WP_Error || is_array($this->next_webhook_response)) {
+            $response = $this->next_webhook_response;
+        } else {
+            $response = [
+                'response' => ['code' => 200, 'message' => 'OK'],
+                'body'     => '',
+                'headers'  => [],
+            ];
+        }
+
+        $this->next_webhook_response = null;
+
+        return $response;
     }
 
     private function create_log_file($contents) {
@@ -379,5 +424,55 @@ Another line
 
         $mail = $this->sent_mail[0];
         $this->assertStringContainsString('Charge CPU', $mail['message'], 'Active channel label should be listed in the test message.');
+    }
+
+    public function test_send_test_message_requires_webhook_configuration() {
+        $result = sitepulse_error_alerts_send_test_message('webhook');
+
+        $this->assertInstanceOf(WP_Error::class, $result, 'Webhook test should fail when no endpoint is configured.');
+        $this->assertSame('sitepulse_no_webhooks', $result->get_error_code());
+    }
+
+    public function test_send_test_message_triggers_webhook() {
+        update_option(SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS, ['webhook']);
+        update_option(SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS, ['https://example.com/webhook']);
+
+        $result = sitepulse_error_alerts_send_test_message('webhook');
+
+        $this->assertTrue($result, 'Webhook test should succeed with a configured endpoint.');
+        $this->assertNotEmpty($this->webhook_requests, 'Webhook test should perform an HTTP request.');
+        $request = $this->webhook_requests[0];
+        $this->assertSame('https://example.com/webhook', $request['url']);
+        $payload = json_decode($request['args']['body'], true);
+        $this->assertSame('test_alert', $payload['type']);
+    }
+
+    public function test_alert_skipped_when_severity_disabled() {
+        update_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, ['alerts@example.com']);
+        update_option(SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES, ['critical']);
+
+        $result = sitepulse_error_alert_send('cpu', 'Subject', 'Message', 'warning');
+
+        $this->assertFalse($result, 'Alert should be skipped when severity is disabled.');
+        $this->assertEmpty($this->sent_mail, 'No e-mail should be sent if severity is disabled.');
+        $this->assertNotEmpty($GLOBALS['sitepulse_logger'], 'A log entry should be added for skipped severity.');
+        $this->assertSame("Alert 'cpu' skipped because severity 'warning' is disabled.", end($GLOBALS['sitepulse_logger'])['message']);
+    }
+
+    public function test_webhook_dispatch_occurs_when_configured() {
+        update_option(SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS, ['webhook']);
+        update_option(SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS, ['https://example.com/hook']);
+
+        $result = sitepulse_error_alert_send('cpu', 'Subject', 'Message', 'warning');
+
+        $this->assertTrue($result, 'Webhook dispatch should be considered a success.');
+        $this->assertEmpty($this->sent_mail, 'E-mail channel should not be used when disabled.');
+        $this->assertCount(1, $this->webhook_requests, 'A single webhook request should be recorded.');
+        $request = $this->webhook_requests[0];
+        $this->assertSame('https://example.com/hook', $request['url']);
+        $payload = json_decode($request['args']['body'], true);
+        $this->assertIsArray($payload, 'Webhook payload should be JSON encoded.');
+        $this->assertSame('cpu', $payload['type']);
+        $this->assertSame('warning', $payload['severity']);
     }
 }

@@ -39,6 +39,9 @@ define('SITEPULSE_OPTION_SPEED_AUTOMATION_CONFIG', 'sitepulse_speed_automation_c
 define('SITEPULSE_OPTION_SPEED_AUTOMATION_HISTORY', 'sitepulse_speed_automation_history');
 define('SITEPULSE_OPTION_SPEED_AUTOMATION_QUEUE', 'sitepulse_speed_automation_queue');
 define('SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS', 'sitepulse_alert_enabled_channels');
+define('SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS', 'sitepulse_error_alert_delivery_channels');
+define('SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS', 'sitepulse_error_alert_webhooks');
+define('SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES', 'sitepulse_error_alert_severities');
 define('SITEPULSE_OPTION_CPU_ALERT_THRESHOLD', 'sitepulse_cpu_alert_threshold');
 define('SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD', 'sitepulse_php_fatal_alert_threshold');
 define('SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES', 'sitepulse_alert_cooldown_minutes');
@@ -1715,6 +1718,9 @@ function sitepulse_activate_site() {
     add_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60, '', false);
     add_option(SITEPULSE_OPTION_ALERT_INTERVAL, 5, '', false);
     add_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, [], '', false);
+    add_option(SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS, ['email'], '', false);
+    add_option(SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS, [], '', false);
+    add_option(SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES, ['warning', 'critical'], '', false);
     add_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER, [], '', false);
     add_option(SITEPULSE_OPTION_CRON_WARNINGS, [], '', false);
     add_option(SITEPULSE_OPTION_SPEED_WARNING_MS, SITEPULSE_DEFAULT_SPEED_WARNING_MS, '', false);
