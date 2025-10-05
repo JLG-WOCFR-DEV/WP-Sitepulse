@@ -179,6 +179,18 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_ALERT_RECIPIENTS, [
         'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_alert_recipients', 'default' => []
     ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_ALERT_WEBHOOK_URL, [
+        'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_alert_webhook_url', 'default' => ''
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_ALERT_WEBHOOK_CHANNEL, [
+        'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_alert_webhook_channel', 'default' => ''
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_ALERT_SLACK_WEBHOOK_URL, [
+        'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_alert_webhook_url', 'default' => ''
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_ALERT_SLACK_WEBHOOK_CHANNEL, [
+        'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_alert_webhook_channel', 'default' => ''
+    ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_URL, [
         'type' => 'string', 'sanitize_callback' => 'esc_url_raw', 'default' => ''
     ]);
@@ -354,7 +366,7 @@ function sitepulse_sanitize_modules($input) {
  * @return array List of allowed channel identifiers.
  */
 function sitepulse_sanitize_alert_channels($input) {
-    $valid_channels = ['cpu', 'php_fatal'];
+    $valid_channels = ['cpu', 'php_fatal', 'webhook', 'slack_webhook'];
     $sanitized      = [];
 
     if (is_array($input)) {
@@ -366,6 +378,48 @@ function sitepulse_sanitize_alert_channels($input) {
     }
 
     return array_values(array_unique($sanitized));
+}
+
+/**
+ * Sanitizes a webhook URL used for alert notifications.
+ *
+ * @param mixed $value Raw user input value.
+ * @return string Sanitized URL or empty string if invalid.
+ */
+function sitepulse_sanitize_alert_webhook_url($value) {
+    if (!is_string($value)) {
+        return '';
+    }
+
+    $value = trim($value);
+
+    if ($value === '') {
+        return '';
+    }
+
+    $sanitized = esc_url_raw($value);
+
+    return is_string($sanitized) ? $sanitized : '';
+}
+
+/**
+ * Sanitizes a webhook channel name.
+ *
+ * @param mixed $value Raw user input value.
+ * @return string Sanitized channel name.
+ */
+function sitepulse_sanitize_alert_webhook_channel($value) {
+    if (!is_string($value)) {
+        return '';
+    }
+
+    $value = trim($value);
+
+    if ($value === '') {
+        return '';
+    }
+
+    return sanitize_text_field($value);
 }
 
 /**
@@ -2086,10 +2140,43 @@ function sitepulse_settings_page() {
                         </div>
                     </div>
                     <?php
-                    $enabled_alert_channels = (array) get_option(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS, ['cpu', 'php_fatal']);
-                    $cpu_enabled           = in_array('cpu', $enabled_alert_channels, true);
-                    $php_enabled           = in_array('php_fatal', $enabled_alert_channels, true);
+                    $enabled_alert_channels   = (array) get_option(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS, ['cpu', 'php_fatal']);
+                    $cpu_enabled             = in_array('cpu', $enabled_alert_channels, true);
+                    $php_enabled             = in_array('php_fatal', $enabled_alert_channels, true);
+                    $generic_webhook_enabled = in_array('webhook', $enabled_alert_channels, true);
+                    $slack_webhook_enabled   = in_array('slack_webhook', $enabled_alert_channels, true);
+                    $generic_webhook_url     = (string) get_option(SITEPULSE_OPTION_ALERT_WEBHOOK_URL, '');
+                    $generic_webhook_channel = (string) get_option(SITEPULSE_OPTION_ALERT_WEBHOOK_CHANNEL, '');
+                    $slack_webhook_url       = (string) get_option(SITEPULSE_OPTION_ALERT_SLACK_WEBHOOK_URL, '');
+                    $slack_webhook_channel   = (string) get_option(SITEPULSE_OPTION_ALERT_SLACK_WEBHOOK_CHANNEL, '');
                     ?>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Notifications webhook', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <p class="sitepulse-card-description"><?php esc_html_e('Déclenchez des notifications HTTP vers vos intégrations externes en parallèle des e-mails.', 'sitepulse'); ?></p>
+                            <label class="sitepulse-toggle" for="sitepulse-alert-channel-generic-webhook">
+                                <input type="checkbox" id="sitepulse-alert-channel-generic-webhook" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS); ?>[]" value="webhook" <?php checked($generic_webhook_enabled); ?>>
+                                <span><?php esc_html_e('Activer l’envoi vers le webhook générique', 'sitepulse'); ?></span>
+                            </label>
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_WEBHOOK_URL); ?>"><?php esc_html_e('URL du webhook', 'sitepulse'); ?></label>
+                            <input type="url" id="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_WEBHOOK_URL); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_WEBHOOK_URL); ?>" value="<?php echo esc_attr($generic_webhook_url); ?>" class="regular-text" placeholder="https://example.com/webhook-endpoint">
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_WEBHOOK_CHANNEL); ?>"><?php esc_html_e('Nom du canal / destination', 'sitepulse'); ?></label>
+                            <input type="text" id="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_WEBHOOK_CHANNEL); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_WEBHOOK_CHANNEL); ?>" value="<?php echo esc_attr($generic_webhook_channel); ?>" class="regular-text">
+                            <p class="sitepulse-card-note"><?php esc_html_e('Laissez le nom vide si votre webhook ne l’utilise pas.', 'sitepulse'); ?></p>
+                            <hr class="sitepulse-card-separator">
+                            <label class="sitepulse-toggle" for="sitepulse-alert-channel-slack-webhook">
+                                <input type="checkbox" id="sitepulse-alert-channel-slack-webhook" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS); ?>[]" value="slack_webhook" <?php checked($slack_webhook_enabled); ?>>
+                                <span><?php esc_html_e('Activer l’envoi vers Slack', 'sitepulse'); ?></span>
+                            </label>
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_SLACK_WEBHOOK_URL); ?>"><?php esc_html_e('URL du webhook Slack', 'sitepulse'); ?></label>
+                            <input type="url" id="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_SLACK_WEBHOOK_URL); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_SLACK_WEBHOOK_URL); ?>" value="<?php echo esc_attr($slack_webhook_url); ?>" class="regular-text" placeholder="https://hooks.slack.com/services/...">
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_SLACK_WEBHOOK_CHANNEL); ?>"><?php esc_html_e('Nom du canal Slack', 'sitepulse'); ?></label>
+                            <input type="text" id="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_SLACK_WEBHOOK_CHANNEL); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_SLACK_WEBHOOK_CHANNEL); ?>" value="<?php echo esc_attr($slack_webhook_channel); ?>" class="regular-text" placeholder="#alerts">
+                            <p class="sitepulse-card-note"><?php esc_html_e('Utilisez le nom du canal ou de la conversation pour contextualiser la notification.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
                     <div class="sitepulse-module-card sitepulse-module-card--setting">
                         <div class="sitepulse-card-header">
                             <h3 class="sitepulse-card-title"><?php esc_html_e("Seuil d'alerte de charge CPU", 'sitepulse'); ?></h3>

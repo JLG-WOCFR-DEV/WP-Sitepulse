@@ -46,8 +46,10 @@ $sitepulse_error_alerts_schedule = sitepulse_error_alerts_get_schedule_slug();
  */
 function sitepulse_error_alerts_get_channel_labels() {
     return [
-        'cpu'       => __('Charge CPU', 'sitepulse'),
-        'php_fatal' => __('Erreurs PHP fatales', 'sitepulse'),
+        'cpu'            => __('Charge CPU', 'sitepulse'),
+        'php_fatal'      => __('Erreurs PHP fatales', 'sitepulse'),
+        'webhook'        => __('Notifications webhook', 'sitepulse'),
+        'slack_webhook'  => __('Notifications Slack', 'sitepulse'),
     ];
 }
 
@@ -313,12 +315,219 @@ function sitepulse_error_alert_get_recipients() {
 }
 
 /**
+ * Retrieves configured webhook targets deduplicated by URL.
+ *
+ * Each target contains the normalized URL as well as the list of enabled
+ * transport identifiers and channel names associated with that endpoint.
+ *
+ * @param array|null $enabled_channels Optional. Pre-fetched enabled channel list.
+ * @return array<int, array<string, mixed>>
+ */
+function sitepulse_error_alert_get_webhook_targets($enabled_channels = null) {
+    if ($enabled_channels === null) {
+        $enabled_channels = sitepulse_error_alerts_get_enabled_channels();
+    }
+
+    if (!is_array($enabled_channels)) {
+        $enabled_channels = [];
+    }
+
+    $definitions = [
+        'webhook'       => [
+            'url_option'     => defined('SITEPULSE_OPTION_ALERT_WEBHOOK_URL') ? SITEPULSE_OPTION_ALERT_WEBHOOK_URL : 'sitepulse_alert_webhook_url',
+            'channel_option' => defined('SITEPULSE_OPTION_ALERT_WEBHOOK_CHANNEL') ? SITEPULSE_OPTION_ALERT_WEBHOOK_CHANNEL : 'sitepulse_alert_webhook_channel',
+        ],
+        'slack_webhook' => [
+            'url_option'     => defined('SITEPULSE_OPTION_ALERT_SLACK_WEBHOOK_URL') ? SITEPULSE_OPTION_ALERT_SLACK_WEBHOOK_URL : 'sitepulse_alert_slack_webhook_url',
+            'channel_option' => defined('SITEPULSE_OPTION_ALERT_SLACK_WEBHOOK_CHANNEL') ? SITEPULSE_OPTION_ALERT_SLACK_WEBHOOK_CHANNEL : 'sitepulse_alert_slack_webhook_channel',
+        ],
+    ];
+
+    $candidates = [];
+
+    foreach ($definitions as $channel_key => $options) {
+        if (!in_array($channel_key, $enabled_channels, true)) {
+            continue;
+        }
+
+        $raw_url = get_option($options['url_option'], '');
+        $raw_url = is_string($raw_url) ? trim($raw_url) : '';
+
+        if ($raw_url === '') {
+            continue;
+        }
+
+        $normalized_url = esc_url_raw($raw_url);
+
+        if (!is_string($normalized_url) || $normalized_url === '') {
+            continue;
+        }
+
+        $channel_name = get_option($options['channel_option'], '');
+        $channel_name = is_string($channel_name) ? trim($channel_name) : '';
+
+        if ($channel_name !== '') {
+            $channel_name = sanitize_text_field($channel_name);
+        }
+
+        $candidates[] = [
+            'url'          => $normalized_url,
+            'channel_key'  => $channel_key,
+            'channel_name' => $channel_name,
+        ];
+    }
+
+    if (empty($candidates)) {
+        return [];
+    }
+
+    $targets = [];
+
+    foreach ($candidates as $candidate) {
+        $url = $candidate['url'];
+
+        if (!isset($targets[$url])) {
+            $targets[$url] = [
+                'url'           => $url,
+                'channels'      => [],
+                'channel_names' => [],
+            ];
+        }
+
+        $targets[$url]['channels'][] = $candidate['channel_key'];
+
+        if ($candidate['channel_name'] !== '') {
+            $targets[$url]['channel_names'][] = $candidate['channel_name'];
+        }
+    }
+
+    foreach ($targets as &$target) {
+        $target['channels'] = array_values(array_unique($target['channels']));
+        $target['channel_names'] = array_values(array_unique(array_filter($target['channel_names'], 'strlen')));
+    }
+    unset($target);
+
+    return array_values($targets);
+}
+
+/**
+ * Dispatches alert payloads to configured webhook endpoints.
+ *
+ * @param string      $type             Alert identifier.
+ * @param string      $subject          Message subject.
+ * @param string      $message          Message body.
+ * @param array|null  $enabled_channels Optional. Pre-fetched enabled channels list.
+ * @param array|null  $targets          Optional. Pre-fetched webhook targets.
+ * @return true|\WP_Error True on success, WP_Error object on failure.
+ */
+function sitepulse_error_alert_send_webhook($type, $subject, $message, $enabled_channels = null, $targets = null) {
+    if ($targets === null) {
+        $targets = sitepulse_error_alert_get_webhook_targets($enabled_channels);
+    }
+
+    if (empty($targets)) {
+        return new WP_Error('sitepulse_no_webhook_targets', __('Aucune URL de webhook valide configurée.', 'sitepulse'));
+    }
+
+    $raw_site_name = get_bloginfo('name');
+    $site_name     = trim(wp_strip_all_tags((string) $raw_site_name));
+
+    if ($site_name === '') {
+        $site_name = home_url('/');
+    }
+
+    $site_url = home_url('/');
+    $timestamp = time();
+
+    $errors = [];
+    $sent   = false;
+
+    foreach ($targets as $target) {
+        $payload = [
+            'type'          => (string) $type,
+            'subject'       => (string) $subject,
+            'message'       => (string) $message,
+            'site'          => [
+                'name' => $site_name,
+                'url'  => $site_url,
+            ],
+            'channels'      => isset($target['channels']) ? (array) $target['channels'] : [],
+            'channel_names' => isset($target['channel_names']) ? (array) $target['channel_names'] : [],
+            'timestamp'     => $timestamp,
+        ];
+
+        $encoded_payload = wp_json_encode($payload);
+
+        if ($encoded_payload === false) {
+            $errors[] = new WP_Error('sitepulse_webhook_encoding_failed', __('Impossible d’encoder le message webhook en JSON.', 'sitepulse'), $payload);
+            continue;
+        }
+
+        $response = wp_remote_post(
+            $target['url'],
+            [
+                'headers' => [
+                    'Content-Type' => 'application/json; charset=utf-8',
+                ],
+                'body'    => $encoded_payload,
+                'timeout' => 10,
+            ]
+        );
+
+        if (is_wp_error($response)) {
+            $errors[] = $response;
+            continue;
+        }
+
+        $status_code = wp_remote_retrieve_response_code($response);
+
+        if ($status_code < 200 || $status_code >= 300) {
+            $errors[] = new WP_Error(
+                'sitepulse_webhook_http_error',
+                sprintf(__('Réponse HTTP inattendue du webhook (%d).', 'sitepulse'), (int) $status_code),
+                [
+                    'response' => $response,
+                    'target'   => $target,
+                ]
+            );
+            continue;
+        }
+
+        $sent = true;
+    }
+
+    if ($sent) {
+        return true;
+    }
+
+    if (!empty($errors)) {
+        $aggregated_error = new WP_Error('sitepulse_webhook_dispatch_failed', __('Échec de l’envoi du webhook.', 'sitepulse'));
+
+        foreach ($errors as $error) {
+            if ($error instanceof WP_Error) {
+                foreach ($error->get_error_codes() as $code) {
+                    $messages = $error->get_error_messages($code);
+
+                    foreach ($messages as $message_text) {
+                        $aggregated_error->add($code, $message_text, $error->get_error_data($code));
+                    }
+                }
+            }
+        }
+
+        return $aggregated_error;
+    }
+
+    return new WP_Error('sitepulse_no_webhook_targets', __('Aucune URL de webhook valide configurée.', 'sitepulse'));
+}
+
+/**
  * Attempts to send an alert message while respecting the cooldown lock.
  *
  * @param string $type    Unique identifier of the alert type.
  * @param string $subject Mail subject.
  * @param string $message Mail body.
- * @return bool True if the e-mail was dispatched, false otherwise.
+ * @return bool True if at least one notification was dispatched, false otherwise.
  */
 function sitepulse_error_alert_send($type, $subject, $message) {
     $lock_key = SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX . sanitize_key($type) . SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX;
@@ -330,28 +539,63 @@ function sitepulse_error_alert_send($type, $subject, $message) {
         return false;
     }
 
-    $recipients = sitepulse_error_alert_get_recipients();
+    $enabled_channels = sitepulse_error_alerts_get_enabled_channels();
+    $recipients       = sitepulse_error_alert_get_recipients();
+    $webhook_targets  = sitepulse_error_alert_get_webhook_targets($enabled_channels);
 
-    if (empty($recipients)) {
+    $should_send_email   = !empty($recipients);
+    $should_send_webhook = !empty($webhook_targets);
+
+    if (!$should_send_email && !$should_send_webhook) {
         if (function_exists('sitepulse_log')) {
-            sitepulse_log("Alert '$type' skipped because no valid recipients were found.", 'ERROR');
+            sitepulse_log("Alert '$type' skipped because no e-mail recipients or webhook endpoints were found.", 'ERROR');
         }
 
         return false;
     }
 
-    $sent = wp_mail($recipients, $subject, $message);
+    $email_sent   = false;
+    $webhook_sent = false;
 
-    if ($sent) {
-        set_transient($lock_key, time(), sitepulse_error_alert_get_cooldown());
-        if (function_exists('sitepulse_log')) {
-            sitepulse_log("Alert '$type' e-mail sent and cooldown applied.");
+    if ($should_send_email) {
+        $email_sent = wp_mail($recipients, $subject, $message);
+
+        if (!$email_sent && function_exists('sitepulse_log')) {
+            sitepulse_log("Alert '$type' e-mail failed to send.", 'ERROR');
         }
     } elseif (function_exists('sitepulse_log')) {
-        sitepulse_log("Alert '$type' e-mail failed to send.", 'ERROR');
+        sitepulse_log("Alert '$type' e-mail delivery skipped because no recipients were available.", 'NOTICE');
     }
 
-    return $sent;
+    if ($should_send_webhook) {
+        $webhook_result = sitepulse_error_alert_send_webhook($type, $subject, $message, $enabled_channels, $webhook_targets);
+
+        if ($webhook_result === true) {
+            $webhook_sent = true;
+        } elseif ($webhook_result instanceof WP_Error && function_exists('sitepulse_log')) {
+            sitepulse_log("Alert '$type' webhook failed: " . $webhook_result->get_error_message(), 'ERROR');
+        }
+    }
+
+    if ($email_sent && function_exists('sitepulse_log')) {
+        sitepulse_log("Alert '$type' e-mail dispatched.");
+    }
+
+    if ($webhook_sent && function_exists('sitepulse_log')) {
+        sitepulse_log("Alert '$type' webhook dispatched.");
+    }
+
+    if ($email_sent || $webhook_sent) {
+        set_transient($lock_key, time(), sitepulse_error_alert_get_cooldown());
+
+        if (function_exists('sitepulse_log')) {
+            sitepulse_log("Alert '$type' notifications sent and cooldown applied.");
+        }
+
+        return true;
+    }
+
+    return false;
 }
 
 /**

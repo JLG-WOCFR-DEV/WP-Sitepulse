@@ -41,6 +41,10 @@ define('SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD', 'sitepulse_php_fatal_alert_
 define('SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES', 'sitepulse_alert_cooldown_minutes');
 define('SITEPULSE_OPTION_ALERT_INTERVAL', 'sitepulse_alert_interval');
 define('SITEPULSE_OPTION_ALERT_RECIPIENTS', 'sitepulse_alert_recipients');
+define('SITEPULSE_OPTION_ALERT_WEBHOOK_URL', 'sitepulse_alert_webhook_url');
+define('SITEPULSE_OPTION_ALERT_WEBHOOK_CHANNEL', 'sitepulse_alert_webhook_channel');
+define('SITEPULSE_OPTION_ALERT_SLACK_WEBHOOK_URL', 'sitepulse_alert_slack_webhook_url');
+define('SITEPULSE_OPTION_ALERT_SLACK_WEBHOOK_CHANNEL', 'sitepulse_alert_slack_webhook_channel');
 define('SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE', 'sitepulse_impact_loader_signature');
 define('SITEPULSE_OPTION_IMPACT_THRESHOLDS', 'sitepulse_impact_thresholds');
 define('SITEPULSE_OPTION_PLUGIN_BASENAME', 'sitepulse_plugin_basename');
@@ -1711,6 +1715,10 @@ function sitepulse_activate_site() {
     add_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60, '', false);
     add_option(SITEPULSE_OPTION_ALERT_INTERVAL, 5, '', false);
     add_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, [], '', false);
+    add_option(SITEPULSE_OPTION_ALERT_WEBHOOK_URL, '', '', false);
+    add_option(SITEPULSE_OPTION_ALERT_WEBHOOK_CHANNEL, '', '', false);
+    add_option(SITEPULSE_OPTION_ALERT_SLACK_WEBHOOK_URL, '', '', false);
+    add_option(SITEPULSE_OPTION_ALERT_SLACK_WEBHOOK_CHANNEL, '', '', false);
     add_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER, [], '', false);
     add_option(SITEPULSE_OPTION_CRON_WARNINGS, [], '', false);
     add_option(SITEPULSE_OPTION_SPEED_WARNING_MS, SITEPULSE_DEFAULT_SPEED_WARNING_MS, '', false);
