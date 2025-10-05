@@ -375,6 +375,30 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $this->assertSame(0.0, $region_metrics['us']['uptime']);
     }
 
+    public function test_internal_queue_uses_utc_timestamps() {
+        update_option('timezone_string', '');
+        update_option('gmt_offset', 5);
+
+        sitepulse_uptime_schedule_internal_request('default');
+
+        $queue = get_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, []);
+        $this->assertNotEmpty($queue, 'Expected one queued request.');
+
+        $entry = $queue[0];
+        $this->assertArrayHasKey('scheduled_at', $entry);
+        $this->assertArrayHasKey('created_at', $entry);
+
+        $expected_gmt = current_time('timestamp', true);
+        $this->assertEqualsWithDelta($expected_gmt, $entry['scheduled_at'], 2, 'Scheduled timestamp should use UTC.');
+        $this->assertEqualsWithDelta($expected_gmt, $entry['created_at'], 2, 'Creation timestamp should use UTC.');
+
+        $local_now = current_time('timestamp');
+        $this->assertGreaterThan(3000, abs($local_now - $entry['scheduled_at']), 'Timestamps should not use the site offset.');
+
+        update_option('gmt_offset', 0);
+        update_option('timezone_string', '');
+    }
+
     public function test_maintenance_window_skips_remote_requests() {
         $now = current_time('timestamp');
 

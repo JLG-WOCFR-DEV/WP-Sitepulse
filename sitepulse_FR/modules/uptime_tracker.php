@@ -677,7 +677,7 @@ function sitepulse_uptime_is_in_maintenance_window($agent_id, $timestamp = null)
  */
 function sitepulse_uptime_schedule_internal_request($agent_id, $payload = [], $timestamp = null) {
     $agent_id = sitepulse_uptime_normalize_agent_id($agent_id);
-    $timestamp = null === $timestamp ? (int) current_time('timestamp') : (int) $timestamp;
+    $timestamp = null === $timestamp ? (int) current_time('timestamp', true) : (int) $timestamp;
 
     if (!is_array($payload)) {
         $payload = [];
@@ -693,7 +693,7 @@ function sitepulse_uptime_schedule_internal_request($agent_id, $payload = [], $t
         'agent'       => $agent_id,
         'payload'     => $payload,
         'scheduled_at'=> $timestamp,
-        'created_at'  => (int) current_time('timestamp'),
+        'created_at'  => (int) current_time('timestamp', true),
     ];
 
     update_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, $queue, false);
@@ -708,7 +708,8 @@ function sitepulse_uptime_schedule_internal_request($agent_id, $payload = [], $t
  * @return void
  */
 function sitepulse_uptime_maybe_schedule_queue_processor($timestamp) {
-    $timestamp = max((int) $timestamp, (int) current_time('timestamp'));
+    // WP-Cron expects UTC timestamps, so always schedule using GMT to avoid timezone offsets.
+    $timestamp = max((int) $timestamp, (int) current_time('timestamp', true));
 
     $current = wp_next_scheduled('sitepulse_uptime_process_remote_queue');
 
@@ -733,7 +734,7 @@ function sitepulse_uptime_process_remote_queue() {
         return;
     }
 
-    $now = (int) current_time('timestamp');
+    $now = (int) current_time('timestamp', true);
     $remaining = [];
 
     foreach ($queue as $item) {
@@ -758,7 +759,7 @@ function sitepulse_uptime_process_remote_queue() {
 
     if (!empty($remaining)) {
         $next_timestamp = min(array_map(function ($item) {
-            return isset($item['scheduled_at']) ? (int) $item['scheduled_at'] : (int) current_time('timestamp');
+            return isset($item['scheduled_at']) ? (int) $item['scheduled_at'] : (int) current_time('timestamp', true);
         }, $remaining));
 
         sitepulse_uptime_maybe_schedule_queue_processor($next_timestamp);
