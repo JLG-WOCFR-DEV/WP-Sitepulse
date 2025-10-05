@@ -26,8 +26,9 @@ if (!function_exists('sitepulse_delete_transients_by_prefix')) {
         $like = $wpdb->esc_like($prefix) . '%';
         $option_names = $wpdb->get_col(
             $wpdb->prepare(
-                "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s",
-                '_transient_' . $like
+                "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
+                '_transient_' . $like,
+                '_transient_timeout_' . $like
             )
         );
 
@@ -35,14 +36,24 @@ if (!function_exists('sitepulse_delete_transients_by_prefix')) {
             return;
         }
 
-        $transient_prefix = strlen('_transient_');
+        $transient_keys = [];
+        $value_prefix   = strlen('_transient_');
+        $timeout_prefix = strlen('_transient_timeout_');
 
         foreach ($option_names as $option_name) {
-            $transient_key = substr($option_name, $transient_prefix);
+            if (strpos($option_name, '_transient_timeout_') === 0) {
+                $transient_key = substr($option_name, $timeout_prefix);
+            } else {
+                $transient_key = substr($option_name, $value_prefix);
+            }
 
             if ($transient_key !== '') {
-                delete_transient($transient_key);
+                $transient_keys[$transient_key] = true;
             }
+        }
+
+        foreach (array_keys($transient_keys) as $transient_key) {
+            delete_transient($transient_key);
         }
     }
 }
@@ -256,8 +267,9 @@ if (!function_exists('sitepulse_delete_site_transients_by_prefix')) {
         $like = $wpdb->esc_like($prefix) . '%';
         $meta_keys = $wpdb->get_col(
             $wpdb->prepare(
-                "SELECT meta_key FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s",
-                '_site_transient_' . $like
+                "SELECT meta_key FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s OR meta_key LIKE %s",
+                '_site_transient_' . $like,
+                '_site_transient_timeout_' . $like
             )
         );
 
@@ -265,14 +277,24 @@ if (!function_exists('sitepulse_delete_site_transients_by_prefix')) {
             return;
         }
 
-        $site_transient_prefix = strlen('_site_transient_');
+        $transient_keys = [];
+        $value_prefix   = strlen('_site_transient_');
+        $timeout_prefix = strlen('_site_transient_timeout_');
 
         foreach ($meta_keys as $meta_key) {
-            $transient_key = substr($meta_key, $site_transient_prefix);
+            if (strpos($meta_key, '_site_transient_timeout_') === 0) {
+                $transient_key = substr($meta_key, $timeout_prefix);
+            } else {
+                $transient_key = substr($meta_key, $value_prefix);
+            }
 
             if ($transient_key !== '') {
-                delete_site_transient($transient_key);
+                $transient_keys[$transient_key] = true;
             }
+        }
+
+        foreach (array_keys($transient_keys) as $transient_key) {
+            delete_site_transient($transient_key);
         }
     }
 }
