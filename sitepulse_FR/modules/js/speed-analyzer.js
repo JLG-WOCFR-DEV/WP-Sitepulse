@@ -3,6 +3,8 @@
 
     var settings = window.SitePulseSpeedAnalyzer || {};
     var chartInstance = null;
+    var automation = settings.automation || { presets: {} };
+    var currentSourceKey = 'manual';
 
     function sanitizeHistory(history) {
         if (!Array.isArray(history)) {
@@ -35,6 +37,92 @@
             .sort(function (a, b) {
                 return a.timestamp - b.timestamp;
             });
+    }
+
+    function buildMetaMap(detailedHistory) {
+        if (!Array.isArray(detailedHistory)) {
+            return {};
+        }
+
+        return detailedHistory.reduce(function (accumulator, entry) {
+            if (!entry || typeof entry !== 'object') {
+                return accumulator;
+            }
+
+            var timestamp = parseInt(entry.timestamp, 10);
+
+            if (!isFinite(timestamp) || timestamp <= 0) {
+                return accumulator;
+            }
+
+            accumulator[timestamp] = entry;
+
+            return accumulator;
+        }, {});
+    }
+
+    function getAutomationPreset(slug) {
+        if (!automation || typeof automation !== 'object') {
+            return null;
+        }
+
+        if (!automation.presets || typeof automation.presets !== 'object') {
+            return null;
+        }
+
+        if (!Object.prototype.hasOwnProperty.call(automation.presets, slug)) {
+            return null;
+        }
+
+        return automation.presets[slug];
+    }
+
+    function getSourceData(sourceKey) {
+        if (!sourceKey || sourceKey === 'manual') {
+            return {
+                key: 'manual',
+                history: settings.history || [],
+                detailedHistory: null,
+                aggregates: settings.aggregates || {},
+                recommendations: settings.recommendations || []
+            };
+        }
+
+        if (sourceKey.indexOf('automation:') === 0) {
+            var slug = sourceKey.substring('automation:'.length);
+            var preset = getAutomationPreset(slug);
+
+            if (preset) {
+                return {
+                    key: sourceKey,
+                    history: preset.history || [],
+                    detailedHistory: preset.detailedHistory || [],
+                    aggregates: preset.aggregates || {},
+                    recommendations: []
+                };
+            }
+        }
+
+        return null;
+    }
+
+    function applySource(sourceKey, dom) {
+        var source = getSourceData(sourceKey);
+
+        if (!source) {
+            source = getSourceData('manual');
+            currentSourceKey = 'manual';
+
+            if (dom.sourceSelect) {
+                dom.sourceSelect.value = 'manual';
+            }
+        } else {
+            currentSourceKey = sourceKey;
+        }
+
+        renderHistory(source.history, source.detailedHistory, dom);
+        renderSummary(source.aggregates || {}, dom);
+        updateRecommendations(source.recommendations || [], dom);
     }
 
     function getStatusMeta(status) {
@@ -235,11 +323,12 @@
         return date.toLocaleString();
     }
 
-    function renderHistory(history, dom) {
+    function renderHistory(history, detailedHistory, dom) {
         var sanitized = sanitizeHistory(history);
         var canvas = dom.canvas;
         var tableBody = dom.tableBody;
         var i18n = settings.i18n || {};
+        var metaMap = buildMetaMap(detailedHistory);
 
         if (tableBody) {
             tableBody.innerHTML = '';
@@ -247,7 +336,7 @@
             if (!sanitized.length) {
                 var emptyRow = document.createElement('tr');
                 var emptyCell = document.createElement('td');
-                emptyCell.colSpan = 2;
+                emptyCell.colSpan = 3;
                 emptyCell.textContent = i18n.noHistory || '';
                 emptyRow.appendChild(emptyCell);
                 tableBody.appendChild(emptyRow);
@@ -256,12 +345,40 @@
                     var row = document.createElement('tr');
                     var dateCell = document.createElement('td');
                     var valueCell = document.createElement('td');
-
+                    var statusCell = document.createElement('td');
+                    statusCell.className = 'speed-history-status';
                     dateCell.textContent = formatTimestamp(entry.timestamp);
                     valueCell.textContent = entry.server_processing_ms.toFixed(2);
 
+                    var meta = metaMap[entry.timestamp] || null;
+                    var statusText = '—';
+
+                    statusCell.classList.remove('status-ok', 'status-error');
+
+                    if (meta) {
+                        if (meta.error) {
+                            statusText = String(meta.error);
+                            statusCell.classList.add('status-error');
+                        } else if (typeof meta.http_code !== 'undefined') {
+                            var code = parseInt(meta.http_code, 10);
+
+                            if (Number.isFinite(code) && code > 0) {
+                                statusText = String(code);
+
+                                if (code >= 400) {
+                                    statusCell.classList.add('status-error');
+                                } else {
+                                    statusCell.classList.add('status-ok');
+                                }
+                            }
+                        }
+                    }
+
+                    statusCell.textContent = statusText;
+
                     row.appendChild(dateCell);
                     row.appendChild(valueCell);
+                    row.appendChild(statusCell);
                     tableBody.appendChild(row);
                 });
             }
@@ -413,12 +530,19 @@
             tableBody: document.querySelector('#sitepulse-speed-history-table tbody'),
             recommendations: document.querySelector('#sitepulse-speed-recommendations ul'),
             summaryGrid: document.getElementById('sitepulse-speed-summary-grid'),
-            summaryNote: document.getElementById('sitepulse-speed-summary-note')
+            summaryNote: document.getElementById('sitepulse-speed-summary-note'),
+            sourceSelect: document.getElementById('sitepulse-speed-history-source'),
+            queueWarning: document.querySelector('.speed-history-queue-warning')
         };
 
-        renderHistory(settings.history || [], dom);
-        updateRecommendations(settings.recommendations || [], dom);
-        renderSummary(settings.aggregates || {}, dom);
+        applySource(currentSourceKey, dom);
+
+        if (dom.sourceSelect) {
+            dom.sourceSelect.value = currentSourceKey;
+            dom.sourceSelect.addEventListener('change', function () {
+                applySource(dom.sourceSelect.value, dom);
+            });
+        }
 
         if (!dom.button) {
             return;
@@ -484,6 +608,7 @@
 
                         if (Array.isArray(errorData.recommendations)) {
                             updateRecommendations(errorData.recommendations, dom);
+                            settings.recommendations = errorData.recommendations;
                         }
 
                         if (errorData.aggregates) {
@@ -491,10 +616,18 @@
                         }
 
                         if (Array.isArray(errorData.history)) {
-                            renderHistory(errorData.history, dom);
+                            settings.history = errorData.history;
                         }
 
-                        renderSummary(settings.aggregates || {}, dom);
+                        if (errorData.automation) {
+                            automation = errorData.automation;
+                            settings.automation = automation;
+                        }
+
+                        if (currentSourceKey === 'manual') {
+                            applySource('manual', dom);
+                        }
+
                         setStatus(message, type, dom);
                         setButtonState(false, dom);
                         return;
@@ -508,9 +641,12 @@
                     settings.rateLimit = data.rate_limit || settings.rateLimit;
                     settings.aggregates = data.aggregates || settings.aggregates;
 
-                    renderHistory(settings.history, dom);
-                    updateRecommendations(settings.recommendations, dom);
-                    renderSummary(settings.aggregates || {}, dom);
+                    if (data.automation) {
+                        automation = data.automation;
+                        settings.automation = automation;
+                    }
+
+                    applySource(currentSourceKey, dom);
 
                     setStatus(data.message || '', 'success', dom);
                     setButtonState(false, dom);
