@@ -108,6 +108,7 @@ function sitepulse_uptime_tracker_register_cron_schedules($schedules) {
 function sitepulse_uptime_register_remote_worker_hooks() {
     add_action('sitepulse_uptime_process_remote_queue', 'sitepulse_uptime_process_remote_queue');
     add_action('sitepulse_uptime_schedule_internal_request', 'sitepulse_uptime_schedule_internal_request', 10, 3);
+    add_action('rest_api_init', 'sitepulse_uptime_register_rest_routes');
 
     if (defined('WP_CLI') && WP_CLI && class_exists('WP_CLI')) {
         WP_CLI::add_command('sitepulse uptime:queue', function ($args, $assoc_args) {
@@ -123,6 +124,102 @@ function sitepulse_uptime_register_remote_worker_hooks() {
             WP_CLI::success(sprintf('Vérification programmée pour %s.', $agent));
         });
     }
+}
+
+/**
+ * Registers the REST API routes used to orchestrate remote uptime workers.
+ *
+ * @return void
+ */
+function sitepulse_uptime_register_rest_routes() {
+    if (!function_exists('register_rest_route')) {
+        return;
+    }
+
+    register_rest_route(
+        'sitepulse/v1',
+        '/uptime/schedule',
+        [
+            'methods'             => defined('WP_REST_Server::CREATABLE') ? WP_REST_Server::CREATABLE : 'POST',
+            'permission_callback' => 'sitepulse_uptime_rest_schedule_permission_check',
+            'callback'            => 'sitepulse_uptime_rest_schedule_callback',
+            'args'                => [
+                'agent'     => [
+                    'type'              => 'string',
+                    'sanitize_callback' => 'sanitize_key',
+                    'default'           => 'default',
+                ],
+                'timestamp' => [
+                    'type'              => 'integer',
+                    'required'          => false,
+                ],
+                'payload'   => [
+                    'type'              => 'array',
+                    'required'          => false,
+                    'default'           => [],
+                ],
+            ],
+        ]
+    );
+}
+
+/**
+ * Determines whether the current request is allowed to schedule uptime checks.
+ *
+ * @param WP_REST_Request $request Request instance.
+ * @return bool
+ */
+function sitepulse_uptime_rest_schedule_permission_check($request) {
+    $required_capability = function_exists('sitepulse_get_capability') ? sitepulse_get_capability() : 'manage_options';
+
+    if (current_user_can($required_capability)) {
+        return true;
+    }
+
+    /**
+     * Filters the permission evaluation for the uptime scheduling REST endpoint.
+     *
+     * This allows third-party authentication strategies (application passwords,
+     * signed tokens, etc.) to authorise remote workers without granting the full
+     * SitePulse capability.
+     *
+     * @param bool             $allowed Whether the request is authorised.
+     * @param WP_REST_Request  $request REST request instance.
+     */
+    return (bool) apply_filters('sitepulse_uptime_rest_schedule_permission', false, $request);
+}
+
+/**
+ * Handles REST API requests to queue internal uptime checks.
+ *
+ * @param WP_REST_Request $request Request instance.
+ * @return WP_REST_Response
+ */
+function sitepulse_uptime_rest_schedule_callback($request) {
+    $agent = $request->get_param('agent');
+    $payload = $request->get_param('payload');
+    $timestamp = $request->get_param('timestamp');
+
+    if (!is_array($payload)) {
+        $payload = [];
+    }
+
+    if (null !== $timestamp) {
+        $timestamp = (int) $timestamp;
+    }
+
+    sitepulse_uptime_schedule_internal_request($agent, $payload, $timestamp);
+
+    $scheduled_timestamp = null === $timestamp
+        ? (int) current_time('timestamp')
+        : (int) $timestamp;
+
+    return rest_ensure_response([
+        'queued'        => true,
+        'agent'         => sitepulse_uptime_normalize_agent_id($agent),
+        'scheduled_at'  => $scheduled_timestamp,
+        'payload'       => empty($payload) ? new stdClass() : $payload,
+    ]);
 }
 
 /**
