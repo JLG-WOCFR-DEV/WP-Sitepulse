@@ -106,6 +106,21 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
         parent::tear_down();
     }
 
+    public function test_settings_page_displays_overview_tab_by_default(): void {
+        delete_option(SITEPULSE_OPTION_ACTIVE_MODULES);
+        delete_option(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS);
+        delete_option(SITEPULSE_OPTION_ALERT_RECIPIENTS);
+        delete_option(SITEPULSE_OPTION_GEMINI_API_KEY);
+
+        ob_start();
+        sitepulse_settings_page();
+        $output = ob_get_clean();
+
+        $this->assertStringContainsString("id=\"sitepulse-tab-overview-label\"", $output);
+        $this->assertStringContainsString("data-tab-target=\"sitepulse-tab-overview\"", $output);
+        $this->assertMatchesRegularExpression('/id="sitepulse-tab-overview-label"\s+class="nav-tab sitepulse-tab-link nav-tab-active"/', $output);
+    }
+
     public function test_clear_log_action_clears_debug_file_and_outputs_notice(): void {
         file_put_contents(self::$debug_log_path, 'test');
         $this->assertFileExists(self::$debug_log_path);
