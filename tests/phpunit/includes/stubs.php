@@ -59,6 +59,18 @@ if (!defined('SITEPULSE_OPTION_ALERT_RECIPIENTS')) {
     define('SITEPULSE_OPTION_ALERT_RECIPIENTS', 'sitepulse_alert_recipients');
 }
 
+if (!defined('SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS')) {
+    define('SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS', 'sitepulse_error_alert_delivery_channels');
+}
+
+if (!defined('SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS')) {
+    define('SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS', 'sitepulse_error_alert_webhooks');
+}
+
+if (!defined('SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES')) {
+    define('SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES', 'sitepulse_error_alert_severities');
+}
+
 if (!defined('SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES')) {
     define('SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES', 'sitepulse_alert_cooldown_minutes');
 }

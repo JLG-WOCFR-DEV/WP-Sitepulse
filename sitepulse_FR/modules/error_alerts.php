@@ -313,14 +313,453 @@ function sitepulse_error_alert_get_recipients() {
 }
 
 /**
+ * Returns labels for the available delivery channels.
+ *
+ * @return array<string, string>
+ */
+function sitepulse_error_alert_get_delivery_channel_labels() {
+    return [
+        'email'   => __('E-mail', 'sitepulse'),
+        'webhook' => __('Webhook', 'sitepulse'),
+    ];
+}
+
+/**
+ * Normalizes a list of delivery channels to a whitelist.
+ *
+ * @param mixed $channels Raw channel list.
+ * @return array<string> Sanitized channel identifiers.
+ */
+function sitepulse_error_alert_normalize_delivery_channels($channels) {
+    if (is_string($channels)) {
+        $channels = [$channels];
+    } elseif (!is_array($channels)) {
+        $channels = [];
+    }
+
+    $allowed   = array_keys(sitepulse_error_alert_get_delivery_channel_labels());
+    $sanitized = [];
+
+    foreach ($channels as $channel) {
+        if (!is_string($channel)) {
+            continue;
+        }
+
+        $channel = sanitize_key($channel);
+
+        if ($channel === '' || !in_array($channel, $allowed, true)) {
+            continue;
+        }
+
+        if (!in_array($channel, $sanitized, true)) {
+            $sanitized[] = $channel;
+        }
+    }
+
+    if (empty($sanitized)) {
+        $sanitized[] = 'email';
+    }
+
+    return $sanitized;
+}
+
+/**
+ * Retrieves the enabled delivery channels for alerts.
+ *
+ * @return array<string>
+ */
+function sitepulse_error_alert_get_delivery_channels() {
+    $stored = get_option(SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS, ['email']);
+
+    return sitepulse_error_alert_normalize_delivery_channels($stored);
+}
+
+/**
+ * Normalizes a list of webhook URLs.
+ *
+ * @param mixed $webhooks Raw webhook list.
+ * @return array<string> Sanitized URLs.
+ */
+function sitepulse_error_alert_normalize_webhook_urls($webhooks) {
+    if (is_string($webhooks)) {
+        $webhooks = preg_split('/[\r\n]+/', $webhooks);
+    } elseif (!is_array($webhooks)) {
+        $webhooks = [];
+    }
+
+    $sanitized = [];
+
+    foreach ($webhooks as $url) {
+        if (!is_string($url)) {
+            continue;
+        }
+
+        $url = trim($url);
+
+        if ($url === '') {
+            continue;
+        }
+
+        $normalized = esc_url_raw($url);
+
+        if ($normalized === '') {
+            continue;
+        }
+
+        if (function_exists('wp_http_validate_url') && !wp_http_validate_url($normalized)) {
+            continue;
+        }
+
+        if (!in_array($normalized, $sanitized, true)) {
+            $sanitized[] = $normalized;
+        }
+    }
+
+    return $sanitized;
+}
+
+/**
+ * Retrieves the configured webhook endpoints.
+ *
+ * @return array<string> List of webhook URLs.
+ */
+function sitepulse_error_alert_get_webhook_urls() {
+    $stored = get_option(SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS, []);
+
+    $urls = sitepulse_error_alert_normalize_webhook_urls($stored);
+
+    /**
+     * Filters the list of webhook endpoints that should receive alert payloads.
+     *
+     * @param array  $urls    List of webhook URLs.
+     * @param string $context Context of the call.
+     */
+    $filtered = apply_filters('sitepulse_error_alert_webhook_urls', $urls, 'option');
+
+    return sitepulse_error_alert_normalize_webhook_urls($filtered);
+}
+
+/**
+ * Returns available severity labels.
+ *
+ * @return array<string, string>
+ */
+function sitepulse_error_alert_get_severity_labels() {
+    return [
+        'info'     => __('Information', 'sitepulse'),
+        'warning'  => __('Avertissement', 'sitepulse'),
+        'critical' => __('Critique', 'sitepulse'),
+    ];
+}
+
+/**
+ * Normalizes the severity identifier.
+ *
+ * @param mixed $severity Raw severity value.
+ * @return string Valid severity key.
+ */
+function sitepulse_error_alert_normalize_severity($severity) {
+    if (!is_string($severity)) {
+        $severity = '';
+    }
+
+    $severity = sanitize_key($severity);
+    $allowed  = array_keys(sitepulse_error_alert_get_severity_labels());
+
+    if (!in_array($severity, $allowed, true)) {
+        $severity = 'warning';
+    }
+
+    return $severity;
+}
+
+/**
+ * Retrieves the severities that should trigger notifications.
+ *
+ * @return array<string>
+ */
+function sitepulse_error_alert_get_enabled_severities() {
+    $stored = get_option(SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES, ['warning', 'critical']);
+
+    if (is_string($stored)) {
+        $stored = [$stored];
+    } elseif (!is_array($stored)) {
+        $stored = [];
+    }
+
+    $normalized = [];
+
+    foreach ($stored as $severity) {
+        $normalized[] = sitepulse_error_alert_normalize_severity($severity);
+    }
+
+    $normalized = array_values(array_unique(array_filter($normalized, 'strlen')));
+
+    if (empty($normalized)) {
+        $normalized = ['warning', 'critical'];
+    }
+
+    return $normalized;
+}
+
+/**
+ * Determines whether a given severity level is enabled.
+ *
+ * @param string $severity Severity identifier.
+ * @return bool
+ */
+function sitepulse_error_alert_is_severity_enabled($severity) {
+    $severity = sitepulse_error_alert_normalize_severity($severity);
+
+    return in_array($severity, sitepulse_error_alert_get_enabled_severities(), true);
+}
+
+/**
+ * Builds a normalized payload for the provided alert content.
+ *
+ * @param string $type     Alert type identifier.
+ * @param string $subject  Alert subject.
+ * @param string $message  Alert message body.
+ * @param string $severity Severity level.
+ * @param array  $extra    Optional additional context.
+ * @return array<string, mixed> Normalized payload array.
+ */
+function sitepulse_error_alert_build_payload($type, $subject, $message, $severity = 'warning', $extra = []) {
+    $type     = sanitize_key($type);
+    $severity = sitepulse_error_alert_normalize_severity($severity);
+
+    if ($type === '') {
+        $type = 'general';
+    }
+
+    $subject = sanitize_text_field((string) $subject);
+    $message = sanitize_textarea_field((string) $message);
+
+    $site_name = get_bloginfo('name');
+    $site_name = is_string($site_name) ? trim($site_name) : '';
+
+    if ($site_name === '') {
+        $site_name = home_url('/');
+    }
+
+    $payload = [
+        'type'      => $type,
+        'subject'   => $subject,
+        'message'   => $message,
+        'severity'  => $severity,
+        'site_name' => $site_name,
+        'site_url'  => home_url('/'),
+        'timestamp' => current_time('mysql', true),
+    ];
+
+    if (is_array($extra) && !empty($extra)) {
+        $payload = array_merge($payload, $extra);
+    }
+
+    /**
+     * Filters the normalized payload before it is dispatched.
+     *
+     * @param array  $payload  Prepared payload.
+     * @param string $type     Alert type.
+     * @param string $severity Severity key.
+     * @param array  $extra    Extra context provided to the builder.
+     */
+    $filtered = apply_filters('sitepulse_error_alert_payload', $payload, $type, $severity, $extra);
+
+    if (!is_array($filtered)) {
+        return $payload;
+    }
+
+    foreach (['type', 'subject', 'message', 'severity'] as $required_key) {
+        if (!isset($filtered[$required_key])) {
+            $filtered[$required_key] = $payload[$required_key];
+        }
+    }
+
+    $filtered['type'] = sanitize_key((string) $filtered['type']);
+    if ($filtered['type'] === '') {
+        $filtered['type'] = $payload['type'];
+    }
+
+    $filtered['subject']  = sanitize_text_field((string) $filtered['subject']);
+    $filtered['message']  = sanitize_textarea_field((string) $filtered['message']);
+    $filtered['severity'] = sitepulse_error_alert_normalize_severity($filtered['severity']);
+
+    if (!isset($filtered['timestamp'])) {
+        $filtered['timestamp'] = $payload['timestamp'];
+    }
+
+    if (!isset($filtered['site_name'])) {
+        $filtered['site_name'] = $payload['site_name'];
+    }
+
+    if (!isset($filtered['site_url'])) {
+        $filtered['site_url'] = $payload['site_url'];
+    }
+
+    return $filtered;
+}
+
+/**
+ * Dispatches the prepared payload via e-mail.
+ *
+ * @param array<string, mixed> $payload Normalized payload array.
+ * @return bool True on success.
+ */
+function sitepulse_error_alert_dispatch_email($payload) {
+    $recipients = sitepulse_error_alert_get_recipients();
+
+    if (empty($recipients)) {
+        if (function_exists('sitepulse_log')) {
+            sitepulse_log("Alert '{$payload['type']}' skipped e-mail dispatch: no recipients.", 'ERROR');
+        }
+
+        return false;
+    }
+
+    /**
+     * Filters the e-mail payload before sending.
+     *
+     * @param array  $payload    Prepared payload.
+     * @param array  $recipients List of recipients.
+     */
+    $email_payload = apply_filters('sitepulse_error_alert_email_payload', $payload, $recipients);
+
+    if (!is_array($email_payload)) {
+        $email_payload = $payload;
+    }
+
+    $subject = isset($email_payload['subject']) ? (string) $email_payload['subject'] : $payload['subject'];
+    $message = isset($email_payload['message']) ? (string) $email_payload['message'] : $payload['message'];
+
+    $sent = wp_mail($recipients, $subject, $message);
+
+    if (function_exists('sitepulse_log')) {
+        if ($sent) {
+            sitepulse_log("Alert '{$payload['type']}' e-mail dispatched to " . count($recipients) . ' recipients.');
+        } else {
+            sitepulse_log("Alert '{$payload['type']}' e-mail failed to send.", 'ERROR');
+        }
+    }
+
+    return (bool) $sent;
+}
+
+/**
+ * Dispatches the prepared payload to webhook endpoints.
+ *
+ * @param array<string, mixed> $payload Normalized payload array.
+ * @return array<string, bool> Map of URL => success state.
+ */
+function sitepulse_error_alert_dispatch_webhooks($payload) {
+    $webhooks = sitepulse_error_alert_get_webhook_urls();
+
+    if (empty($webhooks)) {
+        if (function_exists('sitepulse_log')) {
+            sitepulse_log("Alert '{$payload['type']}' skipped webhook dispatch: no endpoints configured.", 'WARNING');
+        }
+
+        return [];
+    }
+
+    $body = [
+        'type'      => $payload['type'],
+        'subject'   => $payload['subject'],
+        'message'   => $payload['message'],
+        'severity'  => $payload['severity'],
+        'site_name' => isset($payload['site_name']) ? $payload['site_name'] : '',
+        'site_url'  => isset($payload['site_url']) ? $payload['site_url'] : home_url('/'),
+        'timestamp' => isset($payload['timestamp']) ? $payload['timestamp'] : current_time('mysql', true),
+    ];
+
+    /**
+     * Filters the webhook payload body before encoding to JSON.
+     *
+     * @param array $body    Default payload body.
+     * @param array $payload Normalized alert payload.
+     */
+    $body = apply_filters('sitepulse_error_alert_webhook_body', $body, $payload);
+
+    if (!is_array($body)) {
+        $body = [
+            'type'     => $payload['type'],
+            'subject'  => $payload['subject'],
+            'message'  => $payload['message'],
+            'severity' => $payload['severity'],
+        ];
+    }
+
+    $encoded_body = wp_json_encode($body);
+
+    $results = [];
+
+    foreach ($webhooks as $url) {
+        $args = [
+            'method'      => 'POST',
+            'timeout'     => 5,
+            'headers'     => ['Content-Type' => 'application/json'],
+            'body'        => $encoded_body,
+            'data_format' => 'body',
+        ];
+
+        /**
+         * Filters the request arguments used to call webhook endpoints.
+         *
+         * @param array  $args     Request arguments.
+         * @param string $url      Webhook URL.
+         * @param array  $payload  Normalized alert payload.
+         */
+        $request_args = apply_filters('sitepulse_error_alert_webhook_request_args', $args, $url, $payload);
+
+        if (!is_array($request_args)) {
+            $request_args = $args;
+        }
+
+        $response = wp_remote_post($url, $request_args);
+
+        $success = false;
+
+        if (!is_wp_error($response)) {
+            $code = wp_remote_retrieve_response_code($response);
+            $success = $code >= 200 && $code < 300;
+        }
+
+        $results[$url] = $success;
+
+        if (function_exists('sitepulse_log')) {
+            if ($success) {
+                sitepulse_log("Alert '{$payload['type']}' webhook delivered to {$url}.");
+            } else {
+                $error_message = is_wp_error($response) ? $response->get_error_message() : ('HTTP ' . wp_remote_retrieve_response_code($response));
+                sitepulse_log("Alert '{$payload['type']}' webhook failed for {$url}: {$error_message}", 'ERROR');
+            }
+        }
+    }
+
+    return $results;
+}
+
+/**
  * Attempts to send an alert message while respecting the cooldown lock.
  *
- * @param string $type    Unique identifier of the alert type.
- * @param string $subject Mail subject.
- * @param string $message Mail body.
- * @return bool True if the e-mail was dispatched, false otherwise.
+ * @param string               $type     Unique identifier of the alert type.
+ * @param string               $subject  Mail subject.
+ * @param string               $message  Mail body.
+ * @param string               $severity Severity associated with the alert.
+ * @param array<string, mixed> $extra    Optional extra payload data.
+ * @return bool True if at least one channel succeeded, false otherwise.
  */
-function sitepulse_error_alert_send($type, $subject, $message) {
+function sitepulse_error_alert_send($type, $subject, $message, $severity = 'warning', $extra = []) {
+    $severity = sitepulse_error_alert_normalize_severity($severity);
+
+    if (!sitepulse_error_alert_is_severity_enabled($severity)) {
+        if (function_exists('sitepulse_log')) {
+            sitepulse_log("Alert '$type' skipped because severity '{$severity}' is disabled.", 'WARNING');
+        }
+
+        return false;
+    }
+
     $lock_key = SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX . sanitize_key($type) . SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX;
 
     if (false !== get_transient($lock_key)) {
@@ -330,40 +769,87 @@ function sitepulse_error_alert_send($type, $subject, $message) {
         return false;
     }
 
-    $recipients = sitepulse_error_alert_get_recipients();
+    $payload = sitepulse_error_alert_build_payload($type, $subject, $message, $severity, $extra);
 
-    if (empty($recipients)) {
+    $channels = sitepulse_error_alert_get_delivery_channels();
+    $channels = apply_filters('sitepulse_error_alert_delivery_channels', $channels, $payload, $type, $severity, $extra);
+    $channels = sitepulse_error_alert_normalize_delivery_channels($channels);
+
+    if (empty($channels)) {
         if (function_exists('sitepulse_log')) {
-            sitepulse_log("Alert '$type' skipped because no valid recipients were found.", 'ERROR');
+            sitepulse_log("Alert '{$payload['type']}' skipped because no delivery channel is enabled.", 'WARNING');
         }
 
         return false;
     }
 
-    $sent = wp_mail($recipients, $subject, $message);
+    $results = [
+        'email'   => null,
+        'webhook' => [],
+    ];
+    $success = false;
 
-    if ($sent) {
-        set_transient($lock_key, time(), sitepulse_error_alert_get_cooldown());
-        if (function_exists('sitepulse_log')) {
-            sitepulse_log("Alert '$type' e-mail sent and cooldown applied.");
-        }
-    } elseif (function_exists('sitepulse_log')) {
-        sitepulse_log("Alert '$type' e-mail failed to send.", 'ERROR');
+    if (in_array('email', $channels, true)) {
+        $results['email'] = sitepulse_error_alert_dispatch_email($payload);
+        $success = $success || $results['email'];
     }
 
-    return $sent;
+    if (in_array('webhook', $channels, true)) {
+        $results['webhook'] = sitepulse_error_alert_dispatch_webhooks($payload);
+        if (!$success) {
+            $success = !empty(array_filter($results['webhook']));
+        }
+    }
+
+    /**
+     * Fires after an alert payload has been dispatched to all channels.
+     *
+     * @param array  $payload Normalized payload array.
+     * @param array  $results Map of channel => result information.
+     * @param string $type    Alert type.
+     * @param string $severity Alert severity.
+     * @param array  $channels Channels that were attempted.
+     */
+    do_action('sitepulse_error_alert_dispatched', $payload, $results, $type, $severity, $channels);
+
+    if ($success) {
+        set_transient($lock_key, time(), sitepulse_error_alert_get_cooldown());
+
+        if (function_exists('sitepulse_log')) {
+            $labels = sitepulse_error_alert_get_delivery_channel_labels();
+            $label_list = array_map(static function ($channel) use ($labels) {
+                return isset($labels[$channel]) ? $labels[$channel] : $channel;
+            }, $channels);
+
+            sitepulse_log("Alert '{$payload['type']}' dispatched via " . implode(', ', $label_list) . ' and cooldown applied.');
+        }
+    } elseif (function_exists('sitepulse_log')) {
+        sitepulse_log("Alert '{$payload['type']}' failed to dispatch on all channels.", 'ERROR');
+    }
+
+    return $success;
 }
 
 /**
  * Sends a test alert message without applying cooldown locks.
  *
+ * @param string $channel Delivery channel to test (email, webhook, all).
  * @return true|\WP_Error True on success, WP_Error on failure.
  */
-function sitepulse_error_alerts_send_test_message() {
-    $recipients = sitepulse_error_alert_get_recipients();
+function sitepulse_error_alerts_send_test_message($channel = 'email') {
+    $channel = is_string($channel) ? sanitize_key($channel) : '';
 
-    if (empty($recipients)) {
-        return new WP_Error('sitepulse_no_alert_recipients', __('Aucun destinataire valide pour les alertes.', 'sitepulse'));
+    $available_channels = sitepulse_error_alert_get_delivery_channels();
+    $channels_to_test   = [];
+
+    if ($channel === '' || $channel === 'all') {
+        $channels_to_test = $available_channels;
+    } else {
+        $channels_to_test = sitepulse_error_alert_normalize_delivery_channels([$channel]);
+    }
+
+    if (empty($channels_to_test)) {
+        return new WP_Error('sitepulse_no_delivery_channels', __('Aucun canal de diffusion n’est actif.', 'sitepulse'));
     }
 
     $raw_site_name = get_bloginfo('name');
@@ -389,22 +875,62 @@ function sitepulse_error_alerts_send_test_message() {
     }
 
     /* translators: %s: Site title. */
-    $subject = sprintf(__('SitePulse : e-mail de test pour %s', 'sitepulse'), $site_name);
+    $subject = sprintf(__('SitePulse : test de notification pour %s', 'sitepulse'), $site_name);
     $subject = sanitize_text_field($subject);
 
     /* translators: 1: Site title. 2: Comma-separated list of enabled alert channels. */
     $message = sprintf(
-        esc_html__('Cet e-mail confirme la configuration des alertes SitePulse pour %1$s. Canaux actifs : %2$s.', 'sitepulse'),
+        esc_html__('Ce message confirme la configuration des alertes SitePulse pour %1$s. Canaux d’alerte actifs : %2$s.', 'sitepulse'),
         $site_name,
         implode(', ', $enabled_labels)
     );
 
     $message = sanitize_textarea_field($message);
 
-    $sent = wp_mail($recipients, $subject, $message);
+    $payload = sitepulse_error_alert_build_payload('test_alert', $subject, $message, 'info', [
+        'test_channels' => $channels_to_test,
+    ]);
 
-    if (!$sent) {
-        return new WP_Error('sitepulse_test_mail_failed', __('Impossible d’envoyer l’e-mail de test.', 'sitepulse'));
+    $has_success = false;
+
+    foreach ($channels_to_test as $channel_key) {
+        if ($channel_key === 'email') {
+            $recipients = sitepulse_error_alert_get_recipients();
+
+            if (empty($recipients)) {
+                return new WP_Error('sitepulse_no_alert_recipients', __('Aucun destinataire valide pour les alertes.', 'sitepulse'));
+            }
+
+            $result = sitepulse_error_alert_dispatch_email($payload);
+            $has_success = $has_success || $result;
+        } elseif ($channel_key === 'webhook') {
+            $webhooks = sitepulse_error_alert_get_webhook_urls();
+
+            if (empty($webhooks)) {
+                return new WP_Error('sitepulse_no_webhooks', __('Aucune URL de webhook configurée.', 'sitepulse'));
+            }
+
+            $results = sitepulse_error_alert_dispatch_webhooks($payload);
+            if (!$has_success) {
+                $has_success = !empty(array_filter($results));
+            }
+        } else {
+            /**
+             * Allows third-party integrations to handle custom test channels.
+             *
+             * @param string $channel_key Channel identifier.
+             * @param array  $payload     Prepared payload.
+             */
+            do_action('sitepulse_error_alert_test_channel', $channel_key, $payload);
+        }
+    }
+
+    if (!$has_success) {
+        return new WP_Error('sitepulse_test_channel_failed', __('Le test n’a pas pu être envoyé via le canal sélectionné.', 'sitepulse'));
+    }
+
+    if (function_exists('sitepulse_log')) {
+        sitepulse_log('Test de notification SitePulse déclenché.', 'INFO');
     }
 
     return true;
@@ -520,7 +1046,11 @@ function sitepulse_error_alerts_check_cpu_load() {
 
         $message = sanitize_textarea_field($message);
 
-        sitepulse_error_alert_send('cpu', $subject, $message);
+        sitepulse_error_alert_send('cpu', $subject, $message, 'warning', [
+            'cpu_load'      => (float) $load[0],
+            'cpu_threshold' => $total_threshold,
+            'cpu_cores'     => $core_count,
+        ]);
     }
 }
 
@@ -700,7 +1230,10 @@ function sitepulse_error_alerts_check_debug_log() {
 
             $message = sanitize_textarea_field($message);
 
-            sitepulse_error_alert_send('php_fatal', $subject, $message);
+            sitepulse_error_alert_send('php_fatal', $subject, $message, 'critical', [
+                'fatal_count' => (int) $fatal_count,
+                'log_file'    => $log_file_for_message,
+            ]);
             break;
         }
     }
@@ -807,16 +1340,32 @@ function sitepulse_error_alerts_handle_test_admin_post() {
         wp_die(esc_html__('Échec de la vérification de sécurité pour l’envoi de test.', 'sitepulse'));
     }
 
-    $result = sitepulse_error_alerts_send_test_message();
+    $channel = isset($_REQUEST['channel']) ? sanitize_key(wp_unslash($_REQUEST['channel'])) : 'email';
+
+    $result = sitepulse_error_alerts_send_test_message($channel);
     $status = 'success';
 
     if (is_wp_error($result)) {
-        $status = $result->get_error_code() === 'sitepulse_no_alert_recipients' ? 'no_recipients' : 'error';
+        switch ($result->get_error_code()) {
+            case 'sitepulse_no_alert_recipients':
+                $status = 'no_recipients';
+                break;
+            case 'sitepulse_no_webhooks':
+                $status = 'no_webhooks';
+                break;
+            case 'sitepulse_no_delivery_channels':
+                $status = 'no_channels';
+                break;
+            default:
+                $status = 'error';
+        }
     }
 
     $redirect_url = add_query_arg(
-        'sitepulse_alert_test',
-        $status,
+        [
+            'sitepulse_alert_test'     => $status,
+            'sitepulse_alert_channel'  => $channel,
+        ],
         admin_url('admin.php?page=sitepulse-settings#sitepulse-section-alerts')
     );
 
@@ -839,18 +1388,34 @@ function sitepulse_error_alerts_handle_ajax_test() {
         ], 403);
     }
 
-    $result = sitepulse_error_alerts_send_test_message();
+    $channel = isset($_POST['channel']) ? sanitize_key(wp_unslash($_POST['channel'])) : 'email';
+
+    $result = sitepulse_error_alerts_send_test_message($channel);
 
     if (is_wp_error($result)) {
-        $status_code = $result->get_error_code() === 'sitepulse_no_alert_recipients' ? 400 : 500;
+        switch ($result->get_error_code()) {
+            case 'sitepulse_no_alert_recipients':
+                $status_code = 400;
+                break;
+            case 'sitepulse_no_webhooks':
+            case 'sitepulse_no_delivery_channels':
+                $status_code = 400;
+                break;
+            default:
+                $status_code = 500;
+        }
 
         wp_send_json_error([
             'message' => esc_html($result->get_error_message()),
         ], $status_code);
     }
 
+    $success_message = $channel === 'webhook'
+        ? esc_html__('Webhook de test déclenché avec succès.', 'sitepulse')
+        : esc_html__('E-mail de test envoyé.', 'sitepulse');
+
     wp_send_json_success([
-        'message' => esc_html__('E-mail de test envoyé.', 'sitepulse'),
+        'message' => $success_message,
     ]);
 }
 add_action('wp_ajax_sitepulse_send_alert_test', 'sitepulse_error_alerts_handle_ajax_test');
@@ -895,16 +1460,33 @@ function sitepulse_error_alerts_handle_rest_test($request) {
         return new WP_Error('sitepulse_invalid_nonce', __('Échec de la vérification de sécurité pour l’envoi de test.', 'sitepulse'), ['status' => 403]);
     }
 
-    $result = sitepulse_error_alerts_send_test_message();
+    $channel = $request->get_param('channel');
+    $channel = is_string($channel) ? sanitize_key($channel) : 'email';
+
+    $result = sitepulse_error_alerts_send_test_message($channel);
 
     if (is_wp_error($result)) {
-        $status = $result->get_error_code() === 'sitepulse_no_alert_recipients' ? 400 : 500;
+        switch ($result->get_error_code()) {
+            case 'sitepulse_no_alert_recipients':
+                $status = 400;
+                break;
+            case 'sitepulse_no_webhooks':
+            case 'sitepulse_no_delivery_channels':
+                $status = 400;
+                break;
+            default:
+                $status = 500;
+        }
 
         return new WP_Error($result->get_error_code(), $result->get_error_message(), ['status' => $status]);
     }
 
+    $message = $channel === 'webhook'
+        ? esc_html__('Webhook de test déclenché avec succès.', 'sitepulse')
+        : esc_html__('E-mail de test envoyé.', 'sitepulse');
+
     return rest_ensure_response([
         'success' => true,
-        'message' => esc_html__('E-mail de test envoyé.', 'sitepulse'),
+        'message' => $message,
     ]);
 }
