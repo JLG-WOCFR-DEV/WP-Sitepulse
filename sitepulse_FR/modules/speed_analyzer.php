@@ -1270,6 +1270,42 @@ function sitepulse_speed_analyzer_get_summary_meta() {
 }
 
 /**
+ * Builds the textual summary note for the aggregate metrics section.
+ *
+ * @param array{count?:int,excluded_outliers?:int}|null $aggregates Aggregate metrics.
+ *
+ * @return string
+ */
+function sitepulse_speed_analyzer_build_summary_note($aggregates) {
+    if (!is_array($aggregates)) {
+        return '';
+    }
+
+    $summary_note_parts = [];
+
+    if (!empty($aggregates['count'])) {
+        $summary_note_parts[] = sprintf(
+            _n('Basé sur %d mesure.', 'Basé sur %d mesures.', (int) $aggregates['count'], 'sitepulse'),
+            (int) $aggregates['count']
+        );
+    }
+
+    if (!empty($aggregates['excluded_outliers'])) {
+        $summary_note_parts[] = sprintf(
+            _n(
+                '%d mesure extrême ignorée lors du calcul des moyennes.',
+                '%d mesures extrêmes ignorées lors du calcul des moyennes.',
+                (int) $aggregates['excluded_outliers'],
+                'sitepulse'
+            ),
+            (int) $aggregates['excluded_outliers']
+        );
+    }
+
+    return trim(implode(' ', $summary_note_parts));
+}
+
+/**
  * Calculates aggregated statistics over the history.
  *
  * @param array<int,array{timestamp:int,server_processing_ms:float}>|null $history    History entries.
@@ -1568,28 +1604,7 @@ function sitepulse_speed_analyzer_enqueue_assets($hook_suffix) {
     $aggregates = sitepulse_speed_analyzer_get_aggregates($history, $thresholds);
     $summary_meta = sitepulse_speed_analyzer_get_summary_meta();
     $status_labels = sitepulse_speed_analyzer_get_status_labels();
-    $summary_note_parts = [];
-
-    if (!empty($aggregates['count'])) {
-        $summary_note_parts[] = sprintf(
-            _n('Basé sur %d mesure.', 'Basé sur %d mesures.', (int) $aggregates['count'], 'sitepulse'),
-            (int) $aggregates['count']
-        );
-    }
-
-    if (!empty($aggregates['excluded_outliers'])) {
-        $summary_note_parts[] = sprintf(
-            _n(
-                '%d mesure extrême ignorée lors du calcul des moyennes.',
-                '%d mesures extrêmes ignorées lors du calcul des moyennes.',
-                (int) $aggregates['excluded_outliers'],
-                'sitepulse'
-            ),
-            (int) $aggregates['excluded_outliers']
-        );
-    }
-
-    $summary_note = trim(implode(' ', $summary_note_parts));
+    $summary_note = sitepulse_speed_analyzer_build_summary_note($aggregates);
 
     $automation_payload = sitepulse_speed_analyzer_build_automation_payload($thresholds);
     $frequency_choices = sitepulse_speed_analyzer_get_frequency_choices();
@@ -1718,6 +1733,7 @@ function sitepulse_speed_analyzer_page() {
     $history = sitepulse_speed_analyzer_get_history_data();
     $latest_entry = sitepulse_speed_analyzer_get_latest_entry($history);
     $aggregates = sitepulse_speed_analyzer_get_aggregates($history, $thresholds);
+    $summary_note = sitepulse_speed_analyzer_build_summary_note($aggregates);
     $summary_meta = sitepulse_speed_analyzer_get_summary_meta();
     $status_labels = sitepulse_speed_analyzer_get_status_labels();
     $now_timestamp = current_time('timestamp');
