@@ -1020,8 +1020,24 @@ function sitepulse_update_uptime_archive($entry) {
             'maintenance'     => 0,
             'first_timestamp' => $timestamp,
             'last_timestamp'  => $timestamp,
+            'latency_sum'     => 0.0,
+            'latency_count'   => 0,
+            'ttfb_sum'        => 0.0,
+            'ttfb_count'      => 0,
+            'violations'      => 0,
+            'violation_types' => [],
             'agents'          => [],
         ];
+    }
+
+    foreach (['latency_sum' => 0.0, 'latency_count' => 0, 'ttfb_sum' => 0.0, 'ttfb_count' => 0, 'violations' => 0] as $metric_key => $default_value) {
+        if (!isset($archive[$day_key][$metric_key])) {
+            $archive[$day_key][$metric_key] = $default_value;
+        }
+    }
+
+    if (!isset($archive[$day_key]['violation_types']) || !is_array($archive[$day_key]['violation_types'])) {
+        $archive[$day_key]['violation_types'] = [];
     }
 
     if (!isset($archive[$day_key][$status_key])) {
@@ -1040,12 +1056,28 @@ function sitepulse_update_uptime_archive($entry) {
 
     if (!isset($archive[$day_key]['agents'][$agent])) {
         $archive[$day_key]['agents'][$agent] = [
-            'up'          => 0,
-            'down'        => 0,
-            'unknown'     => 0,
-            'maintenance' => 0,
-            'total'       => 0,
+            'up'              => 0,
+            'down'            => 0,
+            'unknown'         => 0,
+            'maintenance'     => 0,
+            'total'           => 0,
+            'latency_sum'     => 0.0,
+            'latency_count'   => 0,
+            'ttfb_sum'        => 0.0,
+            'ttfb_count'      => 0,
+            'violations'      => 0,
+            'violation_types' => [],
         ];
+    }
+
+    foreach (['latency_sum' => 0.0, 'latency_count' => 0, 'ttfb_sum' => 0.0, 'ttfb_count' => 0, 'violations' => 0] as $metric_key => $default_value) {
+        if (!isset($archive[$day_key]['agents'][$agent][$metric_key])) {
+            $archive[$day_key]['agents'][$agent][$metric_key] = $default_value;
+        }
+    }
+
+    if (!isset($archive[$day_key]['agents'][$agent]['violation_types']) || !is_array($archive[$day_key]['agents'][$agent]['violation_types'])) {
+        $archive[$day_key]['agents'][$agent]['violation_types'] = [];
     }
 
     if (!isset($archive[$day_key]['agents'][$agent][$status_key])) {
@@ -1054,6 +1086,51 @@ function sitepulse_update_uptime_archive($entry) {
 
     $archive[$day_key]['agents'][$agent][$status_key]++;
     $archive[$day_key]['agents'][$agent]['total']++;
+
+    $latency_value = isset($entry['latency']) ? (float) $entry['latency'] : null;
+
+    if (null !== $latency_value && $latency_value >= 0) {
+        $archive[$day_key]['latency_sum'] += $latency_value;
+        $archive[$day_key]['latency_count']++;
+        $archive[$day_key]['agents'][$agent]['latency_sum'] += $latency_value;
+        $archive[$day_key]['agents'][$agent]['latency_count']++;
+    }
+
+    if (isset($entry['ttfb'])) {
+        $ttfb_value = (float) $entry['ttfb'];
+
+        if ($ttfb_value >= 0) {
+            $archive[$day_key]['ttfb_sum'] += $ttfb_value;
+            $archive[$day_key]['ttfb_count']++;
+            $archive[$day_key]['agents'][$agent]['ttfb_sum'] += $ttfb_value;
+            $archive[$day_key]['agents'][$agent]['ttfb_count']++;
+        }
+    }
+
+    $entry_violations = [];
+
+    if (isset($entry['violation_types']) && is_array($entry['violation_types'])) {
+        $entry_violations = array_values(array_filter(array_map('sanitize_key', $entry['violation_types'])));
+    }
+
+    if (!empty($entry_violations)) {
+        $archive[$day_key]['violations']++;
+        $archive[$day_key]['agents'][$agent]['violations']++;
+
+        foreach ($entry_violations as $violation_type) {
+            if (!isset($archive[$day_key]['violation_types'][$violation_type])) {
+                $archive[$day_key]['violation_types'][$violation_type] = 0;
+            }
+
+            $archive[$day_key]['violation_types'][$violation_type]++;
+
+            if (!isset($archive[$day_key]['agents'][$agent]['violation_types'][$violation_type])) {
+                $archive[$day_key]['agents'][$agent]['violation_types'][$violation_type] = 0;
+            }
+
+            $archive[$day_key]['agents'][$agent]['violation_types'][$violation_type]++;
+        }
+    }
 
     if (count($archive) > 120) {
         $archive = array_slice($archive, -120, null, true);
@@ -1078,6 +1155,13 @@ function sitepulse_calculate_uptime_window_metrics($archive, $days) {
             'down_checks'    => 0,
             'unknown_checks' => 0,
             'uptime'         => 100.0,
+            'latency_sum'    => 0.0,
+            'latency_count'  => 0,
+            'latency_avg'    => null,
+            'ttfb_sum'       => 0.0,
+            'ttfb_count'     => 0,
+            'ttfb_avg'       => null,
+            'violations'     => 0,
         ];
     }
 
@@ -1090,6 +1174,13 @@ function sitepulse_calculate_uptime_window_metrics($archive, $days) {
         'down_checks'    => 0,
         'unknown_checks' => 0,
         'uptime'         => 100.0,
+        'latency_sum'    => 0.0,
+        'latency_count'  => 0,
+        'latency_avg'    => null,
+        'ttfb_sum'       => 0.0,
+        'ttfb_count'     => 0,
+        'ttfb_avg'       => null,
+        'violations'     => 0,
     ];
 
     foreach ($window as $entry) {
@@ -1101,10 +1192,23 @@ function sitepulse_calculate_uptime_window_metrics($archive, $days) {
         $totals['up_checks'] += isset($entry['up']) ? (int) $entry['up'] : 0;
         $totals['down_checks'] += isset($entry['down']) ? (int) $entry['down'] : 0;
         $totals['unknown_checks'] += isset($entry['unknown']) ? (int) $entry['unknown'] : 0;
+        $totals['latency_sum'] += isset($entry['latency_sum']) ? (float) $entry['latency_sum'] : 0.0;
+        $totals['latency_count'] += isset($entry['latency_count']) ? (int) $entry['latency_count'] : 0;
+        $totals['ttfb_sum'] += isset($entry['ttfb_sum']) ? (float) $entry['ttfb_sum'] : 0.0;
+        $totals['ttfb_count'] += isset($entry['ttfb_count']) ? (int) $entry['ttfb_count'] : 0;
+        $totals['violations'] += isset($entry['violations']) ? (int) $entry['violations'] : 0;
     }
 
     if ($totals['total_checks'] > 0) {
         $totals['uptime'] = ($totals['up_checks'] / $totals['total_checks']) * 100;
+    }
+
+    if ($totals['latency_count'] > 0) {
+        $totals['latency_avg'] = $totals['latency_sum'] / $totals['latency_count'];
+    }
+
+    if ($totals['ttfb_count'] > 0) {
+        $totals['ttfb_avg'] = $totals['ttfb_sum'] / $totals['ttfb_count'];
     }
 
     return $totals;
@@ -1136,6 +1240,14 @@ function sitepulse_calculate_agent_uptime_metrics($archive, $days) {
                     'unknown'     => isset($entry['unknown']) ? (int) $entry['unknown'] : 0,
                     'maintenance' => isset($entry['maintenance']) ? (int) $entry['maintenance'] : 0,
                     'total'       => isset($entry['total']) ? (int) $entry['total'] : 0,
+                    'latency_sum'     => isset($entry['latency_sum']) ? (float) $entry['latency_sum'] : 0.0,
+                    'latency_count'   => isset($entry['latency_count']) ? (int) $entry['latency_count'] : 0,
+                    'ttfb_sum'        => isset($entry['ttfb_sum']) ? (float) $entry['ttfb_sum'] : 0.0,
+                    'ttfb_count'      => isset($entry['ttfb_count']) ? (int) $entry['ttfb_count'] : 0,
+                    'violations'      => isset($entry['violations']) ? (int) $entry['violations'] : 0,
+                    'violation_types' => isset($entry['violation_types']) && is_array($entry['violation_types'])
+                        ? $entry['violation_types']
+                        : [],
                 ],
             ];
         }
@@ -1148,6 +1260,12 @@ function sitepulse_calculate_agent_uptime_metrics($archive, $days) {
                     'unknown'     => 0,
                     'maintenance' => 0,
                     'total'       => 0,
+                    'latency_sum'     => 0.0,
+                    'latency_count'   => 0,
+                    'ttfb_sum'        => 0.0,
+                    'ttfb_count'      => 0,
+                    'violations'      => 0,
+                    'violation_types' => [],
                 ];
             }
 
@@ -1156,6 +1274,27 @@ function sitepulse_calculate_agent_uptime_metrics($archive, $days) {
             $totals[$agent_id]['unknown'] += isset($agent_totals['unknown']) ? (int) $agent_totals['unknown'] : 0;
             $totals[$agent_id]['maintenance'] += isset($agent_totals['maintenance']) ? (int) $agent_totals['maintenance'] : 0;
             $totals[$agent_id]['total'] += isset($agent_totals['total']) ? (int) $agent_totals['total'] : 0;
+            $totals[$agent_id]['latency_sum'] += isset($agent_totals['latency_sum']) ? (float) $agent_totals['latency_sum'] : 0.0;
+            $totals[$agent_id]['latency_count'] += isset($agent_totals['latency_count']) ? (int) $agent_totals['latency_count'] : 0;
+            $totals[$agent_id]['ttfb_sum'] += isset($agent_totals['ttfb_sum']) ? (float) $agent_totals['ttfb_sum'] : 0.0;
+            $totals[$agent_id]['ttfb_count'] += isset($agent_totals['ttfb_count']) ? (int) $agent_totals['ttfb_count'] : 0;
+            $totals[$agent_id]['violations'] += isset($agent_totals['violations']) ? (int) $agent_totals['violations'] : 0;
+
+            if (isset($agent_totals['violation_types']) && is_array($agent_totals['violation_types'])) {
+                foreach ($agent_totals['violation_types'] as $type => $count) {
+                    $type_key = sanitize_key($type);
+
+                    if ($type_key === '') {
+                        continue;
+                    }
+
+                    if (!isset($totals[$agent_id]['violation_types'][$type_key])) {
+                        $totals[$agent_id]['violation_types'][$type_key] = 0;
+                    }
+
+                    $totals[$agent_id]['violation_types'][$type_key] += (int) $count;
+                }
+            }
         }
     }
 
@@ -1164,6 +1303,14 @@ function sitepulse_calculate_agent_uptime_metrics($archive, $days) {
         $uptime = $effective_total > 0 ? ($counts['up'] / $effective_total) * 100 : 100;
         $totals[$agent_id]['uptime'] = max(0, min(100, $uptime));
         $totals[$agent_id]['effective_total'] = $effective_total;
+
+        $latency_count = isset($counts['latency_count']) ? (int) $counts['latency_count'] : 0;
+        $latency_sum = isset($counts['latency_sum']) ? (float) $counts['latency_sum'] : 0.0;
+        $ttfb_count = isset($counts['ttfb_count']) ? (int) $counts['ttfb_count'] : 0;
+        $ttfb_sum = isset($counts['ttfb_sum']) ? (float) $counts['ttfb_sum'] : 0.0;
+
+        $totals[$agent_id]['latency_avg'] = $latency_count > 0 ? $latency_sum / $latency_count : null;
+        $totals[$agent_id]['ttfb_avg'] = $ttfb_count > 0 ? $ttfb_sum / $ttfb_count : null;
     }
 
     return $totals;
@@ -1190,6 +1337,12 @@ function sitepulse_calculate_region_uptime_metrics($agent_metrics, $agents) {
                 'unknown'         => 0,
                 'maintenance'     => 0,
                 'effective_total' => 0,
+                'latency_sum'     => 0.0,
+                'latency_count'   => 0,
+                'ttfb_sum'        => 0.0,
+                'ttfb_count'      => 0,
+                'violations'      => 0,
+                'violation_types' => [],
                 'agents'          => [],
             ];
         }
@@ -1199,13 +1352,43 @@ function sitepulse_calculate_region_uptime_metrics($agent_metrics, $agents) {
         $regions[$region]['unknown'] += isset($metrics['unknown']) ? (int) $metrics['unknown'] : 0;
         $regions[$region]['maintenance'] += isset($metrics['maintenance']) ? (int) $metrics['maintenance'] : 0;
         $regions[$region]['effective_total'] += isset($metrics['effective_total']) ? (int) $metrics['effective_total'] : 0;
+        $regions[$region]['latency_sum'] += isset($metrics['latency_sum']) ? (float) $metrics['latency_sum'] : 0.0;
+        $regions[$region]['latency_count'] += isset($metrics['latency_count']) ? (int) $metrics['latency_count'] : 0;
+        $regions[$region]['ttfb_sum'] += isset($metrics['ttfb_sum']) ? (float) $metrics['ttfb_sum'] : 0.0;
+        $regions[$region]['ttfb_count'] += isset($metrics['ttfb_count']) ? (int) $metrics['ttfb_count'] : 0;
+        $regions[$region]['violations'] += isset($metrics['violations']) ? (int) $metrics['violations'] : 0;
+
         $regions[$region]['agents'][] = $agent_id;
+
+        if (isset($metrics['violation_types']) && is_array($metrics['violation_types'])) {
+            foreach ($metrics['violation_types'] as $type => $count) {
+                $type_key = sanitize_key($type);
+
+                if ($type_key === '') {
+                    continue;
+                }
+
+                if (!isset($regions[$region]['violation_types'][$type_key])) {
+                    $regions[$region]['violation_types'][$type_key] = 0;
+                }
+
+                $regions[$region]['violation_types'][$type_key] += (int) $count;
+            }
+        }
     }
 
     foreach ($regions as $region => $region_metrics) {
         $effective_total = max(0, (int) $region_metrics['effective_total']);
         $uptime = $effective_total > 0 ? ($region_metrics['up'] / $effective_total) * 100 : 100;
         $regions[$region]['uptime'] = max(0, min(100, $uptime));
+
+        $latency_count = isset($region_metrics['latency_count']) ? (int) $region_metrics['latency_count'] : 0;
+        $latency_sum = isset($region_metrics['latency_sum']) ? (float) $region_metrics['latency_sum'] : 0.0;
+        $ttfb_count = isset($region_metrics['ttfb_count']) ? (int) $region_metrics['ttfb_count'] : 0;
+        $ttfb_sum = isset($region_metrics['ttfb_sum']) ? (float) $region_metrics['ttfb_sum'] : 0.0;
+
+        $regions[$region]['latency_avg'] = $latency_count > 0 ? $latency_sum / $latency_count : null;
+        $regions[$region]['ttfb_avg'] = $ttfb_count > 0 ? $ttfb_sum / $ttfb_count : null;
     }
 
     return $regions;
@@ -1284,6 +1467,31 @@ function sitepulse_uptime_tracker_page() {
     $region_metrics = sitepulse_calculate_region_uptime_metrics($agent_metrics, $agents);
     $maintenance_windows = sitepulse_uptime_get_maintenance_windows();
     $maintenance_notice_log = sitepulse_uptime_get_maintenance_notice_log();
+    $latency_threshold_option = get_option(
+        SITEPULSE_OPTION_UPTIME_LATENCY_THRESHOLD,
+        defined('SITEPULSE_DEFAULT_UPTIME_LATENCY_THRESHOLD') ? SITEPULSE_DEFAULT_UPTIME_LATENCY_THRESHOLD : 0
+    );
+    $latency_threshold = function_exists('sitepulse_sanitize_uptime_latency_threshold')
+        ? sitepulse_sanitize_uptime_latency_threshold($latency_threshold_option)
+        : (is_numeric($latency_threshold_option) ? (float) $latency_threshold_option : 0.0);
+    $format_latency_ms = static function ($seconds) {
+        if (null === $seconds || !is_numeric($seconds) || $seconds < 0) {
+            return '—';
+        }
+
+        $milliseconds = (float) $seconds * 1000;
+        $precision = $milliseconds >= 100 ? 0 : 1;
+
+        return number_format_i18n($milliseconds, $precision) . ' ms';
+    };
+    $violation_type_labels = [
+        'latency' => __('Latence', 'sitepulse'),
+        'keyword' => __('Mot-clé', 'sitepulse'),
+    ];
+    $ttfb_30_avg = isset($thirty_day_metrics['ttfb_avg']) ? $thirty_day_metrics['ttfb_avg'] : null;
+    $ttfb_30_count = isset($thirty_day_metrics['ttfb_count']) ? (int) $thirty_day_metrics['ttfb_count'] : 0;
+    $latency_30_avg = isset($thirty_day_metrics['latency_avg']) ? $thirty_day_metrics['latency_avg'] : null;
+    $latency_30_count = isset($thirty_day_metrics['latency_count']) ? (int) $thirty_day_metrics['latency_count'] : 0;
 
     $last_checks = [];
 
@@ -1383,6 +1591,41 @@ function sitepulse_uptime_tracker_page() {
                     );
                 ?></p>
             </div>
+            <div class="uptime-summary-card">
+                <h3><?php esc_html_e('TTFB moyen (30 jours)', 'sitepulse'); ?></h3>
+                <p class="uptime-summary-card__value"><?php echo esc_html($format_latency_ms($ttfb_30_avg)); ?></p>
+                <p class="uptime-summary-card__meta"><?php
+                    $ttfb_measurements_text = $ttfb_30_count > 0
+                        ? sprintf(
+                            /* translators: %s: number of samples. */
+                            _n('%s mesure analysée', '%s mesures analysées', $ttfb_30_count, 'sitepulse'),
+                            number_format_i18n($ttfb_30_count)
+                        )
+                        : __('Aucune mesure disponible', 'sitepulse');
+                    echo esc_html($ttfb_measurements_text);
+                ?></p>
+            </div>
+            <div class="uptime-summary-card">
+                <h3><?php esc_html_e('Latence moyenne (30 jours)', 'sitepulse'); ?></h3>
+                <p class="uptime-summary-card__value"><?php echo esc_html($format_latency_ms($latency_30_avg)); ?></p>
+                <p class="uptime-summary-card__meta"><?php
+                    $latency_threshold_text = $latency_threshold > 0
+                        ? sprintf(
+                            /* translators: %s: latency threshold. */
+                            __('Seuil : %s s', 'sitepulse'),
+                            number_format_i18n($latency_threshold, 2)
+                        )
+                        : __('Seuil : non défini', 'sitepulse');
+                    $latency_measurements_text = $latency_30_count > 0
+                        ? sprintf(
+                            /* translators: %s: number of samples. */
+                            _n('%s mesure analysée', '%s mesures analysées', $latency_30_count, 'sitepulse'),
+                            number_format_i18n($latency_30_count)
+                        )
+                        : __('Aucune mesure disponible', 'sitepulse');
+                    echo esc_html($latency_threshold_text . ' • ' . $latency_measurements_text);
+                ?></p>
+            </div>
         </div>
         <h2><?php esc_html_e('Disponibilité par localisation', 'sitepulse'); ?></h2>
         <table class="widefat striped">
@@ -1391,6 +1634,9 @@ function sitepulse_uptime_tracker_page() {
                     <th><?php esc_html_e('Agent', 'sitepulse'); ?></th>
                     <th><?php esc_html_e('Région', 'sitepulse'); ?></th>
                     <th><?php esc_html_e('Uptime (30 jours)', 'sitepulse'); ?></th>
+                    <th><?php esc_html_e('TTFB moyen (30 jours)', 'sitepulse'); ?></th>
+                    <th><?php esc_html_e('Latence moyenne (30 jours)', 'sitepulse'); ?></th>
+                    <th><?php esc_html_e('Violations (30 jours)', 'sitepulse'); ?></th>
                     <th><?php esc_html_e('Dernier statut', 'sitepulse'); ?></th>
                     <th><?php esc_html_e('Contrôle le', 'sitepulse'); ?></th>
                     <th><?php esc_html_e('Maintenance', 'sitepulse'); ?></th>
@@ -1407,6 +1653,52 @@ function sitepulse_uptime_tracker_page() {
                         'maintenance'     => 0,
                     ];
                     $uptime_value = number_format_i18n($agent_metrics_entry['uptime'], 2);
+                    $ttfb_avg_value = isset($agent_metrics_entry['ttfb_avg']) ? $agent_metrics_entry['ttfb_avg'] : null;
+                    $latency_avg_value = isset($agent_metrics_entry['latency_avg']) ? $agent_metrics_entry['latency_avg'] : null;
+                    $ttfb_display = $format_latency_ms($ttfb_avg_value);
+                    $latency_display = $format_latency_ms($latency_avg_value);
+                    $ttfb_class = null !== $ttfb_avg_value
+                        ? 'sitepulse-uptime-metric sitepulse-uptime-metric--ok'
+                        : 'sitepulse-uptime-metric sitepulse-uptime-metric--neutral';
+                    $latency_class = 'sitepulse-uptime-metric sitepulse-uptime-metric--neutral';
+
+                    if (null !== $latency_avg_value) {
+                        $latency_class = 'sitepulse-uptime-metric sitepulse-uptime-metric--ok';
+
+                        if ($latency_threshold > 0) {
+                            if ($latency_avg_value > $latency_threshold) {
+                                $latency_class = 'sitepulse-uptime-metric sitepulse-uptime-metric--critical';
+                            } elseif ($latency_avg_value > ($latency_threshold * 0.75)) {
+                                $latency_class = 'sitepulse-uptime-metric sitepulse-uptime-metric--warning';
+                            }
+                        }
+                    }
+
+                    $violation_count = isset($agent_metrics_entry['violations']) ? (int) $agent_metrics_entry['violations'] : 0;
+                    $violation_class = $violation_count > 0
+                        ? 'sitepulse-uptime-metric sitepulse-uptime-metric--critical'
+                        : 'sitepulse-uptime-metric sitepulse-uptime-metric--ok';
+                    $violation_details = [];
+
+                    if (isset($agent_metrics_entry['violation_types']) && is_array($agent_metrics_entry['violation_types'])) {
+                        foreach ($agent_metrics_entry['violation_types'] as $type => $count) {
+                            $type_key = sanitize_key($type);
+
+                            if ($type_key === '') {
+                                continue;
+                            }
+
+                            $label = isset($violation_type_labels[$type_key]) ? $violation_type_labels[$type_key] : ucfirst($type_key);
+                            $violation_details[] = sprintf(
+                                /* translators: 1: violation label, 2: count. */
+                                __('%1$s : %2$s', 'sitepulse'),
+                                $label,
+                                number_format_i18n((int) $count)
+                            );
+                        }
+                    }
+
+                    $violation_title = !empty($violation_details) ? implode(', ', $violation_details) : '';
                     $last_entry = isset($last_checks[$agent_id]) ? $last_checks[$agent_id] : null;
                     $status_label = __('Aucun contrôle', 'sitepulse');
                     $status_class = 'status-unknown';
@@ -1483,6 +1775,13 @@ function sitepulse_uptime_tracker_page() {
                     </td>
                     <td><?php echo esc_html(isset($agent_data['region']) ? strtoupper($agent_data['region']) : 'GLOBAL'); ?></td>
                     <td><?php echo esc_html($uptime_value); ?>%</td>
+                    <td><span class="<?php echo esc_attr($ttfb_class); ?>"><?php echo esc_html($ttfb_display); ?></span></td>
+                    <td><span class="<?php echo esc_attr($latency_class); ?>"><?php echo esc_html($latency_display); ?></span></td>
+                    <td>
+                        <span class="<?php echo esc_attr($violation_class); ?>"<?php echo $violation_title !== '' ? ' title="' . esc_attr($violation_title) . '"' : ''; ?>>
+                            <?php echo esc_html(number_format_i18n($violation_count)); ?>
+                        </span>
+                    </td>
                     <td><span class="sitepulse-uptime-status <?php echo esc_attr($status_class); ?>"><?php echo esc_html($status_label); ?></span></td>
                     <td><?php echo esc_html($last_check_time); ?></td>
                     <td><?php echo esc_html($maintenance_label); ?></td>
@@ -1731,6 +2030,17 @@ function sitepulse_run_uptime_check($agent_id = 'default', $override_args = []) 
     $expected_codes = function_exists('sitepulse_sanitize_uptime_expected_codes')
         ? sitepulse_sanitize_uptime_expected_codes($expected_codes_option)
         : [];
+    $latency_threshold_option = get_option(
+        SITEPULSE_OPTION_UPTIME_LATENCY_THRESHOLD,
+        defined('SITEPULSE_DEFAULT_UPTIME_LATENCY_THRESHOLD') ? SITEPULSE_DEFAULT_UPTIME_LATENCY_THRESHOLD : 0
+    );
+    $latency_threshold = function_exists('sitepulse_sanitize_uptime_latency_threshold')
+        ? sitepulse_sanitize_uptime_latency_threshold($latency_threshold_option)
+        : (is_numeric($latency_threshold_option) ? (float) $latency_threshold_option : 0.0);
+    $expected_keyword_option = get_option(SITEPULSE_OPTION_UPTIME_KEYWORD, '');
+    $expected_keyword = function_exists('sitepulse_sanitize_uptime_keyword')
+        ? sitepulse_sanitize_uptime_keyword($expected_keyword_option)
+        : (is_string($expected_keyword_option) ? sanitize_text_field($expected_keyword_option) : '');
 
     if (is_numeric($timeout_option)) {
         $timeout = (int) $timeout_option;
@@ -1933,12 +2243,18 @@ function sitepulse_run_uptime_check($agent_id = 'default', $override_args = []) 
         return;
     }
 
+    $request_start = microtime(true);
     $response = wp_remote_request($request_url, $request_args);
+    $request_end = microtime(true);
+
+    $raw_duration = max(0, (float) ($request_end - $request_start));
 
     $entry = [
         'timestamp' => $timestamp,
         'agent'     => $request_agent,
+        'latency'   => round($raw_duration, 4),
     ];
+    $ttfb = null;
 
     if (is_wp_error($response)) {
         $error_message = $response->get_error_message();
@@ -1971,6 +2287,36 @@ function sitepulse_run_uptime_check($agent_id = 'default', $override_args = []) 
         return;
     }
 
+    if (is_array($response) && isset($response['http_response']) && is_object($response['http_response'])) {
+        $http_response = $response['http_response'];
+
+        if (method_exists($http_response, 'get_response_object')) {
+            $requests_response = $http_response->get_response_object();
+
+            if (is_object($requests_response) && isset($requests_response->info) && is_array($requests_response->info)) {
+                if (isset($requests_response->info['total_time'])) {
+                    $total_time = (float) $requests_response->info['total_time'];
+
+                    if ($total_time >= 0) {
+                        $entry['latency'] = round($total_time, 4);
+                    }
+                }
+
+                if (isset($requests_response->info['starttransfer_time'])) {
+                    $start_transfer = (float) $requests_response->info['starttransfer_time'];
+
+                    if ($start_transfer >= 0) {
+                        $ttfb = $start_transfer;
+                    }
+                }
+            }
+        }
+    }
+
+    if (null !== $ttfb) {
+        $entry['ttfb'] = round($ttfb, 4);
+    }
+
     $response_code = wp_remote_retrieve_response_code($response);
     $is_up = $response_code >= 200 && $response_code < 400;
 
@@ -1978,11 +2324,74 @@ function sitepulse_run_uptime_check($agent_id = 'default', $override_args = []) 
         $is_up = in_array((int) $response_code, $expected_codes, true);
     }
 
-    if ((int) get_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0) !== 0) {
-        update_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0, false);
+    $entry['status'] = $is_up;
+
+    $response_body = wp_remote_retrieve_body($response);
+    $body_as_string = is_string($response_body) ? $response_body : '';
+    $violation_types = [];
+    $violation_messages = [];
+    $latency_value = isset($entry['latency']) ? (float) $entry['latency'] : 0.0;
+
+    if ($latency_threshold > 0 && $latency_value > $latency_threshold) {
+        $violation_types[] = 'latency';
+        $violation_messages[] = sprintf(
+            /* translators: 1: measured latency, 2: configured threshold. */
+            __('Temps de réponse %.3fs supérieur au seuil de %.3fs.', 'sitepulse'),
+            $latency_value,
+            $latency_threshold
+        );
     }
 
-    $entry['status'] = $is_up;
+    if ($expected_keyword !== '') {
+        $body_to_search = $body_as_string;
+
+        if ($body_to_search === '' || false === stripos($body_to_search, $expected_keyword)) {
+            $violation_types[] = 'keyword';
+            $violation_messages[] = sprintf(
+                /* translators: %s is the expected keyword. */
+                __('Mot-clé attendu introuvable dans la réponse : %s.', 'sitepulse'),
+                $expected_keyword
+            );
+        }
+    }
+
+    if (!empty($violation_types)) {
+        $is_up = false;
+        $entry['status'] = false;
+        $entry['violation_types'] = array_values(array_unique(array_map('sanitize_key', $violation_types)));
+        $entry['validation_messages'] = $violation_messages;
+
+        if (!isset($entry['error'])) {
+            $entry['error'] = implode(' ', $violation_messages);
+        }
+
+        if (function_exists('sitepulse_error_alert_send')) {
+            $subject = sprintf(
+                __('Surveillance de disponibilité : alerte pour %s', 'sitepulse'),
+                $request_agent
+            );
+            $message_lines = array_merge($violation_messages, [
+                sprintf(__('Code HTTP : %d', 'sitepulse'), $response_code),
+                sprintf(__('URL : %s', 'sitepulse'), $request_url),
+            ]);
+
+            sitepulse_error_alert_send(
+                'uptime_violation',
+                $subject,
+                implode("\n", $message_lines),
+                'warning',
+                [
+                    'agent'           => $request_agent,
+                    'url'             => $request_url,
+                    'response_code'   => $response_code,
+                    'latency'         => $latency_value,
+                    'latency_threshold' => $latency_threshold,
+                    'expected_keyword' => $expected_keyword,
+                    'violation_types' => $entry['violation_types'],
+                ]
+            );
+        }
+    }
 
     if (!$is_up) {
         $incident_start = $timestamp;
@@ -2006,10 +2415,22 @@ function sitepulse_run_uptime_check($agent_id = 'default', $override_args = []) 
         }
 
         $entry['incident_start'] = $incident_start;
-        $entry['error'] = sprintf('HTTP %d', $response_code);
+
+        if (!isset($entry['error'])) {
+            $entry['error'] = sprintf('HTTP %d', $response_code);
+        }
     }
 
     $log[] = $entry;
+
+    if ($is_up) {
+        if ((int) get_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0) !== 0) {
+            update_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0, false);
+        }
+    } else {
+        $failure_streak = (int) get_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0) + 1;
+        update_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, $failure_streak, false);
+    }
 
     if (!$is_up) {
         sitepulse_log(sprintf('Uptime check: Down (HTTP %d)', $response_code), 'ALERT');
