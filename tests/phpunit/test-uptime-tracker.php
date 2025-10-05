@@ -371,6 +371,8 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $this->assertArrayHasKey('us', $region_metrics);
         $this->assertSame(['default'], $region_metrics['eu']['agents']);
         $this->assertSame(['north_america'], $region_metrics['us']['agents']);
+        $this->assertSame(100.0, $region_metrics['eu']['uptime']);
+        $this->assertSame(0.0, $region_metrics['us']['uptime']);
     }
 
     public function test_maintenance_window_skips_remote_requests() {
@@ -436,5 +438,27 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         });
 
         $this->assertNotEmpty($active_windows);
+    }
+
+    public function test_rest_endpoint_allows_remote_workers_to_queue_checks() {
+        add_filter('sitepulse_uptime_rest_schedule_permission', '__return_true');
+
+        $request = new WP_REST_Request('POST', '/sitepulse/v1/uptime/schedule');
+        $request->set_param('agent', 'default');
+        $request->set_param('timestamp', current_time('timestamp'));
+        $request->set_param('payload', ['timeout' => 15]);
+
+        $response = sitepulse_uptime_rest_schedule_callback($request);
+        $data = $response->get_data();
+
+        $this->assertTrue($data['queued']);
+        $this->assertSame('default', $data['agent']);
+
+        $queue = get_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, []);
+        $this->assertNotEmpty($queue);
+        $this->assertSame('default', $queue[0]['agent']);
+        $this->assertSame(['timeout' => 15], $queue[0]['payload']);
+
+        remove_filter('sitepulse_uptime_rest_schedule_permission', '__return_true');
     }
 }
