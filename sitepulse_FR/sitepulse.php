@@ -35,6 +35,9 @@ define('SITEPULSE_OPTION_UPTIME_HTTP_HEADERS', 'sitepulse_uptime_http_headers');
 define('SITEPULSE_OPTION_UPTIME_EXPECTED_CODES', 'sitepulse_uptime_expected_codes');
 define('SITEPULSE_OPTION_LAST_LOAD_TIME', 'sitepulse_last_load_time');
 define('SITEPULSE_OPTION_SPEED_SCAN_HISTORY', 'sitepulse_speed_scan_history');
+define('SITEPULSE_OPTION_SPEED_AUTOMATION_CONFIG', 'sitepulse_speed_automation_config');
+define('SITEPULSE_OPTION_SPEED_AUTOMATION_HISTORY', 'sitepulse_speed_automation_history');
+define('SITEPULSE_OPTION_SPEED_AUTOMATION_QUEUE', 'sitepulse_speed_automation_queue');
 define('SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS', 'sitepulse_alert_enabled_channels');
 define('SITEPULSE_OPTION_CPU_ALERT_THRESHOLD', 'sitepulse_cpu_alert_threshold');
 define('SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD', 'sitepulse_php_fatal_alert_threshold');
@@ -61,6 +64,7 @@ define('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT', 99);
 define('SITEPULSE_DEFAULT_REVISION_LIMIT', 100);
 
 define('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS', 'sitepulse_speed_scan_results');
+define('SITEPULSE_TRANSIENT_SPEED_SCAN_LOCK', 'sitepulse_speed_scan_lock');
 define('SITEPULSE_TRANSIENT_AI_INSIGHT', 'sitepulse_ai_insight');
 define('SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX', 'sitepulse_error_alert_');
 define('SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX', '_lock');
