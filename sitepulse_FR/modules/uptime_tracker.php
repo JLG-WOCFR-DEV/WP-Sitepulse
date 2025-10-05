@@ -21,6 +21,10 @@ if (!defined('SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS')) {
     define('SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS', 'sitepulse_uptime_maintenance_windows');
 }
 
+if (!defined('SITEPULSE_OPTION_UPTIME_MAINTENANCE_NOTICES')) {
+    define('SITEPULSE_OPTION_UPTIME_MAINTENANCE_NOTICES', 'sitepulse_uptime_maintenance_notices');
+}
+
 $sitepulse_uptime_cron_hook = function_exists('sitepulse_get_cron_hook') ? sitepulse_get_cron_hook('uptime_tracker') : 'sitepulse_uptime_tracker_cron';
 
 add_filter('cron_schedules', 'sitepulse_uptime_tracker_register_cron_schedules');
@@ -239,39 +243,320 @@ function sitepulse_uptime_normalize_agent_id($agent_id) {
 }
 
 /**
- * Returns configured maintenance windows.
+ * Retrieves the raw maintenance window definitions.
  *
  * @return array<int,array<string,mixed>>
  */
-function sitepulse_uptime_get_maintenance_windows() {
+function sitepulse_uptime_get_maintenance_window_definitions() {
     $windows = get_option(SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS, []);
 
     if (!is_array($windows)) {
-        return [];
+        $windows = [];
     }
 
-    return array_values(array_filter(array_map(function ($window) {
+    if (function_exists('sitepulse_sanitize_uptime_maintenance_windows')) {
+        $windows = sitepulse_sanitize_uptime_maintenance_windows($windows);
+    }
+
+    return array_values(array_map(function ($window) {
         if (!is_array($window)) {
-            return null;
-        }
-
-        $start = isset($window['start']) ? (int) $window['start'] : 0;
-        $end = isset($window['end']) ? (int) $window['end'] : 0;
-
-        if ($start <= 0 || $end <= 0 || $start >= $end) {
-            return null;
+            return [];
         }
 
         $agent = isset($window['agent']) ? sitepulse_uptime_normalize_agent_id($window['agent']) : 'all';
 
+        if ($agent === '') {
+            $agent = 'all';
+        }
+
+        $label = isset($window['label']) && is_string($window['label']) ? $window['label'] : '';
+        $recurrence = isset($window['recurrence']) ? sanitize_key($window['recurrence']) : 'weekly';
+
+        if (!in_array($recurrence, ['daily', 'weekly', 'one_off'], true)) {
+            $recurrence = 'weekly';
+        }
+
+        $time = isset($window['time']) ? trim((string) $window['time']) : '00:00';
+
+        if (!preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d$/', $time)) {
+            $time = '00:00';
+        }
+
+        $duration = isset($window['duration']) ? (int) $window['duration'] : 0;
+
+        if ($duration < 1) {
+            $duration = 60;
+        }
+
+        $day = isset($window['day']) ? (int) $window['day'] : 1;
+
+        if ($day < 1 || $day > 7) {
+            $day = 1;
+        }
+
+        $date = isset($window['date']) ? trim((string) $window['date']) : '';
+
         return [
             'agent'      => $agent,
-            'start'      => $start,
-            'end'        => $end,
-            'label'      => isset($window['label']) && is_string($window['label']) ? $window['label'] : '',
-            'created_at' => isset($window['created_at']) ? (int) $window['created_at'] : (int) current_time('timestamp'),
+            'label'      => $label,
+            'recurrence' => $recurrence,
+            'day'        => $day,
+            'time'       => $time,
+            'duration'   => $duration,
+            'date'       => $date,
         ];
-    }, $windows)));
+    }, $windows));
+}
+
+/**
+ * Retrieves the stored maintenance skip notices.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function sitepulse_uptime_get_maintenance_notice_log() {
+    $notices = get_option(SITEPULSE_OPTION_UPTIME_MAINTENANCE_NOTICES, []);
+
+    if (!is_array($notices)) {
+        return [];
+    }
+
+    return array_values(array_filter(array_map(function ($notice) {
+        if (!is_array($notice) || !isset($notice['message'])) {
+            return null;
+        }
+
+        $message = trim((string) $notice['message']);
+
+        if ($message === '') {
+            return null;
+        }
+
+        return [
+            'message'   => $message,
+            'timestamp' => isset($notice['timestamp']) ? (int) $notice['timestamp'] : 0,
+        ];
+    }, $notices)));
+}
+
+/**
+ * Records an uptime maintenance notice for later display.
+ *
+ * @param string $message   Notice message.
+ * @param int    $timestamp Event timestamp.
+ * @return void
+ */
+function sitepulse_uptime_record_maintenance_notice($message, $timestamp) {
+    $notices = get_option(SITEPULSE_OPTION_UPTIME_MAINTENANCE_NOTICES, []);
+
+    if (!is_array($notices)) {
+        $notices = [];
+    }
+
+    $notices[] = [
+        'message'   => (string) $message,
+        'timestamp' => (int) $timestamp,
+    ];
+
+    if (count($notices) > 20) {
+        $notices = array_slice($notices, -20);
+    }
+
+    update_option(SITEPULSE_OPTION_UPTIME_MAINTENANCE_NOTICES, array_values($notices), false);
+}
+
+/**
+ * Resolves a maintenance window occurrence for a given timestamp.
+ *
+ * @param array<string,mixed> $definition Window definition.
+ * @param int                 $timestamp  Reference timestamp.
+ * @param string              $mode       Mode: "current" or "next".
+ * @return array<string,mixed>|null
+ */
+function sitepulse_uptime_resolve_window_occurrence($definition, $timestamp, $mode = 'current') {
+    if (!is_array($definition)) {
+        return null;
+    }
+
+    $timestamp = (int) $timestamp;
+    $mode = $mode === 'next' ? 'next' : 'current';
+    $duration_minutes = isset($definition['duration']) ? (int) $definition['duration'] : 0;
+
+    if ($duration_minutes < 1) {
+        return null;
+    }
+
+    $time_string = isset($definition['time']) ? (string) $definition['time'] : '00:00';
+
+    if (!preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d$/', $time_string)) {
+        return null;
+    }
+
+    list($hour, $minute) = array_map('intval', explode(':', $time_string));
+    $timezone = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('UTC');
+    $now = (new DateTimeImmutable('@' . $timestamp))->setTimezone($timezone);
+    $recurrence = isset($definition['recurrence']) ? $definition['recurrence'] : 'weekly';
+
+    if (!in_array($recurrence, ['daily', 'weekly', 'one_off'], true)) {
+        $recurrence = 'weekly';
+    }
+
+    if ('one_off' === $recurrence) {
+        $date_value = isset($definition['date']) ? trim((string) $definition['date']) : '';
+
+        if ($date_value === '') {
+            return null;
+        }
+
+        try {
+            $start_datetime = new DateTimeImmutable($date_value . ' ' . $time_string, $timezone);
+        } catch (Exception $e) {
+            return null;
+        }
+    } elseif ('daily' === $recurrence) {
+        $start_datetime = $now->setTime($hour, $minute, 0);
+
+        if ('current' === $mode && $now < $start_datetime) {
+            $start_datetime = $start_datetime->modify('-1 day');
+        } elseif ('next' === $mode && $now >= $start_datetime) {
+            $start_datetime = $start_datetime->modify('+1 day');
+        }
+    } else {
+        $day = isset($definition['day']) ? (int) $definition['day'] : 1;
+
+        if ($day < 1 || $day > 7) {
+            $day = 1;
+        }
+
+        $iso_year = (int) $now->format('o');
+        $iso_week = (int) $now->format('W');
+        $start_datetime = $now->setISODate($iso_year, $iso_week, $day)->setTime($hour, $minute, 0);
+
+        if ('current' === $mode && $now < $start_datetime) {
+            $start_datetime = $start_datetime->modify('-1 week');
+        } elseif ('next' === $mode && $now >= $start_datetime) {
+            $start_datetime = $start_datetime->modify('+1 week');
+        }
+    }
+
+    $end_datetime = $start_datetime->modify('+' . $duration_minutes . ' minutes');
+    $start_timestamp = $start_datetime->getTimestamp();
+    $end_timestamp = $end_datetime->getTimestamp();
+
+    if ('current' === $mode) {
+        if ($timestamp < $start_timestamp || $timestamp > $end_timestamp) {
+            return null;
+        }
+    } elseif ($start_timestamp <= $timestamp) {
+        // No future occurrence for one-off schedules.
+        if ('one_off' === $recurrence) {
+            return null;
+        }
+
+        if ($timestamp >= $end_timestamp) {
+            return null;
+        }
+    }
+
+    return [
+        'agent'      => isset($definition['agent']) ? $definition['agent'] : 'all',
+        'label'      => isset($definition['label']) ? (string) $definition['label'] : '',
+        'recurrence' => $recurrence,
+        'day'        => isset($definition['day']) ? (int) $definition['day'] : 1,
+        'time'       => $time_string,
+        'duration'   => $duration_minutes,
+        'date'       => isset($definition['date']) ? (string) $definition['date'] : '',
+        'start'      => $start_timestamp,
+        'end'        => $end_timestamp,
+        'is_active'  => 'current' === $mode,
+    ];
+}
+
+/**
+ * Retrieves resolved maintenance windows (active and upcoming).
+ *
+ * @param int|null $timestamp Reference timestamp.
+ * @return array<int,array<string,mixed>>
+ */
+function sitepulse_uptime_get_maintenance_windows($timestamp = null) {
+    $timestamp = null === $timestamp ? (int) current_time('timestamp') : (int) $timestamp;
+    $definitions = sitepulse_uptime_get_maintenance_window_definitions();
+    $windows = [];
+
+    foreach ($definitions as $definition) {
+        $active_window = sitepulse_uptime_resolve_window_occurrence($definition, $timestamp, 'current');
+
+        if ($active_window) {
+            $windows[] = $active_window;
+        }
+
+        $next_window = sitepulse_uptime_resolve_window_occurrence($definition, $timestamp, 'next');
+
+        if ($next_window) {
+            $duplicate = false;
+
+            foreach ($windows as $existing_window) {
+                if ($existing_window['start'] === $next_window['start'] && $existing_window['agent'] === $next_window['agent']) {
+                    $duplicate = true;
+                    break;
+                }
+            }
+
+            if (!$duplicate) {
+                $windows[] = $next_window;
+            }
+        }
+    }
+
+    if (empty($windows)) {
+        return [];
+    }
+
+    usort($windows, function ($a, $b) {
+        if (!is_array($a) || !is_array($b)) {
+            return 0;
+        }
+
+        if ($a['start'] === $b['start']) {
+            return strcmp((string) $a['agent'], (string) $b['agent']);
+        }
+
+        return $a['start'] <=> $b['start'];
+    });
+
+    return $windows;
+}
+
+/**
+ * Retrieves the active maintenance window for an agent, if any.
+ *
+ * @param string   $agent_id  Agent identifier.
+ * @param int|null $timestamp Evaluation timestamp.
+ * @return array<string,mixed>|null
+ */
+function sitepulse_uptime_find_active_maintenance_window($agent_id, $timestamp = null) {
+    $timestamp = null === $timestamp ? (int) current_time('timestamp') : (int) $timestamp;
+    $agent_id = sitepulse_uptime_normalize_agent_id($agent_id);
+    $definitions = sitepulse_uptime_get_maintenance_window_definitions();
+
+    foreach ($definitions as $definition) {
+        if (!is_array($definition)) {
+            continue;
+        }
+
+        $target_agent = isset($definition['agent']) ? $definition['agent'] : 'all';
+
+        if ('all' !== $target_agent && sitepulse_uptime_normalize_agent_id($target_agent) !== $agent_id) {
+            continue;
+        }
+
+        $window = sitepulse_uptime_resolve_window_occurrence($definition, $timestamp, 'current');
+
+        if ($window) {
+            return $window;
+        }
+    }
+
+    return null;
 }
 
 /**
@@ -282,21 +567,7 @@ function sitepulse_uptime_get_maintenance_windows() {
  * @return bool
  */
 function sitepulse_uptime_is_in_maintenance_window($agent_id, $timestamp = null) {
-    $timestamp = null === $timestamp ? (int) current_time('timestamp') : (int) $timestamp;
-    $agent_id = sitepulse_uptime_normalize_agent_id($agent_id);
-    $windows = sitepulse_uptime_get_maintenance_windows();
-
-    foreach ($windows as $window) {
-        if ($timestamp < $window['start'] || $timestamp > $window['end']) {
-            continue;
-        }
-
-        if ('all' === $window['agent'] || $window['agent'] === $agent_id) {
-            return true;
-        }
-    }
-
-    return false;
+    return null !== sitepulse_uptime_find_active_maintenance_window($agent_id, $timestamp);
 }
 
 /**
@@ -915,6 +1186,7 @@ function sitepulse_uptime_tracker_page() {
     $agent_metrics = sitepulse_calculate_agent_uptime_metrics($uptime_archive, 30);
     $region_metrics = sitepulse_calculate_region_uptime_metrics($agent_metrics, $agents);
     $maintenance_windows = sitepulse_uptime_get_maintenance_windows();
+    $maintenance_notice_log = sitepulse_uptime_get_maintenance_notice_log();
 
     $last_checks = [];
 
@@ -949,6 +1221,34 @@ function sitepulse_uptime_tracker_page() {
             );
             ?>
         </p>
+        <?php if (!empty($maintenance_notice_log)) :
+            $recent_maintenance_notices = array_slice(array_reverse($maintenance_notice_log), 0, 5);
+        ?>
+            <div class="notice notice-info sitepulse-maintenance-history">
+                <p><strong><?php esc_html_e('Contrôles récemment ignorés pour maintenance', 'sitepulse'); ?></strong></p>
+                <ul>
+                    <?php foreach ($recent_maintenance_notices as $notice_entry) :
+                        $notice_message = isset($notice_entry['message']) ? (string) $notice_entry['message'] : '';
+                        $notice_timestamp = isset($notice_entry['timestamp']) ? (int) $notice_entry['timestamp'] : 0;
+                        $notice_time = $notice_timestamp > 0
+                            ? date_i18n($date_format . ' ' . $time_format, $notice_timestamp)
+                            : '';
+                        if ($notice_message === '') {
+                            continue;
+                        }
+                    ?>
+                    <li>
+                        <?php if ('' !== $notice_time) : ?>
+                            <strong><?php echo esc_html($notice_time); ?></strong>
+                            <span aria-hidden="true">—</span>
+                        <?php endif; ?>
+                        <?php echo esc_html($notice_message); ?>
+                    </li>
+                    <?php endforeach; ?>
+                </ul>
+                <p><?php esc_html_e('Ces événements sont consignés pour assurer une traçabilité des suspensions automatiques d’alertes.', 'sitepulse'); ?></p>
+            </div>
+        <?php endif; ?>
         <h2>
             <?php
             echo wp_kses_post(
@@ -1034,43 +1334,49 @@ function sitepulse_uptime_tracker_page() {
                         }
                     }
 
-                    $active_maintenance = sitepulse_uptime_is_in_maintenance_window($agent_id, $current_timestamp);
-                    $next_window = null;
+                    $active_window = sitepulse_uptime_find_active_maintenance_window($agent_id, $current_timestamp);
+                    $upcoming_window = null;
 
                     foreach ($maintenance_windows as $window) {
                         if ('all' !== $window['agent'] && $window['agent'] !== $agent_id) {
                             continue;
                         }
 
-                        if ($window['start'] <= $current_timestamp && $window['end'] >= $current_timestamp) {
-                            $next_window = $window;
-                            break;
+                        if (!empty($window['is_active'])) {
+                            $active_window = $window;
+                            continue;
                         }
 
                         if ($window['start'] > $current_timestamp) {
-                            if (null === $next_window || $window['start'] < $next_window['start']) {
-                                $next_window = $window;
+                            if (null === $upcoming_window || $window['start'] < $upcoming_window['start']) {
+                                $upcoming_window = $window;
                             }
                         }
                     }
 
-                    $maintenance_label = $active_maintenance
-                        ? __('Maintenance active', 'sitepulse')
-                        : __('Aucune', 'sitepulse');
-
-                    if ($next_window && !$active_maintenance) {
+                    if ($active_window) {
+                        $window_name = !empty($active_window['label'])
+                            ? $active_window['label']
+                            : __('Maintenance planifiée', 'sitepulse');
                         $maintenance_label = sprintf(
-                            /* translators: 1: start date, 2: end date. */
-                            __('Prochaine : du %1$s au %2$s', 'sitepulse'),
-                            date_i18n($date_format . ' ' . $time_format, (int) $next_window['start']),
-                            date_i18n($date_format . ' ' . $time_format, (int) $next_window['end'])
+                            /* translators: 1: window name, 2: formatted end date. */
+                            __('%1$s en cours jusqu’au %2$s. Aucune alerte envoyée.', 'sitepulse'),
+                            $window_name,
+                            date_i18n($date_format . ' ' . $time_format, (int) $active_window['end'])
                         );
-                    } elseif ($next_window && $active_maintenance) {
+                    } elseif ($upcoming_window) {
+                        $window_name = !empty($upcoming_window['label'])
+                            ? $upcoming_window['label']
+                            : __('Maintenance planifiée', 'sitepulse');
                         $maintenance_label = sprintf(
-                            /* translators: 1: end date. */
-                            __('Maintenance en cours jusqu’au %s', 'sitepulse'),
-                            date_i18n($date_format . ' ' . $time_format, (int) $next_window['end'])
+                            /* translators: 1: window name, 2: formatted start date, 3: relative time. */
+                            __('%1$s le %2$s (dans %3$s). Les alertes seront suspendues.', 'sitepulse'),
+                            $window_name,
+                            date_i18n($date_format . ' ' . $time_format, (int) $upcoming_window['start']),
+                            human_time_diff($current_timestamp, (int) $upcoming_window['start'])
                         );
+                    } else {
+                        $maintenance_label = __('Aucune maintenance programmée', 'sitepulse');
                     }
                 ?>
                 <tr>
@@ -1118,15 +1424,49 @@ function sitepulse_uptime_tracker_page() {
             <ul class="sitepulse-maintenance-list">
                 <?php foreach ($maintenance_windows as $window) :
                     $window_agent = 'all' === $window['agent'] ? __('Tous les agents', 'sitepulse') : $window['agent'];
+                    $window_name = !empty($window['label']) ? $window['label'] : __('Maintenance planifiée', 'sitepulse');
+                    $status_badge = !empty($window['is_active']) ? __('En cours', 'sitepulse') : __('À venir', 'sitepulse');
+                    $badge_class = !empty($window['is_active']) ? 'is-active' : 'is-scheduled';
+                    $recurrence_label = __('Hebdomadaire', 'sitepulse');
+
+                    if (isset($window['recurrence'])) {
+                        if ('daily' === $window['recurrence']) {
+                            $recurrence_label = __('Quotidienne', 'sitepulse');
+                        } elseif ('one_off' === $window['recurrence']) {
+                            $recurrence_label = __('Ponctuelle', 'sitepulse');
+                        }
+                    }
+
+                    $duration_text = human_time_diff((int) $window['start'], (int) $window['end']);
+                    $starts_in = '';
+
+                    if (empty($window['is_active']) && $window['start'] > $current_timestamp) {
+                        $starts_in = sprintf(
+                            /* translators: %s: human readable time difference. */
+                            __('Débute dans %s.', 'sitepulse'),
+                            human_time_diff($current_timestamp, (int) $window['start'])
+                        );
+                    }
                 ?>
-                <li>
-                    <strong><?php echo esc_html($window_agent); ?></strong> —
-                    <?php echo esc_html(date_i18n($date_format . ' ' . $time_format, (int) $window['start'])); ?>
-                    →
-                    <?php echo esc_html(date_i18n($date_format . ' ' . $time_format, (int) $window['end'])); ?>
-                    <?php if (!empty($window['label'])) : ?>
-                        <em><?php echo esc_html($window['label']); ?></em>
-                    <?php endif; ?>
+                <li class="sitepulse-maintenance-list__item">
+                    <div class="sitepulse-maintenance-list__header">
+                        <strong><?php echo esc_html($window_agent); ?></strong>
+                        <span class="sitepulse-maintenance-badge <?php echo esc_attr($badge_class); ?>"><?php echo esc_html($status_badge); ?></span>
+                    </div>
+                    <div class="sitepulse-maintenance-list__body">
+                        <p><em><?php echo esc_html($window_name); ?></em></p>
+                        <p>
+                            <?php echo esc_html(date_i18n($date_format . ' ' . $time_format, (int) $window['start'])); ?>
+                            →
+                            <?php echo esc_html(date_i18n($date_format . ' ' . $time_format, (int) $window['end'])); ?>
+                        </p>
+                        <p><?php printf(esc_html__('Durée : %s.', 'sitepulse'), esc_html($duration_text)); ?></p>
+                        <p><?php printf(esc_html__('Récurrence : %s.', 'sitepulse'), esc_html($recurrence_label)); ?></p>
+                        <?php if ('' !== $starts_in) : ?>
+                            <p><?php echo esc_html($starts_in); ?></p>
+                        <?php endif; ?>
+                        <p><?php esc_html_e('Aucune alerte n’est envoyée pendant cette fenêtre.', 'sitepulse'); ?></p>
+                    </div>
                 </li>
                 <?php endforeach; ?>
             </ul>
@@ -1216,7 +1556,7 @@ function sitepulse_uptime_tracker_page() {
                     } elseif ('maintenance' === $status) {
                         $bar_title = sprintf(__('Fenêtre de maintenance lors du contrôle du %s.', 'sitepulse'), $check_time);
                         $status_label = __('Statut : maintenance planifiée.', 'sitepulse');
-                        $duration_label = __('Durée : ce contrôle est ignoré pour le calcul de disponibilité.', 'sitepulse');
+                        $duration_label = __('Durée : ce contrôle est ignoré pour le calcul de disponibilité et aucune alerte n’est envoyée.', 'sitepulse');
                     } else {
                         $error_text = isset($entry['error']) ? $entry['error'] : __('Erreur réseau inconnue.', 'sitepulse');
                         $bar_title = sprintf(__('Statut indéterminé lors du contrôle du %1$s : %2$s', 'sitepulse'), $check_time, $error_text);
@@ -1435,12 +1775,20 @@ function sitepulse_run_uptime_check($agent_id = 'default', $override_args = []) 
     $log = sitepulse_normalize_uptime_log($raw_log);
     $timestamp = (int) current_time('timestamp');
 
-    if (sitepulse_uptime_is_in_maintenance_window($request_agent, $timestamp)) {
+    $active_window = sitepulse_uptime_find_active_maintenance_window($request_agent, $timestamp);
+
+    if ($active_window) {
         $entry = [
-            'timestamp' => $timestamp,
-            'status'    => 'maintenance',
-            'agent'     => $request_agent,
+            'timestamp'         => $timestamp,
+            'status'            => 'maintenance',
+            'agent'             => $request_agent,
+            'maintenance_start' => $active_window['start'],
+            'maintenance_end'   => $active_window['end'],
         ];
+
+        if (!empty($active_window['label'])) {
+            $entry['maintenance_label'] = $active_window['label'];
+        }
 
         $log[] = $entry;
 
@@ -1450,7 +1798,40 @@ function sitepulse_run_uptime_check($agent_id = 'default', $override_args = []) 
 
         update_option(SITEPULSE_OPTION_UPTIME_LOG, array_values($log), false);
         sitepulse_update_uptime_archive($entry);
-        sitepulse_log(sprintf('Uptime check skipped for %s due to maintenance window.', $request_agent), 'INFO');
+
+        $log_label = isset($entry['maintenance_label']) ? ' - ' . $entry['maintenance_label'] : '';
+        $log_message = sprintf(
+            'Uptime check skipped for %1$s due to maintenance window (%2$s → %3$s)%4$s.',
+            $request_agent,
+            gmdate('c', $active_window['start']),
+            gmdate('c', $active_window['end']),
+            $log_label
+        );
+        sitepulse_log($log_message, 'INFO');
+
+        $date_format = get_option('date_format', 'Y-m-d');
+        $time_format = get_option('time_format', 'H:i');
+        $agent_label = isset($agent_config['label']) && is_string($agent_config['label']) && $agent_config['label'] !== ''
+            ? $agent_config['label']
+            : $request_agent;
+        $window_label = isset($entry['maintenance_label']) && $entry['maintenance_label'] !== ''
+            ? $entry['maintenance_label']
+            : __('Fenêtre de maintenance planifiée', 'sitepulse');
+        $formatted_start = date_i18n($date_format . ' ' . $time_format, $active_window['start']);
+        $formatted_end = date_i18n($date_format . ' ' . $time_format, $active_window['end']);
+        $notice_message = sprintf(
+            __('Contrôle d’uptime ignoré pour %1$s : %2$s (%3$s → %4$s). Aucune alerte envoyée pendant la maintenance.', 'sitepulse'),
+            $agent_label,
+            $window_label,
+            $formatted_start,
+            $formatted_end
+        );
+
+        if (function_exists('sitepulse_schedule_debug_admin_notice')) {
+            sitepulse_schedule_debug_admin_notice($notice_message, 'info');
+        }
+
+        sitepulse_uptime_record_maintenance_notice($notice_message, $timestamp);
 
         return;
     }
