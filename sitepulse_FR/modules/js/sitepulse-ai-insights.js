@@ -447,8 +447,13 @@
                 text = sitepulseAIInsights.strings.historyAriaDefault;
             }
 
+            // Clear existing text first so repeated announcements are voiced.
+            $historyFeedback.text('');
+
             if (text) {
-                $historyFeedback.text(text);
+                window.setTimeout(function () {
+                    $historyFeedback.text(text);
+                }, 15);
             }
         }
 
@@ -746,6 +751,16 @@
                 return;
             }
 
+            var blob = null;
+
+            try {
+                if (typeof Blob !== 'undefined') {
+                    blob = new Blob([text], { type: 'text/plain;charset=utf-8;' });
+                }
+            } catch (error) {
+                blob = null;
+            }
+
             function fallbackCopy(textToCopy) {
                 var $textarea = $('<textarea readonly class="sitepulse-ai-history-copy-buffer" />')
                     .css({
@@ -768,7 +783,25 @@
                 $textarea.remove();
             }
 
-            if (navigator.clipboard && navigator.clipboard.writeText) {
+            if (blob && navigator.clipboard && navigator.clipboard.write && typeof window !== 'undefined' && window.ClipboardItem) {
+                var clipboardItem = new window.ClipboardItem({
+                    'text/plain': blob
+                });
+
+                navigator.clipboard.write([clipboardItem]).then(function () {
+                    announceHistoryMessage(sitepulseAIInsights.strings.historyCopied || '');
+                }).catch(function () {
+                    if (navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(text).then(function () {
+                            announceHistoryMessage(sitepulseAIInsights.strings.historyCopied || '');
+                        }).catch(function () {
+                            fallbackCopy(text);
+                        });
+                    } else {
+                        fallbackCopy(text);
+                    }
+                });
+            } else if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(text).then(function () {
                     announceHistoryMessage(sitepulseAIInsights.strings.historyCopied || '');
                 }).catch(function () {
