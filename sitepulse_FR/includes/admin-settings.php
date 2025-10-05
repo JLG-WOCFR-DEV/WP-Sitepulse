@@ -1989,7 +1989,12 @@ function sitepulse_settings_page() {
                             $raw_metrics = isset($module_summaries[$module_key]) && is_array($module_summaries[$module_key])
                                 ? $module_summaries[$module_key]
                                 : [];
-                            $module_metrics = [];
+                            ?>
+                            <?php if ($module_description !== '') : ?>
+                                <p class="sitepulse-card-description" id="<?php echo esc_attr($description_id); ?>"><?php echo esc_html($module_description); ?></p>
+                            <?php endif; ?>
+                            <?php
+                            $prepared_metrics = [];
 
                             foreach ($raw_metrics as $metric) {
                                 if (!is_array($metric)) {
@@ -2008,26 +2013,23 @@ function sitepulse_settings_page() {
                                     $metric_status = 'is-success';
                                 }
 
-                                $module_metrics[] = [
+                                $prepared_metrics[] = [
                                     'label'  => $metric_label,
                                     'value'  => $metric_value,
                                     'status' => $metric_status,
                                 ];
                             }
                             ?>
-                            <?php if ($module_description !== '') : ?>
-                                <p class="sitepulse-card-description" id="<?php echo esc_attr($description_id); ?>"><?php echo esc_html($module_description); ?></p>
-                            <?php endif; ?>
-                            <?php if (!empty($module_metrics)) : ?>
+                            <?php if (!empty($prepared_metrics)) : ?>
                                 <ul class="sitepulse-module-metrics">
-                                    <?php foreach ($module_metrics as $metric) : ?>
+                                    <?php foreach ($prepared_metrics as $metric) : ?>
                                         <li class="sitepulse-module-metric">
                                             <?php if ($metric['label'] !== '') : ?>
-                                                <span class="sitepulse-status <?php echo esc_attr($metric['status']); ?>"><?php echo esc_html($metric['label']); ?></span>
+                                                <span class="sitepulse-module-metric-label"><?php echo esc_html($metric['label']); ?></span>
                                             <?php endif; ?>
-                                            <?php if ($metric['value'] !== '') : ?>
-                                                <span class="sitepulse-module-metric-value"><?php echo esc_html($metric['value']); ?></span>
-                                            <?php endif; ?>
+                                            <span class="sitepulse-status <?php echo esc_attr($metric['status']); ?>">
+                                                <?php echo esc_html($metric['value'] !== '' ? $metric['value'] : __('Aucun relevé', 'sitepulse')); ?>
+                                            </span>
                                         </li>
                                     <?php endforeach; ?>
                                 </ul>
