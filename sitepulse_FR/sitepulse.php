@@ -14,86 +14,102 @@
 
 if (!defined('ABSPATH')) exit;
 
+if (!function_exists('sitepulse_define_constant')) {
+    /**
+     * Defines a constant when it has not yet been set.
+     *
+     * @param string $name  Constant name.
+     * @param mixed  $value Constant value.
+     *
+     * @return void
+     */
+    function sitepulse_define_constant($name, $value) {
+        if (!defined($name)) {
+            define($name, $value);
+        }
+    }
+}
+
 // Define constants
-define('SITEPULSE_VERSION', '1.0');
-define('SITEPULSE_PATH', plugin_dir_path(__FILE__));
-define('SITEPULSE_URL', plugin_dir_url(__FILE__));
+sitepulse_define_constant('SITEPULSE_VERSION', '1.0');
+sitepulse_define_constant('SITEPULSE_PATH', plugin_dir_path(__FILE__));
+sitepulse_define_constant('SITEPULSE_URL', plugin_dir_url(__FILE__));
 
-define('SITEPULSE_OPTION_ACTIVE_MODULES', 'sitepulse_active_modules');
-define('SITEPULSE_OPTION_DEBUG_MODE', 'sitepulse_debug_mode');
-define('SITEPULSE_OPTION_GEMINI_API_KEY', 'sitepulse_gemini_api_key');
-define('SITEPULSE_OPTION_AI_MODEL', 'sitepulse_ai_model');
-define('SITEPULSE_OPTION_AI_RATE_LIMIT', 'sitepulse_ai_rate_limit');
-define('SITEPULSE_OPTION_AI_LAST_RUN', 'sitepulse_ai_last_run');
-define('SITEPULSE_OPTION_AI_RETRY_AFTER', 'sitepulse_ai_retry_after');
-define('SITEPULSE_DEFAULT_AI_MODEL', 'gemini-1.5-flash');
-define('SITEPULSE_OPTION_UPTIME_LOG', 'sitepulse_uptime_log');
-define('SITEPULSE_OPTION_UPTIME_URL', 'sitepulse_uptime_url');
-define('SITEPULSE_OPTION_UPTIME_TIMEOUT', 'sitepulse_uptime_timeout');
-define('SITEPULSE_OPTION_UPTIME_FREQUENCY', 'sitepulse_uptime_frequency');
-define('SITEPULSE_OPTION_UPTIME_HTTP_METHOD', 'sitepulse_uptime_http_method');
-define('SITEPULSE_OPTION_UPTIME_HTTP_HEADERS', 'sitepulse_uptime_http_headers');
-define('SITEPULSE_OPTION_UPTIME_EXPECTED_CODES', 'sitepulse_uptime_expected_codes');
-define('SITEPULSE_OPTION_UPTIME_LATENCY_THRESHOLD', 'sitepulse_uptime_latency_threshold');
-define('SITEPULSE_OPTION_UPTIME_KEYWORD', 'sitepulse_uptime_keyword');
-define('SITEPULSE_OPTION_LAST_LOAD_TIME', 'sitepulse_last_load_time');
-define('SITEPULSE_OPTION_SPEED_SCAN_HISTORY', 'sitepulse_speed_scan_history');
-define('SITEPULSE_OPTION_SPEED_AUTOMATION_CONFIG', 'sitepulse_speed_automation_config');
-define('SITEPULSE_OPTION_SPEED_AUTOMATION_HISTORY', 'sitepulse_speed_automation_history');
-define('SITEPULSE_OPTION_SPEED_AUTOMATION_QUEUE', 'sitepulse_speed_automation_queue');
-define('SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS', 'sitepulse_alert_enabled_channels');
-define('SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS', 'sitepulse_error_alert_delivery_channels');
-define('SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS', 'sitepulse_error_alert_webhooks');
-define('SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES', 'sitepulse_error_alert_severities');
-define('SITEPULSE_OPTION_CPU_ALERT_THRESHOLD', 'sitepulse_cpu_alert_threshold');
-define('SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD', 'sitepulse_php_fatal_alert_threshold');
-define('SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES', 'sitepulse_alert_cooldown_minutes');
-define('SITEPULSE_OPTION_ALERT_INTERVAL', 'sitepulse_alert_interval');
-define('SITEPULSE_OPTION_ALERT_RECIPIENTS', 'sitepulse_alert_recipients');
-define('SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE', 'sitepulse_impact_loader_signature');
-define('SITEPULSE_OPTION_IMPACT_THRESHOLDS', 'sitepulse_impact_thresholds');
-define('SITEPULSE_OPTION_PLUGIN_BASENAME', 'sitepulse_plugin_basename');
-define('SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER', 'sitepulse_error_alert_log_pointer');
-define('SITEPULSE_OPTION_CRON_WARNINGS', 'sitepulse_cron_warnings');
-define('SITEPULSE_OPTION_DEBUG_NOTICES', 'sitepulse_debug_notices');
-define('SITEPULSE_OPTION_SPEED_WARNING_MS', 'sitepulse_speed_warning_ms');
-define('SITEPULSE_OPTION_SPEED_CRITICAL_MS', 'sitepulse_speed_critical_ms');
-define('SITEPULSE_OPTION_UPTIME_WARNING_PERCENT', 'sitepulse_uptime_warning_percent');
-define('SITEPULSE_OPTION_REVISION_LIMIT', 'sitepulse_revision_limit');
+sitepulse_define_constant('SITEPULSE_OPTION_ACTIVE_MODULES', 'sitepulse_active_modules');
+sitepulse_define_constant('SITEPULSE_OPTION_DEBUG_MODE', 'sitepulse_debug_mode');
+sitepulse_define_constant('SITEPULSE_OPTION_GEMINI_API_KEY', 'sitepulse_gemini_api_key');
+sitepulse_define_constant('SITEPULSE_OPTION_AI_MODEL', 'sitepulse_ai_model');
+sitepulse_define_constant('SITEPULSE_OPTION_AI_RATE_LIMIT', 'sitepulse_ai_rate_limit');
+sitepulse_define_constant('SITEPULSE_OPTION_AI_LAST_RUN', 'sitepulse_ai_last_run');
+sitepulse_define_constant('SITEPULSE_OPTION_AI_RETRY_AFTER', 'sitepulse_ai_retry_after');
+sitepulse_define_constant('SITEPULSE_DEFAULT_AI_MODEL', 'gemini-1.5-flash');
+sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_LOG', 'sitepulse_uptime_log');
+sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_URL', 'sitepulse_uptime_url');
+sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_TIMEOUT', 'sitepulse_uptime_timeout');
+sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_FREQUENCY', 'sitepulse_uptime_frequency');
+sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_HTTP_METHOD', 'sitepulse_uptime_http_method');
+sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_HTTP_HEADERS', 'sitepulse_uptime_http_headers');
+sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_EXPECTED_CODES', 'sitepulse_uptime_expected_codes');
+sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_LATENCY_THRESHOLD', 'sitepulse_uptime_latency_threshold');
+sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_KEYWORD', 'sitepulse_uptime_keyword');
+sitepulse_define_constant('SITEPULSE_OPTION_LAST_LOAD_TIME', 'sitepulse_last_load_time');
+sitepulse_define_constant('SITEPULSE_OPTION_SPEED_SCAN_HISTORY', 'sitepulse_speed_scan_history');
+sitepulse_define_constant('SITEPULSE_OPTION_SPEED_AUTOMATION_CONFIG', 'sitepulse_speed_automation_config');
+sitepulse_define_constant('SITEPULSE_OPTION_SPEED_AUTOMATION_HISTORY', 'sitepulse_speed_automation_history');
+sitepulse_define_constant('SITEPULSE_OPTION_SPEED_AUTOMATION_QUEUE', 'sitepulse_speed_automation_queue');
+sitepulse_define_constant('SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS', 'sitepulse_alert_enabled_channels');
+sitepulse_define_constant('SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS', 'sitepulse_error_alert_delivery_channels');
+sitepulse_define_constant('SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS', 'sitepulse_error_alert_webhooks');
+sitepulse_define_constant('SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES', 'sitepulse_error_alert_severities');
+sitepulse_define_constant('SITEPULSE_OPTION_CPU_ALERT_THRESHOLD', 'sitepulse_cpu_alert_threshold');
+sitepulse_define_constant('SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD', 'sitepulse_php_fatal_alert_threshold');
+sitepulse_define_constant('SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES', 'sitepulse_alert_cooldown_minutes');
+sitepulse_define_constant('SITEPULSE_OPTION_ALERT_INTERVAL', 'sitepulse_alert_interval');
+sitepulse_define_constant('SITEPULSE_OPTION_ALERT_RECIPIENTS', 'sitepulse_alert_recipients');
+sitepulse_define_constant('SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE', 'sitepulse_impact_loader_signature');
+sitepulse_define_constant('SITEPULSE_OPTION_IMPACT_THRESHOLDS', 'sitepulse_impact_thresholds');
+sitepulse_define_constant('SITEPULSE_OPTION_PLUGIN_BASENAME', 'sitepulse_plugin_basename');
+sitepulse_define_constant('SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER', 'sitepulse_error_alert_log_pointer');
+sitepulse_define_constant('SITEPULSE_OPTION_CRON_WARNINGS', 'sitepulse_cron_warnings');
+sitepulse_define_constant('SITEPULSE_OPTION_DEBUG_NOTICES', 'sitepulse_debug_notices');
+sitepulse_define_constant('SITEPULSE_OPTION_SPEED_WARNING_MS', 'sitepulse_speed_warning_ms');
+sitepulse_define_constant('SITEPULSE_OPTION_SPEED_CRITICAL_MS', 'sitepulse_speed_critical_ms');
+sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_WARNING_PERCENT', 'sitepulse_uptime_warning_percent');
+sitepulse_define_constant('SITEPULSE_OPTION_REVISION_LIMIT', 'sitepulse_revision_limit');
 
-define('SITEPULSE_DEFAULT_UPTIME_TIMEOUT', 10);
-define('SITEPULSE_DEFAULT_UPTIME_FREQUENCY', 'hourly');
-define('SITEPULSE_DEFAULT_UPTIME_HTTP_METHOD', 'GET');
-define('SITEPULSE_DEFAULT_UPTIME_LATENCY_THRESHOLD', 0.0);
-define('SITEPULSE_DEFAULT_SPEED_WARNING_MS', 200);
-define('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS', 500);
-define('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT', 99);
-define('SITEPULSE_DEFAULT_REVISION_LIMIT', 100);
+sitepulse_define_constant('SITEPULSE_DEFAULT_UPTIME_TIMEOUT', 10);
+sitepulse_define_constant('SITEPULSE_DEFAULT_UPTIME_FREQUENCY', 'hourly');
+sitepulse_define_constant('SITEPULSE_DEFAULT_UPTIME_HTTP_METHOD', 'GET');
+sitepulse_define_constant('SITEPULSE_DEFAULT_UPTIME_LATENCY_THRESHOLD', 0.0);
+sitepulse_define_constant('SITEPULSE_DEFAULT_SPEED_WARNING_MS', 200);
+sitepulse_define_constant('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS', 500);
+sitepulse_define_constant('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT', 99);
+sitepulse_define_constant('SITEPULSE_DEFAULT_REVISION_LIMIT', 100);
 
-define('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS', 'sitepulse_speed_scan_results');
-define('SITEPULSE_TRANSIENT_SPEED_SCAN_LOCK', 'sitepulse_speed_scan_lock');
-define('SITEPULSE_TRANSIENT_AI_INSIGHT', 'sitepulse_ai_insight');
-define('SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX', 'sitepulse_error_alert_');
-define('SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX', '_lock');
-define('SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK', SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX . 'cpu' . SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX);
-define('SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK', SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX . 'php_fatal' . SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX);
-define('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX', 'sitepulse_plugin_dir_size_');
-define('SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT', 'sitepulse_resource_monitor_snapshot');
-define('SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY', 'sitepulse_resource_monitor_history');
-define('SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT', 'sitepulse_resource_monitor_cpu_threshold_percent');
-define('SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT', 'sitepulse_resource_monitor_memory_threshold_percent');
-define('SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT', 'sitepulse_resource_monitor_disk_threshold_percent');
+sitepulse_define_constant('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS', 'sitepulse_speed_scan_results');
+sitepulse_define_constant('SITEPULSE_TRANSIENT_SPEED_SCAN_LOCK', 'sitepulse_speed_scan_lock');
+sitepulse_define_constant('SITEPULSE_TRANSIENT_AI_INSIGHT', 'sitepulse_ai_insight');
+sitepulse_define_constant('SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX', 'sitepulse_error_alert_');
+sitepulse_define_constant('SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX', '_lock');
+sitepulse_define_constant('SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK', SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX . 'cpu' . SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX);
+sitepulse_define_constant('SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK', SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX . 'php_fatal' . SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX);
+sitepulse_define_constant('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX', 'sitepulse_plugin_dir_size_');
+sitepulse_define_constant('SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT', 'sitepulse_resource_monitor_snapshot');
+sitepulse_define_constant('SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY', 'sitepulse_resource_monitor_history');
+sitepulse_define_constant('SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT', 'sitepulse_resource_monitor_cpu_threshold_percent');
+sitepulse_define_constant('SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT', 'sitepulse_resource_monitor_memory_threshold_percent');
+sitepulse_define_constant('SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT', 'sitepulse_resource_monitor_disk_threshold_percent');
 
-define('SITEPULSE_DEFAULT_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT', 85);
-define('SITEPULSE_DEFAULT_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT', 90);
-define('SITEPULSE_DEFAULT_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT', 85);
+sitepulse_define_constant('SITEPULSE_DEFAULT_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT', 85);
+sitepulse_define_constant('SITEPULSE_DEFAULT_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT', 90);
+sitepulse_define_constant('SITEPULSE_DEFAULT_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT', 85);
 
-define('SITEPULSE_NONCE_ACTION_AI_INSIGHT', 'sitepulse_get_ai_insight');
-define('SITEPULSE_NONCE_ACTION_ALERT_TEST', 'sitepulse_alert_test');
-define('SITEPULSE_NONCE_ACTION_CLEANUP', 'sitepulse_cleanup');
-define('SITEPULSE_NONCE_FIELD_CLEANUP', 'sitepulse_cleanup_nonce');
-define('SITEPULSE_ACTION_PLUGIN_IMPACT_REFRESH', 'sitepulse_plugin_impact_refresh');
-define('SITEPULSE_NONCE_ACTION_RESOURCE_MONITOR_EXPORT', 'sitepulse_resource_monitor_export');
+sitepulse_define_constant('SITEPULSE_NONCE_ACTION_AI_INSIGHT', 'sitepulse_get_ai_insight');
+sitepulse_define_constant('SITEPULSE_NONCE_ACTION_ALERT_TEST', 'sitepulse_alert_test');
+sitepulse_define_constant('SITEPULSE_NONCE_ACTION_CLEANUP', 'sitepulse_cleanup');
+sitepulse_define_constant('SITEPULSE_NONCE_FIELD_CLEANUP', 'sitepulse_cleanup_nonce');
+sitepulse_define_constant('SITEPULSE_ACTION_PLUGIN_IMPACT_REFRESH', 'sitepulse_plugin_impact_refresh');
+sitepulse_define_constant('SITEPULSE_NONCE_ACTION_RESOURCE_MONITOR_EXPORT', 'sitepulse_resource_monitor_export');
 
 /**
  * Retrieves the absolute path to the WordPress debug log file.
