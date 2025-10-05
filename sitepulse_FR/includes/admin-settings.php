@@ -197,6 +197,9 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_EXPECTED_CODES, [
         'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_uptime_expected_codes', 'default' => []
     ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS, [
+        'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_uptime_maintenance_windows', 'default' => []
+    ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_SPEED_WARNING_MS, [
         'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_speed_warning_threshold', 'default' => SITEPULSE_DEFAULT_SPEED_WARNING_MS
     ]);
@@ -686,6 +689,112 @@ function sitepulse_sanitize_uptime_expected_codes($value) {
     sort($codes, SORT_NUMERIC);
 
     return $codes;
+}
+
+/**
+ * Sanitizes the recurring uptime maintenance windows configuration.
+ *
+ * @param mixed $value Raw user input value.
+ * @return array<int,array<string,mixed>>
+ */
+function sitepulse_sanitize_uptime_maintenance_windows($value) {
+    if (!is_array($value)) {
+        return [];
+    }
+
+    $timezone = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('UTC');
+    $sanitized = [];
+
+    foreach ($value as $window) {
+        if (!is_array($window)) {
+            continue;
+        }
+
+        if (isset($window['start'], $window['end'])) {
+            $start = isset($window['start']) ? (int) $window['start'] : 0;
+            $end   = isset($window['end']) ? (int) $window['end'] : 0;
+
+            if ($start > 0 && $end > $start) {
+                $duration = max(1, (int) round(($end - $start) / MINUTE_IN_SECONDS));
+                $date     = function_exists('wp_date') ? wp_date('Y-m-d', $start) : gmdate('Y-m-d', $start);
+                $time     = function_exists('wp_date') ? wp_date('H:i', $start) : gmdate('H:i', $start);
+                $day      = (int) ((new DateTimeImmutable('@' . $start))->setTimezone($timezone)->format('N'));
+
+                $window = [
+                    'agent'      => isset($window['agent']) ? $window['agent'] : 'all',
+                    'label'      => isset($window['label']) ? $window['label'] : '',
+                    'recurrence' => 'one_off',
+                    'day'        => $day,
+                    'time'       => $time,
+                    'duration'   => $duration,
+                    'date'       => $date,
+                ];
+            }
+        }
+
+        $agent = isset($window['agent']) ? sanitize_key($window['agent']) : 'all';
+
+        if ($agent === '') {
+            $agent = 'all';
+        }
+
+        $label = isset($window['label']) ? sanitize_text_field($window['label']) : '';
+
+        $recurrence = isset($window['recurrence']) ? sanitize_key($window['recurrence']) : 'weekly';
+        $allowed_recurrences = ['daily', 'weekly', 'one_off'];
+
+        if (!in_array($recurrence, $allowed_recurrences, true)) {
+            $recurrence = 'weekly';
+        }
+
+        $time = isset($window['time']) ? trim((string) $window['time']) : '';
+
+        if ($time === '' || !preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d$/', $time)) {
+            continue;
+        }
+
+        $duration = isset($window['duration']) ? (int) $window['duration'] : 0;
+
+        if ($duration < 1) {
+            continue;
+        }
+
+        $day = isset($window['day']) ? (int) $window['day'] : 0;
+        $date_value = '';
+
+        if ('one_off' === $recurrence) {
+            $date_candidate = isset($window['date']) ? trim((string) $window['date']) : '';
+
+            if ($date_candidate === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date_candidate)) {
+                continue;
+            }
+
+            try {
+                $date_object = new DateTimeImmutable($date_candidate, $timezone);
+            } catch (Exception $e) {
+                continue;
+            }
+
+            $date_value = $date_object->format('Y-m-d');
+            $day = (int) $date_object->format('N');
+        } else {
+            if ($day < 1 || $day > 7) {
+                continue;
+            }
+        }
+
+        $sanitized[] = [
+            'agent'      => $agent,
+            'label'      => $label,
+            'recurrence' => $recurrence,
+            'day'        => $day,
+            'time'       => $time,
+            'duration'   => $duration,
+            'date'       => $date_value,
+        ];
+    }
+
+    return $sanitized;
 }
 
 /**
@@ -1426,6 +1535,43 @@ function sitepulse_settings_page() {
     $uptime_expected_codes_option = get_option(SITEPULSE_OPTION_UPTIME_EXPECTED_CODES, []);
     $uptime_expected_codes = sitepulse_sanitize_uptime_expected_codes($uptime_expected_codes_option);
     $uptime_expected_codes_text = implode(', ', $uptime_expected_codes);
+    $uptime_maintenance_windows_option = get_option(SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS, []);
+    $uptime_maintenance_windows = sitepulse_sanitize_uptime_maintenance_windows($uptime_maintenance_windows_option);
+    $uptime_maintenance_rows_to_render = max(count($uptime_maintenance_windows) + 1, 1);
+    $uptime_maintenance_rows_to_render = min($uptime_maintenance_rows_to_render, 6);
+    $uptime_agents_choices = ['all' => __('Tous les agents', 'sitepulse')];
+
+    if (function_exists('sitepulse_uptime_get_agents')) {
+        foreach (sitepulse_uptime_get_agents() as $agent_id => $agent_data) {
+            $agent_key = sanitize_key($agent_id);
+
+            if ($agent_key === '') {
+                continue;
+            }
+
+            $agent_label = isset($agent_data['label']) && is_string($agent_data['label'])
+                ? $agent_data['label']
+                : ucfirst(str_replace('_', ' ', $agent_key));
+
+            $uptime_agents_choices[$agent_key] = $agent_label;
+        }
+    }
+
+    $uptime_day_choices = [
+        1 => __('Lundi', 'sitepulse'),
+        2 => __('Mardi', 'sitepulse'),
+        3 => __('Mercredi', 'sitepulse'),
+        4 => __('Jeudi', 'sitepulse'),
+        5 => __('Vendredi', 'sitepulse'),
+        6 => __('Samedi', 'sitepulse'),
+        7 => __('Dimanche', 'sitepulse'),
+    ];
+
+    $uptime_recurrence_choices = [
+        'weekly'  => __('Hebdomadaire', 'sitepulse'),
+        'daily'   => __('Quotidienne', 'sitepulse'),
+        'one_off' => __('Ponctuelle', 'sitepulse'),
+    ];
 
     $default_speed_thresholds = [
         'warning'  => defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200,
@@ -1548,6 +1694,7 @@ function sitepulse_settings_page() {
         if (isset($_POST['sitepulse_clear_data'])) {
             delete_option(SITEPULSE_OPTION_UPTIME_LOG);
             delete_option(SITEPULSE_OPTION_UPTIME_HTTP_HEADERS);
+            delete_option(SITEPULSE_OPTION_UPTIME_MAINTENANCE_NOTICES);
             delete_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS);
             echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('Données stockées effacées.', 'sitepulse') . '</p></div>';
         }
@@ -1564,6 +1711,7 @@ function sitepulse_settings_page() {
                 SITEPULSE_OPTION_UPTIME_FREQUENCY,
                 SITEPULSE_OPTION_UPTIME_HTTP_METHOD,
                 SITEPULSE_OPTION_UPTIME_HTTP_HEADERS,
+                SITEPULSE_OPTION_UPTIME_MAINTENANCE_NOTICES,
                 SITEPULSE_OPTION_UPTIME_EXPECTED_CODES,
                 SITEPULSE_OPTION_LAST_LOAD_TIME,
                 SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS,
@@ -2255,6 +2403,71 @@ function sitepulse_settings_page() {
                             <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_EXPECTED_CODES); ?>"><?php esc_html_e('Codes considérés comme succès', 'sitepulse'); ?></label>
                             <input type="text" id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_EXPECTED_CODES); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_EXPECTED_CODES); ?>" value="<?php echo esc_attr($uptime_expected_codes_text); ?>" class="regular-text" placeholder="200, 201-204">
                             <p class="sitepulse-card-description"><?php esc_html_e('Liste de codes séparés par des virgules ou plages (ex. 200-204). Laissez vide pour accepter toute réponse 2xx ou 3xx.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Fenêtres de maintenance', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <p class="sitepulse-card-description"><?php esc_html_e('Planifiez des créneaux récurrents pendant lesquels les contrôles d’uptime sont ignorés et aucune alerte n’est envoyée.', 'sitepulse'); ?></p>
+                            <?php for ($index = 0; $index < $uptime_maintenance_rows_to_render; $index++) :
+                                $window = isset($uptime_maintenance_windows[$index]) ? $uptime_maintenance_windows[$index] : [];
+                                $agent_value = isset($window['agent']) ? $window['agent'] : 'all';
+                                $day_value = isset($window['day']) ? (int) $window['day'] : 1;
+                                $time_value = isset($window['time']) ? $window['time'] : '';
+                                $duration_value = isset($window['duration']) ? (int) $window['duration'] : '';
+                                $recurrence_value = isset($window['recurrence']) ? $window['recurrence'] : 'weekly';
+                                $label_value = isset($window['label']) ? $window['label'] : '';
+                                $date_value = isset($window['date']) ? $window['date'] : '';
+                            ?>
+                                <fieldset class="sitepulse-maintenance-window">
+                                    <legend><?php printf(esc_html__('Fenêtre %d', 'sitepulse'), $index + 1); ?></legend>
+                                    <div class="sitepulse-maintenance-window__grid">
+                                        <label>
+                                            <span class="sitepulse-field-label"><?php esc_html_e('Agent concerné', 'sitepulse'); ?></span>
+                                            <select name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS); ?>[<?php echo esc_attr($index); ?>][agent]">
+                                                <?php foreach ($uptime_agents_choices as $agent_key => $agent_label) : ?>
+                                                    <option value="<?php echo esc_attr($agent_key); ?>" <?php selected($agent_value, $agent_key); ?>><?php echo esc_html($agent_label); ?></option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </label>
+                                        <label>
+                                            <span class="sitepulse-field-label"><?php esc_html_e('Jour de démarrage', 'sitepulse'); ?></span>
+                                            <select name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS); ?>[<?php echo esc_attr($index); ?>][day]">
+                                                <?php foreach ($uptime_day_choices as $day_key => $day_label) : ?>
+                                                    <option value="<?php echo esc_attr($day_key); ?>" <?php selected($day_value, $day_key); ?>><?php echo esc_html($day_label); ?></option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </label>
+                                        <label>
+                                            <span class="sitepulse-field-label"><?php esc_html_e('Heure (HH:MM)', 'sitepulse'); ?></span>
+                                            <input type="time" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS); ?>[<?php echo esc_attr($index); ?>][time]" value="<?php echo esc_attr($time_value); ?>">
+                                        </label>
+                                        <label>
+                                            <span class="sitepulse-field-label"><?php esc_html_e('Durée (minutes)', 'sitepulse'); ?></span>
+                                            <input type="number" min="1" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS); ?>[<?php echo esc_attr($index); ?>][duration]" value="<?php echo esc_attr($duration_value); ?>">
+                                        </label>
+                                        <label>
+                                            <span class="sitepulse-field-label"><?php esc_html_e('Récurrence', 'sitepulse'); ?></span>
+                                            <select name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS); ?>[<?php echo esc_attr($index); ?>][recurrence]">
+                                                <?php foreach ($uptime_recurrence_choices as $recurrence_key => $recurrence_label) : ?>
+                                                    <option value="<?php echo esc_attr($recurrence_key); ?>" <?php selected($recurrence_value, $recurrence_key); ?>><?php echo esc_html($recurrence_label); ?></option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </label>
+                                        <label>
+                                            <span class="sitepulse-field-label"><?php esc_html_e('Date (ponctuel)', 'sitepulse'); ?></span>
+                                            <input type="date" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS); ?>[<?php echo esc_attr($index); ?>][date]" value="<?php echo esc_attr($date_value); ?>">
+                                        </label>
+                                        <label>
+                                            <span class="sitepulse-field-label"><?php esc_html_e('Intitulé', 'sitepulse'); ?></span>
+                                            <input type="text" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS); ?>[<?php echo esc_attr($index); ?>][label]" value="<?php echo esc_attr($label_value); ?>" class="regular-text">
+                                        </label>
+                                    </div>
+                                    <p class="description"><?php esc_html_e('Laissez une ligne vide pour supprimer la fenêtre correspondante. Les créneaux ponctuels ignorent le champ « Jour de démarrage ».', 'sitepulse'); ?></p>
+                                </fieldset>
+                            <?php endfor; ?>
                         </div>
                     </div>
                 </div>

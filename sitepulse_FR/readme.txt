@@ -16,7 +16,7 @@ Sitepulse - JLG takes the pulse of your WordPress site, offering modules for:
 
 * Speed analysis (load times, server processing time)
 * Database optimization (clean bloat, suggest indexes)
-* Server monitoring (CPU, memory, uptime)
+* Server monitoring (CPU, memory, uptime) with programmable maintenance windows that pause alerts and log ignored checks
 * Error logging and alerts
 * Plugin impact analysis
 * Maintenance checks and AI insights

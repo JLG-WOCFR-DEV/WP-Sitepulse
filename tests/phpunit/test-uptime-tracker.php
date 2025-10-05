@@ -32,6 +32,7 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $module = dirname(__DIR__, 2) . '/sitepulse_FR/modules/uptime_tracker.php';
         require_once dirname(__DIR__, 2) . '/sitepulse_FR/includes/functions.php';
         require_once dirname(__DIR__, 2) . '/sitepulse_FR/includes/admin-settings.php';
+        require_once dirname(__DIR__, 2) . '/sitepulse_FR/includes/debug-notices.php';
         require_once $module;
     }
 
@@ -55,6 +56,7 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         delete_option(SITEPULSE_OPTION_UPTIME_AGENTS);
         delete_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE);
         delete_option(SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS);
+        delete_option(SITEPULSE_OPTION_UPTIME_MAINTENANCE_NOTICES);
     }
 
     protected function tear_down(): void {
@@ -70,6 +72,7 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         delete_option(SITEPULSE_OPTION_UPTIME_AGENTS);
         delete_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE);
         delete_option(SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS);
+        delete_option(SITEPULSE_OPTION_UPTIME_MAINTENANCE_NOTICES);
 
         parent::tear_down();
     }
@@ -389,10 +392,49 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $this->assertCount(1, $log);
         $this->assertSame('maintenance', $log[0]['status']);
         $this->assertSame('default', $log[0]['agent']);
+        $this->assertArrayHasKey('maintenance_start', $log[0]);
+        $this->assertArrayHasKey('maintenance_end', $log[0]);
 
         $archive = get_option(SITEPULSE_OPTION_UPTIME_ARCHIVE, []);
         $day_key = array_key_last($archive);
         $this->assertSame(1, $archive[$day_key]['maintenance']);
         $this->assertSame(1, $archive[$day_key]['agents']['default']['maintenance']);
+
+        $maintenance_notices = sitepulse_uptime_get_maintenance_notice_log();
+        $this->assertNotEmpty($maintenance_notices);
+        $this->assertStringContainsString('Maintenance', $maintenance_notices[0]['message']);
+    }
+
+    public function test_weekly_maintenance_window_detection() {
+        $timezone = wp_timezone();
+        $now = current_time('timestamp');
+        $start_datetime = (new DateTimeImmutable('@' . $now))->setTimezone($timezone)->modify('-2 minutes');
+        $day = (int) $start_datetime->format('N');
+        $time = $start_datetime->format('H:i');
+
+        $definitions = sitepulse_sanitize_uptime_maintenance_windows([
+            [
+                'agent'      => 'default',
+                'recurrence' => 'weekly',
+                'day'        => $day,
+                'time'       => $time,
+                'duration'   => 5,
+                'label'      => 'Weekly maintenance',
+            ],
+        ]);
+
+        update_option(SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS, $definitions);
+
+        $timestamp_in_window = $start_datetime->modify('+1 minutes')->getTimestamp();
+        $this->assertTrue(sitepulse_uptime_is_in_maintenance_window('default', $timestamp_in_window));
+
+        $resolved_windows = sitepulse_uptime_get_maintenance_windows($timestamp_in_window);
+        $this->assertNotEmpty($resolved_windows);
+
+        $active_windows = array_filter($resolved_windows, function ($window) {
+            return !empty($window['is_active']);
+        });
+
+        $this->assertNotEmpty($active_windows);
     }
 }
