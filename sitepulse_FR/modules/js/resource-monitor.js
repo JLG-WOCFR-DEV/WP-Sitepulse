@@ -35,6 +35,8 @@
     var diskLabel = typeof i18n.diskLabel === 'string' ? i18n.diskLabel : 'Disk';
     var percentAxisLabel = typeof i18n.percentAxisLabel === 'string' ? i18n.percentAxisLabel : '%';
     var unavailableLabel = typeof i18n.unavailable === 'string' ? i18n.unavailable : 'N/A';
+    var cronPointLabel = typeof i18n.cronPoint === 'string' ? i18n.cronPoint : 'Cron';
+    var manualPointLabel = typeof i18n.manualPoint === 'string' ? i18n.manualPoint : 'Manual';
 
     function formatDate(timestamp) {
         var date = new Date(timestamp * 1000);
@@ -62,12 +64,22 @@
     var loadDataset = [];
     var memoryPercentDataset = [];
     var diskPercentDataset = [];
+    var pointRadius = [];
+    var pointHoverRadius = [];
+    var pointStyles = [];
+    var pointBorderWidth = [];
 
     for (var index = 0; index < history.length; index++) {
         var entry = history[index];
         var timestamp = typeof entry.timestamp === 'number' ? entry.timestamp : null;
 
         labels.push(timestamp ? formatDate(timestamp) : unavailableLabel);
+
+        var isCron = entry && entry.isCron ? true : false;
+        pointRadius.push(isCron ? 5 : 3);
+        pointHoverRadius.push(isCron ? 7 : 5);
+        pointStyles.push(isCron ? 'rectRounded' : 'circle');
+        pointBorderWidth.push(isCron ? 2 : 1);
 
         if (entry.load && Array.isArray(entry.load) && typeof entry.load[0] === 'number') {
             loadDataset.push(entry.load[0]);
@@ -105,6 +117,15 @@
                     tension: 0.3,
                     spanGaps: true,
                     yAxisID: 'y',
+                    pointRadius: pointRadius,
+                    pointHoverRadius: pointHoverRadius,
+                    pointStyle: pointStyles,
+                    pointBorderWidth: pointBorderWidth,
+                    pointBorderColor: '#1d4ed8',
+                    pointBackgroundColor: function(context) {
+                        var idx = typeof context.dataIndex === 'number' ? context.dataIndex : 0;
+                        return history[idx] && history[idx].isCron ? '#1d4ed8' : '#ffffff';
+                    },
                 },
                 {
                     label: memoryLabel,
@@ -114,6 +135,15 @@
                     tension: 0.3,
                     spanGaps: true,
                     yAxisID: 'yPercent',
+                    pointRadius: pointRadius,
+                    pointHoverRadius: pointHoverRadius,
+                    pointStyle: pointStyles,
+                    pointBorderWidth: pointBorderWidth,
+                    pointBorderColor: '#16a34a',
+                    pointBackgroundColor: function(context) {
+                        var idx = typeof context.dataIndex === 'number' ? context.dataIndex : 0;
+                        return history[idx] && history[idx].isCron ? '#16a34a' : '#ffffff';
+                    },
                 },
                 {
                     label: diskLabel,
@@ -123,6 +153,15 @@
                     tension: 0.3,
                     spanGaps: true,
                     yAxisID: 'yPercent',
+                    pointRadius: pointRadius,
+                    pointHoverRadius: pointHoverRadius,
+                    pointStyle: pointStyles,
+                    pointBorderWidth: pointBorderWidth,
+                    pointBorderColor: '#f97316',
+                    pointBackgroundColor: function(context) {
+                        var idx = typeof context.dataIndex === 'number' ? context.dataIndex : 0;
+                        return history[idx] && history[idx].isCron ? '#f97316' : '#ffffff';
+                    },
                 },
             ],
         },
@@ -161,6 +200,20 @@
                             }
 
                             return (i18n.timestamp ? i18n.timestamp + ': ' : '') + formatDate(entry.timestamp);
+                        },
+                        footer: function(context) {
+                            if (!context.length) {
+                                return '';
+                            }
+
+                            var idx = typeof context[0].dataIndex === 'number' ? context[0].dataIndex : 0;
+                            var entry = history[idx];
+
+                            if (!entry) {
+                                return '';
+                            }
+
+                            return entry.isCron ? cronPointLabel : manualPointLabel;
                         },
                     },
                 },
