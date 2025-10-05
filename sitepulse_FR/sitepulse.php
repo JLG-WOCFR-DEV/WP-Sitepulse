@@ -292,7 +292,9 @@ sitepulse_update_plugin_basename_option();
 $debug_mode = get_option(SITEPULSE_OPTION_DEBUG_MODE, false);
 define('SITEPULSE_DEBUG', (bool) $debug_mode);
 
-add_action('plugins_loaded', 'sitepulse_load_textdomain');
+// Load translations once WordPress has completed initialization to avoid
+// triggering the _load_textdomain_just_in_time notice introduced in WP 6.7.
+add_action('init', 'sitepulse_load_textdomain');
 
 function sitepulse_load_textdomain() {
     load_plugin_textdomain('sitepulse', false, dirname(plugin_basename(__FILE__)) . '/languages');
