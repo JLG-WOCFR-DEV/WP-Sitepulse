@@ -79,12 +79,20 @@ define('SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK', SITEPULSE_TRANSIENT_ERR
 define('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX', 'sitepulse_plugin_dir_size_');
 define('SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT', 'sitepulse_resource_monitor_snapshot');
 define('SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY', 'sitepulse_resource_monitor_history');
+define('SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT', 'sitepulse_resource_monitor_cpu_threshold_percent');
+define('SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT', 'sitepulse_resource_monitor_memory_threshold_percent');
+define('SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT', 'sitepulse_resource_monitor_disk_threshold_percent');
+
+define('SITEPULSE_DEFAULT_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT', 85);
+define('SITEPULSE_DEFAULT_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT', 90);
+define('SITEPULSE_DEFAULT_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT', 85);
 
 define('SITEPULSE_NONCE_ACTION_AI_INSIGHT', 'sitepulse_get_ai_insight');
 define('SITEPULSE_NONCE_ACTION_ALERT_TEST', 'sitepulse_alert_test');
 define('SITEPULSE_NONCE_ACTION_CLEANUP', 'sitepulse_cleanup');
 define('SITEPULSE_NONCE_FIELD_CLEANUP', 'sitepulse_cleanup_nonce');
 define('SITEPULSE_ACTION_PLUGIN_IMPACT_REFRESH', 'sitepulse_plugin_impact_refresh');
+define('SITEPULSE_NONCE_ACTION_RESOURCE_MONITOR_EXPORT', 'sitepulse_resource_monitor_export');
 
 /**
  * Retrieves the absolute path to the WordPress debug log file.
@@ -1141,6 +1149,98 @@ function sitepulse_get_cron_hook($module_key) {
 }
 
 /**
+ * Returns the cron hook identifier used for the resource monitor automation.
+ *
+ * @return string
+ */
+function sitepulse_resource_monitor_get_cron_hook_name() {
+    $hook = sitepulse_get_cron_hook('resource_monitor');
+
+    if (is_string($hook) && $hook !== '') {
+        return $hook;
+    }
+
+    return 'sitepulse_resource_monitor_cron';
+}
+
+/**
+ * Registers the custom cron schedule used for automated resource snapshots.
+ *
+ * @param array $schedules Existing cron schedules.
+ * @return array
+ */
+function sitepulse_resource_monitor_register_cron_schedule($schedules) {
+    if (!is_array($schedules)) {
+        $schedules = [];
+    }
+
+    $minimum_interval = defined('MINUTE_IN_SECONDS') ? MINUTE_IN_SECONDS : 60;
+    $default_interval = 5 * $minimum_interval;
+    $interval = (int) apply_filters('sitepulse_resource_monitor_cron_interval', $default_interval);
+
+    if ($interval < $minimum_interval) {
+        $interval = $minimum_interval;
+    }
+
+    $schedules['sitepulse_resource_monitor_interval'] = [
+        'interval' => $interval,
+        'display'  => __('SitePulse Resource Monitor (Automatic)', 'sitepulse'),
+    ];
+
+    return $schedules;
+}
+add_filter('cron_schedules', 'sitepulse_resource_monitor_register_cron_schedule');
+
+/**
+ * Ensures the resource monitor cron event is scheduled when the module is active.
+ *
+ * @return void
+ */
+function sitepulse_resource_monitor_schedule_cron_hook() {
+    $hook = sitepulse_resource_monitor_get_cron_hook_name();
+
+    if ($hook === '') {
+        return;
+    }
+
+    if (!sitepulse_is_module_active('resource_monitor')) {
+        if (function_exists('wp_clear_scheduled_hook')) {
+            wp_clear_scheduled_hook($hook);
+        } else {
+            $timestamp = wp_next_scheduled($hook);
+
+            while ($timestamp) {
+                wp_unschedule_event($timestamp, $hook);
+                $timestamp = wp_next_scheduled($hook);
+            }
+        }
+
+        sitepulse_clear_cron_warning('resource_monitor');
+
+        return;
+    }
+
+    $schedule = apply_filters('sitepulse_resource_monitor_cron_recurrence', 'sitepulse_resource_monitor_interval');
+
+    if (!wp_next_scheduled($hook)) {
+        $scheduled = wp_schedule_event(time(), $schedule, $hook);
+
+        if (false === $scheduled) {
+            sitepulse_register_cron_warning(
+                'resource_monitor',
+                __('SitePulse n’a pas pu programmer la collecte automatique des ressources. Vérifiez la configuration de WP-Cron.', 'sitepulse')
+            );
+        }
+    }
+
+    if (wp_next_scheduled($hook)) {
+        sitepulse_clear_cron_warning('resource_monitor');
+    }
+}
+add_action('init', 'sitepulse_resource_monitor_schedule_cron_hook');
+add_action(sitepulse_resource_monitor_get_cron_hook_name(), 'sitepulse_resource_monitor_run_cron');
+
+/**
  * Handles module activation option changes by removing orphaned cron events.
  *
  * The {@see 'update_option_sitepulse_active_modules'} action provides both the
@@ -1702,6 +1802,38 @@ function sitepulse_load_modules() {
 add_action('plugins_loaded', 'sitepulse_load_modules');
 
 /**
+ * Determines whether a given module is marked as active in the settings.
+ *
+ * @param string $module_key Module identifier.
+ * @return bool
+ */
+function sitepulse_is_module_active($module_key) {
+    $module_key = is_string($module_key) ? trim($module_key) : '';
+
+    if ($module_key === '') {
+        return false;
+    }
+
+    $active_modules_option = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
+
+    if (!is_array($active_modules_option)) {
+        return false;
+    }
+
+    foreach ($active_modules_option as $active_module) {
+        if (!is_string($active_module) && !is_numeric($active_module)) {
+            continue;
+        }
+
+        if ($module_key === (string) $active_module) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
  * Sets default options for a given site.
  *
  * @return void
@@ -1730,6 +1862,9 @@ function sitepulse_activate_site() {
     add_option(SITEPULSE_OPTION_SPEED_CRITICAL_MS, SITEPULSE_DEFAULT_SPEED_CRITICAL_MS, '', false);
     add_option(SITEPULSE_OPTION_UPTIME_WARNING_PERCENT, SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT, '', false);
     add_option(SITEPULSE_OPTION_REVISION_LIMIT, SITEPULSE_DEFAULT_REVISION_LIMIT, '', false);
+    add_option(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT, SITEPULSE_DEFAULT_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT, '', false);
+    add_option(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT, SITEPULSE_DEFAULT_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT, '', false);
+    add_option(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT, SITEPULSE_DEFAULT_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT, '', false);
 
     sitepulse_plugin_impact_install_mu_loader();
 

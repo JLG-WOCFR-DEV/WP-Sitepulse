@@ -167,6 +167,21 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, [
         'type' => 'number', 'sanitize_callback' => 'sitepulse_sanitize_cpu_threshold', 'default' => 5
     ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT, [
+        'type' => 'number',
+        'sanitize_callback' => 'sitepulse_sanitize_resource_monitor_cpu_threshold',
+        'default' => SITEPULSE_DEFAULT_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT,
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT, [
+        'type' => 'number',
+        'sanitize_callback' => 'sitepulse_sanitize_resource_monitor_memory_threshold',
+        'default' => SITEPULSE_DEFAULT_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT,
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT, [
+        'type' => 'number',
+        'sanitize_callback' => 'sitepulse_sanitize_resource_monitor_disk_threshold',
+        'default' => SITEPULSE_DEFAULT_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT,
+    ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD, [
         'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_php_fatal_threshold', 'default' => 1
     ]);
@@ -398,6 +413,65 @@ function sitepulse_sanitize_cpu_threshold($value) {
         $value = 5.0;
     }
     return $value;
+}
+
+/**
+ * Normalises percentage thresholds ensuring they stay within 0-100.
+ *
+ * @param mixed $value   Raw value provided by the user.
+ * @param int   $default Default fallback value.
+ * @return int
+ */
+function sitepulse_sanitize_percentage_threshold($value, $default) {
+    if (!is_numeric($default)) {
+        $default = 0;
+    }
+
+    $value = is_scalar($value) ? (float) $value : $default;
+
+    if ($value < 0) {
+        $value = 0;
+    }
+
+    if ($value > 100) {
+        $value = 100;
+    }
+
+    if ($value === 0 && $default > 0) {
+        $value = (float) $default;
+    }
+
+    return (int) round($value);
+}
+
+/**
+ * Sanitizes the CPU usage threshold for the resource monitor cron alerts.
+ *
+ * @param mixed $value Raw value provided by the user.
+ * @return int
+ */
+function sitepulse_sanitize_resource_monitor_cpu_threshold($value) {
+    return sitepulse_sanitize_percentage_threshold($value, SITEPULSE_DEFAULT_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT);
+}
+
+/**
+ * Sanitizes the memory usage threshold for the resource monitor cron alerts.
+ *
+ * @param mixed $value Raw value provided by the user.
+ * @return int
+ */
+function sitepulse_sanitize_resource_monitor_memory_threshold($value) {
+    return sitepulse_sanitize_percentage_threshold($value, SITEPULSE_DEFAULT_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT);
+}
+
+/**
+ * Sanitizes the disk usage threshold for the resource monitor cron alerts.
+ *
+ * @param mixed $value Raw value provided by the user.
+ * @return int
+ */
+function sitepulse_sanitize_resource_monitor_disk_threshold($value) {
+    return sitepulse_sanitize_percentage_threshold($value, SITEPULSE_DEFAULT_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT);
 }
 
 /**
@@ -2627,6 +2701,26 @@ function sitepulse_settings_page() {
                         </div>
                     </div>
                     <?php endforeach; ?>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Seuils du moniteur de ressources', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <p class="sitepulse-card-description"><?php esc_html_e('Définissez les seuils d’utilisation maximum tolérés. Les alertes sont déclenchées lorsque plusieurs relevés automatiques dépassent ces valeurs.', 'sitepulse'); ?></p>
+                            <?php
+                            $resource_cpu_threshold = (int) get_option(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT, SITEPULSE_DEFAULT_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT);
+                            $resource_memory_threshold = (int) get_option(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT, SITEPULSE_DEFAULT_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT);
+                            $resource_disk_threshold = (int) get_option(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT, SITEPULSE_DEFAULT_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT);
+                            ?>
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT); ?>"><?php esc_html_e('CPU – pourcentage d’utilisation', 'sitepulse'); ?></label>
+                            <input type="number" min="0" max="100" id="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT); ?>" value="<?php echo esc_attr($resource_cpu_threshold); ?>" class="small-text">
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT); ?>"><?php esc_html_e('Mémoire – pourcentage utilisé', 'sitepulse'); ?></label>
+                            <input type="number" min="0" max="100" id="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT); ?>" value="<?php echo esc_attr($resource_memory_threshold); ?>" class="small-text">
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT); ?>"><?php esc_html_e('Stockage – pourcentage utilisé', 'sitepulse'); ?></label>
+                            <input type="number" min="0" max="100" id="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT); ?>" value="<?php echo esc_attr($resource_disk_threshold); ?>" class="small-text">
+                            <p class="sitepulse-card-description"><?php esc_html_e('Pour le stockage, le pourcentage correspond à l’espace occupé (100 % = disque plein).', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
                     <div class="sitepulse-module-card sitepulse-module-card--setting" id="sitepulse-debug-card">
                         <div class="sitepulse-card-header">
                             <h3 class="sitepulse-card-title"><?php esc_html_e('Mode Debug', 'sitepulse'); ?></h3>
