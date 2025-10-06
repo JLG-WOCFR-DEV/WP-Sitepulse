@@ -26,12 +26,16 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
         delete_transient(SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT);
         sitepulse_resource_monitor_clear_history();
         $GLOBALS['sitepulse_logger'] = [];
+
+        add_filter('sitepulse_resource_monitor_enable_disk_cache', '__return_false');
     }
 
     protected function tear_down(): void {
         delete_transient(SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT);
         sitepulse_resource_monitor_clear_history();
         $GLOBALS['sitepulse_logger'] = [];
+
+        remove_filter('sitepulse_resource_monitor_enable_disk_cache', '__return_false');
 
         parent::tear_down();
     }
@@ -367,5 +371,32 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
 
         wp_set_current_user(0);
         $_POST = [];
+    }
+
+    public function test_load_average_filter_can_override_values() {
+        $override = [1.23, 4.56, 7.89];
+        $contexts = [];
+
+        $callback = static function($values, $context) use (&$contexts, $override) {
+            $contexts[] = $context;
+
+            return $override;
+        };
+
+        add_filter('sitepulse_resource_monitor_load_average', $callback, 10, 2);
+
+        $snapshot = sitepulse_resource_monitor_get_snapshot();
+
+        remove_filter('sitepulse_resource_monitor_load_average', $callback, 10);
+
+        $this->assertNotEmpty($contexts, 'Filter should receive the current load average context.');
+        $this->assertArrayHasKey('fallback_attempted', $contexts[0], 'Context should expose the fallback status.');
+
+        $this->assertEqualsWithDelta($override[0], $snapshot['load'][0], 0.001, 'Filter override should replace first load value.');
+        $this->assertEqualsWithDelta($override[1], $snapshot['load'][1], 0.001, 'Filter override should replace second load value.');
+        $this->assertEqualsWithDelta($override[2], $snapshot['load'][2], 0.001, 'Filter override should replace third load value.');
+
+        $expected_display = sitepulse_resource_monitor_format_load_display($override);
+        $this->assertSame($expected_display, $snapshot['load_display'], 'Load display should reflect the overridden values.');
     }
 }
