@@ -9,6 +9,14 @@
 
 if (!defined('ABSPATH')) exit;
 
+if (!defined('SITEPULSE_OPTION_UPTIME_HISTORY_RETENTION_DAYS')) {
+    define('SITEPULSE_OPTION_UPTIME_HISTORY_RETENTION_DAYS', 'sitepulse_uptime_history_retention_days');
+}
+
+if (!defined('SITEPULSE_DEFAULT_UPTIME_HISTORY_RETENTION_DAYS')) {
+    define('SITEPULSE_DEFAULT_UPTIME_HISTORY_RETENTION_DAYS', 90);
+}
+
 /**
  * Returns the capability required to manage SitePulse settings.
  *
@@ -226,6 +234,11 @@ function sitepulse_register_settings() {
     ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_KEYWORD, [
         'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_uptime_keyword', 'default' => ''
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_HISTORY_RETENTION_DAYS, [
+        'type' => 'integer',
+        'sanitize_callback' => 'sitepulse_sanitize_uptime_history_retention',
+        'default' => sitepulse_get_default_uptime_history_retention_days(),
     ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS, [
         'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_uptime_maintenance_windows', 'default' => []
@@ -731,6 +744,54 @@ function sitepulse_sanitize_uptime_latency_threshold($value) {
     }
 
     return round($value, 4);
+}
+
+/**
+ * Returns the default retention window for uptime history in days.
+ *
+ * @return int
+ */
+function sitepulse_get_default_uptime_history_retention_days() {
+    return defined('SITEPULSE_DEFAULT_UPTIME_HISTORY_RETENTION_DAYS')
+        ? (int) SITEPULSE_DEFAULT_UPTIME_HISTORY_RETENTION_DAYS
+        : 90;
+}
+
+/**
+ * Provides the selectable retention durations for uptime history.
+ *
+ * @return array<int,string>
+ */
+function sitepulse_get_uptime_history_retention_choices() {
+    return [
+        30  => __('30 derniers jours', 'sitepulse'),
+        90  => __('90 derniers jours', 'sitepulse'),
+        180 => __('6 derniers mois', 'sitepulse'),
+        365 => __('12 derniers mois', 'sitepulse'),
+    ];
+}
+
+/**
+ * Sanitizes the retention duration for uptime history.
+ *
+ * @param mixed $value Raw user input value.
+ * @return int
+ */
+function sitepulse_sanitize_uptime_history_retention($value) {
+    $default = sitepulse_get_default_uptime_history_retention_days();
+
+    if (!is_scalar($value) || !is_numeric($value)) {
+        return $default;
+    }
+
+    $value = (int) $value;
+    $choices = array_keys(sitepulse_get_uptime_history_retention_choices());
+
+    if (!in_array($value, $choices, true)) {
+        return $default;
+    }
+
+    return $value;
 }
 
 /**
@@ -1936,6 +1997,11 @@ function sitepulse_settings_page() {
     $uptime_latency_threshold = sitepulse_sanitize_uptime_latency_threshold($uptime_latency_threshold_option);
     $uptime_keyword_option = get_option(SITEPULSE_OPTION_UPTIME_KEYWORD, '');
     $uptime_keyword = sitepulse_sanitize_uptime_keyword($uptime_keyword_option);
+    $uptime_history_retention_option = get_option(
+        SITEPULSE_OPTION_UPTIME_HISTORY_RETENTION_DAYS,
+        sitepulse_get_default_uptime_history_retention_days()
+    );
+    $uptime_history_retention = sitepulse_sanitize_uptime_history_retention($uptime_history_retention_option);
     $uptime_maintenance_windows_option = get_option(SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS, []);
     $uptime_maintenance_windows = sitepulse_sanitize_uptime_maintenance_windows($uptime_maintenance_windows_option);
     $uptime_maintenance_rows_to_render = max(count($uptime_maintenance_windows) + 1, 1);
@@ -2935,6 +3001,21 @@ function sitepulse_settings_page() {
                                 <?php endforeach; ?>
                             </select>
                             <p class="sitepulse-card-description"><?php esc_html_e('Sélectionnez la fréquence d’exécution de la tâche de surveillance.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Durée de conservation', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <?php $uptime_history_choices = sitepulse_get_uptime_history_retention_choices(); ?>
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_HISTORY_RETENTION_DAYS); ?>"><?php esc_html_e('Historique conservé', 'sitepulse'); ?></label>
+                            <select id="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_HISTORY_RETENTION_DAYS); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_UPTIME_HISTORY_RETENTION_DAYS); ?>">
+                                <?php foreach ($uptime_history_choices as $history_days => $history_label) : ?>
+                                    <option value="<?php echo esc_attr($history_days); ?>" <?php selected($uptime_history_retention, $history_days); ?>><?php echo esc_html($history_label); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <p class="sitepulse-card-description"><?php esc_html_e('Détermine la période maximale conservée pour les journaux et rapports de disponibilité.', 'sitepulse'); ?></p>
                         </div>
                     </div>
                     <div class="sitepulse-module-card sitepulse-module-card--setting">

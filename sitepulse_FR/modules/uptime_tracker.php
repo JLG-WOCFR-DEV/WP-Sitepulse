@@ -25,6 +25,14 @@ if (!defined('SITEPULSE_OPTION_UPTIME_MAINTENANCE_NOTICES')) {
     define('SITEPULSE_OPTION_UPTIME_MAINTENANCE_NOTICES', 'sitepulse_uptime_maintenance_notices');
 }
 
+if (!defined('SITEPULSE_OPTION_UPTIME_HISTORY_RETENTION_DAYS')) {
+    define('SITEPULSE_OPTION_UPTIME_HISTORY_RETENTION_DAYS', 'sitepulse_uptime_history_retention_days');
+}
+
+if (!defined('SITEPULSE_DEFAULT_UPTIME_HISTORY_RETENTION_DAYS')) {
+    define('SITEPULSE_DEFAULT_UPTIME_HISTORY_RETENTION_DAYS', 90);
+}
+
 $sitepulse_uptime_cron_hook = function_exists('sitepulse_get_cron_hook') ? sitepulse_get_cron_hook('uptime_tracker') : 'sitepulse_uptime_tracker_cron';
 
 add_filter('cron_schedules', 'sitepulse_uptime_tracker_register_cron_schedules');
@@ -962,6 +970,89 @@ function sitepulse_normalize_uptime_log($log) {
 }
 
 /**
+ * Returns the configured history retention (in days) for uptime measurements.
+ *
+ * @return int
+ */
+function sitepulse_get_uptime_history_retention_days() {
+    $default = defined('SITEPULSE_DEFAULT_UPTIME_HISTORY_RETENTION_DAYS')
+        ? (int) SITEPULSE_DEFAULT_UPTIME_HISTORY_RETENTION_DAYS
+        : 90;
+
+    $option_value = get_option(SITEPULSE_OPTION_UPTIME_HISTORY_RETENTION_DAYS, $default);
+
+    if (!is_numeric($option_value)) {
+        $option_value = $default;
+    }
+
+    $retention_days = (int) $option_value;
+
+    if ($retention_days < 30) {
+        $retention_days = 30;
+    } elseif ($retention_days > 365) {
+        $retention_days = 365;
+    }
+
+    if (function_exists('apply_filters')) {
+        $retention_days = (int) apply_filters('sitepulse_uptime_history_retention_days', $retention_days);
+    }
+
+    return max(30, min(365, $retention_days));
+}
+
+/**
+ * Trims the uptime log according to the configured retention period.
+ *
+ * @param array $log Normalized uptime log entries.
+ * @return array<int,array<string,mixed>>
+ */
+function sitepulse_trim_uptime_log($log) {
+    if (!is_array($log) || empty($log)) {
+        return [];
+    }
+
+    $retention_days = sitepulse_get_uptime_history_retention_days();
+    $day_in_seconds = defined('DAY_IN_SECONDS') ? (int) DAY_IN_SECONDS : 86400;
+    $retention_seconds = max(1, $retention_days) * $day_in_seconds;
+    $cutoff_timestamp = (int) current_time('timestamp') - $retention_seconds;
+
+    $filtered = [];
+
+    foreach ($log as $entry) {
+        if (!is_array($entry)) {
+            $filtered[] = $entry;
+            continue;
+        }
+
+        if (!isset($entry['timestamp'])) {
+            $filtered[] = $entry;
+            continue;
+        }
+
+        if ((int) $entry['timestamp'] >= $cutoff_timestamp) {
+            $filtered[] = $entry;
+        }
+    }
+
+    $default_interval = defined('HOUR_IN_SECONDS') ? (int) HOUR_IN_SECONDS : 3600;
+    $interval = max(1, sitepulse_uptime_tracker_resolve_schedule_interval($default_interval));
+    $max_entries = (int) ceil($retention_seconds / $interval);
+
+    // Provide a safety margin to avoid trimming legitimate data when the schedule changes.
+    $max_entries = max($max_entries, $retention_days);
+
+    if (empty($filtered)) {
+        $filtered = array_slice(array_values($log), -$max_entries);
+    }
+
+    if (count($filtered) > $max_entries) {
+        $filtered = array_slice($filtered, -$max_entries);
+    }
+
+    return array_values($filtered);
+}
+
+/**
  * Retrieves the persisted uptime archive ordered by day.
  *
  * @return array<string,array<string,int>>
@@ -1133,8 +1224,10 @@ function sitepulse_update_uptime_archive($entry) {
         }
     }
 
-    if (count($archive) > 120) {
-        $archive = array_slice($archive, -120, null, true);
+    $max_archive_days = sitepulse_get_uptime_history_retention_days();
+
+    if ($max_archive_days > 0 && count($archive) > $max_archive_days) {
+        $archive = array_slice($archive, -$max_archive_days, null, true);
     }
 
     update_option(SITEPULSE_OPTION_UPTIME_ARCHIVE, $archive, false);
@@ -1401,6 +1494,7 @@ function sitepulse_uptime_tracker_page() {
     }
 
     $uptime_log = sitepulse_normalize_uptime_log(get_option(SITEPULSE_OPTION_UPTIME_LOG, []));
+    $uptime_log = sitepulse_trim_uptime_log($uptime_log);
     $uptime_archive = sitepulse_get_uptime_archive();
     $agents = sitepulse_uptime_get_agents();
     $total_checks = count($uptime_log);
@@ -2181,6 +2275,7 @@ function sitepulse_run_uptime_check($agent_id = 'default', $override_args = []) 
     }
 
     $log = sitepulse_normalize_uptime_log($raw_log);
+    $log = sitepulse_trim_uptime_log($log);
     $timestamp = (int) current_time('timestamp');
 
     $active_window = sitepulse_uptime_find_active_maintenance_window($request_agent, $timestamp);
@@ -2199,10 +2294,7 @@ function sitepulse_run_uptime_check($agent_id = 'default', $override_args = []) 
         }
 
         $log[] = $entry;
-
-        if (count($log) > 30) {
-            $log = array_slice($log, -30);
-        }
+        $log = sitepulse_trim_uptime_log($log);
 
         update_option(SITEPULSE_OPTION_UPTIME_LOG, array_values($log), false);
         sitepulse_update_uptime_archive($entry);
@@ -2278,9 +2370,7 @@ function sitepulse_run_uptime_check($agent_id = 'default', $override_args = []) 
         $log_message = sprintf('Uptime check: network error (%1$d/%2$d)%3$s', $failure_streak, $threshold, !empty($error_message) ? ' - ' . $error_message : '');
         sitepulse_log($log_message, $level);
 
-        if (count($log) > 30) {
-            $log = array_slice($log, -30);
-        }
+        $log = sitepulse_trim_uptime_log($log);
 
         update_option(SITEPULSE_OPTION_UPTIME_LOG, array_values($log), false);
         sitepulse_update_uptime_archive($entry);
@@ -2439,9 +2529,7 @@ function sitepulse_run_uptime_check($agent_id = 'default', $override_args = []) 
         sitepulse_log('Uptime check: Up');
     }
 
-    if (count($log) > 30) {
-        $log = array_slice($log, -30);
-    }
+    $log = sitepulse_trim_uptime_log($log);
 
     update_option(SITEPULSE_OPTION_UPTIME_LOG, array_values($log), false);
     sitepulse_update_uptime_archive($entry);
