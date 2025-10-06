@@ -30,9 +30,9 @@
     initialise();
 
     function initialise() {
+        bindEvents();
         setControlsFromState(savedState);
         applyStateToGrid(savedState);
-        bindEvents();
         updateEmptyState();
     }
 
@@ -188,7 +188,7 @@
 
         list.appendChild(fragment);
 
-        if ($list && typeof $list.sortable === 'function') {
+        if ($list && typeof $list.sortable === 'function' && $list.hasClass('ui-sortable')) {
             $list.sortable('refresh');
         }
     }
