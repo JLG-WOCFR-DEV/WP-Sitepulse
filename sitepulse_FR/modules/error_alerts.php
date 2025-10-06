@@ -515,6 +515,345 @@ function sitepulse_error_alert_is_severity_enabled($severity) {
 }
 
 /**
+ * Returns default severity indicators (emoji and color) used for webhook formatting.
+ *
+ * @return array<string, array<string, string>>
+ */
+function sitepulse_error_alert_get_severity_indicators() {
+    $indicators = [
+        'info' => [
+            'emoji' => ':information_source:',
+            'color' => '#2563EB',
+        ],
+        'warning' => [
+            'emoji' => ':warning:',
+            'color' => '#F59E0B',
+        ],
+        'critical' => [
+            'emoji' => ':rotating_light:',
+            'color' => '#DC2626',
+        ],
+    ];
+
+    /**
+     * Filters the severity indicators used when formatting webhook payloads.
+     *
+     * @param array<string, array<string, string>> $indicators Severity indicators keyed by severity slug.
+     */
+    return (array) apply_filters('sitepulse_error_alert_severity_indicators', $indicators);
+}
+
+/**
+ * Retrieves a specific severity indicator value.
+ *
+ * @param string $severity Severity identifier.
+ * @param string $key      Indicator key to retrieve (emoji or color).
+ * @param string $default  Optional default value.
+ * @return string
+ */
+function sitepulse_error_alert_get_severity_indicator_value($severity, $key, $default = '') {
+    $severity = sitepulse_error_alert_normalize_severity($severity);
+    $indicators = sitepulse_error_alert_get_severity_indicators();
+
+    if (isset($indicators[$severity][$key]) && is_string($indicators[$severity][$key])) {
+        return $indicators[$severity][$key];
+    }
+
+    return $default;
+}
+
+/**
+ * Retrieves the emoji representing the provided severity.
+ *
+ * @param string $severity Severity identifier.
+ * @return string Emoji string.
+ */
+function sitepulse_error_alert_get_severity_emoji($severity) {
+    return sitepulse_error_alert_get_severity_indicator_value($severity, 'emoji', ':warning:');
+}
+
+/**
+ * Retrieves the hex color associated with the provided severity.
+ *
+ * @param string $severity Severity identifier.
+ * @return string Hex color string (including leading #).
+ */
+function sitepulse_error_alert_get_severity_color($severity) {
+    $color = sitepulse_error_alert_get_severity_indicator_value($severity, 'color', '#F59E0B');
+
+    if (strpos($color, '#') !== 0) {
+        $color = '#' . ltrim($color, '#');
+    }
+
+    return strtoupper($color);
+}
+
+/**
+ * Determines whether the provided webhook URL targets Slack.
+ *
+ * @param string $url Webhook URL.
+ * @return bool
+ */
+function sitepulse_error_alert_is_slack_webhook($url) {
+    $url = strtolower((string) $url);
+
+    return $url !== '' && strpos($url, 'hooks.slack.com/') !== false;
+}
+
+/**
+ * Determines whether the provided webhook URL targets Discord.
+ *
+ * @param string $url Webhook URL.
+ * @return bool
+ */
+function sitepulse_error_alert_is_discord_webhook($url) {
+    $url = strtolower((string) $url);
+
+    return $url !== ''
+        && (strpos($url, 'discord.com/api/webhooks/') !== false || strpos($url, 'discordapp.com/api/webhooks/') !== false);
+}
+
+/**
+ * Determines whether the provided webhook URL targets Microsoft Teams.
+ *
+ * @param string $url Webhook URL.
+ * @return bool
+ */
+function sitepulse_error_alert_is_teams_webhook($url) {
+    $url = strtolower((string) $url);
+
+    return $url !== ''
+        && (strpos($url, 'outlook.office.com/webhook/') !== false
+            || strpos($url, 'office.com/webhook/') !== false
+            || strpos($url, 'office365.com/webhook/') !== false);
+}
+
+/**
+ * Determines whether the provided webhook body uses the default payload structure.
+ *
+ * @param mixed $body Webhook body payload.
+ * @return bool
+ */
+function sitepulse_error_alert_is_default_webhook_body($body) {
+    if (!is_array($body)) {
+        return false;
+    }
+
+    foreach (['type', 'subject', 'message', 'severity'] as $required_key) {
+        if (!array_key_exists($required_key, $body)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
+ * Encodes a payload as JSON while guaranteeing a string result.
+ *
+ * @param mixed $data Data to encode.
+ * @return string JSON encoded string.
+ */
+function sitepulse_error_alert_encode_json($data) {
+    $encoded = wp_json_encode($data);
+
+    if ($encoded === false || $encoded === null) {
+        $encoded = json_encode($data);
+    }
+
+    if (!is_string($encoded) || $encoded === '') {
+        $encoded = '{}';
+    }
+
+    return $encoded;
+}
+
+/**
+ * Builds a Slack-compatible payload from the normalized alert payload.
+ *
+ * @param array<string, mixed> $payload Normalized alert payload.
+ * @return array<string, mixed>
+ */
+function sitepulse_error_alert_build_slack_payload(array $payload) {
+    $subject  = isset($payload['subject']) ? (string) $payload['subject'] : '';
+    $message  = isset($payload['message']) ? (string) $payload['message'] : '';
+    $site_url = isset($payload['site_url']) ? esc_url_raw((string) $payload['site_url']) : '';
+    $site_name = isset($payload['site_name']) ? sanitize_text_field((string) $payload['site_name']) : '';
+    $severity = isset($payload['severity']) ? (string) $payload['severity'] : 'warning';
+    $emoji    = sitepulse_error_alert_get_severity_emoji($severity);
+
+    $context_elements = [
+        [
+            'type' => 'mrkdwn',
+            'text' => sprintf('*%s*', strtoupper($severity)),
+        ],
+    ];
+
+    if ($site_url !== '' && $site_name !== '') {
+        $context_elements[] = [
+            'type' => 'mrkdwn',
+            'text' => sprintf('<%s|%s>', $site_url, $site_name),
+        ];
+    } elseif ($site_name !== '') {
+        $context_elements[] = [
+            'type' => 'mrkdwn',
+            'text' => $site_name,
+        ];
+    }
+
+    $blocks = [
+        [
+            'type' => 'section',
+            'text' => [
+                'type' => 'mrkdwn',
+                'text' => sprintf("*%s*\n%s", $subject, $message),
+            ],
+        ],
+        [
+            'type'     => 'context',
+            'elements' => $context_elements,
+        ],
+    ];
+
+    $slack_payload = [
+        'text'   => trim($emoji . ' ' . $subject),
+        'blocks' => $blocks,
+    ];
+
+    /**
+     * Filters the Slack payload dispatched to webhook endpoints.
+     *
+     * @param array<string, mixed> $slack_payload Prepared Slack payload.
+     * @param array<string, mixed> $payload       Normalized alert payload.
+     */
+    return (array) apply_filters('sitepulse_error_alert_slack_payload', $slack_payload, $payload);
+}
+
+/**
+ * Builds a Discord-compatible payload from the normalized alert payload.
+ *
+ * @param array<string, mixed> $payload Normalized alert payload.
+ * @return array<string, mixed>
+ */
+function sitepulse_error_alert_build_discord_payload(array $payload) {
+    $subject  = isset($payload['subject']) ? (string) $payload['subject'] : '';
+    $message  = isset($payload['message']) ? (string) $payload['message'] : '';
+    $site_url = isset($payload['site_url']) ? esc_url_raw((string) $payload['site_url']) : '';
+    $site_name = isset($payload['site_name']) ? sanitize_text_field((string) $payload['site_name']) : '';
+    $severity = isset($payload['severity']) ? strtoupper((string) $payload['severity']) : 'WARNING';
+    $emoji    = sitepulse_error_alert_get_severity_emoji(isset($payload['severity']) ? $payload['severity'] : 'warning');
+
+    $lines = array_filter([
+        trim(sprintf('**%s** %s', $subject, $emoji)),
+        $message,
+        trim($severity . ($site_name !== '' ? ' • ' . $site_name : '')),
+        $site_url,
+    ]);
+
+    $discord_payload = [
+        'content'          => implode("\n", $lines),
+        'allowed_mentions' => ['parse' => []],
+    ];
+
+    /**
+     * Filters the Discord payload dispatched to webhook endpoints.
+     *
+     * @param array<string, mixed> $discord_payload Prepared Discord payload.
+     * @param array<string, mixed> $payload         Normalized alert payload.
+     */
+    return (array) apply_filters('sitepulse_error_alert_discord_payload', $discord_payload, $payload);
+}
+
+/**
+ * Builds a Microsoft Teams compatible payload from the normalized alert payload.
+ *
+ * @param array<string, mixed> $payload Normalized alert payload.
+ * @return array<string, mixed>
+ */
+function sitepulse_error_alert_build_teams_payload(array $payload) {
+    $subject   = isset($payload['subject']) ? (string) $payload['subject'] : '';
+    $message   = isset($payload['message']) ? (string) $payload['message'] : '';
+    $site_url  = isset($payload['site_url']) ? esc_url_raw((string) $payload['site_url']) : '';
+    $site_name = isset($payload['site_name']) ? sanitize_text_field((string) $payload['site_name']) : '';
+    $severity  = isset($payload['severity']) ? (string) $payload['severity'] : 'warning';
+    $type      = isset($payload['type']) ? (string) $payload['type'] : 'general';
+    $color     = ltrim(sitepulse_error_alert_get_severity_color($severity), '#');
+
+    $facts = [
+        [
+            'name'  => esc_html__('Gravité', 'sitepulse'),
+            'value' => ucfirst($severity),
+        ],
+        [
+            'name'  => esc_html__('Type', 'sitepulse'),
+            'value' => $type,
+        ],
+    ];
+
+    $teams_payload = [
+        '@type'    => 'MessageCard',
+        '@context' => 'http://schema.org/extensions',
+        'themeColor' => $color,
+        'summary'    => $subject,
+        'title'      => $subject,
+        'sections'   => [
+            [
+                'activityTitle'    => $site_name,
+                'activitySubtitle' => $site_url,
+                'text'             => $message,
+                'facts'            => $facts,
+            ],
+        ],
+    ];
+
+    /**
+     * Filters the Microsoft Teams payload dispatched to webhook endpoints.
+     *
+     * @param array<string, mixed> $teams_payload Prepared Teams payload.
+     * @param array<string, mixed> $payload       Normalized alert payload.
+     */
+    return (array) apply_filters('sitepulse_error_alert_teams_payload', $teams_payload, $payload);
+}
+
+/**
+ * Builds base HTTP request arguments for a webhook endpoint.
+ *
+ * @param string               $url     Webhook URL.
+ * @param array<string, mixed> $payload Normalized alert payload.
+ * @param array<string, mixed> $body    Base webhook body prior to provider specific adjustments.
+ * @return array<string, mixed> Request arguments.
+ */
+function sitepulse_error_alert_prepare_webhook_request_args($url, array $payload, array $body) {
+    $args = [
+        'method'      => 'POST',
+        'timeout'     => 5,
+        'headers'     => ['Content-Type' => 'application/json; charset=utf-8'],
+        'data_format' => 'body',
+        'body'        => sitepulse_error_alert_encode_json($body),
+    ];
+
+    if (sitepulse_error_alert_is_default_webhook_body($body)) {
+        if (sitepulse_error_alert_is_slack_webhook($url)) {
+            $args['body'] = sitepulse_error_alert_encode_json(sitepulse_error_alert_build_slack_payload($payload));
+        } elseif (sitepulse_error_alert_is_teams_webhook($url)) {
+            $args['body'] = sitepulse_error_alert_encode_json(sitepulse_error_alert_build_teams_payload($payload));
+        } elseif (sitepulse_error_alert_is_discord_webhook($url)) {
+            $args['body'] = sitepulse_error_alert_encode_json(sitepulse_error_alert_build_discord_payload($payload));
+        }
+    }
+
+    /**
+     * Filters the prepared webhook request arguments before dispatch.
+     *
+     * @param array<string, mixed> $args    Prepared request arguments.
+     * @param string               $url     Webhook URL.
+     * @param array<string, mixed> $payload Normalized alert payload.
+     * @param array<string, mixed> $body    Base webhook body.
+     */
+    return (array) apply_filters('sitepulse_error_alert_prepared_webhook_request_args', $args, $url, $payload, $body);
+}
+
+/**
  * Builds a normalized payload for the provided alert content.
  *
  * @param string $type     Alert type identifier.
@@ -689,30 +1028,22 @@ function sitepulse_error_alert_dispatch_webhooks($payload) {
         ];
     }
 
-    $encoded_body = wp_json_encode($body);
-
     $results = [];
 
     foreach ($webhooks as $url) {
-        $args = [
-            'method'      => 'POST',
-            'timeout'     => 5,
-            'headers'     => ['Content-Type' => 'application/json'],
-            'body'        => $encoded_body,
-            'data_format' => 'body',
-        ];
+        $prepared_args = sitepulse_error_alert_prepare_webhook_request_args($url, $payload, $body);
 
         /**
          * Filters the request arguments used to call webhook endpoints.
          *
-         * @param array  $args     Request arguments.
-         * @param string $url      Webhook URL.
-         * @param array  $payload  Normalized alert payload.
+         * @param array  $prepared_args Request arguments.
+         * @param string $url           Webhook URL.
+         * @param array  $payload       Normalized alert payload.
          */
-        $request_args = apply_filters('sitepulse_error_alert_webhook_request_args', $args, $url, $payload);
+        $request_args = apply_filters('sitepulse_error_alert_webhook_request_args', $prepared_args, $url, $payload);
 
         if (!is_array($request_args)) {
-            $request_args = $args;
+            $request_args = $prepared_args;
         }
 
         $response = wp_remote_post($url, $request_args);
