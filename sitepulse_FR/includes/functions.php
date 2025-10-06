@@ -380,7 +380,7 @@ if (!function_exists('sitepulse_delete_site_transients_by_prefix')) {
      * @return void
      */
     function sitepulse_delete_site_transients_by_prefix($prefix) {
-        if (!is_multisite() || !function_exists('delete_site_transient')) {
+        if (!function_exists('delete_site_transient')) {
             return;
         }
 
@@ -390,37 +390,85 @@ if (!function_exists('sitepulse_delete_site_transients_by_prefix')) {
             return;
         }
 
-        $like = $wpdb->esc_like($prefix) . '%';
-        $meta_keys = $wpdb->get_col(
-            $wpdb->prepare(
-                "SELECT meta_key FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s OR meta_key LIKE %s",
-                '_site_transient_' . $like,
-                '_site_transient_timeout_' . $like
-            )
-        );
+        $targets = [];
 
-        if (empty($meta_keys)) {
+        if (!empty($wpdb->sitemeta)) {
+            $targets[] = [
+                'table'  => $wpdb->sitemeta,
+                'column' => 'meta_key',
+            ];
+        }
+
+        if (!empty($wpdb->options)) {
+            $targets[] = [
+                'table'  => $wpdb->options,
+                'column' => 'option_name',
+            ];
+        }
+
+        if (empty($targets)) {
             return;
         }
 
-        $transient_keys = [];
-        $value_prefix   = strlen('_site_transient_');
-        $timeout_prefix = strlen('_site_transient_timeout_');
+        $like            = $wpdb->esc_like($prefix) . '%';
+        $value_prefix    = strlen('_site_transient_');
+        $timeout_prefix  = strlen('_site_transient_timeout_');
+        $transient_keys  = [];
 
-        foreach ($meta_keys as $meta_key) {
-            if (strpos($meta_key, '_site_transient_timeout_') === 0) {
-                $transient_key = substr($meta_key, $timeout_prefix);
-            } else {
-                $transient_key = substr($meta_key, $value_prefix);
+        foreach ($targets as $target) {
+            $table  = isset($target['table']) ? (string) $target['table'] : '';
+            $column = isset($target['column']) ? (string) $target['column'] : '';
+
+            if ($table === '' || $column === '') {
+                continue;
             }
 
-            if ($transient_key !== '') {
-                $transient_keys[$transient_key] = true;
+            $meta_keys = $wpdb->get_col(
+                $wpdb->prepare(
+                    "SELECT {$column} FROM {$table} WHERE {$column} LIKE %s OR {$column} LIKE %s",
+                    '_site_transient_' . $like,
+                    '_site_transient_timeout_' . $like
+                )
+            );
+
+            if (empty($meta_keys)) {
+                continue;
+            }
+
+            foreach ($meta_keys as $meta_key) {
+                $meta_key = (string) $meta_key;
+
+                if ($meta_key === '') {
+                    continue;
+                }
+
+                if (strpos($meta_key, '_site_transient_timeout_') === 0) {
+                    $transient_key = substr($meta_key, $timeout_prefix);
+                } else {
+                    $transient_key = substr($meta_key, $value_prefix);
+                }
+
+                if ($transient_key !== '') {
+                    $transient_keys[$transient_key] = true;
+                }
             }
         }
 
+        if (empty($transient_keys)) {
+            return;
+        }
+
+        $object_cache_hit = function_exists('wp_using_ext_object_cache') && wp_using_ext_object_cache();
+
         foreach (array_keys($transient_keys) as $transient_key) {
             delete_site_transient($transient_key);
+
+            if ($object_cache_hit && function_exists('wp_cache_delete')) {
+                wp_cache_delete($transient_key, 'site-transient');
+                wp_cache_delete($transient_key, 'site-transient_timeout');
+                wp_cache_delete($transient_key, 'transient');
+                wp_cache_delete($transient_key, 'transient_timeout');
+            }
         }
     }
 }
