@@ -58,3 +58,25 @@
 - Fournir des **variations de style** (mode sombre, alignwide harmonisé avec le thème public) et des options de typographie pour s’intégrer aux chartes marketing.
 - Afficher dans l’éditeur une **simulation de données** (états “ok/alerte”) ou des messages pédagogiques afin que les auteurs visualisent l’impact sans avoir à déclencher un scan réel.
 - Ajouter des **contrôles Gutenberg additionnels** (ordre des cartes, choix d’icônes, CTA vers le back-office) pour offrir une expérience proche des widgets SaaS embarqués.
+
+## 6. Intégrations & API
+### État actuel
+- Les routes REST existantes orchestrent surtout les process internes (queue uptime, tests d’alertes) et reposent sur l’authentification WordPress classique.【F:sitepulse_FR/modules/uptime_tracker.php†L112-L168】【F:sitepulse_FR/modules/error_alerts.php†L1430-L1458】
+- Le suivi uptime conserve un log local limité à 30 entrées, malgré une archive optionnelle, ce qui freine la diffusion vers des tableaux de bord externes.【F:sitepulse_FR/modules/uptime_tracker.php†L2183-L2207】
+- Le module Resource Monitor stocke des snapshots sur une fenêtre d’environ 24 h (TTL `DAY_IN_SECONDS`) et 288 points maximum, sans mécanisme d’export ni de normalisation vers des standards type OpenTelemetry.【F:sitepulse_FR/modules/resource_monitor.php†L827-L845】【F:sitepulse_FR/modules/resource_monitor.php†L998-L1023】
+
+### Recommandations « pro »
+- Étendre le catalogue REST (ou GraphQL) pour exposer **toutes les métriques clé** (uptime, ressources, vitesse, alertes) avec gestion d’authentification applicative (tokens, OAuth) afin de faciliter l’intégration Grafana/Datadog.
+- Prévoir des **connecteurs d’export** (CSV programmables, webhooks, diffusions temps réel) et des webhooks entrants pour rapprocher SitePulse des suites MSP.
+- Normaliser les métriques (nomenclature, unités, statut) et permettre un **mode push** vers des bus d’événements (AWS EventBridge, Kafka) pour la corrélation cross-outils.
+
+## 7. Fiabilité & montée en charge
+### Constat
+- Les jobs IA sont planifiés via `wp_schedule_single_event` ; en cas d’échec du cron, le traitement bascule en synchrone, ce qui garantit un résultat mais sans stratégie de reprise ni priorisation multi-jobs.【F:sitepulse_FR/modules/ai_insights.php†L1769-L1805】
+- L’uptime monitor fournit une orchestration REST et WP-CLI mais n’installe qu’un seul agent par défaut, limitant la résilience régionale.【F:sitepulse_FR/modules/uptime_tracker.php†L112-L168】
+- Les historiques condensés (30 checkpoints uptime, ~24 h de ressources) compliquent l’analyse post-mortem et la corrélation avec des incidents rares.
+
+### Pistes d’amélioration
+- Ajouter une **file de traitement asynchrone** (Action Scheduler, queues Redis, priorités) pour les modules lourds (IA, scans de vitesse) avec journalisation de l’état et des reprises.
+- Supporter la **redondance multi-agents** (régions, providers) et une politique de quorum pour les alertes uptime, à l’image des plateformes pro.
+- Étendre les historiques et proposer des **rétentions paramétrables** (30/90/365 jours) avec agrégations horaires afin de mieux documenter les SLA et MTTR.
