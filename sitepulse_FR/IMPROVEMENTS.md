@@ -107,3 +107,11 @@ Ce document répertorie les fonctions de SitePulse qui gagneraient à être alig
   - Ajouter une hiérarchisation des alertes (critique/avertissement) avec escalade multi-canal et pause après acquittement.
   - Synchroniser les alertes avec des plateformes d’incident (Opsgenie, PagerDuty) et enregistrer les réponses pour bâtir un audit trail.
   - Fournir un historique consultable des événements (qui, quand, quelle réponse) et des dashboards de MTTR pour rivaliser avec les suites SRE.
+
+## Plateforme & intégrations
+
+- **Constat :** les points REST servent surtout à piloter des actions internes (ordonnancement uptime, test d’alertes) sans offrir d’accès complet aux métriques ni d’authentification applicative dédiée.【F:sitepulse_FR/modules/uptime_tracker.php†L112-L168】【F:sitepulse_FR/modules/error_alerts.php†L1430-L1458】 Le stockage des historiques (uptime 30 événements, ressources 288 snapshots/24 h) limite l’export et la corrélation avec les outils d’observabilité d’entreprise.【F:sitepulse_FR/modules/uptime_tracker.php†L2183-L2207】【F:sitepulse_FR/modules/resource_monitor.php†L827-L845】【F:sitepulse_FR/modules/resource_monitor.php†L998-L1023】
+- **Pistes pro :**
+  - Étendre l’API avec un schéma documenté (OpenAPI, GraphQL) couvrant métriques, incidents et préférences, plus des clés applicatives ou OAuth pour les intégrations tierces.
+  - Ajouter des flux d’export programmables (CSV, JSON, webhooks) et un connecteur temps réel (EventBridge, Kafka, WebSub) pour alimenter les SIEM/APM.
+  - Permettre la définition de politiques de rétention modulables (90/180/365 jours) et de destinations d’archivage (S3, BigQuery) pour se rapprocher des offres pro.
