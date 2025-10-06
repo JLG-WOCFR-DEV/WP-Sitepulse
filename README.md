@@ -105,3 +105,15 @@ Ce flux peut être réutilisé en CI pour éviter les régressions sur les fonct
 - `sitepulse_alert_interval_smart_value` : définit la logique de l’intervalle « smart » (priorisation automatique des alertes).【F:sitepulse_FR/includes/functions.php†L520-L640】
 - `sitepulse_transient_delete_batch_size` : ajuste la taille des lots lors d’une purge de transients par préfixe afin d’équilibrer performance et charge SQL.【F:sitepulse_FR/includes/functions.php†L12-L120】
 - `sitepulse_ai_models_cache_ttl` : personnalise la durée de vie du catalogue de modèles IA en cache (désactivation possible via `sitepulse_ai_models_enable_cache`).【F:sitepulse_FR/includes/functions.php†L250-L325】
+
+## Pistes d'amélioration
+
+Pour continuer à enrichir SitePulse, voici des axes d'évolution suggérés :
+
+- **Assistants d'onboarding modulaires** : proposer un assistant pas-à-pas qui détecte l'hébergement, pré-remplit les seuils et suggère les modules pertinents pour accélérer la mise en service.
+- **Connecteurs d'alertes supplémentaires** : ajouter des intégrations natives avec Slack, Microsoft Teams ou Mattermost afin de diffuser les alertes critiques là où les équipes collaborent déjà.
+- **Tableaux de bord programmables** : exposer une API REST/JS dédiée permettant aux intégrateurs de créer des widgets personnalisés (par exemple un score Core Web Vitals) tout en respectant le système de permissions.
+- **Surveillance de la chaîne de build** : relier les scans de performances à des webhooks CI/CD pour déclencher automatiquement des audits lors des déploiements, avec un diff synthétique entre deux versions.
+- **Rapports exportables** : générer automatiquement un rapport PDF ou Markdown hebdomadaire regroupant uptime, performances, incidents et recommandations IA pour faciliter le partage avec les clients.
+
+Ces propositions visent à renforcer l'adoption du plugin, améliorer la collaboration entre équipes et offrir davantage de visibilité sur l'état des sites surveillés.
