@@ -27,13 +27,21 @@ function sitepulse_log_analyzer_page() {
     $log_file_readable = $log_file_exists && is_readable($log_file);
     $log_file_size = $log_file_readable ? filesize($log_file) : 0;
     $recent_log_lines = null;
+    $recent_log_meta  = null;
     $log_file_display = $log_file !== null ? '<code>' . esc_html($log_file) . '</code>' : '<code>debug.log</code>';
     if (function_exists('wp_kses_post')) {
         $log_file_display = wp_kses_post($log_file_display);
     }
 
     if ($debug_log_enabled && $log_file_readable) {
-        $recent_log_lines = sitepulse_get_recent_log_lines($log_file, 100, 131072);
+        $recent_log_data = sitepulse_get_recent_log_lines($log_file, 100, 131072, true);
+
+        if (is_array($recent_log_data) && array_key_exists('lines', $recent_log_data)) {
+            $recent_log_meta  = $recent_log_data;
+            $recent_log_lines = $recent_log_data['lines'];
+        } else {
+            $recent_log_lines = $recent_log_data;
+        }
     }
     ?>
     <?php
@@ -97,6 +105,14 @@ function sitepulse_log_analyzer_page() {
                     ],
                 ];
 
+                if (is_array($recent_log_meta) && !empty($recent_log_meta['truncated'])) {
+                    ?>
+                    <div class="notice notice-warning">
+                        <p><strong><?php esc_html_e('Journal tronqué pour accélérer l’affichage.', 'sitepulse'); ?></strong> <?php esc_html_e('Seules les dernières entrées sont chargées afin de préserver les performances.', 'sitepulse'); ?></p>
+                    </div>
+                    <?php
+                }
+
                 foreach ($log_sections as $key => $section) {
                     if (empty($categorized[$key])) {
                         continue;
@@ -130,6 +146,13 @@ function sitepulse_log_analyzer_page() {
             ?>
                 <div class="notice notice-error">
                     <p><strong><?php esc_html_e('Impossible de lire les dernières lignes du journal.', 'sitepulse'); ?></strong> <?php printf(esc_html__('Veuillez vérifier les permissions du fichier %s.', 'sitepulse'), $log_file_display); ?></p>
+                </div>
+            <?php
+            }
+            elseif (is_array($recent_log_meta) && isset($recent_log_meta['lines']) && empty($recent_log_meta['lines'])) {
+            ?>
+                <div class="notice notice-success">
+                    <p><strong><?php esc_html_e('Votre journal de débogage est accessible.', 'sitepulse'); ?></strong> <?php esc_html_e('Aucune entrée récente n’a été trouvée dans la plage de lecture configurée.', 'sitepulse'); ?></p>
                 </div>
             <?php
             }

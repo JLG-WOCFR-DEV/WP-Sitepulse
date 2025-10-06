@@ -169,7 +169,7 @@ if (!function_exists('sitepulse_get_wp_debug_log_path')) {
 }
 
 if (!function_exists('sitepulse_get_recent_log_lines')) {
-    function sitepulse_get_recent_log_lines($file_path, $max_lines = 100, $max_bytes = 131072) {
+    function sitepulse_get_recent_log_lines($file_path, $max_lines = 100, $max_bytes = 131072, $with_metadata = false) {
         if (!is_string($file_path) || $file_path === '') {
             return null;
         }
@@ -188,6 +188,18 @@ if (!function_exists('sitepulse_get_recent_log_lines')) {
             $contents = array_slice($contents, -$max_lines);
         }
 
-        return array_values($contents);
+        $lines = array_values($contents);
+
+        if (!$with_metadata) {
+            return $lines;
+        }
+
+        return [
+            'lines'         => $lines,
+            'bytes_read'    => strlen(implode("\n", $lines)),
+            'file_size'     => filesize($file_path),
+            'truncated'     => $max_lines > 0 ? count(file($file_path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES)) > $max_lines : false,
+            'last_modified' => filemtime($file_path),
+        ];
     }
 }

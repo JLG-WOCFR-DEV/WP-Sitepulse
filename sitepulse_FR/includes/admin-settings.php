@@ -3203,12 +3203,18 @@ function sitepulse_debug_page() {
         <div style="background: #fff; border: 1px solid #ccc; padding: 10px; max-height: 400px; overflow-y: scroll; font-family: monospace; font-size: 13px;">
             <?php
             if (defined('SITEPULSE_DEBUG_LOG') && is_readable(SITEPULSE_DEBUG_LOG)) {
-                $recent_logs = sitepulse_get_recent_log_lines(SITEPULSE_DEBUG_LOG, $log_max_lines, $log_max_bytes);
+                $recent_logs_data = sitepulse_get_recent_log_lines(SITEPULSE_DEBUG_LOG, $log_max_lines, $log_max_bytes, true);
 
-                if (is_array($recent_logs) && !empty($recent_logs)) {
-                    echo '<pre>' . esc_html(implode("\n", $recent_logs)) . '</pre>';
-                } elseif (is_array($recent_logs)) {
-                    echo '<p>Le journal de débogage est actuellement vide.</p>';
+                if (is_array($recent_logs_data) && array_key_exists('lines', $recent_logs_data)) {
+                    if (!empty($recent_logs_data['lines'])) {
+                        echo '<pre>' . esc_html(implode("\n", $recent_logs_data['lines'])) . '</pre>';
+
+                        if (!empty($recent_logs_data['truncated'])) {
+                            echo '<p class="description">' . esc_html__('Affichage tronqué pour limiter la consommation mémoire.', 'sitepulse') . '</p>';
+                        }
+                    } else {
+                        echo '<p>Le journal de débogage est actuellement vide.</p>';
+                    }
                 } else {
                     echo '<p>Fichier de log non trouvé ou illisible.</p>';
                 }

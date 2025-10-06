@@ -953,7 +953,9 @@ function sitepulse_error_alerts_register_cron_schedule($schedules) {
     if (!isset($schedules[$schedule_slug])) {
         $minute_in_seconds = defined('MINUTE_IN_SECONDS') ? MINUTE_IN_SECONDS : 60;
         $default_interval  = $interval_minutes * $minute_in_seconds;
-        $minimum_interval  = 5 * $minute_in_seconds;
+        $allowed_minutes   = function_exists('sitepulse_get_alert_interval_choices') ? sitepulse_get_alert_interval_choices('cron') : [5];
+        $minimum_minutes   = min($allowed_minutes);
+        $minimum_interval  = max(1, $minimum_minutes) * $minute_in_seconds;
         $interval          = (int) apply_filters('sitepulse_error_alerts_cron_interval_seconds', $default_interval);
 
         if ($interval < $minimum_interval) {

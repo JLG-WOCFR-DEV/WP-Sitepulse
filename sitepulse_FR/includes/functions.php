@@ -13,47 +13,126 @@ if (!function_exists('sitepulse_delete_transients_by_prefix')) {
     /**
      * Deletes all transients whose names start with the provided prefix.
      *
-     * @param string $prefix Transient prefix to match.
+     * The deletion is performed in batches to avoid long-running queries on
+     * large `wp_options` tables. When an external object cache is active we
+     * also invalidate the relevant groups to prevent ghost entries from
+     * sticking around in Redis/Memcached.
+     *
+     * @param string     $prefix Transient prefix to match.
+     * @param array|null $args   Optional arguments. Supported keys: `batch_size`.
      * @return void
      */
-    function sitepulse_delete_transients_by_prefix($prefix) {
+    function sitepulse_delete_transients_by_prefix($prefix, $args = null) {
         global $wpdb;
 
         if (!is_string($prefix) || $prefix === '' || !($wpdb instanceof wpdb)) {
             return;
         }
 
-        $like = $wpdb->esc_like($prefix) . '%';
-        $option_names = $wpdb->get_col(
-            $wpdb->prepare(
-                "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
+        $defaults = [
+            'batch_size' => defined('SITEPULSE_TRANSIENT_DELETE_BATCH') ? (int) SITEPULSE_TRANSIENT_DELETE_BATCH : 200,
+        ];
+
+        $args = is_array($args) ? array_merge($defaults, $args) : $defaults;
+
+        $batch_size = isset($args['batch_size']) ? (int) $args['batch_size'] : 200;
+        $batch_size = max(20, $batch_size);
+
+        if (function_exists('apply_filters')) {
+            $batch_size = (int) apply_filters('sitepulse_transient_delete_batch_size', $batch_size, $prefix, $args);
+        }
+
+        if ($batch_size < 20) {
+            $batch_size = 20;
+        }
+
+        $like             = $wpdb->esc_like($prefix) . '%';
+        $value_prefix     = strlen('_transient_');
+        $timeout_prefix   = strlen('_transient_timeout_');
+        $last_option_id   = 0;
+        $deleted          = 0;
+        $batches          = 0;
+        $object_cache_hit = function_exists('wp_using_ext_object_cache') && wp_using_ext_object_cache();
+        $deleted_keys     = [];
+
+        do {
+            $query = $wpdb->prepare(
+                "SELECT option_id, option_name FROM {$wpdb->options} WHERE option_id > %d AND (option_name LIKE %s OR option_name LIKE %s) ORDER BY option_id ASC LIMIT %d",
+                $last_option_id,
                 '_transient_' . $like,
-                '_transient_timeout_' . $like
-            )
-        );
+                '_transient_timeout_' . $like,
+                $batch_size
+            );
 
-        if (empty($option_names)) {
-            return;
-        }
+            $rows = $wpdb->get_results($query, ARRAY_A);
 
-        $transient_keys = [];
-        $value_prefix   = strlen('_transient_');
-        $timeout_prefix = strlen('_transient_timeout_');
-
-        foreach ($option_names as $option_name) {
-            if (strpos($option_name, '_transient_timeout_') === 0) {
-                $transient_key = substr($option_name, $timeout_prefix);
-            } else {
-                $transient_key = substr($option_name, $value_prefix);
+            if (empty($rows)) {
+                break;
             }
 
-            if ($transient_key !== '') {
-                $transient_keys[$transient_key] = true;
-            }
-        }
+            $batch_keys = [];
 
-        foreach (array_keys($transient_keys) as $transient_key) {
-            delete_transient($transient_key);
+            foreach ($rows as $row) {
+                $option_name = isset($row['option_name']) ? (string) $row['option_name'] : '';
+                $last_option_id = isset($row['option_id']) ? (int) $row['option_id'] : $last_option_id;
+
+                if ($option_name === '') {
+                    continue;
+                }
+
+                if (strpos($option_name, '_transient_timeout_') === 0) {
+                    $transient_key = substr($option_name, $timeout_prefix);
+                } else {
+                    $transient_key = substr($option_name, $value_prefix);
+                }
+
+                if ($transient_key !== '') {
+                    $batch_keys[$transient_key] = true;
+                }
+            }
+
+            if (!empty($batch_keys)) {
+                foreach (array_keys($batch_keys) as $transient_key) {
+                    delete_transient($transient_key);
+
+                    if ($object_cache_hit && function_exists('wp_cache_delete')) {
+                        wp_cache_delete($transient_key, 'transient');
+                        wp_cache_delete($transient_key, 'transient_timeout');
+                        wp_cache_delete($transient_key, 'site-transient');
+                        wp_cache_delete($transient_key, 'site-transient_timeout');
+                    }
+
+                    $deleted_keys[$transient_key] = true;
+                }
+
+                $deleted += count($batch_keys);
+                ++$batches;
+
+                if (function_exists('do_action')) {
+                    do_action(
+                        'sitepulse_transient_deletion_batch',
+                        $prefix,
+                        [
+                            'deleted'          => count($batch_keys),
+                            'batch_size'       => $batch_size,
+                            'object_cache_hit' => $object_cache_hit,
+                        ]
+                    );
+                }
+            }
+        } while (count($rows) === $batch_size);
+
+        if ($deleted > 0 && function_exists('do_action')) {
+            do_action(
+                'sitepulse_transient_deletion_completed',
+                $prefix,
+                [
+                    'deleted'          => $deleted,
+                    'unique_keys'      => array_keys($deleted_keys),
+                    'batches'          => $batches,
+                    'object_cache_hit' => $object_cache_hit,
+                ]
+            );
         }
     }
 }
@@ -132,37 +211,84 @@ if (!function_exists('sitepulse_get_speed_thresholds')) {
     /**
      * Retrieves the configured speed thresholds for warning and critical states.
      *
+     * @param string $profile Optional performance profile (default, mobile, desktop...).
      * @return array{warning:int,critical:int}
      */
-    function sitepulse_get_speed_thresholds() {
-        $default_warning = defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200;
+    function sitepulse_get_speed_thresholds($profile = 'default') {
+        $profile = is_string($profile) ? strtolower(trim($profile)) : 'default';
+
+        if ($profile === '') {
+            $profile = 'default';
+        }
+
+        $default_warning  = defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200;
         $default_critical = defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? (int) SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500;
 
-        $option_warning_key = defined('SITEPULSE_OPTION_SPEED_WARNING_MS') ? SITEPULSE_OPTION_SPEED_WARNING_MS : 'sitepulse_speed_warning_ms';
+        $profiles_option_key = defined('SITEPULSE_OPTION_SPEED_PROFILES') ? SITEPULSE_OPTION_SPEED_PROFILES : 'sitepulse_speed_profiles';
+        $option_warning_key  = defined('SITEPULSE_OPTION_SPEED_WARNING_MS') ? SITEPULSE_OPTION_SPEED_WARNING_MS : 'sitepulse_speed_warning_ms';
         $option_critical_key = defined('SITEPULSE_OPTION_SPEED_CRITICAL_MS') ? SITEPULSE_OPTION_SPEED_CRITICAL_MS : 'sitepulse_speed_critical_ms';
 
-        $warning_value = get_option($option_warning_key, $default_warning);
-        $critical_value = get_option($option_critical_key, $default_critical);
+        $profiles = get_option($profiles_option_key, []);
 
-        $warning_ms = is_scalar($warning_value) ? (int) $warning_value : 0;
-        $critical_ms = is_scalar($critical_value) ? (int) $critical_value : 0;
+        if (!is_array($profiles)) {
+            $profiles = [];
+        }
+
+        $raw_warning  = null;
+        $raw_critical = null;
+
+        if (isset($profiles[$profile]) && is_array($profiles[$profile])) {
+            $raw_warning  = $profiles[$profile]['warning'] ?? null;
+            $raw_critical = $profiles[$profile]['critical'] ?? null;
+        }
+
+        if ($raw_warning === null) {
+            $raw_warning = get_option($option_warning_key, $default_warning);
+        }
+
+        if ($raw_critical === null) {
+            $raw_critical = get_option($option_critical_key, $default_critical);
+        }
+
+        $warning_ms  = is_scalar($raw_warning) ? (int) $raw_warning : 0;
+        $critical_ms = is_scalar($raw_critical) ? (int) $raw_critical : 0;
+        $corrections = [];
 
         if ($warning_ms <= 0) {
-            $warning_ms = $default_warning;
+            $warning_ms   = $default_warning;
+            $corrections[] = 'warning_default';
         }
 
         if ($critical_ms <= 0) {
-            $critical_ms = $default_critical;
+            $critical_ms   = $default_critical;
+            $corrections[] = 'critical_default';
         }
 
         if ($critical_ms <= $warning_ms) {
-            $critical_ms = max($warning_ms + 1, $default_critical);
+            $critical_ms   = max($warning_ms + 1, $default_critical);
+            $corrections[] = 'critical_adjusted';
         }
 
-        return [
+        $thresholds = [
             'warning'  => $warning_ms,
             'critical' => $critical_ms,
         ];
+
+        if (function_exists('apply_filters')) {
+            $thresholds = apply_filters('sitepulse_speed_thresholds', $thresholds, $profile, $corrections);
+        }
+
+        if (!empty($corrections)) {
+            if (function_exists('do_action')) {
+                do_action('sitepulse_speed_threshold_corrected', $profile, $thresholds, $corrections);
+            }
+
+            if (function_exists('sitepulse_log')) {
+                sitepulse_log(sprintf('Speed thresholds corrected for profile %s (%s)', $profile, implode(', ', $corrections)), 'WARNING');
+            }
+        }
+
+        return $thresholds;
     }
 }
 
@@ -303,9 +429,18 @@ if (!function_exists('sitepulse_get_ai_models')) {
     /**
      * Returns the list of supported AI models.
      *
+     * The catalog is cached per-request and optionally persisted in a transient
+     * to avoid running heavy filters on every call.
+     *
      * @return array<string, array{label:string,description?:string,prompt_instruction?:string}>
      */
     function sitepulse_get_ai_models() {
+        static $runtime_cache = null;
+
+        if (is_array($runtime_cache)) {
+            return $runtime_cache;
+        }
+
         $default_models = [
             'gemini-1.5-flash' => [
                 'label'              => __('Gemini 1.5 Flash', 'sitepulse'),
@@ -319,51 +454,83 @@ if (!function_exists('sitepulse_get_ai_models')) {
             ],
         ];
 
-        if (function_exists('apply_filters')) {
-            $filtered_models = apply_filters('sitepulse_ai_models', $default_models);
+        $use_cache    = function_exists('apply_filters') ? (bool) apply_filters('sitepulse_ai_models_enable_cache', true) : true;
+        $transient_id = 'sitepulse_ai_models_catalog';
 
-            if (is_array($filtered_models) && !empty($filtered_models)) {
-                $sanitized_models = [];
+        if ($use_cache && function_exists('get_transient')) {
+            $cached_models = get_transient($transient_id);
 
-                foreach ($filtered_models as $model_key => $model_data) {
-                    if (!is_string($model_key) || $model_key === '') {
-                        continue;
-                    }
+            if (is_array($cached_models) && !empty($cached_models)) {
+                $runtime_cache = $cached_models;
 
-                    if (is_string($model_data)) {
-                        $model_data = ['label' => $model_data];
-                    }
-
-                    if (!is_array($model_data)) {
-                        continue;
-                    }
-
-                    $label = isset($model_data['label']) ? (string) $model_data['label'] : '';
-
-                    if ($label === '') {
-                        $label = $model_key;
-                    }
-
-                    $sanitized_models[$model_key] = [
-                        'label' => $label,
-                    ];
-
-                    if (isset($model_data['description']) && is_string($model_data['description']) && $model_data['description'] !== '') {
-                        $sanitized_models[$model_key]['description'] = $model_data['description'];
-                    }
-
-                    if (isset($model_data['prompt_instruction']) && is_string($model_data['prompt_instruction']) && $model_data['prompt_instruction'] !== '') {
-                        $sanitized_models[$model_key]['prompt_instruction'] = $model_data['prompt_instruction'];
-                    }
-                }
-
-                if (!empty($sanitized_models)) {
-                    return $sanitized_models;
-                }
+                return $cached_models;
             }
         }
 
-        return $default_models;
+        $sanitized_models = [];
+        $filtered_models  = function_exists('apply_filters') ? apply_filters('sitepulse_ai_models', $default_models) : $default_models;
+
+        if (!is_array($filtered_models) || empty($filtered_models)) {
+            $filtered_models = $default_models;
+        }
+
+        foreach ($filtered_models as $model_key => $model_data) {
+            if (!is_string($model_key) || $model_key === '') {
+                continue;
+            }
+
+            $model_key = trim($model_key);
+
+            if ($model_key === '' || strlen($model_key) > 120) {
+                continue;
+            }
+
+            if (is_string($model_data)) {
+                $model_data = ['label' => $model_data];
+            }
+
+            if (!is_array($model_data)) {
+                continue;
+            }
+
+            $label = isset($model_data['label']) ? (string) $model_data['label'] : '';
+
+            if ($label === '') {
+                $label = $model_key;
+            }
+
+            $sanitized_models[$model_key] = [
+                'label' => $label,
+            ];
+
+            if (isset($model_data['description']) && is_string($model_data['description']) && $model_data['description'] !== '') {
+                $sanitized_models[$model_key]['description'] = $model_data['description'];
+            }
+
+            if (isset($model_data['prompt_instruction']) && is_string($model_data['prompt_instruction']) && $model_data['prompt_instruction'] !== '') {
+                $sanitized_models[$model_key]['prompt_instruction'] = $model_data['prompt_instruction'];
+            }
+        }
+
+        if (empty($sanitized_models)) {
+            $sanitized_models = $default_models;
+        }
+
+        if ($use_cache && function_exists('set_transient')) {
+            $ttl = function_exists('apply_filters') ? (int) apply_filters('sitepulse_ai_models_cache_ttl', HOUR_IN_SECONDS, $sanitized_models) : HOUR_IN_SECONDS;
+
+            if ($ttl > 0) {
+                set_transient($transient_id, $sanitized_models, $ttl);
+            }
+        }
+
+        $runtime_cache = $sanitized_models;
+
+        if (function_exists('apply_filters')) {
+            $runtime_cache = apply_filters('sitepulse_ai_models_sanitized', $runtime_cache);
+        }
+
+        return $runtime_cache;
     }
 }
 
@@ -398,13 +565,16 @@ if (!function_exists('sitepulse_get_recent_log_lines')) {
      * The maximum number of bytes read is deliberately capped to avoid memory pressure
      * with very large log files.
      *
-     * @param string $file_path  Path to the log file.
-     * @param int    $max_lines  Number of lines to return.
-     * @param int    $max_bytes  Maximum number of bytes to read from the end of the file.
+     * @param string $file_path       Path to the log file.
+     * @param int    $max_lines       Number of lines to return.
+     * @param int    $max_bytes       Maximum number of bytes to read from the end of the file.
+     * @param bool   $with_metadata   Whether to include metadata (bytes read, truncation flag, etc.).
      * @return array|null Array of recent log lines on success, empty array if the file is empty,
-     *                    or null on failure to read the file.
+     *                    or null on failure to read the file. When `$with_metadata` is true an
+     *                    associative array is returned with the keys `lines`, `bytes_read`,
+     *                    `file_size`, `truncated` and `last_modified`.
      */
-    function sitepulse_get_recent_log_lines($file_path, $max_lines = 100, $max_bytes = 131072) {
+    function sitepulse_get_recent_log_lines($file_path, $max_lines = 100, $max_bytes = 131072, $with_metadata = false) {
         $max_lines = max(1, (int) $max_lines);
         $max_bytes = max(1024, (int) $max_bytes);
 
@@ -442,20 +612,34 @@ if (!function_exists('sitepulse_get_recent_log_lines')) {
             return null;
         }
 
-        $buffer = '';
-        $chunk_size = 4096;
-        $stats = fstat($handle);
-        $file_size = isset($stats['size']) ? (int) $stats['size'] : 0;
-        $bytes_to_read = min($file_size, $max_bytes);
-        $position = $file_size;
+        $locked = false;
+
+        if (function_exists('flock')) {
+            $locked = @flock($handle, LOCK_SH);
+        }
+
+        $buffer          = '';
+        $chunk_size      = 4096;
+        $stats           = fstat($handle);
+        $file_size       = isset($stats['size']) ? (int) $stats['size'] : 0;
+        $bytes_to_read   = min($file_size, $max_bytes);
+        $position        = $file_size;
+        $bytes_read      = 0;
+        $max_iterations  = 500;
+        $iterations      = 0;
 
         while ($bytes_to_read > 0 && $position > 0) {
+            if (++$iterations > $max_iterations) {
+                break;
+            }
+
             $read_size = (int) min($chunk_size, $bytes_to_read, $position);
+
             if ($read_size <= 0) {
                 break;
             }
 
-            $position -= $read_size;
+            $position     -= $read_size;
             $bytes_to_read -= $read_size;
 
             if (fseek($handle, $position, SEEK_SET) !== 0) {
@@ -463,31 +647,49 @@ if (!function_exists('sitepulse_get_recent_log_lines')) {
             }
 
             $chunk = fread($handle, $read_size);
+
             if ($chunk === false) {
                 break;
             }
 
-            $buffer = $chunk . $buffer;
+            $bytes_read += strlen($chunk);
+            $buffer      = $chunk . $buffer;
 
             if (substr_count($buffer, "\n") >= ($max_lines + 1)) {
                 break;
             }
         }
 
+        if ($locked) {
+            flock($handle, LOCK_UN);
+        }
+
         fclose($handle);
 
         if ($buffer === '') {
-            return [];
+            return $with_metadata ? [
+                'lines'         => [],
+                'bytes_read'    => $bytes_read,
+                'file_size'     => $file_size,
+                'truncated'     => false,
+                'last_modified' => isset($stats['mtime']) ? (int) $stats['mtime'] : null,
+            ] : [];
         }
 
         $buffer = str_replace(["\r\n", "\r"], "\n", $buffer);
         $buffer = rtrim($buffer, "\n");
 
         if ($buffer === '') {
-            return [];
+            return $with_metadata ? [
+                'lines'         => [],
+                'bytes_read'    => $bytes_read,
+                'file_size'     => $file_size,
+                'truncated'     => false,
+                'last_modified' => isset($stats['mtime']) ? (int) $stats['mtime'] : null,
+            ] : [];
         }
 
-        $lines = explode("\n", $buffer);
+        $lines    = explode("\n", $buffer);
         $filtered = [];
 
         foreach ($lines as $line) {
@@ -501,7 +703,48 @@ if (!function_exists('sitepulse_get_recent_log_lines')) {
             $filtered = array_slice($filtered, -$max_lines);
         }
 
-        return $filtered;
+        if (!$with_metadata) {
+            return $filtered;
+        }
+
+        $truncated = $file_size > $bytes_read;
+
+        return [
+            'lines'         => $filtered,
+            'bytes_read'    => $bytes_read,
+            'file_size'     => $file_size,
+            'truncated'     => $truncated,
+            'last_modified' => isset($stats['mtime']) ? (int) $stats['mtime'] : null,
+        ];
+    }
+}
+
+if (!function_exists('sitepulse_get_alert_interval_choices')) {
+    /**
+     * Returns the allowed alert interval values (in minutes).
+     *
+     * @param mixed $context Optional context, forwarded to the filter hook.
+     * @return int[]
+     */
+    function sitepulse_get_alert_interval_choices($context = null) {
+        $allowed_values = [1, 2, 5, 10, 15, 30, 60, 120];
+
+        if (function_exists('apply_filters')) {
+            $allowed_values = apply_filters('sitepulse_alert_interval_allowed_values', $allowed_values, $context);
+        }
+
+        $allowed_values = array_map('absint', (array) $allowed_values);
+        $allowed_values = array_values(array_filter($allowed_values, static function ($value) {
+            return $value > 0;
+        }));
+
+        sort($allowed_values, SORT_NUMERIC);
+
+        if (empty($allowed_values)) {
+            $allowed_values = [5];
+        }
+
+        return $allowed_values;
     }
 }
 
@@ -509,23 +752,80 @@ if (!function_exists('sitepulse_sanitize_alert_interval')) {
     /**
      * Sanitizes the alert interval (in minutes) used to schedule error checks.
      *
+     * Supports extended ranges and an optional "smart" mode that can be
+     * interpreted by integrations via the `sitepulse_alert_interval_smart_value`
+     * filter.
+     *
      * @param mixed $value Raw user input value.
      * @return int Sanitized interval in minutes.
      */
     function sitepulse_sanitize_alert_interval($value) {
-        $allowed_values = [5, 10, 15, 30];
-        $value = is_scalar($value) ? absint($value) : 0;
+        $raw_value      = $value;
+        $allowed_values = sitepulse_get_alert_interval_choices($raw_value);
+        $default_value  = min($allowed_values);
 
-        if ($value < 5) {
-            $value = 5;
-        } elseif ($value > 30) {
-            $value = 30;
+        if (is_string($value) && !is_numeric($value)) {
+            $candidate = strtolower(trim($value));
+
+            if ($candidate === 'smart') {
+                $smart_value = $default_value;
+
+                if (function_exists('apply_filters')) {
+                    $smart_value = (int) apply_filters('sitepulse_alert_interval_smart_value', $default_value, $allowed_values, $raw_value);
+                }
+
+                if (in_array($smart_value, $allowed_values, true)) {
+                    $value = $smart_value;
+                } else {
+                    $value = $default_value;
+                }
+            } else {
+                $value = $default_value;
+            }
+        } else {
+            $value = is_scalar($value) ? absint($value) : 0;
+        }
+
+        if ($value <= 0) {
+            $value = $default_value;
         }
 
         if (!in_array($value, $allowed_values, true)) {
-            $value = 5;
+            $value = sitepulse_find_closest_allowed_interval($value, $allowed_values, $default_value);
+        }
+
+        if (function_exists('apply_filters')) {
+            $value = (int) apply_filters('sitepulse_alert_interval_sanitized', $value, $allowed_values, $raw_value);
+        }
+
+        if ($value <= 0) {
+            $value = $default_value;
         }
 
         return $value;
+    }
+}
+
+if (!function_exists('sitepulse_find_closest_allowed_interval')) {
+    /**
+     * Finds the closest allowed interval to the provided value.
+     *
+     * @param int   $value          Input value.
+     * @param array $allowed_values Sorted array of allowed values.
+     * @param int   $default_value  Fallback value.
+     * @return int
+     */
+    function sitepulse_find_closest_allowed_interval($value, $allowed_values, $default_value) {
+        if (empty($allowed_values)) {
+            return $default_value;
+        }
+
+        foreach ($allowed_values as $allowed_value) {
+            if ($value <= $allowed_value) {
+                return (int) $allowed_value;
+            }
+        }
+
+        return (int) end($allowed_values);
     }
 }
