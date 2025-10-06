@@ -475,4 +475,57 @@ Another line
         $this->assertSame('cpu', $payload['type']);
         $this->assertSame('warning', $payload['severity']);
     }
+
+    public function test_slack_webhook_payload_uses_blocks() {
+        update_option(SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS, ['webhook']);
+        update_option(SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS, ['https://hooks.slack.com/services/T000/B000/XXX']);
+
+        sitepulse_error_alert_send('php_fatal', 'Slack Subject', 'Slack message body', 'critical');
+
+        $this->assertCount(1, $this->webhook_requests, 'Slack webhook should trigger exactly one request.');
+        $request = $this->webhook_requests[0];
+        $this->assertSame('https://hooks.slack.com/services/T000/B000/XXX', $request['url']);
+        $this->assertArrayHasKey('headers', $request['args']);
+        $this->assertSame('application/json; charset=utf-8', $request['args']['headers']['Content-Type']);
+
+        $payload = json_decode($request['args']['body'], true);
+        $this->assertIsArray($payload, 'Slack payload should be JSON.');
+        $this->assertArrayHasKey('blocks', $payload, 'Slack payload should include Block Kit data.');
+        $this->assertArrayHasKey('text', $payload, 'Slack payload should include a headline.');
+        $this->assertStringStartsWith(':rotating_light:', $payload['text']);
+        $this->assertSame('section', $payload['blocks'][0]['type']);
+        $this->assertStringContainsString('Slack Subject', $payload['blocks'][0]['text']['text']);
+    }
+
+    public function test_teams_webhook_payload_uses_message_card() {
+        update_option(SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS, ['webhook']);
+        update_option(SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS, ['https://outlook.office.com/webhook/XYZ']);
+
+        sitepulse_error_alert_send('cpu', 'Teams Subject', 'Teams body', 'warning');
+
+        $this->assertCount(1, $this->webhook_requests, 'Teams webhook should trigger exactly one request.');
+        $request = $this->webhook_requests[0];
+        $payload = json_decode($request['args']['body'], true);
+        $this->assertIsArray($payload, 'Teams payload should be JSON.');
+        $this->assertSame('MessageCard', $payload['@type']);
+        $this->assertSame('Teams Subject', $payload['summary']);
+        $this->assertSame('Teams body', $payload['sections'][0]['text']);
+        $this->assertSame('warning', strtolower($payload['sections'][0]['facts'][0]['value']));
+    }
+
+    public function test_discord_webhook_payload_disables_mentions() {
+        update_option(SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS, ['webhook']);
+        update_option(SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS, ['https://discord.com/api/webhooks/123/abc']);
+
+        sitepulse_error_alert_send('cpu', 'Discord Subject', 'Discord body', 'info');
+
+        $this->assertCount(1, $this->webhook_requests, 'Discord webhook should trigger exactly one request.');
+        $request = $this->webhook_requests[0];
+        $payload = json_decode($request['args']['body'], true);
+        $this->assertIsArray($payload, 'Discord payload should be JSON.');
+        $this->assertArrayHasKey('content', $payload);
+        $this->assertStringContainsString('Discord Subject', $payload['content']);
+        $this->assertArrayHasKey('allowed_mentions', $payload);
+        $this->assertSame([], $payload['allowed_mentions']['parse']);
+    }
 }
