@@ -113,7 +113,8 @@
                                     setAttributes(next);
                                 },
                                 disabled: moduleDisabled,
-                                help: toggleHelp
+                                help: toggleHelp,
+                                __nextHasNoMarginBottom: true
                             });
                         })
                     ),

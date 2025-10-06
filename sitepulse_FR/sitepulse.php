@@ -1648,6 +1648,7 @@ function sitepulse_register_dashboard_preview_block() {
     $block_dir = SITEPULSE_PATH . 'blocks/dashboard-preview';
     $style_base_handle = 'sitepulse-dashboard-preview-base';
     $style_handle = 'sitepulse-dashboard-preview-style';
+    $editor_style_handle = 'sitepulse-dashboard-preview-editor-style';
     $editor_handle = 'sitepulse-dashboard-preview-editor';
 
     wp_register_style(
@@ -1661,6 +1662,13 @@ function sitepulse_register_dashboard_preview_block() {
         $style_handle,
         SITEPULSE_URL . 'blocks/dashboard-preview/style.css',
         [$style_base_handle],
+        SITEPULSE_VERSION
+    );
+
+    wp_register_style(
+        $editor_style_handle,
+        SITEPULSE_URL . 'blocks/dashboard-preview/editor.css',
+        [$style_handle],
         SITEPULSE_VERSION
     );
 
@@ -1680,6 +1688,7 @@ function sitepulse_register_dashboard_preview_block() {
         $block_dir,
         [
             'style'           => $style_handle,
+            'editor_style'    => $editor_style_handle,
             'editor_script'   => $editor_handle,
             'render_callback' => 'sitepulse_render_dashboard_preview_block',
         ]
