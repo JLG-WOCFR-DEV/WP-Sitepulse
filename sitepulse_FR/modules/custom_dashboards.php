@@ -955,6 +955,8 @@ function sitepulse_get_dashboard_preview_context() {
             'deprecated' => 0,
         ];
         $log_chart_empty = true;
+        $log_meta = null;
+        $log_truncated = false;
 
         if ($log_file === null) {
             $log_status_class = 'status-warn';
@@ -966,13 +968,24 @@ function sitepulse_get_dashboard_preview_context() {
             $log_status_class = 'status-warn';
             $log_summary = sprintf(__('Unable to read log file (%s).', 'sitepulse'), esc_html($log_file));
         } else {
-            $recent_logs = sitepulse_get_recent_log_lines($log_file, 200, 131072);
+            $recent_logs_data = sitepulse_get_recent_log_lines($log_file, 200, 131072, true);
+
+            if (is_array($recent_logs_data) && array_key_exists('lines', $recent_logs_data)) {
+                $recent_logs   = $recent_logs_data['lines'];
+                $log_meta      = $recent_logs_data;
+                $log_truncated = !empty($recent_logs_data['truncated']);
+            } else {
+                $recent_logs = $recent_logs_data;
+            }
 
             if ($recent_logs === null) {
                 $log_status_class = 'status-warn';
                 $log_summary = sprintf(__('Unable to read log file (%s).', 'sitepulse'), esc_html($log_file));
             } elseif (empty($recent_logs)) {
                 $log_summary = __('No recent log entries.', 'sitepulse');
+                if ($log_meta !== null) {
+                    $log_meta['lines'] = [];
+                }
             } else {
                 $log_chart_empty = false;
                 $log_content = implode("\n", $recent_logs);
@@ -997,6 +1010,9 @@ function sitepulse_get_dashboard_preview_context() {
                     $log_summary = __('Warnings present in the debug log.', 'sitepulse');
                 } else {
                     $log_summary = __('No critical events detected.', 'sitepulse');
+                    if ($log_truncated) {
+                        $log_summary .= ' ' . __('(Only the tail of the log is displayed.)', 'sitepulse');
+                    }
                 }
             }
         }
@@ -1023,6 +1039,7 @@ function sitepulse_get_dashboard_preview_context() {
             ],
             'empty'   => $log_chart_empty,
             'status'  => $log_status_class,
+            'truncated' => $log_truncated,
         ];
 
         $charts_payload['logs'] = $log_chart;
@@ -1030,6 +1047,7 @@ function sitepulse_get_dashboard_preview_context() {
             'status'  => $log_status_class,
             'summary' => $log_summary,
             'counts'  => $log_counts,
+            'meta'    => $log_meta,
         ];
         $context['modules']['logs']['chart'] = $log_chart;
     }
