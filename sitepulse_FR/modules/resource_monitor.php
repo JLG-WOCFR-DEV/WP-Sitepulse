@@ -119,6 +119,332 @@ function sitepulse_resource_monitor_format_load_display($load_values) {
 }
 
 /**
+ * Resolves CPU load average values using multiple strategies.
+ *
+ * @param string $not_available_label Translated fallback label.
+ * @return array{
+ *     display: array<int, mixed>,
+ *     raw: array<int, float|null>,
+ *     notices: array<int, array{type:string,message:string}>
+ * }
+ */
+function sitepulse_resource_monitor_resolve_load_average($not_available_label) {
+    $display = [$not_available_label, $not_available_label, $not_available_label];
+    $raw = [null, null, null];
+    $notices = [];
+    $source = null;
+
+    $load_values = null;
+
+    if (function_exists('sys_getloadavg')) {
+        $load_values = sitepulse_resource_monitor_sanitize_load_values(sys_getloadavg());
+
+        if ($load_values !== null) {
+            $source = 'sys_getloadavg';
+        } else {
+            $message = esc_html__('Indisponible – sys_getloadavg() désactivée par votre hébergeur', 'sitepulse');
+            $notices[] = [
+                'type'    => 'warning',
+                'message' => $message,
+            ];
+
+            if (function_exists('sitepulse_log')) {
+                sitepulse_log(__('Resource Monitor: CPU load average unavailable because sys_getloadavg() is disabled by the hosting provider.', 'sitepulse'), 'WARNING');
+            }
+        }
+    } else {
+        $message = esc_html__('Indisponible – sys_getloadavg() désactivée par votre hébergeur', 'sitepulse');
+        $notices[] = [
+            'type'    => 'warning',
+            'message' => $message,
+        ];
+
+        if (function_exists('sitepulse_log')) {
+            sitepulse_log(__('Resource Monitor: sys_getloadavg() is not available on this server.', 'sitepulse'), 'WARNING');
+        }
+    }
+
+    if ($load_values === null) {
+        $proc_values = sitepulse_resource_monitor_read_proc_loadavg();
+
+        if ($proc_values !== null) {
+            $load_values = $proc_values;
+            $source = 'proc_loadavg';
+
+            if (function_exists('sitepulse_log')) {
+                sitepulse_log(__('Resource Monitor: CPU load average resolved from /proc/loadavg fallback.', 'sitepulse'), 'INFO');
+            }
+        } elseif (!function_exists('sys_getloadavg')) {
+            $message = esc_html__('CPU load average is unavailable because /proc/loadavg could not be read.', 'sitepulse');
+            $notices[] = [
+                'type'    => 'warning',
+                'message' => $message,
+            ];
+
+            if (function_exists('sitepulse_log')) {
+                sitepulse_log(__('Resource Monitor: /proc/loadavg could not be read to determine CPU load average.', 'sitepulse'), 'WARNING');
+            }
+        }
+    }
+
+    $filter_context = [
+        'source'            => $source,
+        'fallback_attempted'=> $source !== null && $source !== 'sys_getloadavg',
+    ];
+
+    /**
+     * Filters the raw load averages before they are formatted for display.
+     *
+     * @param array<int, float>|null $load_values Raw load averages.
+     * @param array{source:?string,fallback_attempted:bool} $filter_context Contextual metadata.
+     */
+    $filtered_values = apply_filters('sitepulse_resource_monitor_load_average', $load_values, $filter_context);
+
+    if ($filtered_values !== $load_values) {
+        $sanitized = sitepulse_resource_monitor_sanitize_load_values($filtered_values);
+
+        if ($sanitized !== null) {
+            $load_values = $sanitized;
+            $source = 'filter';
+        }
+    }
+
+    if ($load_values !== null) {
+        $display = $load_values;
+        $raw = array_map(static function($value) {
+            return is_numeric($value) ? (float) $value : null;
+        }, array_pad(array_values($load_values), 3, null));
+    }
+
+    return [
+        'display' => array_pad(array_values((array) $display), 3, $not_available_label),
+        'raw'     => array_pad($raw, 3, null),
+        'notices' => $notices,
+    ];
+}
+
+/**
+ * Validates and sanitizes load average values.
+ *
+ * @param mixed $values Raw values.
+ * @return array<int, float>|null
+ */
+function sitepulse_resource_monitor_sanitize_load_values($values) {
+    if (!is_array($values) || empty($values)) {
+        return null;
+    }
+
+    $values = array_slice(array_values($values), 0, 3);
+
+    if (empty($values)) {
+        return null;
+    }
+
+    foreach ($values as $value) {
+        if (!is_numeric($value)) {
+            return null;
+        }
+    }
+
+    return array_map(static function($value) {
+        return (float) $value;
+    }, $values);
+}
+
+/**
+ * Attempts to read load averages from /proc/loadavg.
+ *
+ * @return array<int, float>|null
+ */
+function sitepulse_resource_monitor_read_proc_loadavg() {
+    static $cached = null;
+
+    if ($cached !== null) {
+        return $cached;
+    }
+
+    $path = '/proc/loadavg';
+
+    if (!@is_readable($path)) { // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+        $cached = null;
+
+        return null;
+    }
+
+    $error_message = null;
+
+    set_error_handler(static function($errno, $errstr) use (&$error_message) {
+        $error_message = $errstr;
+
+        return true;
+    });
+
+    try {
+        $contents = file_get_contents($path);
+    } catch (\Throwable $exception) {
+        $error_message = $exception->getMessage();
+        $contents = false;
+    } finally {
+        restore_error_handler();
+    }
+
+    if ($contents === false || $contents === '') {
+        $cached = null;
+
+        return null;
+    }
+
+    $parts = preg_split('/\s+/', trim((string) $contents));
+
+    if (!is_array($parts) || empty($parts)) {
+        $cached = null;
+
+        return null;
+    }
+
+    $values = array_slice($parts, 0, 3);
+
+    $sanitized = sitepulse_resource_monitor_sanitize_load_values($values);
+
+    if ($sanitized === null) {
+        $cached = null;
+
+        return null;
+    }
+
+    $cached = $sanitized;
+
+    return $cached;
+}
+
+/**
+ * Retrieves disk usage metrics with shared caching and robust error handling.
+ *
+ * @param string $type Either "free" or "total".
+ * @param string $path Filesystem path to evaluate.
+ * @return array{display:string,bytes:int|null,notices:array<int,array{type:string,message:string}>}
+ */
+function sitepulse_resource_monitor_measure_disk_space($type, $path) {
+    $not_available_label = esc_html__('N/A', 'sitepulse');
+    $result = [
+        'display' => $not_available_label,
+        'bytes'   => null,
+        'notices' => [],
+    ];
+
+    $type = $type === 'total' ? 'total' : 'free';
+
+    static $cache = [];
+    $cache_key = $type . '|' . $path;
+
+    /**
+     * Filters whether the disk usage measurement should be cached during the current request.
+     *
+     * @param bool   $enabled Default caching behaviour.
+     * @param string $type    Requested metric type (free|total).
+     * @param string $path    Filesystem path being inspected.
+     */
+    $enable_cache = (bool) apply_filters('sitepulse_resource_monitor_enable_disk_cache', true, $type, $path);
+
+    if ($enable_cache && isset($cache[$cache_key])) {
+        return $cache[$cache_key];
+    }
+
+    $function = $type === 'total' ? 'disk_total_space' : 'disk_free_space';
+
+    $failure_message = $type === 'total'
+        ? esc_html__('Unable to determine the total disk space for the WordPress root directory.', 'sitepulse')
+        : esc_html__('Unable to determine the available disk space for the WordPress root directory.', 'sitepulse');
+
+    $missing_function_message = $type === 'total'
+        ? esc_html__('The disk_total_space() function is not available on this server.', 'sitepulse')
+        : esc_html__('The disk_free_space() function is not available on this server.', 'sitepulse');
+
+    if (!function_exists($function)) {
+        $result['notices'][] = [
+            'type'    => 'warning',
+            'message' => $missing_function_message,
+        ];
+
+        if (function_exists('sitepulse_log')) {
+            sitepulse_log(
+                sprintf(
+                    /* translators: %s: original message. */
+                    __('Resource Monitor: %s', 'sitepulse'),
+                    $missing_function_message
+                ),
+                'WARNING'
+            );
+        }
+
+        if ($enable_cache) {
+            $cache[$cache_key] = $result;
+        }
+
+        return $result;
+    }
+
+    $error_message = null;
+    set_error_handler(static function($errno, $errstr) use (&$error_message) {
+        $error_message = $errstr;
+
+        return true;
+    });
+
+    try {
+        $value = $function($path);
+    } catch (\Throwable $exception) {
+        $error_message = $exception->getMessage();
+        $value = false;
+    } finally {
+        restore_error_handler();
+    }
+
+    if ($value !== false) {
+        if (is_numeric($value)) {
+            $bytes = (int) $value;
+            $result['bytes'] = $bytes;
+            $result['display'] = size_format($bytes);
+        }
+
+        if ($enable_cache) {
+            $cache[$cache_key] = $result;
+        }
+
+        return $result;
+    }
+
+    $result['notices'][] = [
+        'type'    => 'warning',
+        'message' => $failure_message,
+    ];
+
+    if (function_exists('sitepulse_log')) {
+        $log_message = sprintf(
+            /* translators: %s: original message. */
+            __('Resource Monitor: %s', 'sitepulse'),
+            $failure_message
+        );
+
+        if (is_string($error_message) && $error_message !== '') {
+            $log_message .= ' ' . sprintf(
+                /* translators: %s: error message. */
+                __('Error: %s', 'sitepulse'),
+                $error_message
+            );
+        }
+
+        sitepulse_log($log_message, 'ERROR');
+    }
+
+    if ($enable_cache) {
+        $cache[$cache_key] = $result;
+    }
+
+    return $result;
+}
+
+/**
  * Returns cached resource metrics or computes a fresh snapshot.
  *
  * @return array{
@@ -152,50 +478,12 @@ function sitepulse_resource_monitor_get_snapshot($context = 'manual') {
 
     $notices = [];
     $not_available_label = esc_html__('N/A', 'sitepulse');
-    $load = [$not_available_label, $not_available_label, $not_available_label];
+    $load_result = sitepulse_resource_monitor_resolve_load_average($not_available_label);
+    $load = $load_result['display'];
     $load_display = sitepulse_resource_monitor_format_load_display($load);
-    $load_raw = [null, null, null];
-
-    if (function_exists('sys_getloadavg')) {
-        $load_values = sys_getloadavg();
-        $load_values_are_numeric = is_array($load_values) && !empty($load_values);
-
-        if ($load_values_are_numeric) {
-            foreach ($load_values as $value) {
-                if (!is_numeric($value)) {
-                    $load_values_are_numeric = false;
-                    break;
-                }
-            }
-        }
-
-        if ($load_values_are_numeric) {
-            $load = $load_values;
-            $load_raw = array_map(static function($value) {
-                return is_numeric($value) ? (float) $value : null;
-            }, array_slice(array_values((array) $load_values), 0, 3));
-            $load_display = sitepulse_resource_monitor_format_load_display($load);
-        } else {
-            $message = esc_html__('Indisponible – sys_getloadavg() désactivée par votre hébergeur', 'sitepulse');
-            $notices[] = [
-                'type'    => 'warning',
-                'message' => $message,
-            ];
-
-            if (function_exists('sitepulse_log')) {
-                sitepulse_log(__('Resource Monitor: CPU load average unavailable because sys_getloadavg() is disabled by the hosting provider.', 'sitepulse'), 'WARNING');
-            }
-        }
-    } else {
-        $message = esc_html__('Indisponible – sys_getloadavg() désactivée par votre hébergeur', 'sitepulse');
-        $notices[] = [
-            'type'    => 'warning',
-            'message' => $message,
-        ];
-
-        if (function_exists('sitepulse_log')) {
-            sitepulse_log(__('Resource Monitor: sys_getloadavg() is not available on this server.', 'sitepulse'), 'WARNING');
-        }
+    $load_raw = $load_result['raw'];
+    if (!empty($load_result['notices'])) {
+        $notices = array_merge($notices, $load_result['notices']);
     }
 
     $memory_usage_bytes = (int) memory_get_usage();
@@ -224,135 +512,21 @@ function sitepulse_resource_monitor_get_snapshot($context = 'manual') {
     $disk_free = $not_available_label;
     $disk_free_bytes = null;
 
-    if (function_exists('disk_free_space')) {
-        $disk_free_error = null;
-        set_error_handler(function ($errno, $errstr) use (&$disk_free_error) {
-            $disk_free_error = $errstr;
-
-            return true;
-        });
-
-        try {
-            $free_space = disk_free_space(ABSPATH);
-        } catch (\Throwable $exception) {
-            $disk_free_error = $exception->getMessage();
-            $free_space = false;
-        } finally {
-            restore_error_handler();
-        }
-
-        if ($free_space !== false) {
-            $disk_free_bytes = is_numeric($free_space) ? (int) $free_space : null;
-            $disk_free = size_format($free_space);
-        } else {
-            $message = esc_html__('Unable to determine the available disk space for the WordPress root directory.', 'sitepulse');
-            $notices[] = [
-                'type'    => 'warning',
-                'message' => $message,
-            ];
-
-            if (function_exists('sitepulse_log')) {
-                $log_message = sprintf(
-                    /* translators: %s: original message. */
-                    __('Resource Monitor: %s', 'sitepulse'),
-                    $message
-                );
-
-                if (is_string($disk_free_error) && $disk_free_error !== '') {
-                    $log_message .= ' ' . sprintf(
-                        /* translators: %s: error message. */
-                        __('Error: %s', 'sitepulse'),
-                        $disk_free_error
-                    );
-                }
-
-                sitepulse_log($log_message, 'ERROR');
-            }
-        }
-    } else {
-        $message = esc_html__('The disk_free_space() function is not available on this server.', 'sitepulse');
-        $notices[] = [
-            'type'    => 'warning',
-            'message' => $message,
-        ];
-
-        if (function_exists('sitepulse_log')) {
-            sitepulse_log(
-                sprintf(
-                    /* translators: %s: original message. */
-                    __('Resource Monitor: %s', 'sitepulse'),
-                    $message
-                ),
-                'WARNING'
-            );
-        }
+    $disk_free_result = sitepulse_resource_monitor_measure_disk_space('free', ABSPATH);
+    $disk_free = $disk_free_result['display'];
+    $disk_free_bytes = $disk_free_result['bytes'];
+    if (!empty($disk_free_result['notices'])) {
+        $notices = array_merge($notices, $disk_free_result['notices']);
     }
 
     $disk_total = $not_available_label;
     $disk_total_bytes = null;
 
-    if (function_exists('disk_total_space')) {
-        $disk_total_error = null;
-        set_error_handler(function ($errno, $errstr) use (&$disk_total_error) {
-            $disk_total_error = $errstr;
-
-            return true;
-        });
-
-        try {
-            $total_space = disk_total_space(ABSPATH);
-        } catch (\Throwable $exception) {
-            $disk_total_error = $exception->getMessage();
-            $total_space = false;
-        } finally {
-            restore_error_handler();
-        }
-
-        if ($total_space !== false) {
-            $disk_total_bytes = is_numeric($total_space) ? (int) $total_space : null;
-            $disk_total = size_format($total_space);
-        } else {
-            $message = esc_html__('Unable to determine the total disk space for the WordPress root directory.', 'sitepulse');
-            $notices[] = [
-                'type'    => 'warning',
-                'message' => $message,
-            ];
-
-            if (function_exists('sitepulse_log')) {
-                $log_message = sprintf(
-                    /* translators: %s: original message. */
-                    __('Resource Monitor: %s', 'sitepulse'),
-                    $message
-                );
-
-                if (is_string($disk_total_error) && $disk_total_error !== '') {
-                    $log_message .= ' ' . sprintf(
-                        /* translators: %s: error message. */
-                        __('Error: %s', 'sitepulse'),
-                        $disk_total_error
-                    );
-                }
-
-                sitepulse_log($log_message, 'ERROR');
-            }
-        }
-    } else {
-        $message = esc_html__('The disk_total_space() function is not available on this server.', 'sitepulse');
-        $notices[] = [
-            'type'    => 'warning',
-            'message' => $message,
-        ];
-
-        if (function_exists('sitepulse_log')) {
-            sitepulse_log(
-                sprintf(
-                    /* translators: %s: original message. */
-                    __('Resource Monitor: %s', 'sitepulse'),
-                    $message
-                ),
-                'WARNING'
-            );
-        }
+    $disk_total_result = sitepulse_resource_monitor_measure_disk_space('total', ABSPATH);
+    $disk_total = $disk_total_result['display'];
+    $disk_total_bytes = $disk_total_result['bytes'];
+    if (!empty($disk_total_result['notices'])) {
+        $notices = array_merge($notices, $disk_total_result['notices']);
     }
 
     $snapshot = [
@@ -583,10 +757,10 @@ function sitepulse_resource_monitor_page() {
             <div class="sitepulse-resource-history-chart">
                 <canvas id="sitepulse-resource-history-chart" aria-describedby="sitepulse-resource-history-summary"></canvas>
             </div>
-            <p class="sitepulse-resource-history-empty" data-empty<?php if (!empty($history_entries)) { echo ' hidden'; } ?>>
+            <p class="sitepulse-resource-history-empty" role="status" aria-live="polite" data-empty<?php if (!empty($history_entries)) { echo ' hidden'; } ?>>
                 <?php esc_html_e("Aucun historique disponible pour le moment.", 'sitepulse'); ?>
             </p>
-            <p id="sitepulse-resource-history-summary" class="sitepulse-resource-history-summary">
+            <p id="sitepulse-resource-history-summary" class="sitepulse-resource-history-summary" role="status" aria-live="polite">
                 <?php echo esc_html($history_summary_text); ?>
             </p>
             <div class="sitepulse-resource-history-actions">
