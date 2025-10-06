@@ -91,9 +91,18 @@ function sitepulse_custom_dashboard_enqueue_assets($hook_suffix) {
     }
 
     wp_register_style(
+        'sitepulse-module-navigation',
+        SITEPULSE_URL . 'modules/css/module-navigation.css',
+        [],
+        SITEPULSE_VERSION
+    );
+
+    wp_enqueue_style('sitepulse-module-navigation');
+
+    wp_register_style(
         'sitepulse-custom-dashboard',
         SITEPULSE_URL . 'modules/css/custom-dashboard.css',
-        [],
+        ['sitepulse-module-navigation'],
         SITEPULSE_VERSION
     );
 
@@ -2157,86 +2166,15 @@ function sitepulse_custom_dashboards_page() {
         wp_localize_script('sitepulse-dashboard-charts', 'SitePulseDashboardData', $localization_payload);
     }
 
-    $module_page_definitions = [
-        'custom_dashboards'     => [
-            'label' => __('Dashboard', 'sitepulse'),
-            'page'  => 'sitepulse-dashboard',
-            'icon'  => 'dashicons-dashboard',
-        ],
-        'speed_analyzer'        => [
-            'label' => __('Speed', 'sitepulse'),
-            'page'  => 'sitepulse-speed',
-            'icon'  => 'dashicons-performance',
-        ],
-        'uptime_tracker'        => [
-            'label' => __('Uptime', 'sitepulse'),
-            'page'  => 'sitepulse-uptime',
-            'icon'  => 'dashicons-chart-bar',
-        ],
-        'database_optimizer'    => [
-            'label' => __('Database', 'sitepulse'),
-            'page'  => 'sitepulse-db',
-            'icon'  => 'dashicons-database',
-        ],
-        'log_analyzer'          => [
-            'label' => __('Logs', 'sitepulse'),
-            'page'  => 'sitepulse-logs',
-            'icon'  => 'dashicons-hammer',
-        ],
-        'resource_monitor'      => [
-            'label' => __('Resources', 'sitepulse'),
-            'page'  => 'sitepulse-resources',
-            'icon'  => 'dashicons-chart-area',
-        ],
-        'plugin_impact_scanner' => [
-            'label' => __('Plugins', 'sitepulse'),
-            'page'  => 'sitepulse-plugins',
-            'icon'  => 'dashicons-admin-plugins',
-        ],
-        'maintenance_advisor'   => [
-            'label' => __('Maintenance', 'sitepulse'),
-            'page'  => 'sitepulse-maintenance',
-            'icon'  => 'dashicons-admin-tools',
-        ],
-        'ai_insights'           => [
-            'label' => __('AI Insights', 'sitepulse'),
-            'page'  => 'sitepulse-ai',
-            'icon'  => 'dashicons-lightbulb',
-        ],
-    ];
-
     $current_page = isset($_GET['page']) ? sanitize_title((string) wp_unslash($_GET['page'])) : 'sitepulse-dashboard';
 
     if ($current_page === '') {
         $current_page = 'sitepulse-dashboard';
     }
 
-    $user_can_manage_modules = current_user_can(sitepulse_get_capability());
-    $module_navigation = [];
-
-    foreach ($module_page_definitions as $module_key => $definition) {
-        $page_slug = isset($definition['page']) ? sanitize_title((string) $definition['page']) : '';
-
-        if ($page_slug === '') {
-            continue;
-        }
-
-        $is_module_active = ('custom_dashboards' === $module_key)
-            ? true
-            : in_array($module_key, $active_modules, true);
-
-        if (!$is_module_active || !$user_can_manage_modules) {
-            continue;
-        }
-
-        $module_navigation[] = [
-            'label'   => isset($definition['label']) ? $definition['label'] : '',
-            'icon'    => isset($definition['icon']) ? $definition['icon'] : '',
-            'url'     => admin_url('admin.php?page=' . $page_slug),
-            'slug'    => $page_slug,
-            'current' => ($current_page === $page_slug),
-        ];
-    }
+    $module_navigation = function_exists('sitepulse_get_module_navigation_items')
+        ? sitepulse_get_module_navigation_items($current_page)
+        : [];
 
     $allowed_card_keys = sitepulse_get_dashboard_card_keys();
     $dashboard_preferences = sitepulse_get_dashboard_preferences(get_current_user_id(), $allowed_card_keys);
@@ -2675,75 +2613,7 @@ function sitepulse_custom_dashboards_page() {
         <p><?php esc_html_e("A real-time overview of your site's performance and health.", 'sitepulse'); ?></p>
 
         <?php if (!empty($module_navigation)) : ?>
-            <?php
-            $nav_list_id = function_exists('wp_unique_id')
-                ? wp_unique_id('sitepulse-module-nav-list-')
-                : 'sitepulse-module-nav-list-' . uniqid();
-
-            $nav_select_id = function_exists('wp_unique_id')
-                ? wp_unique_id('sitepulse-module-nav-select-')
-                : 'sitepulse-module-nav-select-' . uniqid();
-            ?>
-            <nav class="sitepulse-module-nav" aria-label="<?php esc_attr_e('SitePulse sections', 'sitepulse'); ?>">
-                <form class="sitepulse-module-nav__mobile-form" method="get" action="<?php echo esc_url(admin_url('admin.php')); ?>">
-                    <label class="sitepulse-module-nav__mobile-label" for="<?php echo esc_attr($nav_select_id); ?>"><?php esc_html_e('Go to section', 'sitepulse'); ?></label>
-                    <div class="sitepulse-module-nav__mobile-controls">
-                        <select
-                            class="sitepulse-module-nav__select"
-                            id="<?php echo esc_attr($nav_select_id); ?>"
-                            name="page"
-                            data-sitepulse-nav-select
-                        >
-                            <?php foreach ($module_navigation as $item) : ?>
-                                <option value="<?php echo esc_attr($item['slug']); ?>"<?php selected(!empty($item['current'])); ?>><?php echo esc_html($item['label']); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <button type="submit" class="button sitepulse-module-nav__select-submit"><?php esc_html_e('View', 'sitepulse'); ?></button>
-                    </div>
-                </form>
-                <div class="sitepulse-module-nav__scroll">
-                    <button
-                        type="button"
-                        class="sitepulse-module-nav__scroll-button sitepulse-module-nav__scroll-button--prev"
-                        data-sitepulse-nav-scroll="prev"
-                        aria-controls="<?php echo esc_attr($nav_list_id); ?>"
-                        aria-label="<?php esc_attr_e('Scroll navigation left', 'sitepulse'); ?>"
-                        disabled
-                    >
-                        <span class="dashicons dashicons-arrow-left-alt2" aria-hidden="true"></span>
-                    </button>
-                    <div class="sitepulse-module-nav__scroll-viewport" data-sitepulse-nav-viewport>
-                        <ul class="sitepulse-module-nav__list" id="<?php echo esc_attr($nav_list_id); ?>">
-                            <?php foreach ($module_navigation as $item) :
-                                $link_classes = ['sitepulse-module-nav__link'];
-
-                                if (!empty($item['current'])) {
-                                    $link_classes[] = 'is-current';
-                                }
-                            ?>
-                                <li class="sitepulse-module-nav__item">
-                                    <a class="<?php echo esc_attr(implode(' ', $link_classes)); ?>" href="<?php echo esc_url($item['url']); ?>"<?php echo !empty($item['current']) ? ' aria-current="page"' : ''; ?>>
-                                        <?php if (!empty($item['icon'])) : ?>
-                                            <span class="sitepulse-module-nav__icon dashicons <?php echo esc_attr($item['icon']); ?>" aria-hidden="true"></span>
-                                        <?php endif; ?>
-                                        <span class="sitepulse-module-nav__label"><?php echo esc_html($item['label']); ?></span>
-                                    </a>
-                                </li>
-                            <?php endforeach; ?>
-                        </ul>
-                    </div>
-                    <button
-                        type="button"
-                        class="sitepulse-module-nav__scroll-button sitepulse-module-nav__scroll-button--next"
-                        data-sitepulse-nav-scroll="next"
-                        aria-controls="<?php echo esc_attr($nav_list_id); ?>"
-                        aria-label="<?php esc_attr_e('Scroll navigation right', 'sitepulse'); ?>"
-                        disabled
-                    >
-                        <span class="dashicons dashicons-arrow-right-alt2" aria-hidden="true"></span>
-                    </button>
-                </div>
-            </nav>
+            <?php sitepulse_render_module_navigation($current_page, $module_navigation); ?>
         <?php endif; ?>
 
         <div class="sitepulse-dashboard-preferences">

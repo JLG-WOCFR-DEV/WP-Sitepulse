@@ -1651,9 +1651,16 @@ function sitepulse_register_dashboard_preview_block() {
     $editor_handle = 'sitepulse-dashboard-preview-editor';
 
     wp_register_style(
+        'sitepulse-module-navigation',
+        SITEPULSE_URL . 'modules/css/module-navigation.css',
+        [],
+        SITEPULSE_VERSION
+    );
+
+    wp_register_style(
         $style_base_handle,
         SITEPULSE_URL . 'modules/css/custom-dashboard.css',
-        [],
+        ['sitepulse-module-navigation'],
         SITEPULSE_VERSION
     );
 
