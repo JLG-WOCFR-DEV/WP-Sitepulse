@@ -39,7 +39,7 @@ Ce document répertorie les fonctions de SitePulse qui gagneraient à être alig
 
 ## Module « Uptime Tracker »
 
-- **Constat :** l'historique conserve uniquement les 30 derniers points et un seul agent actif, ce qui limite la profondeur d'analyse et la corrélation multi-région par rapport à des outils comme Pingdom ou Better Uptime qui agrègent plusieurs sondes et publient des SLA détaillés.【F:sitepulse_FR/modules/uptime_tracker.php†L2203-L2290】【F:sitepulse_FR/modules/uptime_tracker.php†L258-L320】
+- **Constat :** l'historique conserve uniquement les 30 derniers points et un seul agent actif, ce qui limite la profondeur d'analyse et la corrélation multi-région par rapport à des outils comme Pingdom ou Better Uptime qui agrègent plusieurs sondes et publient des SLA détaillés.【F:sitepulse_FR/modules/uptime_tracker.php†L2203-L2288】【F:sitepulse_FR/modules/uptime_tracker.php†L258-L320】
 - **Pistes pro :**
   - Permettre la configuration de multiples agents géographiques avec pondération et tests parallèles, puis générer des rapports SLA mensuels exportables.
   - Étendre la fenêtre d'historique (via options et stockage personnalisé) pour autoriser des rétrospectives de 90 jours/12 mois et la corrélation avec les annotations de maintenance.
@@ -47,7 +47,7 @@ Ce document répertorie les fonctions de SitePulse qui gagneraient à être alig
 
 ## Module « Resource Monitor »
 
-- **Constat :** le module calcule un instantané des ressources et des avertissements, mais n'enregistre ni séries temporelles ni corrélations avec les événements, contrairement à New Relic ou Datadog qui stockent des métriques à haute fréquence pour établir des tendances et des alertes adaptatives.【F:sitepulse_FR/modules/resource_monitor.php†L135-L199】【F:sitepulse_FR/modules/resource_monitor.php†L305-L378】
+- **Constat :** le module calcule un instantané des ressources et des avertissements, mais n'enregistre ni séries temporelles ni corrélations avec les événements, contrairement à New Relic ou Datadog qui stockent des métriques à haute fréquence pour établir des tendances et des alertes adaptatives.【F:sitepulse_FR/modules/resource_monitor.php†L131-L218】【F:sitepulse_FR/modules/resource_monitor.php†L305-L378】
 - **Pistes pro :**
   - Introduire une persistance longue durée (Custom Post Type ou table dédiée) pour suivre l'évolution CPU/RAM/disque, avec export JSON/CSV.
   - Fournir des dashboards corrélant les seuils personnalisés aux pics (heatmaps, alerting basé sur la dérive) et une API REST pour l'intégration Grafana.
@@ -62,40 +62,48 @@ Ce document répertorie les fonctions de SitePulse qui gagneraient à être alig
 
 ## Dashboards personnalisés
 
-- **Constat :** les préférences sont stockées par utilisateur et les cartes nécessitent un module actif, mais l'interface reste limitée au back-office WordPress, sans partage ni versioning collaboratif comme dans des solutions telles que Looker ou Datadog Dashboards.【F:sitepulse_FR/modules/custom_dashboards.php†L20-L145】【F:sitepulse_FR/modules/custom_dashboards.php†L260-L276】【F:sitepulse_FR/modules/custom_dashboards.php†L388-L466】
+- **Constat :** les préférences sont stockées par utilisateur et les cartes nécessitent un module actif, mais l'interface reste limitée au back-office WordPress, sans partage ni versioning collaboratif comme dans des solutions telles que Looker ou Datadog Dashboards.【F:sitepulse_FR/modules/custom_dashboards.php†L20-L145】【F:sitepulse_FR/modules/custom_dashboards.php†L260-L296】【F:sitepulse_FR/modules/custom_dashboards.php†L388-L466】
 - **Pistes pro :**
   - Permettre la publication de vues « lecture seule » partageables (URL signée, iframe, PDF) et la duplication de layouts entre sites.
   - Ajouter des rôles de lecture/édition, un historique des modifications et une synchronisation multisite pour homogénéiser les tableaux de bord.
   - Brancher des sources externes (APM, Lighthouse) et proposer des widgets conditionnels pour une expérience type observability suite.
 
-## Module « Uptime Tracker »
+## Module « Plugin Impact Scanner »
 
-- **Constat :** l'historique conserve uniquement les 30 derniers points et un seul agent actif, ce qui limite la profondeur d'analyse et la corrélation multi-région par rapport à des outils comme Pingdom ou Better Uptime qui agrègent plusieurs sondes et publient des SLA détaillés.【F:sitepulse_FR/modules/uptime_tracker.php†L2203-L2290】【F:sitepulse_FR/modules/uptime_tracker.php†L258-L320】
+- **Constat :** la page admin charge les plugins actifs, applique des seuils statiques et restitue un instantané local des mesures (impact moyen, poids disque) sans tendance ni segmentation par environnement, loin des analyses corrélées au trafic offertes par New Relic APM ou ManageWP Performance.【F:sitepulse_FR/modules/plugin_impact_scanner.php†L28-L133】【F:sitepulse_FR/modules/plugin_impact_scanner.php†L222-L360】
 - **Pistes pro :**
-  - Permettre la configuration de multiples agents géographiques avec pondération et tests parallèles, puis générer des rapports SLA mensuels exportables.
-  - Étendre la fenêtre d'historique (via options et stockage personnalisé) pour autoriser des rétrospectives de 90 jours/12 mois et la corrélation avec les annotations de maintenance.
-  - Ajouter des canaux d'alerte temps réel (webhooks dédiés, SMS) et une page de statut publique afin de se rapprocher des offres premium.
+  - Ajouter un historique des temps de chargement (rolling 7/30 jours) et des comparaisons pré/post mise à jour pour identifier les régressions de performance.
+  - Pondérer l’impact par type de requête (admin/public/REST) et par environnement (staging vs production) afin d’imiter les vues multi-contextes des suites APM.
+  - Offrir des exports programmés (CSV/API REST) et une intégration Slack pour rapprocher l’outil des workflows d’équipes produit.
 
-## Module « Resource Monitor »
+## Module « Maintenance Advisor »
 
-- **Constat :** le module calcule un instantané des ressources et des avertissements, mais n'enregistre ni séries temporelles ni corrélations avec les événements, contrairement à New Relic ou Datadog qui stockent des métriques à haute fréquence pour établir des tendances et des alertes adaptatives.【F:sitepulse_FR/modules/resource_monitor.php†L135-L199】【F:sitepulse_FR/modules/resource_monitor.php†L305-L378】
+- **Constat :** l’écran récapitule les mises à jour core/plugins/thèmes et leurs attributs (auto-update, changelog via Thickbox) mais reste centré sur une action manuelle ponctuelle, sans orchestration type patch management proposée par MainWP ou WP Umbrella.【F:sitepulse_FR/modules/maintenance_advisor.php†L1-L146】【F:sitepulse_FR/modules/maintenance_advisor.php†L182-L246】
 - **Pistes pro :**
-  - Introduire une persistance longue durée (Custom Post Type ou table dédiée) pour suivre l'évolution CPU/RAM/disque, avec export JSON/CSV.
-  - Fournir des dashboards corrélant les seuils personnalisés aux pics (heatmaps, alerting basé sur la dérive) et une API REST pour l'intégration Grafana.
+  - Introduire des fenêtres de maintenance planifiées avec approbation et génération automatique de rapports après déploiement.
+  - Connecter les statuts d’auto-update à des politiques (ex : désactiver si audit échoue) et proposer un mode bulk update sandboxé.
+  - Ajouter une intégration webhook/Slack ou ServiceNow pour notifier les équipes Ops comme le font les solutions MSP.
 
-## Module « AI Insights »
+## Module « Database Optimizer »
 
-- **Constat :** l'orchestrateur Gemini gère les erreurs de quota et le cache transitoire, mais ne propose pas de file d'attente asynchrone ni d'évaluation automatique des recommandations, contrairement aux suites d'assistance IA (ContentKing, Surfer) qui priorisent les analyses et mesurent l'impact sur les KPI.【F:sitepulse_FR/modules/ai_insights.php†L1606-L1759】【F:sitepulse_FR/modules/js/sitepulse-ai-insights.js†L430-L516】
+- **Constat :** le nettoyage des révisions/transients se déclenche à la demande (lot de 500 révisions, notices instantanées) et se limite aux tables natives, sans planification ni suivi de consommation comme WP Rocket ou NitroPack peuvent le proposer.【F:sitepulse_FR/modules/database_optimizer.php†L18-L199】
 - **Pistes pro :**
-  - Ajouter une file d'attente (Action Scheduler, Jobs WP-Cron) pour lisser les demandes IA, relancer automatiquement les échecs et enregistrer le coût par requête.
-  - Calculer un score d'impact basé sur l'historique des actions (TTFB, conversions) et afficher des priorités avec un suivi « fait / à faire ».
-  - Exposer une intégration Zapier/Make pour pousser les recommandations dans Jira, Linear ou Slack.
+  - Permettre la mise en place de fenêtres de purge récurrentes avec rapports (gain de taille, durée) et alertes si la croissance reprend.
+  - Étendre la couverture aux tables personnalisées (WooCommerce sessions, logs) via une couche de déclarations modulaires.
+  - Ajouter une estimation avant/après et un scoring d’impact pour prioriser les nettoyages sur plusieurs environnements.
 
-## Dashboards personnalisés
+## Module « Speed Analyzer »
 
-- **Constat :** les préférences sont stockées par utilisateur et les cartes nécessitent un module actif, mais l'interface reste limitée au back-office WordPress, sans partage ni versioning collaboratif comme dans des solutions telles que Looker ou Datadog Dashboards.【F:sitepulse_FR/modules/custom_dashboards.php†L20-L145】【F:sitepulse_FR/modules/custom_dashboards.php†L260-L276】【F:sitepulse_FR/modules/custom_dashboards.php†L388-L466】
+- **Constat :** le module propose des scans manuels/planifiés via cron interne, applique des limites de fréquence et expose des seuils statiques, mais ne gère ni profils Core Web Vitals multi-device ni budgets partagés comme les sondes synthétiques de SpeedCurve ou PageSpeed Insights API.【F:sitepulse_FR/modules/speed_analyzer.php†L4-L190】
 - **Pistes pro :**
-  - Permettre la publication de vues « lecture seule » partageables (URL signée, iframe, PDF) et la duplication de layouts entre sites.
-  - Ajouter des rôles de lecture/édition, un historique des modifications et une synchronisation multisite pour homogénéiser les tableaux de bord.
-  - Brancher des sources externes (APM, Lighthouse) et proposer des widgets conditionnels pour une expérience type observability suite.
+  - Supporter des scénarios Lighthouse multi-origines (mobile/desktop) avec stockage des runs pour afficher tendances et écarts.
+  - Définir des budgets par page/groupe et déclencher des alertes proactives (Slack, webhook) quand les seuils sont dépassés.
+  - Intégrer des comparaisons concurrentielles (benchmark de 3 sites) pour se rapprocher des offres pro d’analyse de vitesse.
 
+## Module « Error Alerts »
+
+- **Constat :** les contrôles planifiés vérifient la charge CPU et le journal `debug.log`, avec envoi email/webhook conditionnel, mais sans corrélation avec des flux externes ni boucle d’accusé de réception comme dans Datadog Incident Management ou Better Stack.【F:sitepulse_FR/modules/error_alerts.php†L940-L1056】
+- **Pistes pro :**
+  - Ajouter une hiérarchisation des alertes (critique/avertissement) avec escalade multi-canal et pause après acquittement.
+  - Synchroniser les alertes avec des plateformes d’incident (Opsgenie, PagerDuty) et enregistrer les réponses pour bâtir un audit trail.
+  - Fournir un historique consultable des événements (qui, quand, quelle réponse) et des dashboards de MTTR pour rivaliser avec les suites SRE.
