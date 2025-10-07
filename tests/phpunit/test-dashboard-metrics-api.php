@@ -117,6 +117,8 @@ class Sitepulse_Dashboard_Metrics_Api_Test extends WP_UnitTestCase {
         $this->assertArrayHasKey('uptime', $data);
         $this->assertArrayHasKey('logs', $data);
         $this->assertArrayHasKey('speed', $data);
+        $this->assertArrayHasKey('view', $data);
+        $this->assertIsArray($data['view']);
 
         $this->assertSame('24h', get_option(SITEPULSE_OPTION_DASHBOARD_RANGE));
 
@@ -129,6 +131,24 @@ class Sitepulse_Dashboard_Metrics_Api_Test extends WP_UnitTestCase {
 
         $this->assertArrayHasKey('average', $data['speed']);
         $this->assertNotNull($data['speed']['latest']);
+
+        $view = $data['view'];
+        $this->assertSame('24h', $view['range']);
+        $this->assertArrayHasKey('range_label', $view);
+        $this->assertIsString($view['generated_text']);
+        $this->assertNotEmpty($view['generated_text']);
+        $this->assertArrayHasKey('banner', $view);
+        $this->assertIsArray($view['banner']);
+        $this->assertSame('warning', $view['banner']['tone']);
+        $this->assertArrayHasKey('cards', $view);
+        $this->assertArrayHasKey('uptime', $view['cards']);
+        $this->assertArrayHasKey('logs', $view['cards']);
+        $this->assertArrayHasKey('speed', $view['cards']);
+        $this->assertSame('%', $view['cards']['uptime']['value']['unit']);
+        $this->assertSame('status-warn', $view['cards']['logs']['status']['class']);
+        $this->assertArrayHasKey('modules', $view);
+        $this->assertArrayHasKey('log_analyzer', $view['modules']);
+        $this->assertTrue($view['modules']['log_analyzer']);
     }
 
     public function test_invalid_range_falls_back_to_stored_preference(): void {
