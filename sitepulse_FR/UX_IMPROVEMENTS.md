@@ -59,4 +59,36 @@ Ce document compare l'expérience d'administration actuelle de SitePulse à cell
   - Permettre l'enregistrement de vues partagées (lecture seule) et la génération de liens publics ou exports PDF.
   - Introduire une bibliothèque de widgets avec prévisualisation et recommandations contextuelles selon les données disponibles.
 
+## 7. Module « Conseiller de maintenance »
+- **Constat actuel** : l'écran se limite à un bandeau `notice-info` listant les compteurs et à un tableau triable sans hiérarchie visuelle ni surface de risque (sécurité vs fonctionnalité), et les actions rapides renvoient aux écrans WP classiques.【F:sitepulse_FR/modules/maintenance_advisor.php†L162-L295】
+- **Écart vs apps pro** : Des solutions comme ManageWP ou WP Umbrella priorisent les correctifs critiques via des cartes « Security patch », un score de risque global et des scénarios d'automatisation (mise en file batch, création de ticket). Elles combinent également planning et estimation d'effort.
+- **Améliorations proposées** :
+  - **Vue synthétique en cartes** : remplacer le bandeau par trois cartes « Cœur WP », « Plugins », « Thèmes » avec code couleur (green/yellow/red) selon `response` ou `security`, surface d'icône (shield/bolt) et CTA contextuel (« Lancer mise à jour », « Voir changelog ») pour se rapprocher des layouts Ops de ManageWP.
+  - **Score de risque agrégé** : calculer un indicateur 0–100 basé sur le nombre de mises à jour de sécurité (`$row['is_security']`) et l'âge des versions (`$plugin_data->Version`). Afficher ce score dans un widget latéral avec badge « action recommandée » et, en dessous, une timeline d'incidents créés automatiquement via l'API WordPress `wp_insert_post` (type `sitepulse_maintenance_task`).
+  - **Playbook d'exécution** : ajouter une colonne « Étapes » dans le tableau avec boutons « Cloner en staging » et « Créer ticket » (`data-action="create-task"`) qui ouvrent un drawer latéral listant les procédures (à la manière des workflows GitLab). Prévoir un toggle « Ajouter à la campagne de nuit » persistant via option pour aligner les opérations avec les plages de maintenance professionnelles.
+
+## 8. Module « Analyseur d'impact des plugins »
+- **Constat actuel** : la page juxtapose un panneau de métadonnées, quelques filtres numériques et un tableau statique ; les barres d'impact utilisent une couleur fixe et il n'existe ni projection de gain ni corrélation avec le taux d'activation réseau.【F:sitepulse_FR/modules/plugin_impact_scanner.php†L439-L647】
+- **Écart vs apps pro** : Les observabilités pro (New Relic Applied Intelligence, Kinsta APM) livrent des vues combinées (scatter plot impact vs fréquence), proposent des scénarios de mitigation et des alertes proactives (webhooks, tickets).
+- **Améliorations proposées** :
+  - **Visualisation bi-axiale** : ajouter un graphique nuage de points (impact moyen vs poids disque) au-dessus du tableau en s'appuyant sur Chart.js déjà chargé côté modules. Les points utilisent des codes couleur selon `data-is-measured` et la taille selon `samples` pour détecter les plugins à risque élevé.
+  - **Scénarios d'action** : intégrer un panneau latéral « Recommandations » regroupant (1) « remplacer par… » en se basant sur un mapping slug → alternative, (2) « désactiver en heures creuses » via la planification WP-Cron (`wp_schedule_single_event`). Chaque suggestion présente un bouton « Créer tâche » envoyant vers Jira/Linear (webhook configurable) pour imiter les intégrations Ops.
+  - **Alerting & tendances** : mémoriser l'historique `impact` dans l'option et afficher un sparkline + variation % (comparaison dernière semaine) dans la colonne principale. Déclencher une alerte email/Slack (`do_action('sitepulse_plugin_impact_alert')`) quand un plugin dépasse un seuil > 20 % pour reproduire l'approche pro-active de Better Stack.
+
+## 9. Module « Analyseur de vitesse »
+- **Constat actuel** : l'interface affiche un bouton de relance, un graphique d'historique et des tableaux mais n'offre ni segmentation par persona (RUM vs synthétique), ni corrélation avec les seuils Core Web Vitals, ni projection d'impact business.【F:sitepulse_FR/modules/speed_analyzer.php†L1794-L1996】
+- **Écart vs apps pro** : Des produits comme SpeedCurve ou Akamai mPulse mettent en avant des « performance budgets », des scénarios « what-if » et des comparaisons par device/lieu, plus un suivi direct des KPI business (conversion, panier moyen).
+- **Améliorations proposées** :
+  - **Performance Budget & device matrix** : ajouter un header résumant LCP/TTFB/CLS vs budget cible (cards colorées) et une matrice device (desktop/mobile) alimentée par les presets existants. Permettre de définir des budgets dans l'UI (option WordPress) et d'afficher un compteur de dépassement.
+  - **Analyse comparative** : proposer un switch « Benchmarks » qui juxtapose vos mesures à celles de concurrents (import CSV) avec un graphique multi-séries. Les presets existants (`$automation_payload['presets']`) servent à catégoriser par page type (homepage, checkout).
+  - **Storytelling business** : enrichir le bloc Recommandations avec des estimations d'impact (ex. « -100 ms TTFB ≈ +0,7 % conversion ») en s'appuyant sur des coefficients configurables. Ajouter une action « Créer suivi Trello » et un mode « présentation » (pleine largeur, lecture seule) pour partager aux dirigeants.
+
+## 10. Module « Moniteur de ressources »
+- **Constat actuel** : le module empile trois cartes statiques (CPU, mémoire, disque), un historique et un bouton d'actualisation sans projections ni seuils visuels ; les alertes se limitent à des notices textuelles et l'export est caché en bas de page.【F:sitepulse_FR/modules/resource_monitor.php†L678-L755】【F:sitepulse_FR/modules/resource_monitor.php†L1508-L1690】
+- **Écart vs apps pro** : Datadog Infrastructure ou Grafana Cloud proposent des gauges dynamiques, des plages de prévision, et des playbooks d'escalade automatisés (PagerDuty, Opsgenie) directement depuis le module.
+- **Améliorations proposées** :
+  - **Gauges & prévisions** : remplacer les cartes par des jauges semi-circulaires (D3.js) affichant la moyenne, la tendance 24 h et le seuil config (`$thresholds`). Ajouter une projection 7 jours basée sur l'historique (régression simple) pour anticiper la saturation disque.
+  - **Gestion des alertes centralisée** : créer un panneau « Alertes actives » listant les déclenchements récents (`sitepulse_resource_monitor_check_thresholds`) avec état (ouvert, accusé, résolu), assignation et actions rapides (silence 1 h, ouvrir incident). Chaque action déclenche des webhooks (PagerDuty, Slack) paramétrables.
+  - **Exports & rapports** : rendre l'export visible via un bouton primaire « Télécharger rapport » au-dessus du graphique, avec possibilité JSON/CSV (action existante). Ajouter une génération PDF hebdo (lib Dompdf) envoyée automatiquement aux stakeholders pour s'aligner sur les rapports Datadog.
+
 Ces évolutions rapprocheraient l'expérience SitePulse des standards premium tout en conservant la compatibilité avec le back-office WordPress.
