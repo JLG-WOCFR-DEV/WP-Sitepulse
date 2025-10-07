@@ -3,6 +3,8 @@
     --sitepulse-dashboard-card-padding: 20px;
     --sitepulse-dashboard-header-spacing: 24px;
     --sitepulse-dashboard-card-min-width: clamp(220px, 22vw, 320px);
+    container-type: inline-size;
+    container-name: sitepulse-dashboard-preview;
     margin-block: var(--wp--style--block-gap, 0);
 }
 
@@ -52,7 +54,7 @@
     gap: var(--wp--style--block-gap, var(--sitepulse-dashboard-gap, 20px));
 }
 
-@media (min-width: 48rem) {
+@container sitepulse-dashboard-preview (min-width: 48rem) {
     .wp-block-sitepulse-dashboard-preview .sitepulse-grid--cols-2 {
         grid-template-columns: repeat(
             2,
@@ -61,7 +63,7 @@
     }
 }
 
-@media (min-width: 60rem) {
+@container sitepulse-dashboard-preview (min-width: 60rem) {
     .wp-block-sitepulse-dashboard-preview .sitepulse-grid--cols-3,
     .wp-block-sitepulse-dashboard-preview .sitepulse-grid--cols-4 {
         grid-template-columns: repeat(
@@ -71,7 +73,7 @@
     }
 }
 
-@media (min-width: 75rem) {
+@container sitepulse-dashboard-preview (min-width: 75rem) {
     .wp-block-sitepulse-dashboard-preview .sitepulse-grid--cols-4 {
         grid-template-columns: repeat(
             4,
