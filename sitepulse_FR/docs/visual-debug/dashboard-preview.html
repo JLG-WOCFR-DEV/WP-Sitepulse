@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8" />
+    <title>Debug visuel – Aperçu SitePulse</title>
+    <link rel="stylesheet" href="../../blocks/dashboard-preview/style.css" />
+    <link rel="stylesheet" href="../../modules/css/custom-dashboard.css" />
+    <style>
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #f6f7f7;
+            color: #1d2327;
+            padding: 32px;
+        }
+
+        .debug-wrapper {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .debug-wrapper h1 {
+            font-size: 24px;
+            margin-bottom: 16px;
+        }
+
+        .debug-note {
+            margin-bottom: 24px;
+            color: #3c434a;
+        }
+
+        .sitepulse-card {
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .sitepulse-card .sitepulse-card-header h3 {
+            margin: 0 0 8px;
+        }
+
+        .sitepulse-card .sitepulse-card-subtitle {
+            margin: 0 0 16px;
+            color: #50575e;
+        }
+
+        .sitepulse-card .sitepulse-metric {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 18px;
+            margin: 0 0 16px;
+        }
+
+        .sitepulse-legend {
+            list-style: none;
+            margin: 0 0 16px;
+            padding: 0;
+            display: grid;
+            gap: 8px;
+        }
+
+        .sitepulse-legend .label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .sitepulse-legend .badge {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+    </style>
+</head>
+<body>
+    <div class="debug-wrapper">
+        <h1>Débogage visuel – Bloc « Aperçu SitePulse »</h1>
+        <p class="debug-note">
+            Redimensionnez la fenêtre pour vérifier le comportement des colonnes après l'ajout des points de rupture responsives.
+        </p>
+        <div class="wp-block-sitepulse-dashboard-preview sitepulse-dashboard-preview--layout-grid sitepulse-dashboard-preview--density-comfortable sitepulse-dashboard-preview--columns-4">
+            <div class="sitepulse-dashboard-preview__header">
+                <h3>Aperçu SitePulse</h3>
+                <p>Dernières mesures agrégées par vos modules actifs.</p>
+            </div>
+            <div class="sitepulse-grid sitepulse-grid--cols-4 sitepulse-grid--density-comfortable sitepulse-grid--variant-grid">
+                <section class="sitepulse-card sitepulse-card--speed">
+                    <div class="sitepulse-card-header"><h3>Performance PHP</h3></div>
+                    <p class="sitepulse-card-subtitle">Dernier temps de traitement mesuré lors d’un scan récent.</p>
+                    <div class="sitepulse-chart-container">
+                        <div class="sitepulse-chart-placeholder">Graphique simulé</div>
+                    </div>
+                    <p class="sitepulse-metric">
+                        <span class="status-badge status-ok" aria-hidden="true"><span class="status-icon">✅</span><span class="status-text">OK</span></span>
+                        <span class="sitepulse-metric-value">215&nbsp;ms</span>
+                    </p>
+                    <p class="description">En dessous de 200&nbsp;ms, tout va bien. Au-delà de 500&nbsp;ms, investiguez.</p>
+                </section>
+                <section class="sitepulse-card sitepulse-card--uptime">
+                    <div class="sitepulse-card-header"><h3>Disponibilité</h3></div>
+                    <p class="sitepulse-card-subtitle">Taux de réussite des 30 dernières vérifications horaires.</p>
+                    <div class="sitepulse-chart-container">
+                        <div class="sitepulse-chart-placeholder">Graphique simulé</div>
+                    </div>
+                    <p class="sitepulse-metric">
+                        <span class="status-badge status-ok" aria-hidden="true"><span class="status-icon">📈</span><span class="status-text">OK</span></span>
+                        <span class="sitepulse-metric-value">99,4<span class="sitepulse-metric-unit">%</span></span>
+                    </p>
+                    <p class="description">Chaque barre représente une vérification de disponibilité programmée.</p>
+                </section>
+                <section class="sitepulse-card sitepulse-card--database">
+                    <div class="sitepulse-card-header"><h3>Santé de la base</h3></div>
+                    <p class="sitepulse-card-subtitle">Volume des révisions par rapport au budget défini.</p>
+                    <div class="sitepulse-chart-container">
+                        <div class="sitepulse-chart-placeholder">Graphique simulé</div>
+                    </div>
+                    <p class="sitepulse-metric">
+                        <span class="status-badge status-warn" aria-hidden="true"><span class="status-icon">⚠️</span><span class="status-text">Attention</span></span>
+                        <span class="sitepulse-metric-value">340<span class="sitepulse-metric-unit">révisions</span></span>
+                    </p>
+                    <p class="description">Essayez de rester sous la barre des 250 révisions pour éviter les gonflements.</p>
+                </section>
+                <section class="sitepulse-card sitepulse-card--logs">
+                    <div class="sitepulse-card-header"><h3>Journal d’erreurs</h3></div>
+                    <p class="sitepulse-card-subtitle">Répartition des évènements récents.</p>
+                    <div class="sitepulse-chart-container">
+                        <div class="sitepulse-chart-placeholder">Graphique simulé</div>
+                    </div>
+                    <p class="sitepulse-metric">
+                        <span class="status-badge status-warn" aria-hidden="true"><span class="status-icon">⚠️</span><span class="status-text">Surveillance</span></span>
+                        <span class="sitepulse-metric-value">56 alertes</span>
+                    </p>
+                    <ul class="sitepulse-legend">
+                        <li><span class="label"><span class="badge" style="background-color:#a0141e"></span>Erreurs fatales</span><span class="value">3</span></li>
+                        <li><span class="label"><span class="badge" style="background-color:#8a6100"></span>Avertissements</span><span class="value">18</span></li>
+                        <li><span class="label"><span class="badge" style="background-color:#2196F3"></span>Notices</span><span class="value">22</span></li>
+                        <li><span class="label"><span class="badge" style="background-color:#9C27B0"></span>Obsolescences</span><span class="value">13</span></li>
+                    </ul>
+                    <p class="description">Analysez le journal complet depuis l’interface SitePulse pour plus de détails.</p>
+                </section>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
