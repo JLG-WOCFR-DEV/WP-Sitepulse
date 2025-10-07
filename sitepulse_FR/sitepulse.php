@@ -72,6 +72,7 @@ sitepulse_define_constant('SITEPULSE_OPTION_PLUGIN_BASENAME', 'sitepulse_plugin_
 sitepulse_define_constant('SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER', 'sitepulse_error_alert_log_pointer');
 sitepulse_define_constant('SITEPULSE_OPTION_CRON_WARNINGS', 'sitepulse_cron_warnings');
 sitepulse_define_constant('SITEPULSE_OPTION_DEBUG_NOTICES', 'sitepulse_debug_notices');
+sitepulse_define_constant('SITEPULSE_OPTION_DASHBOARD_RANGE', 'sitepulse_dashboard_range');
 sitepulse_define_constant('SITEPULSE_OPTION_SPEED_WARNING_MS', 'sitepulse_speed_warning_ms');
 sitepulse_define_constant('SITEPULSE_OPTION_SPEED_CRITICAL_MS', 'sitepulse_speed_critical_ms');
 sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_WARNING_PERCENT', 'sitepulse_uptime_warning_percent');

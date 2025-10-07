@@ -11,6 +11,7 @@ if (!defined('ABSPATH')) exit; // Exit if accessed directly.
 
 add_action('admin_enqueue_scripts', 'sitepulse_custom_dashboard_enqueue_assets');
 add_action('wp_ajax_sitepulse_save_dashboard_preferences', 'sitepulse_save_dashboard_preferences');
+add_action('rest_api_init', 'sitepulse_custom_dashboard_register_rest_routes');
 
 /**
  * Registers the assets used by the SitePulse dashboard when the page is loaded.
@@ -405,6 +406,864 @@ function sitepulse_sanitize_dashboard_preferences($raw_preferences, $allowed_car
  *     sizes: array<string,string>
  * }
  */
+/**
+ * Returns the option name used to store the preferred dashboard range.
+ *
+ * @return string
+ */
+function sitepulse_custom_dashboard_get_range_option_name() {
+    return defined('SITEPULSE_OPTION_DASHBOARD_RANGE')
+        ? SITEPULSE_OPTION_DASHBOARD_RANGE
+        : 'sitepulse_dashboard_range';
+}
+
+/**
+ * Retrieves the supported time ranges for dashboard metrics.
+ *
+ * @return array<string,array<string,int|string>>
+ */
+function sitepulse_custom_dashboard_get_metric_ranges() {
+    $day_in_seconds = defined('DAY_IN_SECONDS') ? DAY_IN_SECONDS : 86400;
+
+    $ranges = [
+        '24h' => [
+            'id'      => '24h',
+            'label'   => __('Last 24 hours', 'sitepulse'),
+            'seconds' => $day_in_seconds,
+            'days'    => 1,
+        ],
+        '7d' => [
+            'id'      => '7d',
+            'label'   => __('Last 7 days', 'sitepulse'),
+            'seconds' => $day_in_seconds * 7,
+            'days'    => 7,
+        ],
+        '30d' => [
+            'id'      => '30d',
+            'label'   => __('Last 30 days', 'sitepulse'),
+            'seconds' => $day_in_seconds * 30,
+            'days'    => 30,
+        ],
+    ];
+
+    if (function_exists('apply_filters')) {
+        $filtered = apply_filters('sitepulse_dashboard_metric_ranges', $ranges);
+
+        if (is_array($filtered) && !empty($filtered)) {
+            $ranges = $filtered;
+        }
+    }
+
+    $normalized = [];
+
+    foreach ($ranges as $key => $config) {
+        $range_id = '';
+
+        if (is_array($config) && isset($config['id'])) {
+            $range_id = sanitize_key($config['id']);
+        }
+
+        if ($range_id === '') {
+            $range_id = is_string($key) ? sanitize_key($key) : '';
+        }
+
+        if ($range_id === '') {
+            continue;
+        }
+
+        $label = '';
+
+        if (is_array($config) && isset($config['label']) && is_string($config['label'])) {
+            $label = $config['label'];
+        } else {
+            $label = $range_id;
+        }
+
+        $seconds = 0;
+
+        if (is_array($config) && isset($config['seconds'])) {
+            $seconds = (int) $config['seconds'];
+        }
+
+        $days = 0;
+
+        if (is_array($config) && isset($config['days'])) {
+            $days = (int) $config['days'];
+        }
+
+        if ($seconds <= 0) {
+            if ($days > 0) {
+                $seconds = $days * $day_in_seconds;
+            } elseif ($range_id === '24h') {
+                $seconds = $day_in_seconds;
+                $days    = 1;
+            } elseif ($range_id === '7d') {
+                $seconds = $day_in_seconds * 7;
+                $days    = 7;
+            } elseif ($range_id === '30d') {
+                $seconds = $day_in_seconds * 30;
+                $days    = 30;
+            }
+        }
+
+        if ($days <= 0 && $seconds > 0) {
+            $days = max(1, (int) round($seconds / $day_in_seconds));
+        }
+
+        $normalized[$range_id] = [
+            'id'      => $range_id,
+            'label'   => $label,
+            'seconds' => max(0, $seconds),
+            'days'    => max(1, $days),
+        ];
+    }
+
+    if (empty($normalized)) {
+        $normalized = [
+            '7d' => [
+                'id'      => '7d',
+                'label'   => __('Last 7 days', 'sitepulse'),
+                'seconds' => $day_in_seconds * 7,
+                'days'    => 7,
+            ],
+        ];
+    }
+
+    return $normalized;
+}
+
+/**
+ * Returns the default range identifier when no preference is stored.
+ *
+ * @return string
+ */
+function sitepulse_custom_dashboard_get_default_range() {
+    $ranges = sitepulse_custom_dashboard_get_metric_ranges();
+
+    if (isset($ranges['7d'])) {
+        return '7d';
+    }
+
+    $keys = array_keys($ranges);
+
+    return isset($keys[0]) ? $keys[0] : '7d';
+}
+
+/**
+ * Sanitizes a range identifier against the supported configuration.
+ *
+ * @param mixed $value Raw range value.
+ * @return string Sanitized range identifier or an empty string if unsupported.
+ */
+function sitepulse_custom_dashboard_sanitize_range($value) {
+    if (!is_string($value) || $value === '') {
+        return '';
+    }
+
+    $range = sanitize_key($value);
+    $ranges = sitepulse_custom_dashboard_get_metric_ranges();
+
+    if ($range !== '' && isset($ranges[$range])) {
+        return $range;
+    }
+
+    return '';
+}
+
+/**
+ * Retrieves the persisted dashboard range preference.
+ *
+ * @return string
+ */
+function sitepulse_custom_dashboard_get_stored_range() {
+    $option_name = sitepulse_custom_dashboard_get_range_option_name();
+    $stored      = get_option($option_name, '');
+    $sanitized   = sitepulse_custom_dashboard_sanitize_range($stored);
+
+    if ($sanitized !== '') {
+        return $sanitized;
+    }
+
+    return sitepulse_custom_dashboard_get_default_range();
+}
+
+/**
+ * Retrieves the current timestamp using WordPress when possible.
+ *
+ * @return int
+ */
+function sitepulse_custom_dashboard_get_current_timestamp() {
+    if (function_exists('current_time')) {
+        return (int) current_time('timestamp');
+    }
+
+    return time();
+}
+
+/**
+ * Registers the REST API routes powering the dashboard metrics feed.
+ *
+ * @return void
+ */
+function sitepulse_custom_dashboard_register_rest_routes() {
+    if (!function_exists('register_rest_route')) {
+        return;
+    }
+
+    register_rest_route(
+        'sitepulse/v1',
+        '/metrics',
+        [
+            'methods'             => defined('WP_REST_Server::READABLE') ? WP_REST_Server::READABLE : 'GET',
+            'callback'            => 'sitepulse_custom_dashboard_rest_metrics',
+            'permission_callback' => 'sitepulse_custom_dashboard_rest_permission_check',
+            'args'                => [
+                'range' => [
+                    'type'              => 'string',
+                    'required'          => false,
+                    'sanitize_callback' => 'sanitize_key',
+                ],
+            ],
+        ]
+    );
+}
+
+/**
+ * Determines whether the current request can access the metrics endpoint.
+ *
+ * @return bool
+ */
+function sitepulse_custom_dashboard_rest_permission_check() {
+    $capability = function_exists('sitepulse_get_capability')
+        ? sitepulse_get_capability()
+        : 'manage_options';
+
+    return current_user_can($capability);
+}
+
+/**
+ * Builds the payload returned by the metrics endpoint.
+ *
+ * @param string $range Range identifier to compute.
+ * @return array<string,mixed>
+ */
+function sitepulse_custom_dashboard_prepare_metrics_payload($range) {
+    $ranges = sitepulse_custom_dashboard_get_metric_ranges();
+
+    if (!isset($ranges[$range])) {
+        $range = sitepulse_custom_dashboard_get_default_range();
+    }
+
+    $config           = $ranges[$range];
+    $available_ranges = array_values($ranges);
+
+    $uptime = sitepulse_custom_dashboard_calculate_uptime_metrics($range, $config);
+    $logs   = sitepulse_custom_dashboard_analyze_debug_log();
+    $speed  = sitepulse_custom_dashboard_calculate_speed_metrics($range, $config);
+
+    if (is_array($logs)) {
+        $logs['enabled'] = function_exists('sitepulse_is_module_active')
+            ? sitepulse_is_module_active('log_analyzer')
+            : true;
+    }
+
+    $modules_status = [
+        'uptime_tracker' => function_exists('sitepulse_is_module_active')
+            ? sitepulse_is_module_active('uptime_tracker')
+            : true,
+        'log_analyzer'   => function_exists('sitepulse_is_module_active')
+            ? sitepulse_is_module_active('log_analyzer')
+            : true,
+        'speed_analyzer' => function_exists('sitepulse_is_module_active')
+            ? sitepulse_is_module_active('speed_analyzer')
+            : true,
+    ];
+
+    return [
+        'range'            => $range,
+        'available_ranges' => $available_ranges,
+        'generated_at'     => sitepulse_custom_dashboard_get_current_timestamp(),
+        'uptime'           => $uptime,
+        'logs'             => $logs,
+        'speed'            => $speed,
+        'modules'          => $modules_status,
+    ];
+}
+
+/**
+ * REST API callback returning dashboard metrics.
+ *
+ * @param WP_REST_Request $request Incoming REST request.
+ * @return WP_REST_Response
+ */
+function sitepulse_custom_dashboard_rest_metrics($request) {
+    $provided = $request instanceof WP_REST_Request ? $request->get_param('range') : null;
+    $sanitized = sitepulse_custom_dashboard_sanitize_range($provided);
+
+    if ($sanitized !== '') {
+        update_option(sitepulse_custom_dashboard_get_range_option_name(), $sanitized, false);
+        $range = $sanitized;
+    } else {
+        $range = sitepulse_custom_dashboard_get_stored_range();
+    }
+
+    $payload = sitepulse_custom_dashboard_prepare_metrics_payload($range);
+
+    return rest_ensure_response($payload);
+}
+
+/**
+ * Calculates uptime metrics for the selected window.
+ *
+ * @param string               $range  Range identifier.
+ * @param array<string,mixed>  $config Range configuration.
+ * @return array<string,mixed>
+ */
+function sitepulse_custom_dashboard_calculate_uptime_metrics($range, $config) {
+    $days = isset($config['days']) ? (int) $config['days'] : 0;
+
+    if ($days < 1) {
+        $days = 1;
+    }
+
+    $option_key = defined('SITEPULSE_OPTION_UPTIME_ARCHIVE')
+        ? SITEPULSE_OPTION_UPTIME_ARCHIVE
+        : 'sitepulse_uptime_archive';
+
+    $archive = get_option($option_key, []);
+
+    if (!is_array($archive)) {
+        $archive = [];
+    }
+
+    $current_metrics = function_exists('sitepulse_calculate_uptime_window_metrics')
+        ? sitepulse_calculate_uptime_window_metrics($archive, $days)
+        : sitepulse_custom_dashboard_calculate_uptime_window_metrics($archive, $days);
+
+    $previous_metrics = [];
+
+    if ($days > 0 && count($archive) > $days) {
+        $previous_archive = array_slice($archive, 0, count($archive) - $days, true);
+        $previous_metrics = function_exists('sitepulse_calculate_uptime_window_metrics')
+            ? sitepulse_calculate_uptime_window_metrics($previous_archive, $days)
+            : sitepulse_custom_dashboard_calculate_uptime_window_metrics($previous_archive, $days);
+    }
+
+    if (!is_array($previous_metrics)) {
+        $previous_metrics = [];
+    }
+
+    $uptime_value   = isset($current_metrics['uptime']) ? (float) $current_metrics['uptime'] : null;
+    $latency_avg    = isset($current_metrics['latency_avg']) ? $current_metrics['latency_avg'] : null;
+    $ttfb_avg       = isset($current_metrics['ttfb_avg']) ? $current_metrics['ttfb_avg'] : null;
+    $violation_count = isset($current_metrics['violations']) ? (int) $current_metrics['violations'] : 0;
+
+    return [
+        'range'  => $range,
+        'days'   => isset($current_metrics['days']) ? (int) $current_metrics['days'] : 0,
+        'totals' => [
+            'total'   => isset($current_metrics['total_checks']) ? (int) $current_metrics['total_checks'] : 0,
+            'up'      => isset($current_metrics['up_checks']) ? (int) $current_metrics['up_checks'] : 0,
+            'down'    => isset($current_metrics['down_checks']) ? (int) $current_metrics['down_checks'] : 0,
+            'unknown' => isset($current_metrics['unknown_checks']) ? (int) $current_metrics['unknown_checks'] : 0,
+        ],
+        'uptime'       => $uptime_value !== null ? round($uptime_value, 4) : null,
+        'latency_avg'  => ($latency_avg !== null && is_numeric($latency_avg)) ? round((float) $latency_avg, 2) : null,
+        'ttfb_avg'     => ($ttfb_avg !== null && is_numeric($ttfb_avg)) ? round((float) $ttfb_avg, 2) : null,
+        'violations'   => $violation_count,
+        'trend'        => [
+            'uptime'      => sitepulse_custom_dashboard_calculate_trend($uptime_value, $previous_metrics['uptime'] ?? null, 4),
+            'latency_avg' => sitepulse_custom_dashboard_calculate_trend($latency_avg, $previous_metrics['latency_avg'] ?? null, 2),
+            'ttfb_avg'    => sitepulse_custom_dashboard_calculate_trend($ttfb_avg, $previous_metrics['ttfb_avg'] ?? null, 2),
+            'violations'  => sitepulse_custom_dashboard_calculate_trend($violation_count, $previous_metrics['violations'] ?? null, 0),
+        ],
+    ];
+}
+
+/**
+ * Fallback calculation for uptime metrics when the Uptime module is unavailable.
+ *
+ * @param array<int|string,mixed> $archive Archive entries.
+ * @param int                     $days    Window size in days.
+ * @return array<string,mixed>
+ */
+function sitepulse_custom_dashboard_calculate_uptime_window_metrics($archive, $days) {
+    if (!is_array($archive) || empty($archive) || $days < 1) {
+        return [
+            'days'           => 0,
+            'total_checks'   => 0,
+            'up_checks'      => 0,
+            'down_checks'    => 0,
+            'unknown_checks' => 0,
+            'uptime'         => 100.0,
+            'latency_sum'    => 0.0,
+            'latency_count'  => 0,
+            'latency_avg'    => null,
+            'ttfb_sum'       => 0.0,
+            'ttfb_count'     => 0,
+            'ttfb_avg'       => null,
+            'violations'     => 0,
+        ];
+    }
+
+    $window = array_slice($archive, -$days, null, true);
+
+    $totals = [
+        'days'           => count($window),
+        'total_checks'   => 0,
+        'up_checks'      => 0,
+        'down_checks'    => 0,
+        'unknown_checks' => 0,
+        'uptime'         => 100.0,
+        'latency_sum'    => 0.0,
+        'latency_count'  => 0,
+        'latency_avg'    => null,
+        'ttfb_sum'       => 0.0,
+        'ttfb_count'     => 0,
+        'ttfb_avg'       => null,
+        'violations'     => 0,
+    ];
+
+    foreach ($window as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+
+        $day_total   = isset($entry['total']) ? (int) $entry['total'] : 0;
+        $maintenance = isset($entry['maintenance']) ? (int) $entry['maintenance'] : 0;
+        $effective   = max(0, $day_total - $maintenance);
+
+        $totals['total_checks']   += $effective;
+        $totals['up_checks']      += isset($entry['up']) ? (int) $entry['up'] : 0;
+        $totals['down_checks']    += isset($entry['down']) ? (int) $entry['down'] : 0;
+        $totals['unknown_checks'] += isset($entry['unknown']) ? (int) $entry['unknown'] : 0;
+        $totals['latency_sum']    += isset($entry['latency_sum']) ? (float) $entry['latency_sum'] : 0.0;
+        $totals['latency_count']  += isset($entry['latency_count']) ? (int) $entry['latency_count'] : 0;
+        $totals['ttfb_sum']       += isset($entry['ttfb_sum']) ? (float) $entry['ttfb_sum'] : 0.0;
+        $totals['ttfb_count']     += isset($entry['ttfb_count']) ? (int) $entry['ttfb_count'] : 0;
+        $totals['violations']     += isset($entry['violations']) ? (int) $entry['violations'] : 0;
+    }
+
+    if ($totals['total_checks'] > 0) {
+        $totals['uptime'] = ($totals['up_checks'] / $totals['total_checks']) * 100;
+    }
+
+    if ($totals['latency_count'] > 0) {
+        $totals['latency_avg'] = $totals['latency_sum'] / $totals['latency_count'];
+    }
+
+    if ($totals['ttfb_count'] > 0) {
+        $totals['ttfb_avg'] = $totals['ttfb_sum'] / $totals['ttfb_count'];
+    }
+
+    return $totals;
+}
+
+/**
+ * Computes a numeric trend between the current and previous values.
+ *
+ * @param mixed $current   Current measurement.
+ * @param mixed $previous  Previous measurement.
+ * @param int   $precision Number of decimals to keep. Zero forces an integer delta.
+ * @return float|int|null
+ */
+function sitepulse_custom_dashboard_calculate_trend($current, $previous, $precision = 2) {
+    if (!is_numeric($current) || !is_numeric($previous)) {
+        return null;
+    }
+
+    $delta = (float) $current - (float) $previous;
+
+    if ($precision <= 0) {
+        return (int) round($delta);
+    }
+
+    return round($delta, $precision);
+}
+
+/**
+ * Reads and summarises the WordPress debug log for dashboard usage.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_custom_dashboard_analyze_debug_log($force_refresh = false) {
+    static $cached = null;
+
+    if (!$force_refresh && $cached !== null) {
+        return $cached;
+    }
+
+    $counts = [
+        'fatal'      => 0,
+        'warning'    => 0,
+        'notice'     => 0,
+        'deprecated' => 0,
+    ];
+
+    $status   = 'status-ok';
+    $summary  = __('Log is clean.', 'sitepulse');
+    $metadata = null;
+    $truncated = false;
+
+    $log_file = function_exists('sitepulse_get_wp_debug_log_path')
+        ? sitepulse_get_wp_debug_log_path()
+        : null;
+
+    $readable = false;
+
+    if ($log_file === null) {
+        $status  = 'status-warn';
+        $summary = __('Debug log not configured.', 'sitepulse');
+    } elseif (!file_exists($log_file)) {
+        $status  = 'status-warn';
+        $summary = sprintf(__('Log file not found (%s).', 'sitepulse'), $log_file);
+    } elseif (!is_readable($log_file)) {
+        $status  = 'status-warn';
+        $summary = sprintf(__('Unable to read log file (%s).', 'sitepulse'), $log_file);
+    } else {
+        $readable  = true;
+        $log_lines = sitepulse_get_recent_log_lines($log_file, 200, 131072, true);
+
+        if ($log_lines === null) {
+            $status  = 'status-warn';
+            $summary = sprintf(__('Unable to read log file (%s).', 'sitepulse'), $log_file);
+        } else {
+            $lines = [];
+
+            if (is_array($log_lines) && isset($log_lines['lines'])) {
+                $lines     = (array) $log_lines['lines'];
+                $metadata  = $log_lines;
+                $truncated = !empty($log_lines['truncated']);
+            } else {
+                $lines = (array) $log_lines;
+            }
+
+            if (empty($lines)) {
+                $summary = __('No recent log entries.', 'sitepulse');
+
+                if (is_array($metadata)) {
+                    $metadata['lines'] = [];
+                }
+            } else {
+                $content = implode("\n", $lines);
+
+                $patterns = [
+                    'fatal'      => '/PHP (Fatal error|Parse error|Uncaught)/i',
+                    'warning'    => '/PHP Warning/i',
+                    'notice'     => '/PHP Notice/i',
+                    'deprecated' => '/PHP Deprecated/i',
+                ];
+
+                foreach ($patterns as $type => $pattern) {
+                    $matches        = preg_match_all($pattern, $content, $ignore_matches);
+                    $counts[$type]  = $matches ? (int) $matches : 0;
+                }
+
+                if ($counts['fatal'] > 0) {
+                    $status  = 'status-bad';
+                    $summary = __('Fatal errors detected in the debug log.', 'sitepulse');
+                } elseif ($counts['warning'] > 0 || $counts['deprecated'] > 0) {
+                    $status  = 'status-warn';
+                    $summary = __('Warnings present in the debug log.', 'sitepulse');
+                } else {
+                    $summary = __('No critical events detected.', 'sitepulse');
+
+                    if ($truncated) {
+                        $summary .= ' ' . __('(Only the tail of the log is displayed.)', 'sitepulse');
+                    }
+                }
+            }
+        }
+    }
+
+    $chart = [
+        'type'      => 'doughnut',
+        'labels'    => [
+            __('Fatal errors', 'sitepulse'),
+            __('Warnings', 'sitepulse'),
+            __('Notices', 'sitepulse'),
+            __('Deprecated notices', 'sitepulse'),
+        ],
+        'datasets'  => array_sum($counts) > 0
+            ? [[
+                'data'            => array_values($counts),
+                'backgroundColor' => ['#ff3b30', '#ff9500', '#007bff', '#af52de'],
+                'borderWidth'     => 0,
+            ]]
+            : [],
+        'empty'     => array_sum($counts) === 0,
+        'status'    => $status,
+        'truncated' => $truncated,
+    ];
+
+    $detailed_metadata = [
+        'path'       => $log_file,
+        'available'  => $log_file !== null,
+        'readable'   => $readable,
+        'truncated'  => $truncated,
+        'bytes_read' => is_array($metadata) && isset($metadata['bytes_read']) ? (int) $metadata['bytes_read'] : null,
+        'file_size'  => is_array($metadata) && isset($metadata['file_size']) ? (int) $metadata['file_size'] : null,
+        'last_modified' => is_array($metadata) && isset($metadata['last_modified'])
+            ? (int) $metadata['last_modified']
+            : null,
+    ];
+
+    if (is_array($metadata) && isset($metadata['lines'])) {
+        $detailed_metadata['lines'] = (array) $metadata['lines'];
+    }
+
+    $cached = [
+        'card' => [
+            'status'  => $status,
+            'summary' => $summary,
+            'counts'  => $counts,
+            'meta'    => $metadata,
+        ],
+        'chart'     => $chart,
+        'metadata'  => $detailed_metadata,
+    ];
+
+    return $cached;
+}
+
+/**
+ * Normalises the stored speed history when the Speed Analyzer module is inactive.
+ *
+ * @return array<int,array{timestamp:int,server_processing_ms:float}>
+ */
+function sitepulse_custom_dashboard_get_speed_history() {
+    if (function_exists('sitepulse_speed_analyzer_get_history_data')) {
+        return sitepulse_speed_analyzer_get_history_data();
+    }
+
+    $option_key = defined('SITEPULSE_OPTION_SPEED_SCAN_HISTORY')
+        ? SITEPULSE_OPTION_SPEED_SCAN_HISTORY
+        : 'sitepulse_speed_scan_history';
+
+    $history = get_option($option_key, []);
+
+    if (!is_array($history)) {
+        return [];
+    }
+
+    $normalized = [];
+
+    foreach ($history as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+
+        if (!isset($entry['timestamp'], $entry['server_processing_ms'])) {
+            continue;
+        }
+
+        if (!is_numeric($entry['timestamp']) || !is_numeric($entry['server_processing_ms'])) {
+            continue;
+        }
+
+        $normalized[] = [
+            'timestamp'            => max(0, (int) $entry['timestamp']),
+            'server_processing_ms' => max(0.0, (float) $entry['server_processing_ms']),
+        ];
+    }
+
+    usort(
+        $normalized,
+        static function ($a, $b) {
+            return $a['timestamp'] <=> $b['timestamp'];
+        }
+    );
+
+    return $normalized;
+}
+
+/**
+ * Resolves the status of a speed measurement against the configured thresholds.
+ *
+ * @param float|int|null        $value      Measurement in milliseconds.
+ * @param array<string,int>     $thresholds Warning and critical thresholds.
+ * @return string
+ */
+function sitepulse_custom_dashboard_resolve_speed_status($value, $thresholds) {
+    if (function_exists('sitepulse_speed_analyzer_resolve_status')) {
+        return sitepulse_speed_analyzer_resolve_status($value, $thresholds);
+    }
+
+    if (!is_numeric($value)) {
+        return 'status-warn';
+    }
+
+    $warning  = isset($thresholds['warning']) ? (int) $thresholds['warning'] : 0;
+    $critical = isset($thresholds['critical']) ? (int) $thresholds['critical'] : 0;
+    $value    = (float) $value;
+
+    if ($critical > 0 && $value >= $critical) {
+        return 'status-bad';
+    }
+
+    if ($warning > 0 && $value >= $warning) {
+        return 'status-warn';
+    }
+
+    return 'status-ok';
+}
+
+/**
+ * Retrieves the configured speed thresholds without requiring the Speed module.
+ *
+ * @return array<string,int>
+ */
+function sitepulse_custom_dashboard_get_speed_thresholds_for_dashboard() {
+    if (function_exists('sitepulse_get_speed_thresholds')) {
+        $thresholds = sitepulse_get_speed_thresholds();
+
+        if (is_array($thresholds)) {
+            return $thresholds;
+        }
+    }
+
+    $default_warning  = defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200;
+    $default_critical = defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? (int) SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500;
+
+    $warning_option  = defined('SITEPULSE_OPTION_SPEED_WARNING_MS') ? SITEPULSE_OPTION_SPEED_WARNING_MS : 'sitepulse_speed_warning_ms';
+    $critical_option = defined('SITEPULSE_OPTION_SPEED_CRITICAL_MS') ? SITEPULSE_OPTION_SPEED_CRITICAL_MS : 'sitepulse_speed_critical_ms';
+
+    $warning  = (int) get_option($warning_option, $default_warning);
+    $critical = (int) get_option($critical_option, $default_critical);
+
+    if ($warning <= 0) {
+        $warning = $default_warning;
+    }
+
+    if ($critical <= 0 || $critical <= $warning) {
+        $critical = max($warning + 1, $default_critical);
+    }
+
+    return [
+        'warning'  => $warning,
+        'critical' => $critical,
+    ];
+}
+
+/**
+ * Calculates the arithmetic mean of speed measurements.
+ *
+ * @param array<int,array<string,float|int>> $entries History entries.
+ * @return float|null
+ */
+function sitepulse_custom_dashboard_average_measurements($entries) {
+    if (empty($entries) || !is_array($entries)) {
+        return null;
+    }
+
+    $sum   = 0.0;
+    $count = 0;
+
+    foreach ($entries as $entry) {
+        if (!is_array($entry) || !isset($entry['server_processing_ms'])) {
+            continue;
+        }
+
+        if (!is_numeric($entry['server_processing_ms'])) {
+            continue;
+        }
+
+        $sum   += (float) $entry['server_processing_ms'];
+        $count++;
+    }
+
+    if ($count === 0) {
+        return null;
+    }
+
+    return $sum / $count;
+}
+
+/**
+ * Aggregates speed metrics for the requested window.
+ *
+ * @param string              $range  Range identifier.
+ * @param array<string,mixed> $config Range configuration.
+ * @return array<string,mixed>
+ */
+function sitepulse_custom_dashboard_calculate_speed_metrics($range, $config) {
+    $history = sitepulse_custom_dashboard_get_speed_history();
+
+    $window_seconds = isset($config['seconds']) ? (int) $config['seconds'] : 0;
+
+    if ($window_seconds < 0) {
+        $window_seconds = 0;
+    }
+
+    $now          = sitepulse_custom_dashboard_get_current_timestamp();
+    $window_start = $window_seconds > 0 ? $now - $window_seconds : 0;
+
+    $current_entries  = [];
+    $previous_entries = [];
+
+    if (!empty($history)) {
+        foreach ($history as $entry) {
+            if (!is_array($entry) || !isset($entry['timestamp'])) {
+                continue;
+            }
+
+            $timestamp = (int) $entry['timestamp'];
+
+            if ($window_seconds <= 0) {
+                $current_entries[] = $entry;
+                continue;
+            }
+
+            if ($timestamp >= $window_start) {
+                $current_entries[] = $entry;
+            } elseif ($timestamp >= ($window_start - $window_seconds)) {
+                $previous_entries[] = $entry;
+            }
+        }
+    }
+
+    $current_avg  = sitepulse_custom_dashboard_average_measurements($current_entries);
+    $previous_avg = sitepulse_custom_dashboard_average_measurements($previous_entries);
+
+    $thresholds = sitepulse_custom_dashboard_get_speed_thresholds_for_dashboard();
+
+    $latest_entry = null;
+
+    if (!empty($current_entries)) {
+        $latest_entry = $current_entries[count($current_entries) - 1];
+    } elseif (!empty($history)) {
+        $latest_entry = $history[count($history) - 1];
+    }
+
+    $latest_payload = null;
+
+    if (is_array($latest_entry)) {
+        $latest_payload = [
+            'timestamp'            => isset($latest_entry['timestamp']) ? (int) $latest_entry['timestamp'] : 0,
+            'server_processing_ms' => isset($latest_entry['server_processing_ms'])
+                ? round((float) $latest_entry['server_processing_ms'], 2)
+                : null,
+            'status'              => sitepulse_custom_dashboard_resolve_speed_status(
+                $latest_entry['server_processing_ms'] ?? null,
+                $thresholds
+            ),
+        ];
+    }
+
+    return [
+        'range'             => $range,
+        'window_seconds'    => $window_seconds,
+        'samples'           => count($current_entries),
+        'previous_samples'  => count($previous_entries),
+        'average'           => $current_avg !== null ? round($current_avg, 2) : null,
+        'previous_average'  => $previous_avg !== null ? round($previous_avg, 2) : null,
+        'trend'             => sitepulse_custom_dashboard_calculate_trend($current_avg, $previous_avg, 2),
+        'latest'            => $latest_payload,
+        'thresholds'        => $thresholds,
+        'history_available' => !empty($history),
+    ];
+}
+
 function sitepulse_get_dashboard_preferences($user_id = 0, $allowed_cards = null) {
     if (!is_int($user_id) || $user_id <= 0) {
         $user_id = get_current_user_id();
@@ -954,110 +1813,20 @@ function sitepulse_get_dashboard_preview_context() {
     }
 
     if ($is_logs_enabled) {
-        $log_file = function_exists('sitepulse_get_wp_debug_log_path') ? sitepulse_get_wp_debug_log_path() : null;
-        $log_status_class = 'status-ok';
-        $log_summary = __('Log is clean.', 'sitepulse');
-        $log_counts = [
-            'fatal'      => 0,
-            'warning'    => 0,
-            'notice'     => 0,
-            'deprecated' => 0,
-        ];
-        $log_chart_empty = true;
-        $log_meta = null;
-        $log_truncated = false;
+        $log_snapshot = sitepulse_custom_dashboard_analyze_debug_log();
+        $log_chart    = isset($log_snapshot['chart']) ? $log_snapshot['chart'] : [];
 
-        if ($log_file === null) {
-            $log_status_class = 'status-warn';
-            $log_summary = __('Debug log not configured.', 'sitepulse');
-        } elseif (!file_exists($log_file)) {
-            $log_status_class = 'status-warn';
-            $log_summary = sprintf(__('Log file not found (%s).', 'sitepulse'), esc_html($log_file));
-        } elseif (!is_readable($log_file)) {
-            $log_status_class = 'status-warn';
-            $log_summary = sprintf(__('Unable to read log file (%s).', 'sitepulse'), esc_html($log_file));
-        } else {
-            $recent_logs_data = sitepulse_get_recent_log_lines($log_file, 200, 131072, true);
-
-            if (is_array($recent_logs_data) && array_key_exists('lines', $recent_logs_data)) {
-                $recent_logs   = $recent_logs_data['lines'];
-                $log_meta      = $recent_logs_data;
-                $log_truncated = !empty($recent_logs_data['truncated']);
-            } else {
-                $recent_logs = $recent_logs_data;
-            }
-
-            if ($recent_logs === null) {
-                $log_status_class = 'status-warn';
-                $log_summary = sprintf(__('Unable to read log file (%s).', 'sitepulse'), esc_html($log_file));
-            } elseif (empty($recent_logs)) {
-                $log_summary = __('No recent log entries.', 'sitepulse');
-                if ($log_meta !== null) {
-                    $log_meta['lines'] = [];
-                }
-            } else {
-                $log_chart_empty = false;
-                $log_content = implode("\n", $recent_logs);
-
-                $patterns = [
-                    'fatal'      => '/PHP (Fatal error|Parse error|Uncaught)/i',
-                    'warning'    => '/PHP Warning/i',
-                    'notice'     => '/PHP Notice/i',
-                    'deprecated' => '/PHP Deprecated/i',
-                ];
-
-                foreach ($patterns as $type => $pattern) {
-                    $matches = preg_match_all($pattern, $log_content, $ignore_matches);
-                    $log_counts[$type] = $matches ? (int) $matches : 0;
-                }
-
-                if ($log_counts['fatal'] > 0) {
-                    $log_status_class = 'status-bad';
-                    $log_summary = __('Fatal errors detected in the debug log.', 'sitepulse');
-                } elseif ($log_counts['warning'] > 0 || $log_counts['deprecated'] > 0) {
-                    $log_status_class = 'status-warn';
-                    $log_summary = __('Warnings present in the debug log.', 'sitepulse');
-                } else {
-                    $log_summary = __('No critical events detected.', 'sitepulse');
-                    if ($log_truncated) {
-                        $log_summary .= ' ' . __('(Only the tail of the log is displayed.)', 'sitepulse');
-                    }
-                }
-            }
+        if (!empty($log_chart['datasets']) && isset($log_chart['datasets'][0]) && is_array($log_chart['datasets'][0])) {
+            $log_chart['datasets'][0]['backgroundColor'] = [
+                $palette['red'],
+                $palette['amber'],
+                $palette['blue'],
+                $palette['purple'],
+            ];
         }
 
-        $log_chart = [
-            'type'     => 'doughnut',
-            'labels'   => [
-                __('Fatal errors', 'sitepulse'),
-                __('Warnings', 'sitepulse'),
-                __('Notices', 'sitepulse'),
-                __('Deprecated notices', 'sitepulse'),
-            ],
-            'datasets' => $log_chart_empty ? [] : [
-                [
-                    'data' => array_values($log_counts),
-                    'backgroundColor' => [
-                        $palette['red'],
-                        $palette['amber'],
-                        $palette['blue'],
-                        $palette['purple'],
-                    ],
-                    'borderWidth' => 0,
-                ],
-            ],
-            'empty'   => $log_chart_empty,
-            'status'  => $log_status_class,
-            'truncated' => $log_truncated,
-        ];
-
         $charts_payload['logs'] = $log_chart;
-        $context['modules']['logs']['card'] = [
-            'status'  => $log_status_class,
-            'summary' => $log_summary,
-            'counts'  => $log_counts,
-            'meta'    => $log_meta,
-        ];
+        $context['modules']['logs']['card']  = isset($log_snapshot['card']) ? $log_snapshot['card'] : null;
         $context['modules']['logs']['chart'] = $log_chart;
     }
 
@@ -1671,92 +2440,20 @@ function sitepulse_custom_dashboards_page() {
     $logs_card = null;
 
     if ($is_logs_enabled) {
-        $log_file = function_exists('sitepulse_get_wp_debug_log_path') ? sitepulse_get_wp_debug_log_path() : null;
-        $log_status_class = 'status-ok';
-        $log_summary = __('Log is clean.', 'sitepulse');
-        $log_counts = [
-            'fatal'      => 0,
-            'warning'    => 0,
-            'notice'     => 0,
-            'deprecated' => 0,
-        ];
-        $log_chart_empty = true;
+        $log_snapshot = sitepulse_custom_dashboard_analyze_debug_log();
+        $log_chart    = isset($log_snapshot['chart']) ? $log_snapshot['chart'] : [];
 
-        if ($log_file === null) {
-            $log_status_class = 'status-warn';
-            $log_summary = __('Debug log not configured.', 'sitepulse');
-        } elseif (!file_exists($log_file)) {
-            $log_status_class = 'status-warn';
-            $log_summary = sprintf(__('Log file not found (%s).', 'sitepulse'), esc_html($log_file));
-        } elseif (!is_readable($log_file)) {
-            $log_status_class = 'status-warn';
-            $log_summary = sprintf(__('Unable to read log file (%s).', 'sitepulse'), esc_html($log_file));
-        } else {
-            $recent_logs = sitepulse_get_recent_log_lines($log_file, 200, 131072);
-
-            if ($recent_logs === null) {
-                $log_status_class = 'status-warn';
-                $log_summary = sprintf(__('Unable to read log file (%s).', 'sitepulse'), esc_html($log_file));
-            } elseif (empty($recent_logs)) {
-                $log_summary = __('No recent log entries.', 'sitepulse');
-            } else {
-                $log_chart_empty = false;
-                $log_content = implode("\n", $recent_logs);
-
-                $patterns = [
-                    'fatal'      => '/PHP (Fatal error|Parse error|Uncaught)/i',
-                    'warning'    => '/PHP Warning/i',
-                    'notice'     => '/PHP Notice/i',
-                    'deprecated' => '/PHP Deprecated/i',
-                ];
-
-                foreach ($patterns as $type => $pattern) {
-                    $matches = preg_match_all($pattern, $log_content, $ignore_matches);
-                    $log_counts[$type] = $matches ? (int) $matches : 0;
-                }
-
-                if ($log_counts['fatal'] > 0) {
-                    $log_status_class = 'status-bad';
-                    $log_summary = __('Fatal errors detected in the debug log.', 'sitepulse');
-                } elseif ($log_counts['warning'] > 0 || $log_counts['deprecated'] > 0) {
-                    $log_status_class = 'status-warn';
-                    $log_summary = __('Warnings present in the debug log.', 'sitepulse');
-                } else {
-                    $log_summary = __('No critical events detected.', 'sitepulse');
-                }
-            }
+        if (!empty($log_chart['datasets']) && isset($log_chart['datasets'][0]) && is_array($log_chart['datasets'][0])) {
+            $log_chart['datasets'][0]['backgroundColor'] = [
+                $palette['red'],
+                $palette['amber'],
+                $palette['blue'],
+                $palette['purple'],
+            ];
         }
 
-        $log_chart = [
-            'type'     => 'doughnut',
-            'labels'   => [
-                __('Fatal errors', 'sitepulse'),
-                __('Warnings', 'sitepulse'),
-                __('Notices', 'sitepulse'),
-                __('Deprecated notices', 'sitepulse'),
-            ],
-            'datasets' => $log_chart_empty ? [] : [
-                [
-                    'data' => array_values($log_counts),
-                    'backgroundColor' => [
-                        $palette['red'],
-                        $palette['amber'],
-                        $palette['blue'],
-                        $palette['purple'],
-                    ],
-                    'borderWidth' => 0,
-                ],
-            ],
-            'empty'   => $log_chart_empty,
-            'status'  => $log_status_class,
-        ];
-
         $charts_payload['logs'] = $log_chart;
-        $logs_card = [
-            'status' => $log_status_class,
-            'summary' => $log_summary,
-            'counts'  => $log_counts,
-        ];
+        $logs_card = isset($log_snapshot['card']) ? $log_snapshot['card'] : null;
     }
 
     $resource_card = null;
