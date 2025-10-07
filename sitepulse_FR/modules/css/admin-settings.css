@@ -1,10 +1,26 @@
 .sitepulse-settings-wrap {
     max-width: 1100px;
+    --sitepulse-surface: var(--wp-admin-color-gray-0, #ffffff);
+    --sitepulse-surface-subtle: var(--wp-admin-color-gray-50, #f6f7f7);
+    --sitepulse-border: var(--wp-admin-color-gray-200, #c3c4c7);
+    --sitepulse-border-strong: var(--wp-admin-color-gray-300, #b5bcc2);
+    --sitepulse-text: var(--wp-admin-color-gray-900, #1d2327);
+    --sitepulse-text-muted: var(--wp-admin-color-gray-700, #50575e);
+    --sitepulse-text-subtle: var(--wp-admin-color-gray-600, #646970);
+    --sitepulse-accent: var(--wp-admin-theme-color, #2271b1);
+    --sitepulse-accent-strong: var(--wp-admin-theme-color-darker-20, #195c8f);
+    --sitepulse-focus-ring: rgba(34, 113, 177, 0.35);
+    --sitepulse-success-text: #047857;
+    --sitepulse-success-bg: #ecfdf5;
+    --sitepulse-warning-text: #b45309;
+    --sitepulse-warning-bg: #fef3c7;
+    --sitepulse-critical-text: #b91c1c;
+    --sitepulse-critical-bg: #fee2e2;
 }
 
 .sitepulse-settings-intro,
 .sitepulse-section-intro {
-    color: #4a5568;
+    color: var(--sitepulse-text-subtle);
     font-size: 14px;
     line-height: 1.6;
     margin: 0 0 16px;
@@ -18,9 +34,9 @@
     display: flex;
     gap: 24px;
     align-items: flex-start;
-    background: #fff;
-    border: 1px solid #dcdfe5;
-    border-left: 4px solid #2271b1;
+    background: var(--sitepulse-surface);
+    border: 1px solid var(--sitepulse-border);
+    border-left: 4px solid var(--sitepulse-accent);
     border-radius: 6px;
     padding: 24px;
     margin-bottom: 24px;
@@ -34,8 +50,8 @@
     width: 52px;
     height: 52px;
     border-radius: 50%;
-    background: #f0f6fc;
-    color: #1d2327;
+    background: var(--sitepulse-surface-subtle);
+    color: var(--sitepulse-text);
     flex-shrink: 0;
 }
 
@@ -61,7 +77,7 @@
 .sitepulse-overview-callout__title {
     font-size: 18px;
     font-weight: 600;
-    color: #1d2327;
+    color: var(--sitepulse-text);
     margin: 0;
 }
 
@@ -72,16 +88,18 @@
     padding: 4px 12px;
     text-transform: uppercase;
     letter-spacing: 0.4px;
+    background: var(--sitepulse-warning-bg);
+    color: var(--sitepulse-warning-text);
 }
 
 .sitepulse-overview-callout__badge.is-complete {
-    background: #ecfdf5;
-    color: #047857;
+    background: var(--sitepulse-success-bg);
+    color: var(--sitepulse-success-text);
 }
 
 .sitepulse-overview-callout__badge.is-progress {
-    background: #fef3c7;
-    color: #b45309;
+    background: var(--sitepulse-warning-bg);
+    color: var(--sitepulse-warning-text);
 }
 
 .sitepulse-overview-callout__body {
@@ -99,7 +117,7 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.4px;
-    color: #4a5568;
+    color: var(--sitepulse-text-subtle);
     margin: 0 0 8px;
 }
 
@@ -121,7 +139,7 @@
 .sitepulse-overview-callout__status-label {
     font-size: 13px;
     font-weight: 600;
-    color: #1d2327;
+    color: var(--sitepulse-text);
 }
 
 .sitepulse-overview-callout__status-content {
@@ -132,7 +150,7 @@
 
 .sitepulse-overview-callout__description {
     margin: 0;
-    color: #4a5568;
+    color: var(--sitepulse-text-subtle);
     font-size: 13px;
     line-height: 1.5;
 }
@@ -140,7 +158,7 @@
 .sitepulse-overview-callout__inline-link {
     font-size: 12px;
     font-weight: 600;
-    color: #2271b1;
+    color: var(--sitepulse-accent);
     text-decoration: none;
 }
 
@@ -160,38 +178,15 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 14px;
-    border-radius: 4px;
-    border: 1px solid #d0d5dd;
-    background: #f8fafc;
-    color: #1d2327;
-    font-size: 13px;
+    text-decoration: none;
+}
+
+.sitepulse-overview-callout__action.button {
     font-weight: 600;
-    text-decoration: none;
-    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.sitepulse-overview-callout__action.is-primary {
-    background: #2271b1;
-    border-color: #2271b1;
-    color: #fff;
-}
-
-.sitepulse-overview-callout__action:hover,
-.sitepulse-overview-callout__action:focus {
-    text-decoration: none;
-    box-shadow: 0 0 0 1px rgba(34, 113, 177, 0.15);
-}
-
-.sitepulse-overview-callout__action:focus-visible {
-    outline: 2px solid #2271b1;
-    outline-offset: 2px;
-}
-
-.sitepulse-overview-callout__action.is-primary:hover,
-.sitepulse-overview-callout__action.is-primary:focus {
-    background: #195c8f;
-    border-color: #195c8f;
+.sitepulse-overview-callout__action.button:focus-visible {
+    box-shadow: 0 0 0 var(--wp-admin-border-width-focus, 2px) var(--sitepulse-focus-ring);
 }
 
 @media (max-width: 782px) {
@@ -223,15 +218,15 @@
 
 .sitepulse-settings-tabs .sitepulse-tab-link.nav-tab-active,
 .sitepulse-settings-tabs .sitepulse-tab-link.is-active {
-    background: #fff;
-    border-bottom-color: #fff;
-    box-shadow: 0 1px 0 #fff;
-    color: #1d2327;
+    background: var(--sitepulse-surface);
+    border-bottom-color: var(--sitepulse-surface);
+    box-shadow: 0 1px 0 var(--sitepulse-surface);
+    color: var(--sitepulse-text);
     font-weight: 600;
 }
 
 .sitepulse-settings-tabs .sitepulse-tab-link:focus-visible {
-    outline: 2px solid #2271b1;
+    outline: 2px solid var(--sitepulse-accent);
     outline-offset: 2px;
 }
 
@@ -259,8 +254,8 @@
 }
 
 .sitepulse-module-card {
-    background: #fff;
-    border: 1px solid #dcdfe5;
+    background: var(--sitepulse-surface);
+    border: 1px solid var(--sitepulse-border);
     border-radius: 8px;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
     display: flex;
@@ -269,15 +264,15 @@
 }
 
 .sitepulse-module-card--danger {
-    border-color: #cc1818;
+    border-color: var(--sitepulse-critical-text);
 }
 
 .sitepulse-module-card--setting {
-    border-color: #e2e8f0;
+    border-color: var(--sitepulse-border);
 }
 
 .sitepulse-card-header {
-    border-bottom: 1px solid #edf2f7;
+    border-bottom: 1px solid var(--sitepulse-border);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -309,31 +304,25 @@
     font-weight: 600;
     padding: 4px 10px;
     text-transform: uppercase;
+    background: var(--sitepulse-warning-bg);
+    color: var(--sitepulse-warning-text);
 }
 
-.sitepulse-status.is-active {
-    background: #e6fffa;
-    color: #0f766e;
-}
-
-.sitepulse-status.is-inactive {
-    background: #fef2f2;
-    color: #b91c1c;
-}
-
+.sitepulse-status.is-active,
 .sitepulse-status.is-success {
-    background: #ecfdf5;
-    color: #047857;
+    background: var(--sitepulse-success-bg);
+    color: var(--sitepulse-success-text);
+}
+
+.sitepulse-status.is-inactive,
+.sitepulse-status.is-critical {
+    background: var(--sitepulse-critical-bg);
+    color: var(--sitepulse-critical-text);
 }
 
 .sitepulse-status.is-warning {
-    background: #fef3c7;
-    color: #b45309;
-}
-
-.sitepulse-status.is-critical {
-    background: #fee2e2;
-    color: #b91c1c;
+    background: var(--sitepulse-warning-bg);
+    color: var(--sitepulse-warning-text);
 }
 
 .sitepulse-module-metrics {
@@ -350,13 +339,13 @@
     align-items: center;
     gap: 8px;
     font-size: 13px;
-    color: #2d3748;
+    color: var(--sitepulse-text);
 }
 
 .sitepulse-module-metric-label {
     font-weight: 600;
     font-size: 12px;
-    color: #4a5568;
+    color: var(--sitepulse-text-subtle);
     text-transform: uppercase;
 }
 
@@ -365,7 +354,7 @@
 }
 
 .sitepulse-card-placeholder {
-    color: #718096;
+    color: var(--sitepulse-text-muted);
     font-size: 13px;
     margin: 12px 0 0;
 }
@@ -374,11 +363,11 @@
     display: block;
     font-weight: 600;
     font-size: 13px;
-    color: #2d3748;
+    color: var(--sitepulse-text);
 }
 
 .sitepulse-card-description {
-    color: #4a5568;
+    color: var(--sitepulse-text-subtle);
     font-size: 13px;
     line-height: 1.6;
     margin: 0;
@@ -390,7 +379,7 @@
     align-items: center;
     gap: 8px;
     font-size: 13px;
-    color: #2d3748;
+    color: var(--sitepulse-text);
 }
 
 .sitepulse-card-checkbox input,
@@ -404,22 +393,22 @@
     text-decoration: none;
     padding: 6px 12px;
     border-radius: 4px;
-    background: #2271b1;
-    color: #fff;
+    background: var(--sitepulse-accent);
+    color: var(--sitepulse-surface);
     transition: background 0.2s ease;
 }
 
 .sitepulse-card-link:hover,
 .sitepulse-card-link:focus {
-    background: #135e96;
-    color: #fff;
+    background: var(--sitepulse-accent-strong);
+    color: var(--sitepulse-surface);
 }
 
 .sitepulse-card-list {
     list-style: disc;
     margin: 0;
     padding-left: 20px;
-    color: #4a5568;
+    color: var(--sitepulse-text-subtle);
     font-size: 13px;
 }
 
@@ -428,9 +417,9 @@
 }
 
 .sitepulse-card-badge {
-    background: #edf2f7;
+    background: var(--sitepulse-surface-subtle);
     border-radius: 999px;
-    color: #1a202c;
+    color: var(--sitepulse-text);
     font-size: 11px;
     font-weight: 600;
     margin-left: 8px;
@@ -457,7 +446,7 @@
 
 .sitepulse-settings-separator {
     border: 0;
-    border-top: 1px solid #e2e8f0;
+    border-top: 1px solid var(--sitepulse-border);
     margin: 40px 0;
 }
 
@@ -474,5 +463,24 @@
     .sitepulse-card-link {
         width: 100%;
         text-align: center;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .sitepulse-settings-wrap {
+        --sitepulse-surface: var(--wp-admin-color-gray-900, #1d2327);
+        --sitepulse-surface-subtle: var(--wp-admin-color-gray-800, #2c3338);
+        --sitepulse-border: rgba(255, 255, 255, 0.12);
+        --sitepulse-border-strong: rgba(255, 255, 255, 0.2);
+        --sitepulse-text: var(--wp-admin-color-gray-0, #ffffff);
+        --sitepulse-text-muted: rgba(255, 255, 255, 0.75);
+        --sitepulse-text-subtle: rgba(255, 255, 255, 0.65);
+        --sitepulse-success-bg: rgba(4, 120, 87, 0.2);
+        --sitepulse-warning-bg: rgba(180, 83, 9, 0.2);
+        --sitepulse-critical-bg: rgba(185, 28, 28, 0.22);
+    }
+
+    .sitepulse-overview-callout {
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
     }
 }

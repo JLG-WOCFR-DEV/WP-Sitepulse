@@ -2353,9 +2353,11 @@ function sitepulse_settings_page() {
                         </div>
                         <footer class="sitepulse-overview-callout__footer">
                             <?php foreach ($next_steps_overview as $step) :
-                                $link_classes = ['sitepulse-overview-callout__action', 'sitepulse-tab-trigger'];
-                                if (!$step['is_complete']) {
-                                    $link_classes[] = 'is-primary';
+                                $link_classes = ['sitepulse-overview-callout__action', 'sitepulse-tab-trigger', 'button'];
+                                if ($step['is_complete']) {
+                                    $link_classes[] = 'button-secondary';
+                                } else {
+                                    $link_classes[] = 'button-primary';
                                 }
                             ?>
                                 <a class="<?php echo esc_attr(implode(' ', $link_classes)); ?>" data-tab-target="<?php echo esc_attr($step['target']); ?>" href="<?php echo esc_url($step['href']); ?>"><?php echo esc_html($step['label']); ?></a>
