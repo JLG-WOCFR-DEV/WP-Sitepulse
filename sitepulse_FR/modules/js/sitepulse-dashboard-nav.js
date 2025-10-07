@@ -24,6 +24,42 @@
             window.setTimeout(callback, 16);
         };
 
+    var STORAGE_KEY = 'sitepulseModuleNavSearch';
+
+    var isString = function (value) {
+        return typeof value === 'string' || value instanceof String;
+    };
+
+    var readStorage = function () {
+        if (!('localStorage' in window)) {
+            return '';
+        }
+
+        try {
+            var stored = window.localStorage.getItem(STORAGE_KEY);
+
+            return isString(stored) ? stored : '';
+        } catch (error) {
+            return '';
+        }
+    };
+
+    var writeStorage = function (value) {
+        if (!('localStorage' in window)) {
+            return;
+        }
+
+        try {
+            if (value) {
+                window.localStorage.setItem(STORAGE_KEY, value);
+            } else {
+                window.localStorage.removeItem(STORAGE_KEY);
+            }
+        } catch (error) {
+            // Gracefully ignore storage issues (quota, private mode, etc.).
+        }
+    };
+
     var initNavigation = function (nav) {
         if (!nav) {
             return;
@@ -45,6 +81,46 @@
         var viewport = nav.querySelector('[data-sitepulse-nav-viewport]');
         var prevButton = nav.querySelector('[data-sitepulse-nav-scroll="prev"]');
         var nextButton = nav.querySelector('[data-sitepulse-nav-scroll="next"]');
+        var searchInput = nav.querySelector('[data-sitepulse-nav-search]');
+        var clearButton = nav.querySelector('[data-sitepulse-nav-clear]');
+        var resultsDisplay = nav.querySelector('[data-sitepulse-nav-results]');
+        var emptyMessage = nav.querySelector('[data-sitepulse-nav-empty]');
+
+        var getItems = function () {
+            return nav.querySelectorAll('[data-sitepulse-nav-item]');
+        };
+
+        var toggleClearButton = function (query) {
+            if (!clearButton) {
+                return;
+            }
+
+            var hasValue = query && query.length > 0;
+            clearButton.hidden = !hasValue;
+        };
+
+        var updateResultsDisplay = function (visibleCount) {
+            if (!resultsDisplay) {
+                return;
+            }
+
+            var plural = resultsDisplay.getAttribute('data-plural') || '';
+            var singular = resultsDisplay.getAttribute('data-singular') || '';
+            var empty = resultsDisplay.getAttribute('data-empty') || '';
+            var text = '';
+
+            if (visibleCount <= 0) {
+                text = empty;
+            } else if (visibleCount === 1 && singular) {
+                text = singular;
+            } else if (plural) {
+                text = plural.replace('%d', String(visibleCount));
+            } else {
+                text = String(visibleCount);
+            }
+
+            resultsDisplay.textContent = text;
+        };
 
         if (!viewport || !prevButton || !nextButton) {
             return;
@@ -60,10 +136,19 @@
         };
 
         var updateButtons = function () {
+            var items = getItems();
+            var visibleCount = 0;
+
+            Array.prototype.forEach.call(items, function (item) {
+                if (!item.hasAttribute('hidden')) {
+                    visibleCount++;
+                }
+            });
+
             var metrics = getScrollMetrics();
             var tolerance = 2;
 
-            if (metrics.maxScroll <= tolerance) {
+            if (metrics.maxScroll <= tolerance || visibleCount <= 1) {
                 nav.classList.remove('sitepulse-module-nav--scrollable');
                 prevButton.disabled = true;
                 nextButton.disabled = true;
@@ -85,6 +170,59 @@
             });
         };
 
+        var filterItems = function (query) {
+            var value = isString(query) ? query.trim().toLowerCase() : '';
+            var items = getItems();
+            var matches = 0;
+
+            Array.prototype.forEach.call(items, function (item) {
+                var filterText = item.getAttribute('data-filter-text') || '';
+                var isMatch = value === '' || filterText.indexOf(value) !== -1;
+                var link = item.querySelector('a');
+
+                if (isMatch) {
+                    item.hidden = false;
+                    item.classList.remove('is-filtered-out');
+
+                    if (link) {
+                        link.removeAttribute('tabindex');
+                    }
+
+                    matches++;
+                } else {
+                    item.hidden = true;
+                    item.classList.add('is-filtered-out');
+
+                    if (link) {
+                        link.setAttribute('tabindex', '-1');
+                    }
+                }
+            });
+
+            if (emptyMessage) {
+                var hasMatches = matches > 0;
+                emptyMessage.hidden = hasMatches;
+                emptyMessage.setAttribute('aria-hidden', hasMatches ? 'true' : 'false');
+            }
+
+            nav.classList.toggle('sitepulse-module-nav--filtering', value !== '');
+            updateResultsDisplay(matches);
+            toggleClearButton(value);
+
+            if (matches > 0) {
+                if (prefersReducedMotion) {
+                    viewport.scrollLeft = 0;
+                } else {
+                    viewport.scrollTo({
+                        left: 0,
+                        behavior: 'smooth'
+                    });
+                }
+            }
+
+            raf(updateButtons);
+        };
+
         prevButton.addEventListener('click', function () {
             scrollByAmount(-1);
         });
@@ -95,6 +233,50 @@
 
         viewport.addEventListener('scroll', updateButtons, { passive: true });
         window.addEventListener('resize', updateButtons);
+
+        if (searchInput) {
+            var applyStoredSearch = function () {
+                var storedValue = readStorage();
+
+                if (storedValue) {
+                    searchInput.value = storedValue;
+                    filterItems(storedValue);
+                } else {
+                    filterItems('');
+                }
+
+                toggleClearButton(searchInput.value || '');
+            };
+
+            searchInput.addEventListener('input', function () {
+                var currentValue = searchInput.value || '';
+                writeStorage(currentValue);
+                filterItems(currentValue);
+            });
+
+            searchInput.addEventListener('keydown', function (event) {
+                if (event.key === 'Escape') {
+                    searchInput.value = '';
+                    writeStorage('');
+                    filterItems('');
+                    toggleClearButton('');
+                }
+            });
+
+            applyStoredSearch();
+        } else {
+            filterItems('');
+        }
+
+        if (clearButton && searchInput) {
+            clearButton.addEventListener('click', function () {
+                searchInput.value = '';
+                writeStorage('');
+                filterItems('');
+                toggleClearButton('');
+                searchInput.focus();
+            });
+        }
 
         // Ensure initial state after layout.
         raf(updateButtons);
