@@ -170,3 +170,38 @@
         border-bottom-width: 2px;
     }
 }
+.speed-history-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+}
+
+.speed-history-profile {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13px;
+    max-width: 420px;
+}
+
+.speed-history-profile .profile-title {
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.speed-history-profile .profile-description {
+    color: var(--wp-admin-color-gray-700, #50575e);
+}
+
+.is-dark .speed-history-profile .profile-description {
+    color: var(--wp-admin-color-gray-0, #ffffff);
+}
+
+@media (prefers-color-scheme: dark) {
+    .speed-history-profile .profile-description {
+        color: var(--wp-admin-color-gray-0, #ffffff);
+    }
+}
+
