@@ -4,9 +4,8 @@ Ce document répertorie les fonctions de SitePulse qui gagneraient à être alig
 
 ## `sitepulse_delete_transients_by_prefix()`
 
-- **Statut :** ✅ Support du cache persistant (groupes `transient`/`site-transient`), purge en lots et télémétrie via les hooks `sitepulse_transient_deletion_batch`/`completed` pour suivre les nettoyages.【F:sitepulse_FR/includes/functions.php†L12-L120】
+- **Statut :** ✅ Support du cache persistant (groupes `transient`/`site-transient`), purge en lots, télémétrie via les hooks `sitepulse_transient_deletion_batch`/`completed` (avec indication du scope) et historisation des purges exposée dans les réglages ainsi qu’un widget du tableau de bord WordPress.【F:sitepulse_FR/includes/functions.php†L12-L260】【F:sitepulse_FR/includes/admin-settings.php†L3208-L3268】
 - **Pistes pro :**
-  - 🔭 Exporter les statistiques de purge vers le tableau de bord (Widget ou admin notice) afin de mettre en avant les transients problématiques.
   - 🔭 Permettre une purge asynchrone via Action Scheduler ou queue REST pour les installations multi-millions d'options.
 
 ## `sitepulse_get_recent_log_lines()`

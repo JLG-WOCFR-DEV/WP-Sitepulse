@@ -1961,6 +1961,19 @@ function sitepulse_settings_page() {
             'href'         => '#sitepulse-section-api',
         ],
     ];
+
+    $transient_purge_entries = function_exists('sitepulse_get_transient_purge_log')
+        ? sitepulse_get_transient_purge_log(5)
+        : [];
+
+    $transient_purge_summary = function_exists('sitepulse_calculate_transient_purge_summary')
+        ? sitepulse_calculate_transient_purge_summary($transient_purge_entries)
+        : [
+            'totals'       => ['deleted' => 0, 'unique' => 0, 'batches' => 0],
+            'latest'       => null,
+            'top_prefixes' => [],
+        ];
+
     $debug_mode_option = get_option(SITEPULSE_OPTION_DEBUG_MODE);
     $is_debug_mode_enabled = rest_sanitize_boolean($debug_mode_option);
     $uptime_url_option = get_option(SITEPULSE_OPTION_UPTIME_URL, '');
@@ -3185,6 +3198,77 @@ function sitepulse_settings_page() {
                                             <div class="sitepulse-card-footer">
                                                 <button type="submit" name="sitepulse_reset_all" class="button button-danger" onclick="return confirm('<?php echo esc_js(__('Êtes-vous sûr ?', 'sitepulse')); ?>');"><?php echo esc_html__('Tout réinitialiser', 'sitepulse'); ?></button>
                                             </div>
+                                        </div>
+                                    </div>
+                                    <div class="sitepulse-module-card sitepulse-module-card--metric sitepulse-module-card--analytics">
+                                        <div class="sitepulse-card-header">
+                                            <h3 class="sitepulse-card-title"><?php esc_html_e('Historique des purges de transients', 'sitepulse'); ?></h3>
+                                        </div>
+                                        <div class="sitepulse-card-body">
+                                            <?php
+                                            $transient_purge_latest = isset($transient_purge_summary['latest']) && is_array($transient_purge_summary['latest'])
+                                                ? $transient_purge_summary['latest']
+                                                : null;
+                                            $transient_purge_totals = isset($transient_purge_summary['totals']) && is_array($transient_purge_summary['totals'])
+                                                ? $transient_purge_summary['totals']
+                                                : ['deleted' => 0, 'unique' => 0, 'batches' => 0];
+                                            $transient_purge_top    = isset($transient_purge_summary['top_prefixes']) && is_array($transient_purge_summary['top_prefixes'])
+                                                ? $transient_purge_summary['top_prefixes']
+                                                : [];
+                                            ?>
+                                            <?php if (!empty($transient_purge_entries)) : ?>
+                                                <?php
+                                                $relative_label = '';
+
+                                                if ($transient_purge_latest && !empty($transient_purge_latest['timestamp']) && function_exists('human_time_diff')) {
+                                                    $diff = human_time_diff(
+                                                        (int) $transient_purge_latest['timestamp'],
+                                                        function_exists('current_time') ? current_time('timestamp') : time()
+                                                    );
+
+                                                    if (!empty($diff)) {
+                                                        $relative_label = sprintf(esc_html__('il y a %s', 'sitepulse'), $diff);
+                                                    }
+                                                }
+                                                ?>
+                                                <p class="sitepulse-card-description">
+                                                    <?php printf(
+                                                        esc_html__('Dernière purge : %1$s (%2$s) — %3$s transients supprimés.', 'sitepulse'),
+                                                        $transient_purge_latest ? esc_html($transient_purge_latest['prefix']) : esc_html__('N/A', 'sitepulse'),
+                                                        $transient_purge_latest ? esc_html(sitepulse_get_transient_purge_scope_label($transient_purge_latest['scope'])) : esc_html__('Scope inconnu', 'sitepulse'),
+                                                        $transient_purge_latest ? esc_html(number_format_i18n((int) $transient_purge_latest['deleted'])) : '0'
+                                                    ); ?>
+                                                    <?php if ($relative_label !== '') : ?>
+                                                        <span class="sitepulse-transient-purge-relative"><?php echo esc_html($relative_label); ?></span>
+                                                    <?php endif; ?>
+                                                </p>
+                                                <p class="sitepulse-transient-purge-total">
+                                                    <?php printf(
+                                                        esc_html__('%1$s suppressions · %2$s clés uniques · %3$s lots sur 30 jours.', 'sitepulse'),
+                                                        esc_html(number_format_i18n((int) $transient_purge_totals['deleted'])),
+                                                        esc_html(number_format_i18n((int) $transient_purge_totals['unique'])),
+                                                        esc_html(number_format_i18n((int) $transient_purge_totals['batches']))
+                                                    ); ?>
+                                                </p>
+                                                <?php if (!empty($transient_purge_top)) : ?>
+                                                    <ul class="sitepulse-transient-purge-list">
+                                                        <?php foreach ($transient_purge_top as $prefix_entry) : ?>
+                                                            <li>
+                                                                <span class="sitepulse-transient-purge-prefix"><?php echo esc_html($prefix_entry['prefix']); ?></span>
+                                                                <span class="sitepulse-transient-purge-count">
+                                                                    <?php printf(
+                                                                        esc_html(_n('%s suppression', '%s suppressions', (int) $prefix_entry['deleted'], 'sitepulse')),
+                                                                        esc_html(number_format_i18n((int) $prefix_entry['deleted']))
+                                                                    ); ?>
+                                                                </span>
+                                                                <span class="sitepulse-transient-purge-scope"><?php echo esc_html(sitepulse_get_transient_purge_scope_label($prefix_entry['scope'])); ?></span>
+                                                            </li>
+                                                        <?php endforeach; ?>
+                                                    </ul>
+                                                <?php endif; ?>
+                                            <?php else : ?>
+                                                <p class="sitepulse-card-description"><?php esc_html_e('Aucune purge de transients n’a encore été enregistrée.', 'sitepulse'); ?></p>
+                                            <?php endif; ?>
                                         </div>
                                     </div>
                                 </div>
