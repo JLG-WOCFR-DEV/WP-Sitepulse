@@ -18,6 +18,8 @@ class Sitepulse_Pro_Functions_Test extends WP_UnitTestCase {
         $this->deleted_transient_stats = [];
         $this->threshold_corrections   = [];
 
+        delete_option('sitepulse_transient_purge_log');
+
         add_action('sitepulse_transient_deletion_completed', [$this, 'capture_transient_stats'], 10, 2);
         add_action('sitepulse_speed_threshold_corrected', [$this, 'capture_speed_threshold_corrections'], 10, 3);
     }
@@ -27,6 +29,7 @@ class Sitepulse_Pro_Functions_Test extends WP_UnitTestCase {
         remove_action('sitepulse_speed_threshold_corrected', [$this, 'capture_speed_threshold_corrections'], 10);
 
         delete_option('sitepulse_speed_profiles');
+        delete_option('sitepulse_transient_purge_log');
 
         parent::tear_down();
     }
@@ -120,5 +123,93 @@ class Sitepulse_Pro_Functions_Test extends WP_UnitTestCase {
         $this->assertGreaterThan($thresholds['warning'], $thresholds['critical']);
         $this->assertSame('mobile', $this->threshold_corrections['profile']);
         $this->assertContains('critical_adjusted', $this->threshold_corrections['corrections']);
+    }
+
+    public function test_transient_purge_log_records_standard_transients() {
+        set_transient('sitepulse_widget_tmp_one', 'value', 60);
+        set_transient('sitepulse_widget_tmp_two', 'value', 60);
+
+        sitepulse_delete_transients_by_prefix('sitepulse_widget_tmp_');
+
+        $log = sitepulse_get_transient_purge_log();
+
+        $this->assertNotEmpty($log);
+        $entry = $log[0];
+
+        $this->assertSame('transient', $entry['scope']);
+        $this->assertSame('sitepulse_widget_tmp_', $entry['prefix']);
+        $this->assertSame(2, $entry['deleted']);
+        $this->assertSame(2, $entry['unique']);
+    }
+
+    public function test_transient_purge_log_records_site_transients() {
+        set_site_transient('sitepulse_network_cache_a', 'a', 60);
+        set_site_transient('sitepulse_network_cache_b', 'b', 60);
+
+        sitepulse_delete_site_transients_by_prefix('sitepulse_network_cache_');
+
+        $log = sitepulse_get_transient_purge_log();
+
+        $this->assertNotEmpty($log);
+        $entry = $log[0];
+
+        $this->assertSame('site-transient', $entry['scope']);
+        $this->assertSame('sitepulse_network_cache_', $entry['prefix']);
+        $this->assertSame(2, $entry['deleted']);
+        $this->assertSame(1, $entry['batches']);
+    }
+
+    public function test_transient_purge_summary_groups_by_prefix() {
+        $now = function_exists('current_time') ? current_time('timestamp') : time();
+
+        update_option('sitepulse_transient_purge_log', [
+            [
+                'scope'     => 'transient',
+                'prefix'    => 'sitepulse_alpha_',
+                'deleted'   => 3,
+                'unique'    => 3,
+                'batches'   => 1,
+                'timestamp' => $now,
+            ],
+            [
+                'scope'     => 'site-transient',
+                'prefix'    => 'sitepulse_beta_',
+                'deleted'   => 5,
+                'unique'    => 4,
+                'batches'   => 2,
+                'timestamp' => $now,
+            ],
+        ]);
+
+        $summary = sitepulse_calculate_transient_purge_summary();
+
+        $this->assertSame(8, $summary['totals']['deleted']);
+        $this->assertSame(7, $summary['totals']['unique']);
+        $this->assertNotEmpty($summary['top_prefixes']);
+        $this->assertSame('sitepulse_beta_', $summary['top_prefixes'][0]['prefix']);
+        $this->assertSame('site-transient', $summary['top_prefixes'][0]['scope']);
+    }
+
+    public function test_record_transient_purge_stats_honors_scope_from_stats() {
+        delete_option('sitepulse_transient_purge_log');
+
+        sitepulse_record_transient_purge_stats('sitepulse_scope_demo_', [
+            'deleted'          => 3,
+            'unique_keys'      => ['one', 'two', 'three'],
+            'batches'          => 2,
+            'object_cache_hit' => false,
+            'scope'            => 'site-transient',
+        ]);
+
+        $log = sitepulse_get_transient_purge_log();
+
+        $this->assertNotEmpty($log);
+
+        $entry = $log[0];
+
+        $this->assertSame('site-transient', $entry['scope']);
+        $this->assertSame(3, $entry['deleted']);
+        $this->assertSame(3, $entry['unique']);
+        $this->assertSame(2, $entry['batches']);
     }
 }

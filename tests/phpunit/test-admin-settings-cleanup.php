@@ -94,6 +94,8 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
         if (file_exists(self::$debug_log_path)) {
             unlink(self::$debug_log_path);
         }
+
+        delete_option('sitepulse_transient_purge_log');
     }
 
     protected function tear_down(): void {
@@ -102,6 +104,8 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
         if (file_exists(self::$debug_log_path)) {
             unlink(self::$debug_log_path);
         }
+
+        delete_option('sitepulse_transient_purge_log');
 
         parent::tear_down();
     }
@@ -154,6 +158,27 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
         $this->assertFalse(get_option(SITEPULSE_OPTION_UPTIME_LOG));
         $this->assertFalse(get_transient(SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS));
         $this->assertStringContainsString('Données stockées effacées.', $output);
+    }
+
+    public function test_cleanup_tab_displays_transient_purge_summary(): void {
+        update_option('sitepulse_transient_purge_log', [
+            [
+                'scope'     => 'transient',
+                'prefix'    => 'sitepulse_demo_',
+                'deleted'   => 4,
+                'unique'    => 4,
+                'batches'   => 2,
+                'timestamp' => time(),
+            ],
+        ]);
+
+        ob_start();
+        sitepulse_settings_page();
+        $output = ob_get_clean();
+
+        $this->assertStringContainsString('Historique des purges de transients', $output);
+        $this->assertStringContainsString('Dernière purge', $output);
+        $this->assertStringContainsString('sitepulse_demo_', $output);
     }
 
     public function test_reset_all_action_resets_plugin_state_and_outputs_notice(): void {
