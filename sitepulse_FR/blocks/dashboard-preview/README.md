@@ -26,3 +26,11 @@ Si aucune métrique n’est disponible (par exemple sur un nouveau site), le blo
 ## Dépendances
 
 Pour garantir le style et l’accessibilité, le bloc réutilise les mêmes feuilles de style que le tableau de bord SitePulse (`modules/css/custom-dashboard.css`).
+
+## Débogage d’un affichage dégradé
+
+1. **Vérifier les feuilles de style chargées** – Dans l’inspecteur du navigateur (onglet *Réseau* ou *Éléments*), confirmez que les handles `sitepulse-dashboard-preview-style` et `sitepulse-dashboard-preview-base` sont bien présents. Sans eux, les cartes héritent des styles du thème et se chevauchent.
+2. **Tester le rendu isolé** – Ouvrez le fichier `docs/visual-debug/dashboard-preview.html` inclus dans le plugin. Il charge uniquement les CSS du bloc et permet de comparer rapidement le rendu attendu avec celui du site.【F:sitepulse_FR/docs/visual-debug/dashboard-preview.html†L1-L112】
+3. **Inspecter le contexte PHP** – Depuis la racine WordPress, lancez `wp eval 'var_export(sitepulse_get_dashboard_preview_context());'` pour vérifier que chaque module renvoie bien ses cartes (`speed`, `uptime`, `database`, `logs`). Un module désactivé ou sans données renvoie un tableau vide.
+4. **Activer le mode debug SitePulse** – Ajoutez `define('SITEPULSE_DEBUG', true);` dans `wp-config.php` pour obtenir les notices additionnelles du plugin (incluant celles liées au chargement des modules et du bloc). Pensez à le désactiver ensuite en production.
+5. **Comparer les classes générées** – Les cartes utilisent des classes spécifiques (`sitepulse-card--speed`, `sitepulse-card--uptime`, etc.). Si elles sont absentes dans le HTML final, un filtre tiers modifie le rendu : désactivez temporairement les plugins de mise en cache / optimisation HTML pour confirmer.
