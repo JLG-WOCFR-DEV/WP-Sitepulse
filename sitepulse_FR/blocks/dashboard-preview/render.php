@@ -57,7 +57,7 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
                 if (is_numeric($value)) {
                     $numeric_value = (float) $value;
                     $rounded_integer = round($numeric_value);
-                    $is_near_integer = abs($numeric_value - $rounded_integer) < 0.001;
+                    $is_near_integer = abs($numeric_value - $rounded_integer) <= 0.001;
 
                     if ($is_near_integer) {
                         $values[] = number_format_i18n($rounded_integer, 0);
