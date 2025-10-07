@@ -153,6 +153,14 @@ function sitepulse_custom_dashboard_enqueue_assets($hook_suffix) {
         SITEPULSE_VERSION,
         true
     );
+
+    wp_register_script(
+        'sitepulse-dashboard-metrics',
+        SITEPULSE_URL . 'modules/js/sitepulse-dashboard-metrics.js',
+        ['wp-a11y'],
+        SITEPULSE_VERSION,
+        true
+    );
 }
 
 /**
@@ -170,6 +178,69 @@ function sitepulse_get_chart_summary_id($chart_id) {
     }
 
     return $sanitized_id . '-summary';
+}
+
+/**
+ * Returns the default status labels used across dashboard cards.
+ *
+ * @return array<string,array<string,string>>
+ */
+function sitepulse_custom_dashboard_get_default_status_labels() {
+    return [
+        'status-ok'   => [
+            'label' => __('Bon', 'sitepulse'),
+            'sr'    => __('Statut : bon', 'sitepulse'),
+            'icon'  => '✔️',
+        ],
+        'status-warn' => [
+            'label' => __('Attention', 'sitepulse'),
+            'sr'    => __('Statut : attention', 'sitepulse'),
+            'icon'  => '⚠️',
+        ],
+        'status-bad'  => [
+            'label' => __('Critique', 'sitepulse'),
+            'sr'    => __('Statut : critique', 'sitepulse'),
+            'icon'  => '⛔',
+        ],
+    ];
+}
+
+/**
+ * Resolves the status meta for a given status key.
+ *
+ * @param string                              $status Status identifier.
+ * @param array<string,array<string,string>>  $labels Optional custom labels.
+ *
+ * @return array<string,string>
+ */
+function sitepulse_custom_dashboard_resolve_status_meta($status, $labels = []) {
+    $defaults = sitepulse_custom_dashboard_get_default_status_labels();
+
+    if (is_array($labels) && !empty($labels)) {
+        $labels = array_merge($defaults, $labels);
+    } else {
+        $labels = $defaults;
+    }
+
+    if (isset($labels[$status])) {
+        return $labels[$status];
+    }
+
+    if (isset($labels['status-warn'])) {
+        return $labels['status-warn'];
+    }
+
+    $first = reset($labels);
+
+    if (is_array($first)) {
+        return $first;
+    }
+
+    return [
+        'label' => __('Attention', 'sitepulse'),
+        'sr'    => __('Statut : attention', 'sitepulse'),
+        'icon'  => '⚠️',
+    ];
 }
 
 /**
@@ -601,6 +672,801 @@ function sitepulse_custom_dashboard_get_current_timestamp() {
 }
 
 /**
+ * Retrieves the configured uptime warning threshold.
+ *
+ * @return float
+ */
+function sitepulse_custom_dashboard_get_uptime_warning_threshold() {
+    $default = defined('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT')
+        ? (float) SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT
+        : 99.0;
+
+    if (function_exists('sitepulse_get_uptime_warning_percentage')) {
+        $threshold = (float) sitepulse_get_uptime_warning_percentage();
+    } else {
+        $option_key = defined('SITEPULSE_OPTION_UPTIME_WARNING_PERCENT')
+            ? SITEPULSE_OPTION_UPTIME_WARNING_PERCENT
+            : 'sitepulse_uptime_warning_percent';
+
+        $stored = get_option($option_key, $default);
+
+        $threshold = is_scalar($stored) ? (float) $stored : $default;
+    }
+
+    if ($threshold < 0) {
+        $threshold = 0.0;
+    } elseif ($threshold > 100) {
+        $threshold = 100.0;
+    }
+
+    return $threshold;
+}
+
+/**
+ * Resolves the status string for an uptime percentage.
+ *
+ * @param float|int|null $uptime_value Uptime percentage.
+ *
+ * @return string
+ */
+function sitepulse_custom_dashboard_resolve_uptime_status($uptime_value) {
+    if (!is_numeric($uptime_value)) {
+        return 'status-warn';
+    }
+
+    $threshold = sitepulse_custom_dashboard_get_uptime_warning_threshold();
+    $value     = (float) $uptime_value;
+
+    if ($value < $threshold) {
+        return 'status-bad';
+    }
+
+    if ($value < 100.0) {
+        return 'status-warn';
+    }
+
+    return 'status-ok';
+}
+
+/**
+ * Resolves a human-readable label for the provided range identifier.
+ *
+ * @param string                          $range            Range identifier.
+ * @param array<int,array<string,mixed>>  $available_ranges Available range definitions.
+ *
+ * @return string
+ */
+function sitepulse_custom_dashboard_resolve_range_label($range, $available_ranges) {
+    if (is_array($available_ranges)) {
+        foreach ($available_ranges as $definition) {
+            if (!is_array($definition)) {
+                continue;
+            }
+
+            $definition_id = isset($definition['id']) ? (string) $definition['id'] : '';
+
+            if ($definition_id === '') {
+                continue;
+            }
+
+            if ($definition_id === $range) {
+                if (isset($definition['label']) && is_string($definition['label']) && $definition['label'] !== '') {
+                    return $definition['label'];
+                }
+
+                return $definition_id;
+            }
+        }
+    }
+
+    $ranges = sitepulse_custom_dashboard_get_metric_ranges();
+
+    if (isset($ranges[$range]['label']) && is_string($ranges[$range]['label'])) {
+        return $ranges[$range]['label'];
+    }
+
+    switch ($range) {
+        case '24h':
+            return __('Last 24 hours', 'sitepulse');
+        case '30d':
+            return __('Last 30 days', 'sitepulse');
+        case '7d':
+        default:
+            return __('Last 7 days', 'sitepulse');
+    }
+}
+
+/**
+ * Formats a delta value into a trend descriptor.
+ *
+ * @param float|int|null $delta Numeric delta compared to previous window.
+ * @param array<string,mixed> $args Optional configuration.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_custom_dashboard_format_trend($delta, $args = []) {
+    $defaults = [
+        'tolerance'         => 0.01,
+        'unit'              => '',
+        'precision'         => 2,
+        'increase_good'     => true,
+        'positive_template' => __('Improved by %s%s', 'sitepulse'),
+        'negative_template' => __('Regressed by %s%s', 'sitepulse'),
+        'positive_sr'       => __('Metric improved by %s%s compared to the previous window.', 'sitepulse'),
+        'negative_sr'       => __('Metric regressed by %s%s compared to the previous window.', 'sitepulse'),
+        'stable_template'   => __('Stable compared to the previous window.', 'sitepulse'),
+        'stable_sr'         => __('Metric is stable compared to the previous window.', 'sitepulse'),
+        'missing_template'  => __('No comparison available for this metric yet.', 'sitepulse'),
+        'missing_sr'        => __('Comparison data is not available for this metric.', 'sitepulse'),
+    ];
+
+    $config = array_merge($defaults, is_array($args) ? $args : []);
+
+    if (!is_numeric($delta)) {
+        $text = $config['missing_template'];
+
+        return [
+            'direction' => 'flat',
+            'text'      => $text,
+            'sr'        => $config['missing_sr'],
+            'value'     => null,
+        ];
+    }
+
+    $numeric_delta = (float) $delta;
+    $absolute       = abs($numeric_delta);
+
+    if ($absolute < (float) $config['tolerance']) {
+        return [
+            'direction' => 'flat',
+            'text'      => $config['stable_template'],
+            'sr'        => $config['stable_sr'],
+            'value'     => round($numeric_delta, (int) $config['precision']),
+        ];
+    }
+
+    $precision = (int) $config['precision'];
+    $formatted = number_format_i18n($absolute, $precision);
+    $unit      = is_string($config['unit']) ? $config['unit'] : '';
+
+    if ($unit !== '' && !preg_match('/^\s/u', $unit)) {
+        $unit = ' ' . $unit;
+    }
+
+    $is_positive = $numeric_delta > 0;
+    $is_improvement = $config['increase_good'] ? $is_positive : !$is_positive;
+    $template = $is_improvement ? $config['positive_template'] : $config['negative_template'];
+    $sr_template = $is_improvement ? $config['positive_sr'] : $config['negative_sr'];
+    $direction = $is_improvement ? 'up' : 'down';
+
+    $text = sprintf($template, $formatted, $unit);
+    $sr   = sprintf($sr_template, $formatted, $unit);
+
+    return [
+        'direction' => $direction,
+        'text'      => $text,
+        'sr'        => $sr,
+        'value'     => round($numeric_delta, $precision),
+    ];
+}
+
+/**
+ * Formats uptime metrics for display in the KPI grid.
+ *
+ * @param array<string,mixed>|null $uptime      Raw uptime metrics.
+ * @param bool                     $is_active   Whether the module is active.
+ * @param string                   $range_label Human-readable range label.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_custom_dashboard_format_uptime_card_view($uptime, $is_active, $range_label) {
+    $status_meta = sitepulse_custom_dashboard_resolve_status_meta('status-warn');
+
+    $card = [
+        'label'             => __('Availability', 'sitepulse'),
+        'status'            => array_merge($status_meta, ['class' => 'status-warn']),
+        'value'             => ['text' => __('N/A', 'sitepulse'), 'unit' => ''],
+        'summary'           => __('No uptime data collected yet.', 'sitepulse'),
+        'trend'             => sitepulse_custom_dashboard_format_trend(null),
+        'details'           => [],
+        'description'       => __('Once checks run, uptime results will appear here.', 'sitepulse'),
+        'inactive'          => !$is_active,
+        'inactive_message'  => __('Activate the Uptime Tracker module to populate this metric.', 'sitepulse'),
+    ];
+
+    if ($card['inactive']) {
+        return $card;
+    }
+
+    if (!is_array($uptime) || empty($uptime)) {
+        return $card;
+    }
+
+    $uptime_value = isset($uptime['uptime']) ? $uptime['uptime'] : null;
+    $status       = sitepulse_custom_dashboard_resolve_uptime_status($uptime_value);
+    $status_meta  = sitepulse_custom_dashboard_resolve_status_meta($status);
+    $status_meta['class'] = $status;
+
+    $card['status'] = $status_meta;
+
+    if (is_numeric($uptime_value)) {
+        $card['value'] = [
+            'text' => number_format_i18n((float) $uptime_value, 2),
+            'unit' => '%',
+        ];
+    }
+
+    $totals = isset($uptime['totals']) && is_array($uptime['totals']) ? $uptime['totals'] : [];
+    $up      = isset($totals['up']) ? (int) $totals['up'] : 0;
+    $down    = isset($totals['down']) ? (int) $totals['down'] : 0;
+    $unknown = isset($totals['unknown']) ? (int) $totals['unknown'] : 0;
+    $total   = isset($totals['total']) ? (int) $totals['total'] : ($up + $down + $unknown);
+
+    $card['summary'] = sprintf(
+        __('%1$s up · %2$s down · %3$s unknown', 'sitepulse'),
+        number_format_i18n($up),
+        number_format_i18n($down),
+        number_format_i18n($unknown)
+    );
+
+    $latency_avg = isset($uptime['latency_avg']) && is_numeric($uptime['latency_avg'])
+        ? (float) $uptime['latency_avg']
+        : null;
+    $ttfb_avg = isset($uptime['ttfb_avg']) && is_numeric($uptime['ttfb_avg'])
+        ? (float) $uptime['ttfb_avg']
+        : null;
+    $violations = isset($uptime['violations']) ? (int) $uptime['violations'] : 0;
+
+    $card['details'] = [
+        [
+            'label' => __('Average latency', 'sitepulse'),
+            'value' => $latency_avg !== null
+                ? sprintf(__('%s ms', 'sitepulse'), number_format_i18n($latency_avg, 2))
+                : __('N/A', 'sitepulse'),
+        ],
+        [
+            'label' => __('Average TTFB', 'sitepulse'),
+            'value' => $ttfb_avg !== null
+                ? sprintf(__('%s ms', 'sitepulse'), number_format_i18n($ttfb_avg, 2))
+                : __('N/A', 'sitepulse'),
+        ],
+        [
+            'label' => __('Downtime events', 'sitepulse'),
+            'value' => number_format_i18n($violations),
+        ],
+    ];
+
+    $card['trend'] = sitepulse_custom_dashboard_format_trend(
+        isset($uptime['trend']['uptime']) ? $uptime['trend']['uptime'] : null,
+        [
+            'tolerance'         => 0.05,
+            'precision'         => 2,
+            'unit'              => __(' pts', 'sitepulse'),
+            'increase_good'     => true,
+            'positive_template' => __('Uptime improved by %s%s', 'sitepulse'),
+            'negative_template' => __('Uptime decreased by %s%s', 'sitepulse'),
+            'positive_sr'       => __('Availability improved by %s%s compared to the previous window.', 'sitepulse'),
+            'negative_sr'       => __('Availability decreased by %s%s compared to the previous window.', 'sitepulse'),
+        ]
+    );
+
+    if ($total > 0) {
+        $card['description'] = sprintf(
+            __('Based on %1$s checks over %2$s.', 'sitepulse'),
+            number_format_i18n($total),
+            $range_label
+        );
+    } else {
+        $card['description'] = __('No uptime checks recorded during this window.', 'sitepulse');
+    }
+
+    return $card;
+}
+
+/**
+ * Formats debug log metrics for display in the KPI grid.
+ *
+ * @param array<string,mixed>|null $logs      Raw log metrics.
+ * @param bool                     $is_active Whether the module is active.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_custom_dashboard_format_log_card_view($logs, $is_active) {
+    $status_meta = sitepulse_custom_dashboard_resolve_status_meta('status-warn');
+
+    $card = [
+        'label'             => __('Error log', 'sitepulse'),
+        'status'            => array_merge($status_meta, ['class' => 'status-warn']),
+        'value'             => ['text' => __('Unavailable', 'sitepulse'), 'unit' => ''],
+        'summary'           => __('No log metrics available.', 'sitepulse'),
+        'trend'             => [
+            'direction' => 'flat',
+            'text'      => __('Monitoring for new events.', 'sitepulse'),
+            'sr'        => __('Awaiting new log activity.', 'sitepulse'),
+            'value'     => null,
+        ],
+        'details'           => [],
+        'description'       => __('Once the analyzer scans debug.log, results will appear here.', 'sitepulse'),
+        'inactive'          => !$is_active,
+        'inactive_message'  => __('Activate the Error Alerts module to monitor the debug log.', 'sitepulse'),
+    ];
+
+    if ($card['inactive']) {
+        return $card;
+    }
+
+    if (!is_array($logs) || empty($logs)) {
+        return $card;
+    }
+
+    $card_payload = isset($logs['card']) && is_array($logs['card']) ? $logs['card'] : [];
+    $counts       = isset($card_payload['counts']) && is_array($card_payload['counts'])
+        ? $card_payload['counts']
+        : [];
+
+    $fatal      = isset($counts['fatal']) ? (int) $counts['fatal'] : 0;
+    $warning    = isset($counts['warning']) ? (int) $counts['warning'] : 0;
+    $notice     = isset($counts['notice']) ? (int) $counts['notice'] : 0;
+    $deprecated = isset($counts['deprecated']) ? (int) $counts['deprecated'] : 0;
+
+    if ($fatal > 0) {
+        $status = 'status-bad';
+        $value_text = sprintf(
+            _n('%s fatal error', '%s fatal errors', $fatal, 'sitepulse'),
+            number_format_i18n($fatal)
+        );
+    } elseif ($warning > 0) {
+        $status = 'status-warn';
+        $value_text = sprintf(
+            _n('%s warning', '%s warnings', $warning, 'sitepulse'),
+            number_format_i18n($warning)
+        );
+    } elseif ($deprecated > 0) {
+        $status = 'status-warn';
+        $value_text = sprintf(
+            _n('%s deprecated notice', '%s deprecated notices', $deprecated, 'sitepulse'),
+            number_format_i18n($deprecated)
+        );
+    } elseif ($notice > 0) {
+        $status = 'status-warn';
+        $value_text = sprintf(
+            _n('%s notice', '%s notices', $notice, 'sitepulse'),
+            number_format_i18n($notice)
+        );
+    } else {
+        $status = 'status-ok';
+        $value_text = __('Log clean', 'sitepulse');
+    }
+
+    $status_meta = sitepulse_custom_dashboard_resolve_status_meta($status);
+    $status_meta['class'] = $status;
+    $card['status'] = $status_meta;
+    $card['value']  = ['text' => $value_text, 'unit' => ''];
+
+    if (isset($card_payload['summary']) && is_string($card_payload['summary'])) {
+        $card['summary'] = $card_payload['summary'];
+    }
+
+    $card['details'] = [
+        ['label' => __('Fatal errors', 'sitepulse'), 'value' => number_format_i18n($fatal)],
+        ['label' => __('Warnings', 'sitepulse'), 'value' => number_format_i18n($warning)],
+        ['label' => __('Deprecated', 'sitepulse'), 'value' => number_format_i18n($deprecated)],
+        ['label' => __('Notices', 'sitepulse'), 'value' => number_format_i18n($notice)],
+    ];
+
+    $metadata = isset($logs['metadata']) && is_array($logs['metadata']) ? $logs['metadata'] : [];
+
+    if (!empty($metadata['truncated'])) {
+        $card['details'][] = [
+            'label' => __('Snapshot', 'sitepulse'),
+            'value' => __('Tail of log displayed', 'sitepulse'),
+        ];
+    }
+
+    $last_modified = isset($metadata['last_modified']) ? (int) $metadata['last_modified'] : 0;
+
+    if ($last_modified > 0 && function_exists('human_time_diff')) {
+        $ago = human_time_diff($last_modified, sitepulse_custom_dashboard_get_current_timestamp());
+        $card['description'] = sprintf(__('Last updated %s ago.', 'sitepulse'), $ago);
+    } elseif (isset($metadata['path']) && is_string($metadata['path']) && $metadata['path'] !== '') {
+        $card['description'] = sprintf(__('Log file: %s', 'sitepulse'), $metadata['path']);
+    }
+
+    return $card;
+}
+
+/**
+ * Formats speed metrics for display in the KPI grid.
+ *
+ * @param array<string,mixed>|null $speed       Raw speed metrics.
+ * @param bool                     $is_active   Whether the module is active.
+ * @param string                   $range_label Range label.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_custom_dashboard_format_speed_card_view($speed, $is_active, $range_label) {
+    $status_meta = sitepulse_custom_dashboard_resolve_status_meta('status-warn');
+
+    $card = [
+        'label'             => __('Backend speed', 'sitepulse'),
+        'status'            => array_merge($status_meta, ['class' => 'status-warn']),
+        'value'             => ['text' => __('N/A', 'sitepulse'), 'unit' => ''],
+        'summary'           => __('No scans recorded during this window.', 'sitepulse'),
+        'trend'             => sitepulse_custom_dashboard_format_trend(null),
+        'details'           => [],
+        'description'       => __('Run a speed scan to populate this metric.', 'sitepulse'),
+        'inactive'          => !$is_active,
+        'inactive_message'  => __('Activate the Speed Analyzer module to track processing times.', 'sitepulse'),
+    ];
+
+    if ($card['inactive']) {
+        return $card;
+    }
+
+    if (!is_array($speed) || empty($speed)) {
+        return $card;
+    }
+
+    $average = isset($speed['average']) && is_numeric($speed['average']) ? (float) $speed['average'] : null;
+    $latest  = isset($speed['latest']) && is_array($speed['latest']) ? $speed['latest'] : [];
+    $latest_status = isset($latest['status']) ? (string) $latest['status'] : '';
+
+    if ($latest_status === '') {
+        $latest_status = sitepulse_custom_dashboard_resolve_speed_status($average, isset($speed['thresholds']) ? $speed['thresholds'] : []);
+    }
+
+    $status_meta = sitepulse_custom_dashboard_resolve_status_meta($latest_status);
+    $status_meta['class'] = $latest_status;
+    $card['status'] = $status_meta;
+
+    if ($average !== null) {
+        $card['value'] = [
+            'text' => number_format_i18n($average, 2),
+            'unit' => 'ms',
+        ];
+    }
+
+    $samples = isset($speed['samples']) ? (int) $speed['samples'] : 0;
+
+    $summary_parts = [];
+
+    if (isset($latest['server_processing_ms']) && is_numeric($latest['server_processing_ms'])) {
+        $summary_parts[] = sprintf(
+            __('Latest: %s ms', 'sitepulse'),
+            number_format_i18n((float) $latest['server_processing_ms'], 2)
+        );
+    }
+
+    if ($samples > 0) {
+        $summary_parts[] = sprintf(
+            _n('%s sample', '%s samples', $samples, 'sitepulse'),
+            number_format_i18n($samples)
+        );
+    }
+
+    if (!empty($summary_parts)) {
+        $card['summary'] = implode(' · ', $summary_parts);
+    }
+
+    $thresholds = isset($speed['thresholds']) && is_array($speed['thresholds']) ? $speed['thresholds'] : [];
+
+    $card['details'] = [
+        [
+            'label' => __('Warning threshold', 'sitepulse'),
+            'value' => isset($thresholds['warning'])
+                ? sprintf(__('%s ms', 'sitepulse'), number_format_i18n((int) $thresholds['warning']))
+                : __('N/A', 'sitepulse'),
+        ],
+        [
+            'label' => __('Critical threshold', 'sitepulse'),
+            'value' => isset($thresholds['critical'])
+                ? sprintf(__('%s ms', 'sitepulse'), number_format_i18n((int) $thresholds['critical']))
+                : __('N/A', 'sitepulse'),
+        ],
+    ];
+
+    $card['trend'] = sitepulse_custom_dashboard_format_trend(
+        isset($speed['trend']) ? $speed['trend'] : null,
+        [
+            'tolerance'         => 0.5,
+            'precision'         => 1,
+            'unit'              => __(' ms', 'sitepulse'),
+            'increase_good'     => false,
+            'positive_template' => __('Slower by %s%s', 'sitepulse'),
+            'negative_template' => __('Faster by %s%s', 'sitepulse'),
+            'positive_sr'       => __('Backend processing time increased by %s%s compared to the previous window.', 'sitepulse'),
+            'negative_sr'       => __('Backend processing time improved by %s%s compared to the previous window.', 'sitepulse'),
+            'stable_template'   => __('Speed is stable compared to the previous window.', 'sitepulse'),
+            'stable_sr'         => __('Backend processing time is stable compared to the previous window.', 'sitepulse'),
+        ]
+    );
+
+    if ($samples > 0) {
+        $card['description'] = sprintf(
+            __('Average across %1$s samples collected during %2$s.', 'sitepulse'),
+            number_format_i18n($samples),
+            $range_label
+        );
+    }
+
+    return $card;
+}
+
+/**
+ * Builds the contextual status banner based on the current metrics.
+ *
+ * @param array<string,array<string,mixed>> $cards    Formatted cards indexed by key.
+ * @param array<string,mixed>               $payload  Raw payload data.
+ * @param string                            $range_label Human-readable range label.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_custom_dashboard_format_status_banner($cards, $payload, $range_label) {
+    $tone    = 'ok';
+    $icon    = '✅';
+    $message = sprintf(__('All systems operational for %s.', 'sitepulse'), $range_label);
+    $sr      = $message;
+    $cta     = [
+        'label' => '',
+        'url'   => '',
+        'data'  => '',
+    ];
+
+    $uptime_card = isset($cards['uptime']) ? $cards['uptime'] : null;
+    $logs_card   = isset($cards['logs']) ? $cards['logs'] : null;
+    $speed_card  = isset($cards['speed']) ? $cards['speed'] : null;
+
+    if (is_array($uptime_card) && empty($uptime_card['inactive'])) {
+        $uptime_status = isset($uptime_card['status']['class']) ? $uptime_card['status']['class'] : 'status-ok';
+
+        if ('status-bad' === $uptime_status) {
+            $tone = 'danger';
+            $icon = '🚨';
+            $violations = isset($payload['uptime']['violations']) ? (int) $payload['uptime']['violations'] : 0;
+            $down_checks = isset($payload['uptime']['totals']['down']) ? (int) $payload['uptime']['totals']['down'] : 0;
+            $incident_count = $violations > 0 ? $violations : $down_checks;
+
+            if ($incident_count > 0) {
+                $message = sprintf(
+                    _n('🚨 %1$d incident detected over %2$s.', '🚨 %1$d incidents detected over %2$s.', $incident_count, 'sitepulse'),
+                    $incident_count,
+                    $range_label
+                );
+                $sr = sprintf(
+                    _n('%1$d incident detected during the selected window of %2$s.', '%1$d incidents detected during the selected window of %2$s.', $incident_count, 'sitepulse'),
+                    $incident_count,
+                    $range_label
+                );
+            } else {
+                $message = sprintf(__('🚨 Availability is below target for %s.', 'sitepulse'), $range_label);
+                $sr = sprintf(__('Availability is below target for %s.', 'sitepulse'), $range_label);
+            }
+
+            $cta = [
+                'label' => __('Review uptime incidents', 'sitepulse'),
+                'url'   => admin_url('admin.php?page=sitepulse-uptime'),
+                'data'  => 'incident-playbook',
+            ];
+        } elseif ('status-warn' === $uptime_status) {
+            $tone = 'warning';
+            $icon = '⚠️';
+            $message = sprintf(__('⚠️ Availability dipped during %s.', 'sitepulse'), $range_label);
+            $sr = sprintf(__('Availability dipped during %s.', 'sitepulse'), $range_label);
+            $cta = [
+                'label' => __('Open uptime details', 'sitepulse'),
+                'url'   => admin_url('admin.php?page=sitepulse-uptime'),
+                'data'  => 'incident-playbook',
+            ];
+        }
+    }
+
+    if (is_array($logs_card) && empty($logs_card['inactive'])) {
+        $logs_status = isset($logs_card['status']['class']) ? $logs_card['status']['class'] : 'status-ok';
+
+        if ('status-bad' === $logs_status) {
+            $tone = 'danger';
+            $icon = '🚨';
+            $message = __('🚨 Fatal errors detected in debug.log.', 'sitepulse');
+            $sr = __('Fatal errors detected in the debug log. Immediate attention required.', 'sitepulse');
+            $cta = [
+                'label' => __('Inspect the error log', 'sitepulse'),
+                'url'   => admin_url('admin.php?page=sitepulse-logs'),
+                'data'  => 'incident-playbook',
+            ];
+        } elseif ('status-warn' === $logs_status && 'danger' !== $tone) {
+            $tone = 'warning';
+            $icon = '⚠️';
+            $message = __('⚠️ Warnings present in the debug log.', 'sitepulse');
+            $sr = __('Warnings present in the debug log.', 'sitepulse');
+            $cta = [
+                'label' => __('Review log warnings', 'sitepulse'),
+                'url'   => admin_url('admin.php?page=sitepulse-logs'),
+                'data'  => 'incident-playbook',
+            ];
+        }
+    }
+
+    if (is_array($speed_card) && empty($speed_card['inactive'])) {
+        $speed_status = isset($speed_card['status']['class']) ? $speed_card['status']['class'] : 'status-ok';
+
+        if ('status-bad' === $speed_status && 'danger' !== $tone) {
+            $tone = 'danger';
+            $icon = '🚨';
+            $message = __('🚨 Backend processing time exceeds the critical threshold.', 'sitepulse');
+            $sr = __('Backend processing time exceeds the critical threshold.', 'sitepulse');
+            $cta = [
+                'label' => __('Investigate speed scans', 'sitepulse'),
+                'url'   => admin_url('admin.php?page=sitepulse-speed'),
+                'data'  => 'performance-playbook',
+            ];
+        } elseif ('status-warn' === $speed_status && 'danger' !== $tone && 'warning' !== $tone) {
+            $tone = 'warning';
+            $icon = '⚠️';
+            $message = __('⚠️ Backend speed is approaching the warning threshold.', 'sitepulse');
+            $sr = __('Backend speed is approaching the warning threshold.', 'sitepulse');
+            $cta = [
+                'label' => __('Open speed analyzer', 'sitepulse'),
+                'url'   => admin_url('admin.php?page=sitepulse-speed'),
+                'data'  => 'performance-playbook',
+            ];
+        }
+    }
+
+    return [
+        'tone'    => $tone,
+        'icon'    => $icon,
+        'message' => $message,
+        'sr'      => $sr,
+        'cta'     => $cta,
+    ];
+}
+
+/**
+ * Builds the formatted representation of the metrics payload for UI rendering.
+ *
+ * @param array<string,mixed> $payload Raw payload data.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_custom_dashboard_format_metrics_view($payload) {
+    $range = isset($payload['range']) ? (string) $payload['range'] : sitepulse_custom_dashboard_get_default_range();
+    $available_ranges = isset($payload['available_ranges']) && is_array($payload['available_ranges'])
+        ? $payload['available_ranges']
+        : array_values(sitepulse_custom_dashboard_get_metric_ranges());
+    $modules = isset($payload['modules']) && is_array($payload['modules']) ? $payload['modules'] : [];
+
+    $range_label = sitepulse_custom_dashboard_resolve_range_label($range, $available_ranges);
+    $generated_at = isset($payload['generated_at']) ? (int) $payload['generated_at'] : sitepulse_custom_dashboard_get_current_timestamp();
+
+    if ($generated_at <= 0) {
+        $generated_at = sitepulse_custom_dashboard_get_current_timestamp();
+    }
+
+    $date_format = get_option('date_format');
+    $time_format = get_option('time_format');
+    $generated_label = function_exists('wp_date')
+        ? wp_date($date_format . ' ' . $time_format, $generated_at)
+        : date_i18n($date_format . ' ' . $time_format, $generated_at);
+
+    $cards = [
+        'uptime' => sitepulse_custom_dashboard_format_uptime_card_view(
+            isset($payload['uptime']) ? $payload['uptime'] : null,
+            !empty($modules['uptime_tracker']),
+            $range_label
+        ),
+        'logs'   => sitepulse_custom_dashboard_format_log_card_view(
+            isset($payload['logs']) ? $payload['logs'] : null,
+            !empty($modules['log_analyzer'])
+        ),
+        'speed'  => sitepulse_custom_dashboard_format_speed_card_view(
+            isset($payload['speed']) ? $payload['speed'] : null,
+            !empty($modules['speed_analyzer']),
+            $range_label
+        ),
+    ];
+
+    $cards = array_filter($cards, 'is_array');
+
+    $banner = sitepulse_custom_dashboard_format_status_banner($cards, $payload, $range_label);
+
+    return [
+        'range'           => $range,
+        'range_label'     => $range_label,
+        'generated_at'    => $generated_at,
+        'generated_label' => $generated_label,
+        'generated_text'  => $generated_label !== ''
+            ? sprintf(__('Updated %s.', 'sitepulse'), $generated_label)
+            : __('Updated just now.', 'sitepulse'),
+        'cards'           => $cards,
+        'banner'          => $banner,
+        'modules'         => $modules,
+    ];
+}
+
+function sitepulse_render_dashboard_metric_card($card_key, $card_view) {
+    if (!is_array($card_view)) {
+        return '';
+    }
+
+    $classes = ['sitepulse-kpi-card'];
+    $status_class = isset($card_view['status']['class']) ? sanitize_html_class((string) $card_view['status']['class']) : '';
+
+    if ($status_class !== '') {
+        $classes[] = 'sitepulse-kpi-card--' . $status_class;
+    }
+
+    if (!empty($card_view['inactive'])) {
+        $classes[] = 'sitepulse-kpi-card--inactive';
+    }
+
+    $status_meta = isset($card_view['status']) && is_array($card_view['status'])
+        ? $card_view['status']
+        : sitepulse_custom_dashboard_resolve_status_meta('status-warn');
+
+    $status_label = isset($status_meta['label']) ? $status_meta['label'] : __('Status unknown', 'sitepulse');
+    $status_icon  = isset($status_meta['icon']) ? $status_meta['icon'] : '⚠️';
+    $status_sr    = isset($status_meta['sr']) ? $status_meta['sr'] : __('Status: unknown', 'sitepulse');
+
+    $value_text = isset($card_view['value']['text']) ? (string) $card_view['value']['text'] : __('N/A', 'sitepulse');
+    $value_unit = isset($card_view['value']['unit']) ? (string) $card_view['value']['unit'] : '';
+    $summary    = isset($card_view['summary']) ? (string) $card_view['summary'] : '';
+
+    $trend   = isset($card_view['trend']) && is_array($card_view['trend']) ? $card_view['trend'] : [];
+    $trend_text = isset($trend['text']) ? (string) $trend['text'] : '';
+    $trend_direction = isset($trend['direction']) ? sanitize_html_class((string) $trend['direction']) : 'flat';
+    $trend_sr = isset($trend['sr']) ? (string) $trend['sr'] : '';
+
+    $description = isset($card_view['description']) ? (string) $card_view['description'] : '';
+    $inactive_message = isset($card_view['inactive_message'])
+        ? (string) $card_view['inactive_message']
+        : __('Enable the related module to view this metric.', 'sitepulse');
+
+    ob_start();
+    ?>
+    <article class="<?php echo esc_attr(implode(' ', $classes)); ?>" data-sitepulse-metric-card="<?php echo esc_attr($card_key); ?>" data-status="<?php echo esc_attr($status_class); ?>"<?php echo !empty($card_view['inactive']) ? ' data-inactive=\"true\"' : ''; ?>>
+        <header class="sitepulse-kpi-card__header">
+            <h2 class="sitepulse-kpi-card__title" data-sitepulse-metric-label><?php echo esc_html(isset($card_view['label']) ? $card_view['label'] : ucfirst($card_key)); ?></h2>
+            <span class="status-badge <?php echo esc_attr($status_class); ?>" data-sitepulse-metric-status-badge>
+                <span class="status-icon" data-sitepulse-metric-status-icon><?php echo esc_html($status_icon); ?></span>
+                <span class="status-text" data-sitepulse-metric-status-label><?php echo esc_html($status_label); ?></span>
+            </span>
+            <span class="screen-reader-text" data-sitepulse-metric-status-sr><?php echo esc_html($status_sr); ?></span>
+        </header>
+        <p class="sitepulse-kpi-card__value">
+            <span class="sitepulse-kpi-card__value-number" data-sitepulse-metric-value><?php echo esc_html($value_text); ?></span>
+            <span class="sitepulse-kpi-card__value-unit" data-sitepulse-metric-unit<?php echo $value_unit === '' ? ' hidden' : ''; ?>><?php echo esc_html($value_unit); ?></span>
+        </p>
+        <p class="sitepulse-kpi-card__summary" data-sitepulse-metric-summary<?php echo $summary === '' ? ' hidden' : ''; ?>><?php echo esc_html($summary); ?></p>
+        <p class="sitepulse-kpi-card__trend" data-sitepulse-metric-trend data-trend="<?php echo esc_attr($trend_direction); ?>"<?php echo $trend_text === '' ? ' hidden' : ''; ?>>
+            <span aria-hidden="true" data-sitepulse-metric-trend-text><?php echo esc_html($trend_text); ?></span>
+            <span class="screen-reader-text" data-sitepulse-metric-trend-sr><?php echo esc_html($trend_sr); ?></span>
+        </p>
+        <?php
+        $details = isset($card_view['details']) && is_array($card_view['details']) ? $card_view['details'] : [];
+        ?>
+        <dl class="sitepulse-kpi-card__details" data-sitepulse-metric-details<?php echo empty($details) ? ' hidden' : ''; ?>>
+            <?php foreach ($details as $detail) :
+                $detail_label = isset($detail['label']) ? (string) $detail['label'] : '';
+                $detail_value = isset($detail['value']) ? (string) $detail['value'] : '';
+                if ($detail_label === '' && $detail_value === '') {
+                    continue;
+                }
+            ?>
+                <div class="sitepulse-kpi-card__detail">
+                    <dt><?php echo esc_html($detail_label); ?></dt>
+                    <dd><?php echo esc_html($detail_value); ?></dd>
+                </div>
+            <?php endforeach; ?>
+        </dl>
+        <p class="sitepulse-kpi-card__description" data-sitepulse-metric-description<?php echo $description === '' ? ' hidden' : ''; ?>><?php echo esc_html($description); ?></p>
+        <p class="sitepulse-kpi-card__inactive" data-sitepulse-metric-inactive<?php echo empty($card_view['inactive']) ? ' hidden' : ''; ?>><?php echo esc_html($inactive_message); ?></p>
+    </article>
+    <?php
+
+    return (string) ob_get_clean();
+}
+
+/**
  * Registers the REST API routes powering the dashboard metrics feed.
  *
  * @return void
@@ -679,7 +1545,7 @@ function sitepulse_custom_dashboard_prepare_metrics_payload($range) {
             : true,
     ];
 
-    return [
+    $payload = [
         'range'            => $range,
         'available_ranges' => $available_ranges,
         'generated_at'     => sitepulse_custom_dashboard_get_current_timestamp(),
@@ -688,6 +1554,10 @@ function sitepulse_custom_dashboard_prepare_metrics_payload($range) {
         'speed'            => $speed,
         'modules'          => $modules_status,
     ];
+
+    $payload['view'] = sitepulse_custom_dashboard_format_metrics_view($payload);
+
+    return $payload;
 }
 
 /**
@@ -1883,6 +2753,41 @@ function sitepulse_custom_dashboards_page() {
         wp_enqueue_script('sitepulse-dashboard-charts');
     }
 
+    $selected_range = sitepulse_custom_dashboard_get_stored_range();
+    $metrics_payload = sitepulse_custom_dashboard_prepare_metrics_payload($selected_range);
+    $metrics_view = isset($metrics_payload['view']) && is_array($metrics_payload['view'])
+        ? $metrics_payload['view']
+        : sitepulse_custom_dashboard_format_metrics_view($metrics_payload);
+    $range_options = isset($metrics_payload['available_ranges']) && is_array($metrics_payload['available_ranges'])
+        ? array_values($metrics_payload['available_ranges'])
+        : array_values(sitepulse_custom_dashboard_get_metric_ranges());
+
+    if (wp_script_is('sitepulse-dashboard-metrics', 'registered')) {
+        wp_localize_script('sitepulse-dashboard-metrics', 'SitePulseMetricsData', [
+            'restUrl' => esc_url_raw(rest_url('sitepulse/v1/metrics')),
+            'nonce'   => wp_create_nonce('wp_rest'),
+            'view'    => $metrics_view,
+            'ranges'  => $range_options,
+            'strings' => [
+                'loading'      => __('Refreshing metrics…', 'sitepulse'),
+                'error'        => __('Unable to refresh metrics. Please try again.', 'sitepulse'),
+                'announcement' => __('Dashboard metrics updated for %s.', 'sitepulse'),
+            ],
+        ]);
+        wp_enqueue_script('sitepulse-dashboard-metrics');
+    }
+
+    $metrics_cards = isset($metrics_view['cards']) && is_array($metrics_view['cards']) ? $metrics_view['cards'] : [];
+    $banner_view = isset($metrics_view['banner']) && is_array($metrics_view['banner']) ? $metrics_view['banner'] : [];
+    $banner_tone = isset($banner_view['tone']) ? sanitize_html_class($banner_view['tone']) : 'ok';
+    $banner_icon = isset($banner_view['icon']) ? $banner_view['icon'] : '✅';
+    $banner_message = isset($banner_view['message']) ? $banner_view['message'] : '';
+    $banner_sr = isset($banner_view['sr']) ? $banner_view['sr'] : '';
+    $banner_cta = isset($banner_view['cta']) && is_array($banner_view['cta']) ? $banner_view['cta'] : [];
+    $generated_text = isset($metrics_view['generated_text']) ? $metrics_view['generated_text'] : '';
+    $range_label = isset($metrics_view['range_label']) ? $metrics_view['range_label'] : '';
+    $current_range = isset($metrics_payload['range']) ? $metrics_payload['range'] : sitepulse_custom_dashboard_get_default_range();
+
     $default_palette = [
         'green'    => '#0b6d2a',
         'amber'    => '#8a6100',
@@ -1893,23 +2798,7 @@ function sitepulse_custom_dashboards_page() {
         'purple'   => '#9C27B0',
     ];
 
-    $default_status_labels = [
-        'status-ok'   => [
-            'label' => __('Bon', 'sitepulse'),
-            'sr'    => __('Statut : bon', 'sitepulse'),
-            'icon'  => '✔️',
-        ],
-        'status-warn' => [
-            'label' => __('Attention', 'sitepulse'),
-            'sr'    => __('Statut : attention', 'sitepulse'),
-            'icon'  => '⚠️',
-        ],
-        'status-bad'  => [
-            'label' => __('Critique', 'sitepulse'),
-            'sr'    => __('Statut : critique', 'sitepulse'),
-            'icon'  => '⛔',
-        ],
-    ];
+    $default_status_labels = sitepulse_custom_dashboard_get_default_status_labels();
 
     $context = sitepulse_get_dashboard_preview_context();
 
@@ -3312,6 +4201,78 @@ function sitepulse_custom_dashboards_page() {
         <?php if (!empty($module_navigation)) : ?>
             <?php sitepulse_render_module_navigation($current_page, $module_navigation); ?>
         <?php endif; ?>
+
+        <?php
+        $banner_cta_label = isset($banner_cta['label']) ? $banner_cta['label'] : '';
+        $banner_cta_url   = isset($banner_cta['url']) ? $banner_cta['url'] : '';
+        $banner_cta_data  = isset($banner_cta['data']) ? $banner_cta['data'] : '';
+        ?>
+
+        <div class="sitepulse-overview" data-sitepulse-metrics data-loading="false" aria-busy="false">
+            <div class="sitepulse-overview__controls">
+                <fieldset class="sitepulse-range-picker" data-sitepulse-range>
+                    <legend><?php esc_html_e('Select timeframe', 'sitepulse'); ?></legend>
+                    <div class="sitepulse-range-picker__options">
+                        <?php foreach ($range_options as $option) :
+                            $option_id = isset($option['id']) ? sanitize_key($option['id']) : '';
+                            if ($option_id === '') {
+                                continue;
+                            }
+                            $option_label = isset($option['label']) && is_string($option['label']) ? $option['label'] : $option_id;
+                            $input_id = 'sitepulse-metrics-range-' . $option_id;
+                        ?>
+                            <label class="sitepulse-range-picker__option<?php echo ($option_id === $current_range) ? ' is-selected' : ''; ?>" for="<?php echo esc_attr($input_id); ?>">
+                                <input type="radio" id="<?php echo esc_attr($input_id); ?>" name="sitepulse-metrics-range" value="<?php echo esc_attr($option_id); ?>" <?php checked($option_id === $current_range); ?> data-sitepulse-range-option />
+                                <span><?php echo esc_html($option_label); ?></span>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+                    <label class="sitepulse-range-picker__select">
+                        <span class="screen-reader-text"><?php esc_html_e('Select timeframe', 'sitepulse'); ?></span>
+                        <select data-sitepulse-range-select>
+                            <?php foreach ($range_options as $option) :
+                                $option_id = isset($option['id']) ? sanitize_key($option['id']) : '';
+                                if ($option_id === '') {
+                                    continue;
+                                }
+                                $option_label = isset($option['label']) && is_string($option['label']) ? $option['label'] : $option_id;
+                            ?>
+                                <option value="<?php echo esc_attr($option_id); ?>" <?php selected($option_id, $current_range); ?>><?php echo esc_html($option_label); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                </fieldset>
+                <div class="sitepulse-overview__meta">
+                    <p class="sitepulse-overview__range">
+                        <span class="sitepulse-overview__meta-label"><?php esc_html_e('Active window:', 'sitepulse'); ?></span>
+                        <span data-sitepulse-range-label><?php echo esc_html($range_label); ?></span>
+                    </p>
+                    <p class="sitepulse-overview__generated" data-sitepulse-generated><?php echo esc_html($generated_text); ?></p>
+                </div>
+            </div>
+
+            <div class="sitepulse-status-banner sitepulse-status-banner--<?php echo esc_attr($banner_tone); ?>" data-sitepulse-banner role="status" aria-live="polite">
+                <div class="sitepulse-status-banner__content">
+                    <span class="sitepulse-status-banner__icon" aria-hidden="true" data-sitepulse-banner-icon><?php echo esc_html($banner_icon); ?></span>
+                    <p class="sitepulse-status-banner__message" data-sitepulse-banner-message><?php echo esc_html($banner_message); ?></p>
+                    <span class="screen-reader-text" data-sitepulse-banner-sr><?php echo esc_html($banner_sr); ?></span>
+                </div>
+                <?php if ($banner_cta_label !== '' && $banner_cta_url !== '') : ?>
+                    <a href="<?php echo esc_url($banner_cta_url); ?>" class="button button-primary sitepulse-status-banner__cta" data-sitepulse-banner-cta<?php echo $banner_cta_data !== '' ? ' data-cta="' . esc_attr($banner_cta_data) . '"' : ''; ?>><?php echo esc_html($banner_cta_label); ?></a>
+                <?php else : ?>
+                    <span class="sitepulse-status-banner__cta" data-sitepulse-banner-cta hidden></span>
+                <?php endif; ?>
+            </div>
+
+            <div class="sitepulse-kpi-grid" data-sitepulse-metrics-grid>
+                <?php foreach ($metrics_cards as $card_key => $card_data) : ?>
+                    <?php echo sitepulse_render_dashboard_metric_card($card_key, $card_data); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+                <?php endforeach; ?>
+            </div>
+
+            <div class="sitepulse-metrics__error notice notice-error" role="alert" hidden data-sitepulse-metrics-error></div>
+            <span class="screen-reader-text" aria-live="polite" data-sitepulse-metrics-announcer></span>
+        </div>
 
         <div class="sitepulse-dashboard-preferences">
             <button type="button" class="button button-secondary sitepulse-preferences__toggle" aria-expanded="false" aria-controls="sitepulse-preferences-panel">
