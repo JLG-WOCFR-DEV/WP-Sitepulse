@@ -126,6 +126,39 @@ function sitepulse_get_module_selector_items() {
 }
 
 /**
+ * Ensures the module navigation assets are registered and enqueued.
+ *
+ * @return void
+ */
+function sitepulse_enqueue_module_navigation_assets() {
+    $style_handle  = 'sitepulse-module-navigation';
+    $script_handle = 'sitepulse-dashboard-nav';
+
+    if (!wp_style_is($style_handle, 'registered')) {
+        wp_register_style(
+            $style_handle,
+            SITEPULSE_URL . 'modules/css/module-navigation.css',
+            [],
+            SITEPULSE_VERSION
+        );
+    }
+
+    wp_enqueue_style($style_handle);
+
+    if (!wp_script_is($script_handle, 'registered')) {
+        wp_register_script(
+            $script_handle,
+            SITEPULSE_URL . 'modules/js/sitepulse-dashboard-nav.js',
+            [],
+            SITEPULSE_VERSION,
+            true
+        );
+    }
+
+    wp_enqueue_script($script_handle);
+}
+
+/**
  * Enqueues the shared module selector stylesheet when viewing a SitePulse module screen.
  *
  * @param string $hook_suffix Current admin page identifier.
@@ -153,24 +186,7 @@ function sitepulse_module_selector_enqueue_style($hook_suffix) {
         return;
     }
 
-    wp_register_style(
-        'sitepulse-module-navigation',
-        SITEPULSE_URL . 'modules/css/module-navigation.css',
-        [],
-        SITEPULSE_VERSION
-    );
-
-    wp_enqueue_style('sitepulse-module-navigation');
-
-    wp_register_script(
-        'sitepulse-dashboard-nav',
-        SITEPULSE_URL . 'modules/js/sitepulse-dashboard-nav.js',
-        [],
-        SITEPULSE_VERSION,
-        true
-    );
-
-    wp_enqueue_script('sitepulse-dashboard-nav');
+    sitepulse_enqueue_module_navigation_assets();
 }
 add_action('admin_enqueue_scripts', 'sitepulse_module_selector_enqueue_style');
 
@@ -232,6 +248,8 @@ function sitepulse_render_module_navigation($current_page = '', $items = null) {
     if (empty($items)) {
         return;
     }
+
+    sitepulse_enqueue_module_navigation_assets();
 
     $nav_list_id = function_exists('wp_unique_id')
         ? wp_unique_id('sitepulse-module-nav-list-')
