@@ -56,8 +56,14 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
 
                 if (is_numeric($value)) {
                     $numeric_value = (float) $value;
-                    $precision = (floor($numeric_value) === $numeric_value) ? 0 : 2;
-                    $values[] = number_format_i18n($numeric_value, $precision);
+                    $rounded_integer = round($numeric_value);
+                    $is_near_integer = abs($numeric_value - $rounded_integer) < 0.001;
+
+                    if ($is_near_integer) {
+                        $values[] = number_format_i18n($rounded_integer, 0);
+                    } else {
+                        $values[] = number_format_i18n(round($numeric_value, 2), 2);
+                    }
                 } elseif (is_scalar($value)) {
                     $values[] = (string) $value;
                 }
