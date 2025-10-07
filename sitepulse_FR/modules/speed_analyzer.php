@@ -79,16 +79,23 @@ function sitepulse_speed_analyzer_get_rate_limit() {
 /**
  * Retrieves the warning and critical thresholds for speed measurements.
  *
- * @return array{warning:int,critical:int,default_warning:int,default_critical:int}
+ * @param string $profile Optional profile identifier (desktop, mobile…).
+ * @return array{warning:int,critical:int,default_warning:int,default_critical:int,profile:string}
  */
-function sitepulse_speed_analyzer_get_thresholds() {
+function sitepulse_speed_analyzer_get_thresholds($profile = 'default') {
+    $profile = sitepulse_speed_analyzer_normalize_profile($profile);
+
     $default_speed_warning = defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200;
     $default_speed_critical = defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? (int) SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500;
     $speed_warning_threshold = $default_speed_warning;
     $speed_critical_threshold = $default_speed_critical;
 
     if (function_exists('sitepulse_get_speed_thresholds')) {
-        $fetched_thresholds = sitepulse_get_speed_thresholds();
+        $fetched_thresholds = sitepulse_get_speed_thresholds($profile);
+
+        if (!is_array($fetched_thresholds) && $profile !== 'default') {
+            $fetched_thresholds = sitepulse_get_speed_thresholds('default');
+        }
 
         if (is_array($fetched_thresholds)) {
             if (isset($fetched_thresholds['warning']) && is_numeric($fetched_thresholds['warning'])) {
@@ -128,7 +135,120 @@ function sitepulse_speed_analyzer_get_thresholds() {
         'critical'         => $speed_critical_threshold,
         'default_warning'  => $default_speed_warning,
         'default_critical' => $default_speed_critical,
+        'profile'          => $profile,
     ];
+}
+
+/**
+ * Returns the available performance profiles.
+ *
+ * @return array<string,array{label:string,description:string}>
+ */
+function sitepulse_speed_analyzer_get_profile_catalog() {
+    $profiles = [
+        'default' => [
+            'label'       => __('Standard', 'sitepulse'),
+            'description' => __('Profil générique aligné sur les seuils globaux du site.', 'sitepulse'),
+        ],
+        'desktop' => [
+            'label'       => __('Desktop – Core Web Vitals', 'sitepulse'),
+            'description' => __('Référence bureau inspirée des budgets de performance PageSpeed (connexion rapide).', 'sitepulse'),
+        ],
+        'mobile' => [
+            'label'       => __('Mobile – Core Web Vitals', 'sitepulse'),
+            'description' => __('Budget mobile plus strict pour simuler un smartphone 4G.', 'sitepulse'),
+        ],
+    ];
+
+    if (function_exists('apply_filters')) {
+        $filtered = apply_filters('sitepulse_speed_analyzer_profiles', $profiles);
+
+        if (is_array($filtered)) {
+            $profiles = [];
+
+            foreach ($filtered as $slug => $profile) {
+                if (!is_string($slug) || $slug === '') {
+                    continue;
+                }
+
+                if (!is_array($profile)) {
+                    continue;
+                }
+
+                $label = isset($profile['label']) ? (string) $profile['label'] : ucfirst($slug);
+                $description = isset($profile['description']) ? (string) $profile['description'] : '';
+
+                $profiles[sanitize_key($slug)] = [
+                    'label'       => $label,
+                    'description' => $description,
+                ];
+            }
+        }
+    }
+
+    if (!isset($profiles['default'])) {
+        $profiles['default'] = [
+            'label'       => __('Standard', 'sitepulse'),
+            'description' => __('Profil générique aligné sur les seuils globaux du site.', 'sitepulse'),
+        ];
+    }
+
+    return $profiles;
+}
+
+/**
+ * Normalizes a profile identifier against the catalog.
+ *
+ * @param mixed $profile Raw profile value.
+ *
+ * @return string
+ */
+function sitepulse_speed_analyzer_normalize_profile($profile) {
+    $profile = is_string($profile) ? sanitize_key($profile) : '';
+
+    if ($profile === '') {
+        $profile = 'default';
+    }
+
+    $catalog = sitepulse_speed_analyzer_get_profile_catalog();
+
+    if (!isset($catalog[$profile])) {
+        return 'default';
+    }
+
+    return $profile;
+}
+
+/**
+ * Prepares the profile catalog for client-side usage.
+ *
+ * @param array<string,array{label:string,description:string}>|null $catalog Optional catalog override.
+ *
+ * @return array<string,array{label:string,description:string}>
+ */
+function sitepulse_speed_analyzer_prepare_profiles_for_js($catalog = null) {
+    if ($catalog === null) {
+        $catalog = sitepulse_speed_analyzer_get_profile_catalog();
+    }
+
+    $prepared = [];
+
+    if (!is_array($catalog)) {
+        return $prepared;
+    }
+
+    foreach ($catalog as $slug => $profile) {
+        if (!is_string($slug) || $slug === '') {
+            continue;
+        }
+
+        $prepared[$slug] = [
+            'label'       => isset($profile['label']) ? (string) $profile['label'] : ucfirst($slug),
+            'description' => isset($profile['description']) ? (string) $profile['description'] : '',
+        ];
+    }
+
+    return $prepared;
 }
 
 /**
@@ -238,16 +358,19 @@ function sitepulse_speed_analyzer_get_default_presets() {
             'label'  => __('Front-office', 'sitepulse'),
             'url'    => home_url('/'),
             'method' => 'GET',
+            'profile' => 'desktop',
         ],
         'critical' => [
             'label'  => __('Page critique', 'sitepulse'),
             'url'    => home_url('/'),
             'method' => 'GET',
+            'profile' => 'mobile',
         ],
         'api' => [
             'label'  => __('API', 'sitepulse'),
             'url'    => home_url('/wp-json/'),
             'method' => 'GET',
+            'profile' => 'default',
         ],
     ];
 
@@ -320,10 +443,14 @@ function sitepulse_speed_analyzer_get_automation_settings() {
             $method = 'GET';
         }
 
+        $profile = isset($preset['profile']) ? $preset['profile'] : (isset($defaults['presets'][$key]['profile']) ? $defaults['presets'][$key]['profile'] : 'default');
+        $profile = sitepulse_speed_analyzer_normalize_profile($profile);
+
         $normalized_presets[$key] = [
-            'label'  => $label,
-            'url'    => esc_url_raw($url),
-            'method' => $method,
+            'label'   => $label,
+            'url'     => esc_url_raw($url),
+            'method'  => $method,
+            'profile' => $profile,
         ];
     }
 
@@ -379,10 +506,14 @@ function sitepulse_speed_analyzer_save_automation_settings($settings) {
             $method = 'GET';
         }
 
+        $profile = isset($preset['profile']) ? $preset['profile'] : (isset($defaults[$key]['profile']) ? $defaults[$key]['profile'] : 'default');
+        $profile = sitepulse_speed_analyzer_normalize_profile($profile);
+
         $presets[$key] = [
-            'label'  => $label,
-            'url'    => $url,
-            'method' => $method,
+            'label'   => $label,
+            'url'     => $url,
+            'method'  => $method,
+            'profile' => $profile,
         ];
     }
 
@@ -480,6 +611,10 @@ function sitepulse_speed_analyzer_get_automation_history($preset, $include_meta 
                     $entry['error'] = (string) $entry['error'];
                 }
 
+                if (isset($entry['profile'])) {
+                    $entry['profile'] = sitepulse_speed_analyzer_normalize_profile($entry['profile']);
+                }
+
                 return $entry;
             },
             $entries
@@ -513,24 +648,33 @@ function sitepulse_speed_analyzer_get_automation_history($preset, $include_meta 
 /**
  * Builds the automation payload used by the UI and AJAX responses.
  *
- * @param array{warning:int,critical:int}|null $thresholds Thresholds.
+ * @param array{warning:int,critical:int}|null $default_thresholds Default thresholds for manual runs.
  *
  * @return array<string,mixed>
  */
-function sitepulse_speed_analyzer_build_automation_payload($thresholds = null) {
-    if ($thresholds === null) {
-        $thresholds = sitepulse_speed_analyzer_get_thresholds();
+function sitepulse_speed_analyzer_build_automation_payload($default_thresholds = null) {
+    if ($default_thresholds === null) {
+        $default_thresholds = sitepulse_speed_analyzer_get_thresholds();
     }
 
     $settings = sitepulse_speed_analyzer_get_automation_settings();
+    $profiles = sitepulse_speed_analyzer_get_profile_catalog();
     $payload = [
-        'frequency' => $settings['frequency'],
-        'presets'   => [],
-        'queue'     => sitepulse_speed_analyzer_get_queue(),
+        'frequency'        => $settings['frequency'],
+        'presets'          => [],
+        'queue'            => sitepulse_speed_analyzer_get_queue(),
+        'manualThresholds' => [
+            'warning'  => isset($default_thresholds['warning']) ? (int) $default_thresholds['warning'] : 0,
+            'critical' => isset($default_thresholds['critical']) ? (int) $default_thresholds['critical'] : 0,
+            'profile'  => isset($default_thresholds['profile']) ? sitepulse_speed_analyzer_normalize_profile($default_thresholds['profile']) : 'default',
+        ],
     ];
 
     foreach ($settings['presets'] as $slug => $preset) {
         $history = sitepulse_speed_analyzer_get_automation_history($slug);
+        $profile = isset($preset['profile']) ? sitepulse_speed_analyzer_normalize_profile($preset['profile']) : 'default';
+        $profile_thresholds = sitepulse_speed_analyzer_get_thresholds($profile);
+        $profile_label = isset($profiles[$profile]['label']) ? (string) $profiles[$profile]['label'] : ucfirst($profile);
 
         $payload['presets'][$slug] = [
             'label'           => isset($preset['label']) ? (string) $preset['label'] : ucfirst($slug),
@@ -538,7 +682,14 @@ function sitepulse_speed_analyzer_build_automation_payload($thresholds = null) {
             'method'          => isset($preset['method']) ? (string) $preset['method'] : 'GET',
             'history'         => $history,
             'detailedHistory' => sitepulse_speed_analyzer_get_automation_history($slug, true),
-            'aggregates'      => sitepulse_speed_analyzer_get_aggregates($history, $thresholds),
+            'aggregates'      => sitepulse_speed_analyzer_get_aggregates($history, $profile_thresholds),
+            'profile'         => $profile,
+            'profileLabel'    => $profile_label,
+            'thresholds'      => [
+                'warning'  => (int) $profile_thresholds['warning'],
+                'critical' => (int) $profile_thresholds['critical'],
+                'profile'  => $profile,
+            ],
         ];
     }
 
@@ -594,6 +745,7 @@ function sitepulse_speed_analyzer_store_automation_measurement($preset, array $e
     }
 
     $previous = sitepulse_speed_analyzer_get_latest_numeric_entry_from_history($history[$preset]);
+    $profile = isset($config['profile']) ? sitepulse_speed_analyzer_normalize_profile($config['profile']) : 'default';
 
     $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : current_time('timestamp');
     $value = null;
@@ -617,6 +769,8 @@ function sitepulse_speed_analyzer_store_automation_measurement($preset, array $e
     if (!empty($entry['error'])) {
         $stored_entry['error'] = (string) $entry['error'];
     }
+
+    $stored_entry['profile'] = $profile;
 
     $history[$preset][] = $stored_entry;
 
@@ -1533,6 +1687,11 @@ function sitepulse_ajax_run_speed_scan() {
     $thresholds = sitepulse_speed_analyzer_get_thresholds();
 
     $automation_payload = sitepulse_speed_analyzer_build_automation_payload($thresholds);
+    $profiles_catalog = sitepulse_speed_analyzer_get_profile_catalog();
+    $profiles_for_js = sitepulse_speed_analyzer_prepare_profiles_for_js($profiles_catalog);
+    $manual_profile_slug = isset($thresholds['profile']) ? sitepulse_speed_analyzer_normalize_profile($thresholds['profile']) : 'default';
+    $manual_profile_label = isset($profiles_for_js[$manual_profile_slug]['label']) ? $profiles_for_js[$manual_profile_slug]['label'] : ucfirst($manual_profile_slug);
+    $manual_profile_description = isset($profiles_for_js[$manual_profile_slug]['description']) ? $profiles_for_js[$manual_profile_slug]['description'] : '';
 
     if ($rate_limit > 0 && ($now - $last_run) < $rate_limit) {
         $remaining = max(0, $rate_limit - ($now - $last_run));
@@ -1555,6 +1714,12 @@ function sitepulse_ajax_run_speed_scan() {
             'rate_limit'       => $rate_limit,
             'remaining'        => $remaining,
             'automation'       => $automation_payload,
+            'profiles'         => $profiles_for_js,
+            'manualProfile'    => [
+                'slug'        => $manual_profile_slug,
+                'label'       => $manual_profile_label,
+                'description' => $manual_profile_description,
+            ],
         ], 429);
     }
 
@@ -1583,6 +1748,12 @@ function sitepulse_ajax_run_speed_scan() {
         'last_run'        => $now,
         'rate_limit'      => $rate_limit,
         'automation'      => $automation_payload,
+        'profiles'        => $profiles_for_js,
+        'manualProfile'   => [
+            'slug'        => $manual_profile_slug,
+            'label'       => $manual_profile_label,
+            'description' => $manual_profile_description,
+        ],
     ]);
 }
 
@@ -1608,6 +1779,13 @@ function sitepulse_speed_analyzer_enqueue_assets($hook_suffix) {
 
     $automation_payload = sitepulse_speed_analyzer_build_automation_payload($thresholds);
     $frequency_choices = sitepulse_speed_analyzer_get_frequency_choices();
+    $profiles_catalog = sitepulse_speed_analyzer_get_profile_catalog();
+    $profiles_catalog = sitepulse_speed_analyzer_get_profile_catalog();
+    $profiles_for_js = sitepulse_speed_analyzer_prepare_profiles_for_js($profiles_catalog);
+
+    $manual_profile = isset($thresholds['profile']) ? sitepulse_speed_analyzer_normalize_profile($thresholds['profile']) : 'default';
+    $manual_profile_label = isset($profiles_for_js[$manual_profile]['label']) ? $profiles_for_js[$manual_profile]['label'] : ucfirst($manual_profile);
+    $manual_profile_description = isset($profiles_for_js[$manual_profile]['description']) ? $profiles_for_js[$manual_profile]['description'] : '';
 
     wp_enqueue_style(
         'sitepulse-speed-analyzer',
@@ -1662,6 +1840,7 @@ function sitepulse_speed_analyzer_enqueue_assets($hook_suffix) {
             'thresholds'     => [
                 'warning'  => (int) $thresholds['warning'],
                 'critical' => (int) $thresholds['critical'],
+                'profile'  => $manual_profile,
             ],
             'aggregates'     => $aggregates,
             'summaryMeta'    => $summary_meta,
@@ -1674,6 +1853,12 @@ function sitepulse_speed_analyzer_enqueue_assets($hook_suffix) {
             ),
             'automation'     => $automation_payload,
             'frequencyChoices'=> $frequency_choices,
+            'profiles'       => $profiles_for_js,
+            'manualProfile'  => [
+                'slug'        => $manual_profile,
+                'label'       => $manual_profile_label,
+                'description' => $manual_profile_description,
+            ],
             'i18n'           => [
                 'running'        => esc_html__('Analyse en cours…', 'sitepulse'),
                 'retry'          => esc_html__('Relancer un test', 'sitepulse'),
@@ -1691,6 +1876,7 @@ function sitepulse_speed_analyzer_enqueue_assets($hook_suffix) {
                 'automationLabel'=> esc_html__('Planifié – %s', 'sitepulse'),
                 'automationEmpty'=> esc_html__('Aucun preset planifié n’est disponible.', 'sitepulse'),
                 'queueWarning'   => esc_html__('Certaines mesures automatiques sont en file d’attente.', 'sitepulse'),
+                'profileLabel'  => esc_html__('Profil', 'sitepulse'),
                 'summaryUnit'   => esc_html__('ms', 'sitepulse'),
                 'summaryNoData' => esc_html__('N/A', 'sitepulse'),
                 'summarySampleSingular' => esc_html__('Basé sur %d mesure.', 'sitepulse'),
@@ -1740,6 +1926,9 @@ function sitepulse_speed_analyzer_page() {
     $rate_limit_label = human_time_diff($now_timestamp, $now_timestamp + max(1, $rate_limit));
     $automation_settings = sitepulse_speed_analyzer_get_automation_settings();
     $automation_payload = sitepulse_speed_analyzer_build_automation_payload($thresholds);
+    $manual_profile = isset($thresholds['profile']) ? sitepulse_speed_analyzer_normalize_profile($thresholds['profile']) : 'default';
+    $manual_profile_label = isset($profiles_catalog[$manual_profile]['label']) ? (string) $profiles_catalog[$manual_profile]['label'] : ucfirst($manual_profile);
+    $manual_profile_description = isset($profiles_catalog[$manual_profile]['description']) ? (string) $profiles_catalog[$manual_profile]['description'] : '';
     $frequency_choices = sitepulse_speed_analyzer_get_frequency_choices();
     $selected_frequency = isset($automation_settings['frequency']) ? $automation_settings['frequency'] : 'disabled';
     $default_presets = sitepulse_speed_analyzer_get_default_presets();
@@ -1813,22 +2002,27 @@ function sitepulse_speed_analyzer_page() {
 
         <div class="speed-history-wrapper">
             <h2><?php esc_html_e('Historique des temps de réponse', 'sitepulse'); ?></h2>
-            <div class="speed-history-controls">
-                <label class="screen-reader-text" for="sitepulse-speed-history-source"><?php esc_html_e('Source des mesures', 'sitepulse'); ?></label>
-                <select id="sitepulse-speed-history-source">
-                    <option value="manual" selected><?php esc_html_e('Tests manuels', 'sitepulse'); ?></option>
-                    <?php if (!empty($automation_payload['presets'])) : ?>
-                        <?php foreach ($automation_payload['presets'] as $preset_slug => $preset_data) : ?>
-                            <option value="<?php echo esc_attr('automation:' . $preset_slug); ?>">
-                                <?php printf(esc_html__('Planifié – %s', 'sitepulse'), esc_html($preset_data['label'])); ?>
-                            </option>
-                        <?php endforeach; ?>
+                <div class="speed-history-controls">
+                    <label class="screen-reader-text" for="sitepulse-speed-history-source"><?php esc_html_e('Source des mesures', 'sitepulse'); ?></label>
+                    <select id="sitepulse-speed-history-source">
+                        <option value="manual" selected><?php esc_html_e('Tests manuels', 'sitepulse'); ?></option>
+                        <?php if (!empty($automation_payload['presets'])) : ?>
+                            <?php foreach ($automation_payload['presets'] as $preset_slug => $preset_data) : ?>
+                                <option value="<?php echo esc_attr('automation:' . $preset_slug); ?>">
+                                    <?php printf(esc_html__('Planifié – %s', 'sitepulse'), esc_html($preset_data['label'])); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </select>
+                    <div class="speed-history-profile" id="sitepulse-speed-history-profile" data-profile="<?php echo esc_attr($manual_profile); ?>" aria-live="polite">
+                        <span class="profile-title"><?php esc_html_e('Profil actif :', 'sitepulse'); ?></span>
+                        <span class="profile-label"><?php echo esc_html($manual_profile_label); ?></span>
+                        <span class="profile-description"<?php echo $manual_profile_description === '' ? ' style="display:none;"' : ''; ?>><?php echo esc_html($manual_profile_description); ?></span>
+                    </div>
+                    <?php if (!empty($automation_queue)) : ?>
+                        <p class="description speed-history-queue-warning"><?php esc_html_e('Certaines mesures automatiques sont en file d’attente.', 'sitepulse'); ?></p>
                     <?php endif; ?>
-                </select>
-                <?php if (!empty($automation_queue)) : ?>
-                    <p class="description speed-history-queue-warning"><?php esc_html_e('Certaines mesures automatiques sont en file d’attente.', 'sitepulse'); ?></p>
-                <?php endif; ?>
-            </div>
+                </div>
             <div class="speed-history-visual">
                 <canvas id="sitepulse-speed-history-chart" aria-describedby="sitepulse-speed-history-summary"></canvas>
             </div>
@@ -1928,6 +2122,9 @@ function sitepulse_speed_analyzer_page() {
                         $preset_label = isset($preset_config['label']) ? (string) $preset_config['label'] : ucfirst($preset_slug);
                         $preset_url = isset($preset_config['url']) ? (string) $preset_config['url'] : '';
                         $preset_method = isset($preset_config['method']) ? strtoupper((string) $preset_config['method']) : 'GET';
+                        $preset_profile = isset($preset_config['profile'])
+                            ? sitepulse_speed_analyzer_normalize_profile($preset_config['profile'])
+                            : 'default';
                         if (!in_array($preset_method, ['GET', 'POST', 'HEAD'], true)) {
                             $preset_method = 'GET';
                         }
@@ -1944,6 +2141,17 @@ function sitepulse_speed_analyzer_page() {
                                     <option value="<?php echo esc_attr($method_option); ?>" <?php selected($preset_method, $method_option); ?>><?php echo esc_html($method_option); ?></option>
                                 <?php endforeach; ?>
                             </select>
+                            <label for="sitepulse-speed-preset-<?php echo esc_attr($preset_slug); ?>-profile"><?php esc_html_e('Profil de mesure', 'sitepulse'); ?></label>
+                            <select id="sitepulse-speed-preset-<?php echo esc_attr($preset_slug); ?>-profile" name="sitepulse_speed_presets[<?php echo esc_attr($preset_slug); ?>][profile]">
+                                <?php foreach ($profiles_catalog as $profile_slug => $profile_meta) :
+                                    $profile_label = isset($profile_meta['label']) ? (string) $profile_meta['label'] : ucfirst($profile_slug);
+                                ?>
+                                    <option value="<?php echo esc_attr($profile_slug); ?>" <?php selected($preset_profile, $profile_slug); ?>><?php echo esc_html($profile_label); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <?php if (isset($profiles_catalog[$preset_profile]['description']) && $profiles_catalog[$preset_profile]['description'] !== '') : ?>
+                                <p class="description"><?php echo esc_html($profiles_catalog[$preset_profile]['description']); ?></p>
+                            <?php endif; ?>
                         </fieldset>
                     <?php endforeach; ?>
                 </div>
@@ -1958,6 +2166,7 @@ function sitepulse_speed_analyzer_page() {
                     <thead>
                         <tr>
                             <th scope="col"><?php esc_html_e('Preset', 'sitepulse'); ?></th>
+                            <th scope="col"><?php esc_html_e('Profil', 'sitepulse'); ?></th>
                             <th scope="col"><?php esc_html_e('Moyenne (ms)', 'sitepulse'); ?></th>
                             <th scope="col"><?php esc_html_e('Dernière mesure', 'sitepulse'); ?></th>
                             <th scope="col"><?php esc_html_e('Statut HTTP', 'sitepulse'); ?></th>
@@ -1967,6 +2176,8 @@ function sitepulse_speed_analyzer_page() {
                     <tbody>
                         <?php foreach ($automation_payload['presets'] as $preset_slug => $preset_data) :
                             $aggregated = isset($preset_data['aggregates']) ? $preset_data['aggregates'] : [];
+                            $preset_thresholds = isset($preset_data['thresholds']) ? $preset_data['thresholds'] : $thresholds;
+                            $profile_label = isset($preset_data['profileLabel']) ? (string) $preset_data['profileLabel'] : '';
                             $mean_metric = isset($aggregated['metrics']['mean']) ? $aggregated['metrics']['mean'] : null;
                             $mean_value = ($mean_metric && isset($mean_metric['value']) && $mean_metric['value'] !== null)
                                 ? sprintf(
@@ -1989,7 +2200,7 @@ function sitepulse_speed_analyzer_page() {
                                 )
                                 : esc_html__('N/A', 'sitepulse');
                             $latest_status = ($latest_meta && isset($latest_meta['server_processing_ms']))
-                                ? sitepulse_speed_analyzer_resolve_status((float) $latest_meta['server_processing_ms'], $thresholds)
+                                ? sitepulse_speed_analyzer_resolve_status((float) $latest_meta['server_processing_ms'], $preset_thresholds)
                                 : 'status-warn';
                             $latest_meta_info = $get_status_meta($latest_status);
                             $http_status_label = '—';
@@ -2008,6 +2219,7 @@ function sitepulse_speed_analyzer_page() {
                         ?>
                             <tr>
                                 <td><?php echo esc_html($preset_data['label']); ?></td>
+                                <td><?php echo esc_html($profile_label); ?></td>
                                 <td>
                                     <span class="status-badge <?php echo esc_attr($mean_status); ?>" aria-hidden="true">
                                         <span class="status-icon"><?php echo esc_html($mean_meta['icon']); ?></span>

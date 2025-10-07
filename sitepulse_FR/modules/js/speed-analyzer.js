@@ -5,6 +5,132 @@
     var chartInstance = null;
     var automation = settings.automation || { presets: {} };
     var currentSourceKey = 'manual';
+    var profileCatalog = {};
+    var manualProfile = settings.manualProfile || null;
+    var manualThresholds = {};
+
+    updateProfileCatalog(settings.profiles || {});
+    updateManualProfile(manualProfile || {});
+    updateManualThresholds(settings.thresholds || {});
+
+    function cloneThresholds(thresholds) {
+        var clone = {};
+
+        if (thresholds && typeof thresholds === 'object') {
+            if (typeof thresholds.warning !== 'undefined') {
+                clone.warning = Number(thresholds.warning);
+            }
+
+            if (typeof thresholds.critical !== 'undefined') {
+                clone.critical = Number(thresholds.critical);
+            }
+
+            if (typeof thresholds.profile === 'string') {
+                clone.profile = thresholds.profile;
+            }
+        }
+
+        return clone;
+    }
+
+    function getProfileMeta(slug) {
+        var normalized = typeof slug === 'string' && slug ? slug : '';
+
+        if (!normalized) {
+            if (manualProfile && manualProfile.slug) {
+                normalized = manualProfile.slug;
+            } else if (manualThresholds.profile) {
+                normalized = manualThresholds.profile;
+            } else {
+                normalized = 'default';
+            }
+        }
+
+        var meta = profileCatalog[normalized] || {};
+        var label = meta.label || '';
+        var description = meta.description || '';
+
+        if ((!label || !description) && manualProfile && manualProfile.slug === normalized) {
+            if (!label && manualProfile.label) {
+                label = manualProfile.label;
+            }
+
+            if (!description && manualProfile.description) {
+                description = manualProfile.description;
+            }
+        }
+
+        if (!label) {
+            label = normalized.charAt(0).toUpperCase() + normalized.slice(1);
+        }
+
+        return {
+            slug: normalized,
+            label: label,
+            description: description || ''
+        };
+    }
+
+    function updateProfileCatalog(profiles) {
+        if (!profiles || typeof profiles !== 'object') {
+            return;
+        }
+
+        var updated = {};
+
+        Object.keys(profiles).forEach(function (slug) {
+            if (typeof slug !== 'string' || !slug) {
+                return;
+            }
+
+            var meta = profiles[slug] || {};
+
+            updated[slug] = {
+                label: typeof meta.label === 'string' ? meta.label : '',
+                description: typeof meta.description === 'string' ? meta.description : ''
+            };
+        });
+
+        profileCatalog = updated;
+    }
+
+    function updateManualProfile(profile) {
+        if (!profile || typeof profile !== 'object') {
+            return;
+        }
+
+        var slug = typeof profile.slug === 'string' && profile.slug
+            ? profile.slug
+            : (manualProfile && manualProfile.slug) || manualThresholds.profile || 'default';
+
+        manualProfile = {
+            slug: slug,
+            label: typeof profile.label === 'string'
+                ? profile.label
+                : (manualProfile && manualProfile.slug === slug ? manualProfile.label : ''),
+            description: typeof profile.description === 'string'
+                ? profile.description
+                : (manualProfile && manualProfile.slug === slug ? manualProfile.description : '')
+        };
+
+        if (manualProfile.slug && manualThresholds.profile !== manualProfile.slug) {
+            manualThresholds.profile = manualProfile.slug;
+        }
+    }
+
+    function updateManualThresholds(thresholds) {
+        manualThresholds = cloneThresholds(thresholds || {});
+
+        if (!manualThresholds.profile) {
+            if (manualProfile && manualProfile.slug) {
+                manualThresholds.profile = manualProfile.slug;
+            } else if (settings.thresholds && settings.thresholds.profile) {
+                manualThresholds.profile = settings.thresholds.profile;
+            } else {
+                manualThresholds.profile = 'default';
+            }
+        }
+    }
 
     function sanitizeHistory(history) {
         if (!Array.isArray(history)) {
@@ -84,7 +210,9 @@
                 history: settings.history || [],
                 detailedHistory: null,
                 aggregates: settings.aggregates || {},
-                recommendations: settings.recommendations || []
+                recommendations: settings.recommendations || [],
+                profile: manualThresholds.profile,
+                thresholds: cloneThresholds(manualThresholds)
             };
         }
 
@@ -98,12 +226,41 @@
                     history: preset.history || [],
                     detailedHistory: preset.detailedHistory || [],
                     aggregates: preset.aggregates || {},
-                    recommendations: []
+                    recommendations: [],
+                    profile: preset.profile || (preset.thresholds && preset.thresholds.profile) || null,
+                    thresholds: cloneThresholds(preset.thresholds || {})
                 };
             }
         }
 
         return null;
+    }
+
+    function updateProfileBadge(profileKey, dom) {
+        if (!dom || !dom.profileBadge) {
+            return;
+        }
+
+        var badge = dom.profileBadge;
+        var meta = getProfileMeta(profileKey);
+        var labelEl = badge.querySelector('.profile-label');
+        var descriptionEl = badge.querySelector('.profile-description');
+
+        badge.dataset.profile = meta.slug;
+
+        if (labelEl) {
+            labelEl.textContent = meta.label || '';
+        }
+
+        if (descriptionEl) {
+            if (meta.description) {
+                descriptionEl.textContent = meta.description;
+                descriptionEl.style.display = '';
+            } else {
+                descriptionEl.textContent = '';
+                descriptionEl.style.display = 'none';
+            }
+        }
     }
 
     function applySource(sourceKey, dom) {
@@ -119,6 +276,23 @@
         } else {
             currentSourceKey = sourceKey;
         }
+
+        var thresholds = cloneThresholds(source.thresholds || {});
+
+        if (!thresholds.profile) {
+            thresholds.profile = source.profile || manualThresholds.profile;
+        }
+
+        if (typeof thresholds.warning === 'undefined' && typeof manualThresholds.warning !== 'undefined') {
+            thresholds.warning = manualThresholds.warning;
+        }
+
+        if (typeof thresholds.critical === 'undefined' && typeof manualThresholds.critical !== 'undefined') {
+            thresholds.critical = manualThresholds.critical;
+        }
+
+        settings.thresholds = thresholds;
+        updateProfileBadge(thresholds.profile, dom);
 
         renderHistory(source.history, source.detailedHistory, dom);
         renderSummary(source.aggregates || {}, dom);
@@ -532,7 +706,8 @@
             summaryGrid: document.getElementById('sitepulse-speed-summary-grid'),
             summaryNote: document.getElementById('sitepulse-speed-summary-note'),
             sourceSelect: document.getElementById('sitepulse-speed-history-source'),
-            queueWarning: document.querySelector('.speed-history-queue-warning')
+            queueWarning: document.querySelector('.speed-history-queue-warning'),
+            profileBadge: document.getElementById('sitepulse-speed-history-profile')
         };
 
         applySource(currentSourceKey, dom);
@@ -622,6 +797,20 @@
                         if (errorData.automation) {
                             automation = errorData.automation;
                             settings.automation = automation;
+
+                            if (automation.manualThresholds) {
+                                updateManualThresholds(automation.manualThresholds);
+                            }
+                        }
+
+                        if (errorData.manualProfile) {
+                            updateManualProfile(errorData.manualProfile);
+                            settings.manualProfile = manualProfile;
+                        }
+
+                        if (errorData.profiles) {
+                            updateProfileCatalog(errorData.profiles);
+                            settings.profiles = profileCatalog;
                         }
 
                         if (currentSourceKey === 'manual') {
@@ -644,9 +833,31 @@
                     if (data.automation) {
                         automation = data.automation;
                         settings.automation = automation;
+
+                        if (automation.manualThresholds) {
+                            updateManualThresholds(automation.manualThresholds);
+                        }
                     }
 
-                    applySource(currentSourceKey, dom);
+                    if (data.manualProfile) {
+                        updateManualProfile(data.manualProfile);
+                        settings.manualProfile = manualProfile;
+                    }
+
+                    if (data.profiles) {
+                        updateProfileCatalog(data.profiles);
+                        settings.profiles = profileCatalog;
+                    }
+
+                    if (currentSourceKey === 'manual') {
+                        // Ensure manual view reflects refreshed thresholds and labels.
+                        applySource('manual', dom);
+                    } else {
+                        applySource(currentSourceKey, dom);
+                    }
+
+                    settings.manualProfile = manualProfile;
+                    settings.profiles = profileCatalog;
 
                     setStatus(data.message || '', 'success', dom);
                     setButtonState(false, dom);
