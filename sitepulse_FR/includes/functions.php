@@ -9,6 +9,362 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+if (!defined('SITEPULSE_OPTION_TRANSIENT_PURGE_LOG')) {
+    define('SITEPULSE_OPTION_TRANSIENT_PURGE_LOG', 'sitepulse_transient_purge_log');
+}
+
+if (!function_exists('sitepulse_register_transient_purge_entry')) {
+    /**
+     * Persists metadata about a transient purge.
+     *
+     * @param string $scope   Purge scope (transient / site-transient).
+     * @param string $prefix  Prefix that was purged.
+     * @param array  $metrics Additional metrics (deleted, unique, batches, cache).
+     *
+     * @return void
+     */
+    function sitepulse_register_transient_purge_entry($scope, $prefix, $metrics = []) {
+        if (!function_exists('get_option') || !function_exists('update_option')) {
+            return;
+        }
+
+        $scope  = is_string($scope) ? strtolower(trim($scope)) : 'transient';
+        $prefix = is_string($prefix) ? $prefix : '';
+
+        if ($prefix === '') {
+            return;
+        }
+
+        $deleted = isset($metrics['deleted']) ? (int) $metrics['deleted'] : 0;
+
+        if ($deleted <= 0) {
+            return;
+        }
+
+        $timestamp = function_exists('current_time') ? (int) current_time('timestamp') : time();
+
+        $entry = [
+            'scope'        => $scope === 'site-transient' ? 'site-transient' : 'transient',
+            'prefix'       => $prefix,
+            'deleted'      => $deleted,
+            'unique'       => isset($metrics['unique']) ? max(0, (int) $metrics['unique']) : $deleted,
+            'batches'      => isset($metrics['batches']) ? max(0, (int) $metrics['batches']) : 0,
+            'object_cache' => !empty($metrics['object_cache']),
+            'timestamp'    => $timestamp,
+        ];
+
+        $existing_log = get_option(SITEPULSE_OPTION_TRANSIENT_PURGE_LOG, []);
+
+        if (!is_array($existing_log)) {
+            $existing_log = [];
+        }
+
+        array_unshift($existing_log, $entry);
+
+        $max_entries = 20;
+
+        if (function_exists('apply_filters')) {
+            $max_entries = (int) apply_filters('sitepulse_transient_purge_log_limit', $max_entries);
+        }
+
+        if ($max_entries > 0 && count($existing_log) > $max_entries) {
+            $existing_log = array_slice($existing_log, 0, $max_entries);
+        }
+
+        update_option(SITEPULSE_OPTION_TRANSIENT_PURGE_LOG, $existing_log, false);
+}
+}
+
+if (!function_exists('sitepulse_record_transient_purge_stats')) {
+    /**
+     * Compatibility wrapper executed when the purge action fires.
+     *
+     * @param string $prefix Transient prefix.
+     * @param array  $stats  Telemetry payload from the purge routine.
+     *
+     * @return void
+     */
+    function sitepulse_record_transient_purge_stats($prefix, $stats) {
+        if (!is_array($stats) || empty($stats['deleted'])) {
+            return;
+        }
+
+        if (!empty($stats['already_logged'])) {
+            return;
+        }
+
+        $scope = isset($stats['scope']) && $stats['scope'] === 'site-transient' ? 'site-transient' : 'transient';
+
+        $metrics = [
+            'deleted'      => isset($stats['deleted']) ? (int) $stats['deleted'] : 0,
+            'unique'       => isset($stats['unique_keys']) && is_array($stats['unique_keys'])
+                ? count($stats['unique_keys'])
+                : (isset($stats['unique']) ? (int) $stats['unique'] : (isset($stats['deleted']) ? (int) $stats['deleted'] : 0)),
+            'batches'      => isset($stats['batches']) ? (int) $stats['batches'] : 0,
+            'object_cache' => !empty($stats['object_cache_hit']),
+        ];
+
+        sitepulse_register_transient_purge_entry($scope, $prefix, $metrics);
+    }
+}
+
+if (!function_exists('sitepulse_get_transient_purge_log')) {
+    /**
+     * Retrieves the transient purge history.
+     *
+     * @param int $limit Maximum number of entries to return.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    function sitepulse_get_transient_purge_log($limit = 10) {
+        if (!function_exists('get_option')) {
+            return [];
+        }
+
+        $raw_log = get_option(SITEPULSE_OPTION_TRANSIENT_PURGE_LOG, []);
+
+        if (!is_array($raw_log)) {
+            $raw_log = [];
+        }
+
+        $sanitized = [];
+
+        foreach ($raw_log as $entry) {
+            if (!is_array($entry) || empty($entry['prefix'])) {
+                continue;
+            }
+
+            $sanitized[] = [
+                'scope'        => isset($entry['scope']) && $entry['scope'] === 'site-transient' ? 'site-transient' : 'transient',
+                'prefix'       => (string) $entry['prefix'],
+                'deleted'      => max(0, (int) ($entry['deleted'] ?? 0)),
+                'unique'       => max(0, (int) ($entry['unique'] ?? 0)),
+                'batches'      => max(0, (int) ($entry['batches'] ?? 0)),
+                'object_cache' => !empty($entry['object_cache']),
+                'timestamp'    => isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0,
+            ];
+        }
+
+        if ($limit > 0 && count($sanitized) > $limit) {
+            $sanitized = array_slice($sanitized, 0, $limit);
+        }
+
+        return $sanitized;
+    }
+}
+
+if (!function_exists('sitepulse_calculate_transient_purge_summary')) {
+    /**
+     * Calculates aggregate statistics for the transient purge history.
+     *
+     * @param array|null $entries        Optional pre-fetched log entries.
+     * @param int|null   $window_seconds Time window for aggregations (defaults to 30 days).
+     *
+     * @return array{
+     *     totals: array{deleted:int,unique:int,batches:int},
+     *     latest: array<string,mixed>|null,
+     *     top_prefixes: array<int,array{scope:string,prefix:string,deleted:int,unique:int}>
+     * }
+     */
+    function sitepulse_calculate_transient_purge_summary($entries = null, $window_seconds = null) {
+        if ($entries === null) {
+            $entries = sitepulse_get_transient_purge_log();
+        }
+
+        if (!is_array($entries)) {
+            $entries = [];
+        }
+
+        $now = function_exists('current_time') ? (int) current_time('timestamp') : time();
+        $window_seconds = $window_seconds === null
+            ? (defined('DAY_IN_SECONDS') ? 30 * DAY_IN_SECONDS : 30 * 86400)
+            : max(0, (int) $window_seconds);
+
+        $summary = [
+            'totals'       => ['deleted' => 0, 'unique' => 0, 'batches' => 0],
+            'latest'       => isset($entries[0]) ? $entries[0] : null,
+            'top_prefixes' => [],
+        ];
+
+        if (empty($entries)) {
+            return $summary;
+        }
+
+        $prefix_map = [];
+
+        foreach ($entries as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+
+            $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+
+            if ($window_seconds > 0 && $timestamp > 0 && $timestamp < ($now - $window_seconds)) {
+                continue;
+            }
+
+            $deleted = max(0, (int) ($entry['deleted'] ?? 0));
+            $unique  = max(0, (int) ($entry['unique'] ?? 0));
+            $batches = max(0, (int) ($entry['batches'] ?? 0));
+
+            $summary['totals']['deleted'] += $deleted;
+            $summary['totals']['unique']  += $unique;
+            $summary['totals']['batches'] += $batches;
+
+            $scope  = isset($entry['scope']) && $entry['scope'] === 'site-transient' ? 'site-transient' : 'transient';
+            $prefix = isset($entry['prefix']) ? (string) $entry['prefix'] : '';
+
+            if ($prefix === '') {
+                continue;
+            }
+
+            $map_key = $scope . '|' . $prefix;
+
+            if (!isset($prefix_map[$map_key])) {
+                $prefix_map[$map_key] = [
+                    'scope'   => $scope,
+                    'prefix'  => $prefix,
+                    'deleted' => 0,
+                    'unique'  => 0,
+                ];
+            }
+
+            $prefix_map[$map_key]['deleted'] += $deleted;
+            $prefix_map[$map_key]['unique']  += $unique ?: $deleted;
+        }
+
+        if (!empty($prefix_map)) {
+            $prefixes = array_values($prefix_map);
+
+            usort($prefixes, static function ($a, $b) {
+                $deleted_compare = $b['deleted'] <=> $a['deleted'];
+
+                if ($deleted_compare !== 0) {
+                    return $deleted_compare;
+                }
+
+                return strcmp($a['prefix'], $b['prefix']);
+            });
+
+            $summary['top_prefixes'] = array_slice($prefixes, 0, 3);
+        }
+
+        return $summary;
+    }
+}
+
+  if (!function_exists('sitepulse_get_transient_purge_scope_label')) {
+    /**
+     * Returns a human readable label for a purge scope.
+     *
+     * @param string $scope Scope identifier.
+     *
+     * @return string
+     */
+    function sitepulse_get_transient_purge_scope_label($scope) {
+        if ($scope === 'site-transient') {
+            return __('Transients réseau', 'sitepulse');
+        }
+
+        return __('Transients du site courant', 'sitepulse');
+    }
+  }
+
+  if (!function_exists('sitepulse_register_transient_purge_dashboard_widget')) {
+    /**
+     * Registers the dashboard widget summarizing transient purges.
+     *
+     * @return void
+     */
+    function sitepulse_register_transient_purge_dashboard_widget() {
+        if (!function_exists('wp_add_dashboard_widget') || !function_exists('current_user_can')) {
+            return;
+        }
+
+        $capability = function_exists('sitepulse_get_capability') ? sitepulse_get_capability() : 'manage_options';
+
+        if (!current_user_can($capability)) {
+            return;
+        }
+
+        wp_add_dashboard_widget(
+            'sitepulse_transient_purge_widget',
+            __('SitePulse — Purges de transients', 'sitepulse'),
+            'sitepulse_render_transient_purge_dashboard_widget'
+        );
+    }
+  }
+
+  if (!function_exists('sitepulse_render_transient_purge_dashboard_widget')) {
+    /**
+     * Renders the dashboard widget content.
+     *
+     * @return void
+     */
+    function sitepulse_render_transient_purge_dashboard_widget() {
+        $log     = sitepulse_get_transient_purge_log(5);
+        $summary = sitepulse_calculate_transient_purge_summary($log);
+
+        if (empty($log)) {
+            echo '<p>' . esc_html__('Aucune purge de transients enregistrée pour le moment.', 'sitepulse') . '</p>';
+
+            return;
+        }
+
+        $latest = $summary['latest'];
+
+        if ($latest) {
+            $relative = '';
+
+            if (!empty($latest['timestamp']) && function_exists('human_time_diff')) {
+                $diff = human_time_diff($latest['timestamp'], function_exists('current_time') ? current_time('timestamp') : time());
+                $relative = sprintf(__('il y a %s', 'sitepulse'), $diff);
+            }
+
+            printf(
+                '<p><strong>%1$s</strong> — %2$s %3$s</p>',
+                esc_html(sitepulse_get_transient_purge_scope_label($latest['scope'])),
+                esc_html($latest['prefix']),
+                $relative !== '' ? '<span class="sitepulse-transient-purge-ago">' . esc_html($relative) . '</span>' : ''
+            );
+        }
+
+        if (!empty($summary['top_prefixes'])) {
+            echo '<ul class="sitepulse-transient-purge-top">';
+
+            foreach ($summary['top_prefixes'] as $prefix_entry) {
+                printf(
+                    '<li><span class="sitepulse-transient-purge-prefix">%1$s</span> — %2$s</li>',
+                    esc_html($prefix_entry['prefix']),
+                    esc_html(sprintf(
+                        _n('%s suppression', '%s suppressions', $prefix_entry['deleted'], 'sitepulse'),
+                        number_format_i18n($prefix_entry['deleted'])
+                    ))
+                );
+            }
+
+            echo '</ul>';
+        }
+
+        printf(
+            '<p class="sitepulse-transient-purge-total"><span class="count">%1$s</span> · <span class="unique">%2$s</span></p>',
+            esc_html(sprintf(
+                _n('%s suppression totale sur 30 jours', '%s suppressions totales sur 30 jours', $summary['totals']['deleted'], 'sitepulse'),
+                number_format_i18n($summary['totals']['deleted'])
+            )),
+            esc_html(sprintf(
+                _n('%s clé unique', '%s clés uniques', $summary['totals']['unique'], 'sitepulse'),
+                number_format_i18n($summary['totals']['unique'])
+            ))
+        );
+    }
+  }
+
+  if (function_exists('add_action')) {
+    add_action('sitepulse_transient_deletion_completed', 'sitepulse_record_transient_purge_stats', 10, 2);
+    add_action('wp_dashboard_setup', 'sitepulse_register_transient_purge_dashboard_widget');
+  }
+
 if (!function_exists('sitepulse_delete_transients_by_prefix')) {
     /**
      * Deletes all transients whose names start with the provided prefix.
@@ -122,17 +478,34 @@ if (!function_exists('sitepulse_delete_transients_by_prefix')) {
             }
         } while (count($rows) === $batch_size);
 
-        if ($deleted > 0 && function_exists('do_action')) {
-            do_action(
-                'sitepulse_transient_deletion_completed',
-                $prefix,
-                [
-                    'deleted'          => $deleted,
-                    'unique_keys'      => array_keys($deleted_keys),
-                    'batches'          => $batches,
-                    'object_cache_hit' => $object_cache_hit,
-                ]
-            );
+        if ($deleted > 0) {
+            if (function_exists('sitepulse_register_transient_purge_entry')) {
+                sitepulse_register_transient_purge_entry(
+                    'transient',
+                    $prefix,
+                    [
+                        'deleted'      => $deleted,
+                        'unique'       => count($deleted_keys),
+                        'batches'      => $batches,
+                        'object_cache' => $object_cache_hit,
+                    ]
+                );
+            }
+
+            if (function_exists('do_action')) {
+                do_action(
+                    'sitepulse_transient_deletion_completed',
+                    $prefix,
+                    [
+                        'deleted'          => $deleted,
+                        'unique_keys'      => array_keys($deleted_keys),
+                        'batches'          => $batches,
+                        'object_cache_hit' => $object_cache_hit,
+                        'scope'            => 'transient',
+                        'already_logged'   => true,
+                    ]
+                );
+            }
         }
     }
 }
@@ -468,6 +841,38 @@ if (!function_exists('sitepulse_delete_site_transients_by_prefix')) {
                 wp_cache_delete($transient_key, 'site-transient_timeout');
                 wp_cache_delete($transient_key, 'transient');
                 wp_cache_delete($transient_key, 'transient_timeout');
+            }
+        }
+
+        $deleted = count($transient_keys);
+
+        if ($deleted > 0) {
+            if (function_exists('sitepulse_register_transient_purge_entry')) {
+                sitepulse_register_transient_purge_entry(
+                    'site-transient',
+                    $prefix,
+                    [
+                        'deleted'      => $deleted,
+                        'unique'       => $deleted,
+                        'batches'      => 1,
+                        'object_cache' => $object_cache_hit,
+                    ]
+                );
+            }
+
+            if (function_exists('do_action')) {
+                do_action(
+                    'sitepulse_transient_deletion_completed',
+                    $prefix,
+                    [
+                        'deleted'          => $deleted,
+                        'unique_keys'      => array_keys($transient_keys),
+                        'batches'          => 1,
+                        'object_cache_hit' => $object_cache_hit,
+                        'scope'            => 'site-transient',
+                        'already_logged'   => true,
+                    ]
+                );
             }
         }
     }
