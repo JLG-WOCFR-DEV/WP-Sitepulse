@@ -5,6 +5,21 @@
 
 Monitors your WordPress site's speed, database, maintenance, server, and errors with modular, toggleable tools.
 
+## Table des matières
+
+1. [Description](#description)
+2. [Installation](#installation)
+3. [Diagnostic « Santé du site »](#diagnostic-santé-du-site)
+4. [Exporter et partager les recommandations IA](#exporter-et-partager-les-recommandations-ia)
+5. [Sécuriser la clé API Gemini](#sécuriser-la-clé-api-gemini)
+6. [Panorama des modules](#panorama-des-modules)
+7. [Workflow de monitoring](#workflow-de-monitoring)
+8. [Sécurité, audit et conformité](#sécurité-audit-et-conformité)
+9. [WordPress Compatibility](#wordpress-compatibility)
+10. [License](#license)
+11. [Changelog](#changelog)
+12. [Upgrade Notice](#upgrade-notice)
+
 ## Description
 
 Sitepulse - JLG takes the pulse of your WordPress site, offering modules for:
@@ -30,6 +45,39 @@ Sitepulse - JLG takes the pulse of your WordPress site, offering modules for:
 Ces valeurs peuvent être modifiées dans la page « Réglages » de SitePulse. Elles sont automatiquement utilisées par les modules concernés (analyseur de vitesse, tableaux de bord personnalisés, vérification de base de données) tout en conservant les anciennes valeurs si elles existent déjà.
 
 Toggle modules in the admin panel to keep it lightweight. Includes debug mode and cleanup options.
+
+## Panorama des modules
+
+| Module | Objectif | Fonctionnalités clés |
+| --- | --- | --- |
+| **Speed Analyzer** | Mesurer la performance front-end | Scans manuels et planifiés, agrégation mobile/desktop, recommandations contextualisées, budgets de vitesse personnalisables |
+| **Database Optimizer** | Nettoyer et optimiser la base | Purge des révisions/transients, historique des opérations, seuils ajustables et notifications de nettoyage |
+| **Uptime Tracker** | Surveiller la disponibilité | Agents programmables, historique 30 points, export CSV, intégration Site Health, maintenance windows configurables |
+| **Resource Monitor** | Suivre CPU/RAM/Disque | Snapshots réguliers, historique 24 h, export JSON/CSV, alertes visuelles basées sur les seuils |
+| **Error Alerts** | Détecter les erreurs PHP/JS | Lecture sécurisée de `debug.log`, webhooks Slack/Teams/Discord, filtrage par gravité, journal d’alertes |
+| **AI Insights** | Générer des recommandations | Orchestrateur Gemini avec cache, historique commentable, export CSV/clipboard, module de notes collaboratif |
+| **Plugin Impact Scanner** | Évaluer l’effet des extensions | Mesures de temps de chargement, poids disque, filtres multi-critères, scénarios d’atténuation |
+| **Maintenance Advisor** | Planifier les mises à jour | Synthèse des mises à jour, intégration Thickbox pour changelog, recommandations de maintenance pilotées |
+| **Custom Dashboards** | Construire des vues dédiées | Widgets drag & drop, préférences par utilisateur, intégration KPI modules, partage interne |
+
+Chaque module peut être activé/désactivé depuis l’interface d’administration pour n’installer que les briques nécessaires à votre contexte. Les hooks `sitepulse_module_enabled` / `sitepulse_module_disabled` permettent d’auditer ces actions ou d’automatiser le provisionnement.
+
+## Workflow de monitoring
+
+1. **Instrumentation** : installez SitePulse, activez les modules pertinents et définissez vos seuils de vitesse, uptime et ressources dans la page Réglages.
+2. **Collecte** : planifiez des scans récurrents (cron WP ou Action Scheduler) et connectez vos webhooks incidentiels (Slack, Teams, Discord) pour centraliser les alertes.
+3. **Analyse** : consultez le tableau de bord personnalisé, les rapports IA et les historiques de performance pour prioriser les actions. Les métadonnées exposées par les fonctions `sitepulse_get_recent_log_lines()` et `sitepulse_get_speed_thresholds()` facilitent les corrélations entre modules.
+4. **Remédiation** : déclenchez les actions de nettoyage, les scripts de maintenance ou les escalades depuis les modules concernés. Les événements sont historisés dans les options du plugin afin d’assurer un audit trail minimum.
+5. **Partage** : exportez les rapports CSV/PDF, copiez les recommandations IA contextualisées et partagez les liens d’incident pour garder vos équipes alignées.
+
+## Sécurité, audit et conformité
+
+- **Gestion des secrets** : définissez `SITEPULSE_GEMINI_API_KEY` dans `wp-config.php` ou via le filtre `sitepulse_gemini_api_key` pour éviter de stocker les clés en clair.
+- **Rétention contrôlée** : ajustez les durées de conservation des historiques (uptime, ressources, logs) grâce aux options du plugin ou en branchant vos propres stratégies via hooks (`sitepulse_resource_monitor_history_retention`).
+- **Journalisation** : les modules exposent des actions (`do_action`) lors des purges, scans ou envoi d’alertes. Exploitez-les pour alimenter vos systèmes SIEM (ELK, Datadog) et tracer les opérations sensibles.
+- **Accessibilité** : les interfaces intègrent `aria-live`, états de focus et messages contextuels pour s’aligner sur les bonnes pratiques WCAG 2.1 AA. Activez le mode debug pour vérifier les annonces vocales et l’état des composants.
+
+Ces garde-fous rapprochent SitePulse des exigences enterprise sans sacrifier la simplicité d’installation WordPress.
 
 ## Installation
 
