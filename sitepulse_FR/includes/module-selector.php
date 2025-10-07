@@ -14,47 +14,56 @@ function sitepulse_get_module_selector_definitions() {
             'page'             => 'sitepulse-dashboard',
             'label'            => __('Dashboard', 'sitepulse'),
             'icon'             => 'dashicons-dashboard',
+            'tags'             => ['overview', 'summary', 'executive'],
             'always_available' => true,
         ],
         'speed_analyzer' => [
             'page'  => 'sitepulse-speed',
             'label' => __('Speed', 'sitepulse'),
             'icon'  => 'dashicons-performance',
+            'tags'  => ['performance', 'web vitals', 'ttfb', 'lcp'],
         ],
         'uptime_tracker' => [
             'page'  => 'sitepulse-uptime',
             'label' => __('Uptime', 'sitepulse'),
             'icon'  => 'dashicons-chart-bar',
+            'tags'  => ['availability', 'incidents', 'sla'],
         ],
         'database_optimizer' => [
             'page'  => 'sitepulse-db',
             'label' => __('Database', 'sitepulse'),
             'icon'  => 'dashicons-database',
+            'tags'  => ['sql', 'cleanup', 'optimization'],
         ],
         'log_analyzer' => [
             'page'  => 'sitepulse-logs',
             'label' => __('Logs', 'sitepulse'),
             'icon'  => 'dashicons-hammer',
+            'tags'  => ['errors', 'debug', 'php'],
         ],
         'resource_monitor' => [
             'page'  => 'sitepulse-resources',
             'label' => __('Resources', 'sitepulse'),
             'icon'  => 'dashicons-chart-area',
+            'tags'  => ['infrastructure', 'cpu', 'memory'],
         ],
         'plugin_impact_scanner' => [
             'page'  => 'sitepulse-plugins',
             'label' => __('Plugins', 'sitepulse'),
             'icon'  => 'dashicons-admin-plugins',
+            'tags'  => ['extensions', 'weight', 'load'],
         ],
         'maintenance_advisor' => [
             'page'  => 'sitepulse-maintenance',
             'label' => __('Maintenance', 'sitepulse'),
             'icon'  => 'dashicons-admin-tools',
+            'tags'  => ['updates', 'security', 'housekeeping'],
         ],
         'ai_insights' => [
             'page'  => 'sitepulse-ai',
             'label' => __('AI Insights', 'sitepulse'),
             'icon'  => 'dashicons-lightbulb',
+            'tags'  => ['automation', 'recommendations', 'content'],
         ],
     ];
 
@@ -69,7 +78,7 @@ function sitepulse_get_module_selector_definitions() {
 /**
  * Builds the list of enabled module selector items including URLs.
  *
- * @return array<int, array{slug:string,label:string,url:string,icon:string}>
+ * @return array<int, array{slug:string,label:string,url:string,icon:string,tags:array<int, string> }>
  */
 function sitepulse_get_module_selector_items() {
     $active_modules = array_map('strval', (array) get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []));
@@ -91,11 +100,18 @@ function sitepulse_get_module_selector_items() {
             continue;
         }
 
+        $tags = [];
+
+        if (isset($definition['tags'])) {
+            $tags = array_filter(array_map('strval', (array) $definition['tags']));
+        }
+
         $items[] = [
             'slug'  => $page_slug,
             'label' => $label,
             'url'   => admin_url('admin.php?page=' . $page_slug),
             'icon'  => $icon,
+            'tags'  => $tags,
         ];
     }
 
@@ -162,7 +178,7 @@ add_action('admin_enqueue_scripts', 'sitepulse_module_selector_enqueue_style');
  * Builds the navigation items for the module selector, marking the current page.
  *
  * @param string $current_page Current module page slug (e.g. "sitepulse-speed").
- * @return array<int, array{slug:string,label:string,url:string,icon:string,current:bool}>
+ * @return array<int, array{slug:string,label:string,url:string,icon:string,tags:array<int, string>,current:bool}>
  */
 function sitepulse_get_module_navigation_items($current_page = '') {
     $sanitizer = function_exists('sanitize_title')
@@ -225,8 +241,60 @@ function sitepulse_render_module_navigation($current_page = '', $items = null) {
         ? wp_unique_id('sitepulse-module-nav-select-')
         : 'sitepulse-module-nav-select-' . uniqid('', true);
 
+    $nav_search_id = function_exists('wp_unique_id')
+        ? wp_unique_id('sitepulse-module-nav-search-')
+        : 'sitepulse-module-nav-search-' . uniqid('', true);
+
+    $total_items = count($items);
+
     ?>
     <nav class="sitepulse-module-nav" aria-label="<?php esc_attr_e('SitePulse sections', 'sitepulse'); ?>">
+        <div class="sitepulse-module-nav__search" role="search">
+            <label class="sitepulse-module-nav__search-label" for="<?php echo esc_attr($nav_search_id); ?>"><?php esc_html_e('Search modules', 'sitepulse'); ?></label>
+            <div class="sitepulse-module-nav__search-field">
+                <span class="dashicons dashicons-search" aria-hidden="true"></span>
+                <input
+                    type="search"
+                    class="sitepulse-module-nav__search-input"
+                    id="<?php echo esc_attr($nav_search_id); ?>"
+                    name="sitepulse-nav-search"
+                    placeholder="<?php esc_attr_e('Filter by name, capability or focus…', 'sitepulse'); ?>"
+                    autocomplete="off"
+                    spellcheck="false"
+                    data-sitepulse-nav-search
+                    aria-describedby="<?php echo esc_attr($nav_search_id); ?>-help"
+                />
+                <button
+                    type="button"
+                    class="button-link sitepulse-module-nav__search-clear"
+                    data-sitepulse-nav-clear
+                    hidden
+                >
+                    <span class="screen-reader-text"><?php esc_html_e('Clear search', 'sitepulse'); ?></span>
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <p class="sitepulse-module-nav__search-help" id="<?php echo esc_attr($nav_search_id); ?>-help">
+                <?php esc_html_e('Start typing to narrow down the available SitePulse modules.', 'sitepulse'); ?>
+            </p>
+        </div>
+        <div class="sitepulse-module-nav__search-meta">
+            <span
+                class="sitepulse-module-nav__results"
+                role="status"
+                aria-live="polite"
+                data-sitepulse-nav-results
+                data-total="<?php echo (int) $total_items; ?>"
+                data-empty="<?php esc_attr_e('No modules match your filters.', 'sitepulse'); ?>"
+                data-singular="<?php esc_attr_e('1 module displayed', 'sitepulse'); ?>"
+                data-plural="<?php esc_attr_e('%d modules displayed', 'sitepulse'); ?>"
+            >
+                <?php printf(esc_html__('%d modules displayed', 'sitepulse'), (int) $total_items); ?>
+            </span>
+            <p class="sitepulse-module-nav__empty" data-sitepulse-nav-empty hidden>
+                <?php esc_html_e('Try adjusting your search or enable additional modules from the settings screen.', 'sitepulse'); ?>
+            </p>
+        </div>
         <form class="sitepulse-module-nav__mobile-form" method="get" action="<?php echo esc_url(admin_url('admin.php')); ?>">
             <label class="sitepulse-module-nav__mobile-label" for="<?php echo esc_attr($nav_select_id); ?>"><?php esc_html_e('Go to section', 'sitepulse'); ?></label>
             <div class="sitepulse-module-nav__mobile-controls">
@@ -262,8 +330,36 @@ function sitepulse_render_module_navigation($current_page = '', $items = null) {
                         if (!empty($item['current'])) {
                             $link_classes[] = 'is-current';
                         }
+
+                        $filter_terms = [];
+
+                        if (!empty($item['label'])) {
+                            $filter_terms[] = $item['label'];
+                        }
+
+                        if (!empty($item['tags']) && is_array($item['tags'])) {
+                            foreach ($item['tags'] as $tag) {
+                                if (!is_scalar($tag)) {
+                                    continue;
+                                }
+
+                                $filter_terms[] = (string) $tag;
+                            }
+                        }
+
+                        $filter_text = trim(implode(' ', array_filter($filter_terms)));
+
+                        if (function_exists('remove_accents')) {
+                            $filter_text = remove_accents($filter_text);
+                        }
+
+                        $filter_text = strtolower($filter_text);
                     ?>
-                        <li class="sitepulse-module-nav__item">
+                        <li
+                            class="sitepulse-module-nav__item"
+                            data-sitepulse-nav-item
+                            data-filter-text="<?php echo esc_attr($filter_text); ?>"
+                        >
                             <a class="<?php echo esc_attr(implode(' ', $link_classes)); ?>" href="<?php echo esc_url($item['url']); ?>"<?php echo !empty($item['current']) ? ' aria-current="page"' : ''; ?>>
                                 <?php if (!empty($item['icon'])) : ?>
                                     <span class="sitepulse-module-nav__icon dashicons <?php echo esc_attr($item['icon']); ?>" aria-hidden="true"></span>
