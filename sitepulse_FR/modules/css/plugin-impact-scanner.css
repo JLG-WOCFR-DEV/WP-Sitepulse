@@ -66,6 +66,10 @@
     margin-bottom: 1em;
 }
 
+.sitepulse-impact-refresh {
+    margin-bottom: 1.5em;
+}
+
 .sitepulse-impact-controls__group {
     display: flex;
     flex-direction: column;
