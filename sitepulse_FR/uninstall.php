@@ -58,6 +58,7 @@ $sitepulse_constants = [
     'SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT' => 'sitepulse_resource_monitor_snapshot',
     'SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY'       => 'sitepulse_resource_monitor_history',
     'SITEPULSE_PLUGIN_IMPACT_OPTION'              => 'sitepulse_plugin_impact_stats',
+    'SITEPULSE_OPTION_PLUGIN_IMPACT_HISTORY'      => 'sitepulse_plugin_impact_history',
     'SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE'    => 'sitepulse_impact_loader_signature',
     'SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION'      => 'sitepulse_plugin_dir_scan_queue',
 ];

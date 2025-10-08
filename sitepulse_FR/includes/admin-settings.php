@@ -1216,6 +1216,8 @@ function sitepulse_get_default_plugin_impact_thresholds() {
         'impactCritical' => 60.0,
         'weightWarning'  => 10.0,
         'weightCritical' => 20.0,
+        'trendWarning'   => 15.0,
+        'trendCritical'  => 40.0,
     ];
 }
 
@@ -1266,11 +1268,30 @@ function sitepulse_normalize_impact_threshold_set($thresholds, $fallback = []) {
         $weight_critical = round($weight_critical, 2);
     }
 
+    $trend_warning = sitepulse_sanitize_impact_threshold_number(
+        array_key_exists('trendWarning', $thresholds) ? $thresholds['trendWarning'] : $fallback['trendWarning'],
+        $fallback['trendWarning'],
+        $defaults['trendWarning']
+    );
+
+    $trend_critical = sitepulse_sanitize_impact_threshold_number(
+        array_key_exists('trendCritical', $thresholds) ? $thresholds['trendCritical'] : $fallback['trendCritical'],
+        $fallback['trendCritical'],
+        $defaults['trendCritical']
+    );
+
+    if ($trend_critical <= $trend_warning) {
+        $trend_critical = max($trend_warning + 0.1, $fallback['trendCritical'], $defaults['trendCritical']);
+        $trend_critical = round($trend_critical, 2);
+    }
+
     $normalized = [
         'impactWarning'  => (float) min(max($impact_warning, 0.0), 100.0),
         'impactCritical' => (float) min(max($impact_critical, 0.0), 100.0),
         'weightWarning'  => (float) min(max($weight_warning, 0.0), 100.0),
         'weightCritical' => (float) min(max($weight_critical, 0.0), 100.0),
+        'trendWarning'   => (float) min(max($trend_warning, 0.0), 100.0),
+        'trendCritical'  => (float) min(max($trend_critical, 0.0), 100.0),
     ];
 
     if ($normalized['impactCritical'] <= $normalized['impactWarning']) {
@@ -1279,6 +1300,10 @@ function sitepulse_normalize_impact_threshold_set($thresholds, $fallback = []) {
 
     if ($normalized['weightCritical'] <= $normalized['weightWarning']) {
         $normalized['weightCritical'] = min(100.0, round($normalized['weightWarning'] + 0.1, 2));
+    }
+
+    if ($normalized['trendCritical'] <= $normalized['trendWarning']) {
+        $normalized['trendCritical'] = min(100.0, round($normalized['trendWarning'] + 0.1, 2));
     }
 
     return $normalized;
@@ -2585,6 +2610,14 @@ function sitepulse_settings_page() {
                                 'weightCritical' => [
                                     'label'       => __('Poids – critique (%)', 'sitepulse'),
                                     'description' => __('Part du poids total à partir de laquelle un plugin est signalé critique.', 'sitepulse'),
+                                ],
+                                'trendWarning' => [
+                                    'label'       => __('Variation – avertissement (%)', 'sitepulse'),
+                                    'description' => __('Augmentation relative entre deux mesures successives déclenchant un avertissement.', 'sitepulse'),
+                                ],
+                                'trendCritical' => [
+                                    'label'       => __('Variation – critique (%)', 'sitepulse'),
+                                    'description' => __('Augmentation relative entre deux mesures successives déclenchant un statut critique.', 'sitepulse'),
                                 ],
                             ];
                             ?>

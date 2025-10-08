@@ -70,6 +70,7 @@ Ce document répertorie les fonctions de SitePulse qui gagneraient à être alig
 ## Module « Plugin Impact Scanner »
 
 - **Constat :** la page admin charge les plugins actifs, applique des seuils statiques et restitue un instantané local des mesures (impact moyen, poids disque) sans tendance ni segmentation par environnement, loin des analyses corrélées au trafic offertes par New Relic APM ou ManageWP Performance.【F:sitepulse_FR/modules/plugin_impact_scanner.php†L28-L133】【F:sitepulse_FR/modules/plugin_impact_scanner.php†L222-L360】
+- **Statut :** ✅ Historique roulant (30 jours) et tendances comparatives sont désormais persistés côté tracker, affichés dans l’UI (variation vs précédente mesure, moyennes 7 j/30 j) et inclus dans l’export CSV pour documenter les régressions de performance.【F:sitepulse_FR/includes/plugin-impact-tracker.php†L1-L210】【F:sitepulse_FR/modules/plugin_impact_scanner.php†L520-L700】【F:sitepulse_FR/modules/js/plugin-impact-scanner.js†L1-L320】
 - **Pistes pro :**
   - Ajouter un historique des temps de chargement (rolling 7/30 jours) et des comparaisons pré/post mise à jour pour identifier les régressions de performance.
   - Pondérer l’impact par type de requête (admin/public/REST) et par environnement (staging vs production) afin d’imiter les vues multi-contextes des suites APM.
