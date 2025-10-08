@@ -1277,7 +1277,7 @@ require_once SITEPULSE_PATH . 'includes/functions.php';
 require_once SITEPULSE_PATH . 'includes/module-selector.php';
 require_once SITEPULSE_PATH . 'includes/admin-settings.php';
 require_once SITEPULSE_PATH . 'includes/integrations.php';
-require_once SITEPULSE_PATH . 'includes/ui-presets.php';
+require_once SITEPULSE_PATH . 'includes/appearance-presets.php';
 require_once SITEPULSE_PATH . 'blocks/dashboard-preview/render.php';
 
 /**
@@ -1306,10 +1306,12 @@ function sitepulse_register_dashboard_preview_block() {
         SITEPULSE_VERSION
     );
 
+    sitepulse_register_appearance_presets_style();
+
     wp_register_style(
         $style_handle,
         SITEPULSE_URL . 'blocks/dashboard-preview/style.css',
-        [$style_base_handle],
+        [$style_base_handle, 'sitepulse-appearance-presets'],
         SITEPULSE_VERSION
     );
 
