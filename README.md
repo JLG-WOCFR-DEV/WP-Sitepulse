@@ -86,7 +86,13 @@ SitePulse - JLG est un plugin WordPress modulaire qui surveille la vitesse, la b
 Un harnais PHPUnit/WP-Unit est disponible dans `tests/phpunit/` (configuré via `phpunit.xml.dist`) afin de valider les modules clefs : suivi d'uptime, notices de debug, nettoyage des transients ainsi que l'analyse du journal d'erreurs (pointeurs de lecture, détection des fatals et verrou de cooldown).【F:tests/phpunit/test-error-alerts.php†L1-L200】
 
 1. Installez la bibliothèque de tests WordPress et définissez la variable d'environnement `WP_TESTS_DIR` (par exemple via `bin/install-wp-tests.sh <db-name> <db-user> <db-pass>`).
-2. Assurez-vous que `phpunit` est disponible sur votre machine (ou utilisez un binaire local tel que `vendor/bin/phpunit`).
+2. Assurez-vous que `phpunit` est disponible sur votre machine (ou utilisez un binaire local tel que `vendor/bin/phpunit`). Vous pouvez l'ajouter au projet à l'aide de Composer :
+
+   ```bash
+   composer global require phpunit/phpunit ^9.6
+   ```
+
+   ou en plaçant le PHAR officiel dans `~/bin/phpunit` puis en l'ajoutant à votre `PATH`.
 3. Exécutez les tests depuis la racine du dépôt :
 
    ```bash
