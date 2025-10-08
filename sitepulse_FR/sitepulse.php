@@ -1797,6 +1797,133 @@ function sitepulse_run_for_site($site_id, callable $callback, $context) {
 }
 
 /**
+ * Determines whether the frontend article slideshow should be enabled.
+ *
+ * @return bool
+ */
+function sitepulse_is_article_slideshow_enabled() {
+    $enabled = true;
+
+    if (function_exists('apply_filters')) {
+        $enabled = apply_filters('sitepulse_enable_article_slideshow', $enabled);
+    }
+
+    return (bool) $enabled;
+}
+
+/**
+ * Retrieves the CSS selectors scanned to build article slideshows.
+ *
+ * @return array<int,string>
+ */
+function sitepulse_get_article_slideshow_selectors() {
+    $selectors = [
+        '.sitepulse-article',
+        '.entry-content',
+        '.wp-block-post-content',
+        '.post',
+        '.hentry',
+    ];
+
+    if (function_exists('apply_filters')) {
+        $selectors = apply_filters('sitepulse_article_slideshow_selectors', $selectors);
+    }
+
+    if (!is_array($selectors)) {
+        return [];
+    }
+
+    $normalized = [];
+
+    foreach ($selectors as $selector) {
+        if (!is_string($selector)) {
+            continue;
+        }
+
+        $selector = trim($selector);
+
+        if ($selector === '') {
+            continue;
+        }
+
+        $normalized[] = $selector;
+    }
+
+    return array_values(array_unique($normalized));
+}
+
+/**
+ * Enqueues the assets used to render the frontend article slideshow.
+ *
+ * @return void
+ */
+function sitepulse_enqueue_article_slideshow_assets() {
+    if (is_admin()) {
+        return;
+    }
+
+    if (!function_exists('is_singular') || !is_singular()) {
+        return;
+    }
+
+    if (!sitepulse_is_article_slideshow_enabled()) {
+        return;
+    }
+
+    $script_handle = 'sitepulse-article-slideshow';
+    $style_handle  = 'sitepulse-article-slideshow';
+    $version       = defined('SITEPULSE_VERSION') ? SITEPULSE_VERSION : false;
+
+    $selectors = sitepulse_get_article_slideshow_selectors();
+
+    $strings = [
+        'next'             => __('Image suivante', 'sitepulse'),
+        'previous'         => __('Image précédente', 'sitepulse'),
+        'close'            => __('Fermer le diaporama', 'sitepulse'),
+        'counter'          => __('Photo %1$d sur %2$d', 'sitepulse'),
+        'empty'            => __('Aucune image à afficher.', 'sitepulse'),
+        'missingImage'     => __('Impossible de charger cette image.', 'sitepulse'),
+        'ariaLabel'        => __('Visionneuse d’images de l’article', 'sitepulse'),
+        'debugTitle'       => __('Mode debug du diaporama', 'sitepulse'),
+        'debugImage'       => __('Image active', 'sitepulse'),
+        'debugTotal'       => __('Total détecté', 'sitepulse'),
+        'debugIndex'       => __('Index courant', 'sitepulse'),
+        'debugSelectors'   => __('Sélecteurs analysés', 'sitepulse'),
+        'debugNoContainers'=> __('Aucun conteneur correspondant trouvé sur la page.', 'sitepulse'),
+    ];
+
+    if (!wp_style_is($style_handle, 'registered')) {
+        wp_register_style(
+            $style_handle,
+            SITEPULSE_URL . 'modules/css/article-slideshow.css',
+            [],
+            $version
+        );
+    }
+
+    if (!wp_script_is($script_handle, 'registered')) {
+        wp_register_script(
+            $script_handle,
+            SITEPULSE_URL . 'modules/js/sitepulse-article-slideshow.js',
+            [],
+            $version,
+            true
+        );
+    }
+
+    wp_localize_script($script_handle, 'sitepulseSlideshow', [
+        'debug'     => defined('SITEPULSE_DEBUG') ? (bool) SITEPULSE_DEBUG : false,
+        'strings'   => $strings,
+        'selectors' => $selectors,
+    ]);
+
+    wp_enqueue_style($style_handle);
+    wp_enqueue_script($script_handle);
+}
+
+add_action('wp_enqueue_scripts', 'sitepulse_enqueue_article_slideshow_assets');
+
+/**
  * Activation hook. Sets default options.
  *
  * @param bool $network_wide Whether the plugin is being activated network-wide.

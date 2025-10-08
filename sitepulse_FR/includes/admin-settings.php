@@ -3327,7 +3327,7 @@ function sitepulse_debug_page() {
                         <h2 class="hndle"><span>Tâches Planifiées (Crons)</span></h2>
                         <div class="inside">
                            <ul>
-                                <?php 
+                                <?php
                                 $crons = get_option('cron');
                                 $has_sitepulse_cron = false;
 
@@ -3351,6 +3351,34 @@ function sitepulse_debug_page() {
                                 if (!$has_sitepulse_cron) { echo '<li>Aucune tâche planifiée pour SitePulse trouvée.</li>'; }
                                 ?>
                            </ul>
+                        </div>
+                    </div>
+                    <div class="postbox">
+                        <h2 class="hndle"><span><?php esc_html_e('Diaporama des images d’article', 'sitepulse'); ?></span></h2>
+                        <div class="inside">
+                            <?php
+                            $slideshow_enabled   = sitepulse_is_article_slideshow_enabled();
+                            $slideshow_selectors = sitepulse_get_article_slideshow_selectors();
+                            ?>
+                            <p><?php esc_html_e('Ce panneau résume le statut du diaporama frontend activé par SitePulse.', 'sitepulse'); ?></p>
+                            <ul>
+                                <li><strong><?php esc_html_e('Activation automatique', 'sitepulse'); ?> :</strong> <?php echo $slideshow_enabled ? esc_html__('Oui', 'sitepulse') : esc_html__('Non', 'sitepulse'); ?></li>
+                                <li><strong><?php esc_html_e('Mode debug', 'sitepulse'); ?> :</strong> <?php echo (defined('SITEPULSE_DEBUG') && SITEPULSE_DEBUG) ? esc_html__('Actif', 'sitepulse') : esc_html__('Désactivé', 'sitepulse'); ?></li>
+                                <li><strong><?php esc_html_e('Identifiant du script', 'sitepulse'); ?> :</strong> <code>sitepulse-article-slideshow</code></li>
+                            </ul>
+                            <?php if (!empty($slideshow_selectors)) : ?>
+                                <p><strong><?php esc_html_e('Sélecteurs surveillés', 'sitepulse'); ?> :</strong></p>
+                                <ul class="sitepulse-slideshow-selector-list">
+                                    <?php foreach ($slideshow_selectors as $selector) : ?>
+                                        <li><code><?php echo esc_html($selector); ?></code></li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            <?php endif; ?>
+                            <?php if (defined('SITEPULSE_DEBUG') && SITEPULSE_DEBUG) : ?>
+                                <p class="description"><?php esc_html_e('Ouvrez un article côté frontend : la visionneuse affiche un panneau d’inspection (index, texte alternatif, légendes).', 'sitepulse'); ?></p>
+                            <?php else : ?>
+                                <p class="description"><?php esc_html_e('Activez le mode debug dans les réglages SitePulse pour afficher le panneau d’inspection directement dans le diaporama.', 'sitepulse'); ?></p>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>
