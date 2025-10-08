@@ -9,8 +9,8 @@
 ### État actuel
 - Les réglages centralisent l’activation des modules, la clé Gemini, les destinataires d’alertes, les seuils vitesse/uptime et quelques fenêtres de maintenance.【F:sitepulse_FR/includes/admin-settings.php†L1745-L2056】
 - Les seuils de performance ne gèrent que deux niveaux (avertissement/critique) par profil, ce qui limite la granularité par rapport aux suites qui surveillent LCP, INP ou CLS séparément.【F:sitepulse_FR/includes/functions.php†L210-L275】
-- L’historique d’uptime se limite aux 30 derniers événements, ce qui empêche tout calcul d’indicateurs SLA sur 90 jours ou 12 mois.【F:sitepulse_FR/modules/uptime_tracker.php†L2183-L2207】
-- Un seul agent « global » est provisionné par défaut et il n’existe pas d’interface pour déclarer plusieurs sondes régionales avec leurs URL dédiées.【F:sitepulse_FR/modules/uptime_tracker.php†L254-L293】
+- La rétention d’uptime est désormais configurable entre 30 et 365 jours (`sitepulse_get_uptime_history_retention_days()`), mais aucun rapport SLA consolidé n’est généré automatiquement pour capitaliser sur ces fenêtres étendues.【F:sitepulse_FR/modules/uptime_tracker.php†L1004-L1028】
+- Le plugin sait charger plusieurs agents (`SITEPULSE_OPTION_UPTIME_AGENTS`) et orchestrer une file d’attente de jobs distants, toutefois l’interface d’administration ne propose pas encore de gestion CRUD avancée (ajout/suspension d’agents, pondération) ni de métriques associées.【F:sitepulse_FR/modules/uptime_tracker.php†L277-L346】【F:sitepulse_FR/modules/uptime_tracker.php†L696-L820】
 - Les analyses IA sont planifiées via un unique événement WP-Cron et, en cas d’échec de planification, exécutées immédiatement sans file d’attente priorisée ni reprise automatique des erreurs.【F:sitepulse_FR/modules/ai_insights.php†L1769-L1890】
 
 ### Pistes d’alignement « pro »
@@ -62,7 +62,7 @@
 ## 6. Intégrations & API
 ### État actuel
 - Les routes REST existantes orchestrent surtout les process internes (queue uptime, tests d’alertes) et reposent sur l’authentification WordPress classique.【F:sitepulse_FR/modules/uptime_tracker.php†L112-L168】【F:sitepulse_FR/modules/error_alerts.php†L1430-L1458】
-- Le suivi uptime conserve un log local limité à 30 entrées, malgré une archive optionnelle, ce qui freine la diffusion vers des tableaux de bord externes.【F:sitepulse_FR/modules/uptime_tracker.php†L2183-L2207】
+- Le suivi uptime persiste désormais jusqu’à 365 jours d’historique selon la configuration, mais aucune API REST n’expose encore ces séries longues pour alimenter des dashboards externes (Grafana, Better Uptime).【F:sitepulse_FR/modules/uptime_tracker.php†L1004-L1028】
 - Le module Resource Monitor stocke des snapshots sur une fenêtre d’environ 24 h (TTL `DAY_IN_SECONDS`) et 288 points maximum, sans mécanisme d’export ni de normalisation vers des standards type OpenTelemetry.【F:sitepulse_FR/modules/resource_monitor.php†L827-L845】【F:sitepulse_FR/modules/resource_monitor.php†L998-L1023】
 
 ### Recommandations « pro »

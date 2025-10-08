@@ -1,12 +1,11 @@
 # Code Review Notes
 
-## High Priority
+## Statut des points critiques
 
-- **REST permission filter bypass** – `sitepulse_uptime_rest_schedule_permission_check()` casts the result of the `sitepulse_uptime_rest_schedule_permission` filter to a boolean before returning. Any callback that returns a `WP_Error` (which is the common pattern for REST permissions) will be converted to `true`, unintentionally authorising the request. This breaks expectations for integrators that rely on returning an error to deny access and effectively disables custom authentication failures.【F:sitepulse_FR/modules/uptime_tracker.php†L184-L202】
+- ✅ **REST permission filter bypass** – La fonction `sitepulse_uptime_rest_schedule_permission_check()` renvoie désormais l'objet `WP_Error` retourné par le filtre `sitepulse_uptime_rest_schedule_permission` et respecte explicitement les valeurs booléennes. Les intégrateurs peuvent à nouveau interrompre l'exécution en renvoyant un `WP_Error`, sans que celui-ci soit converti en `true`.【F:sitepulse_FR/modules/uptime_tracker.php†L184-L211】
 
-- **Incident start regression on unsorted logs** – `sitepulse_normalize_uptime_log()` derives `incident_start` values while iterating the raw log in its original order and only sorts entries by timestamp afterwards. When the stored log is newest-first (which can happen with legacy data or external imports that already include timestamps), downtime entries inherit the start time from the next *newer* row instead of the first outage sample. After the final sort this leaves older entries with an `incident_start` that is more recent than the sample timestamp, under-reporting downtime duration in the UI and archives.【F:sitepulse_FR/modules/uptime_tracker.php†L880-L969】
+- ✅ **Incident start regression on unsorted logs** – `sitepulse_normalize_uptime_log()` prépare maintenant un tableau trié par timestamp avant de propager `incident_start`. Les entrées sont ordonnées via `usort()` puis parcourues séquentiellement, ce qui garantit que la propagation s'appuie sur les échantillons antérieurs plutôt que suivants.【F:sitepulse_FR/modules/uptime_tracker.php†L904-L996】
 
-## Suggestions
+## Points à surveiller
 
-- Ensure permission callbacks return either `true`, `false` or a `WP_Error` without forcing a cast, e.g. `return apply_filters(...) ?: new WP_Error(...)`.
-- Normalise the log order (e.g. sort by timestamp ascending) *before* calculating `incident_start`, or process the data in chronological order to keep the propagation logic correct.
+- Les nouvelles files d'attente d'agents (`SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE`) n'imposent aucune limite de taille ni stratégie de purge automatique. Une surcharge de requêtes distantes pourrait grossir l'option de façon significative si `sitepulse_uptime_process_remote_queue()` n'est pas déclenché (WP-Cron désactivé ou erreur fatale). Ajouter un garde-fou (taille max, purge par timestamp) éviterait les dépassements de mémoire et faciliterait la reprise après incident.【F:sitepulse_FR/modules/uptime_tracker.php†L696-L767】【F:sitepulse_FR/modules/uptime_tracker.php†L768-L820】
