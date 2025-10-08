@@ -1926,6 +1926,10 @@ function sitepulse_speed_analyzer_page() {
     $rate_limit_label = human_time_diff($now_timestamp, $now_timestamp + max(1, $rate_limit));
     $automation_settings = sitepulse_speed_analyzer_get_automation_settings();
     $automation_payload = sitepulse_speed_analyzer_build_automation_payload($thresholds);
+    $profiles_catalog = sitepulse_speed_analyzer_get_profile_catalog();
+    if (!is_array($profiles_catalog)) {
+        $profiles_catalog = [];
+    }
     $manual_profile = isset($thresholds['profile']) ? sitepulse_speed_analyzer_normalize_profile($thresholds['profile']) : 'default';
     $manual_profile_label = isset($profiles_catalog[$manual_profile]['label']) ? (string) $profiles_catalog[$manual_profile]['label'] : ucfirst($manual_profile);
     $manual_profile_description = isset($profiles_catalog[$manual_profile]['description']) ? (string) $profiles_catalog[$manual_profile]['description'] : '';
@@ -1934,7 +1938,11 @@ function sitepulse_speed_analyzer_page() {
     $default_presets = sitepulse_speed_analyzer_get_default_presets();
     $form_presets = $default_presets;
 
-    foreach ($automation_settings['presets'] as $preset_slug => $preset_config) {
+    $automation_presets = isset($automation_settings['presets']) && is_array($automation_settings['presets'])
+        ? $automation_settings['presets']
+        : [];
+
+    foreach ($automation_presets as $preset_slug => $preset_config) {
         if (isset($form_presets[$preset_slug])) {
             $form_presets[$preset_slug] = array_merge($form_presets[$preset_slug], $preset_config);
         } else {
