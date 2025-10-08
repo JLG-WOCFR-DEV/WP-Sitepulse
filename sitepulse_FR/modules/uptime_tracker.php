@@ -235,7 +235,7 @@ function sitepulse_uptime_rest_schedule_permission_check($request) {
         return true;
     }
 
-    if (false === $permission) {
+    if (false === $permission || null === $permission) {
         return new WP_Error(
             'sitepulse_uptime_forbidden',
             __('Vous n’avez pas l’autorisation de planifier des vérifications d’uptime via l’API REST.', 'sitepulse'),
@@ -245,19 +245,37 @@ function sitepulse_uptime_rest_schedule_permission_check($request) {
         );
     }
 
-    if (null === $permission) {
-        $permission = false;
+    if (is_bool($permission)) {
+        return $permission
+            ? true
+            : new WP_Error(
+                'sitepulse_uptime_forbidden',
+                __('Vous n’avez pas l’autorisation de planifier des vérifications d’uptime via l’API REST.', 'sitepulse'),
+                [
+                    'status' => rest_authorization_required_code(),
+                ]
+            );
     }
 
-    return $permission
-        ? true
-        : new WP_Error(
-            'sitepulse_uptime_forbidden',
-            __('Vous n’avez pas l’autorisation de planifier des vérifications d’uptime via l’API REST.', 'sitepulse'),
-            [
-                'status' => rest_authorization_required_code(),
-            ]
-        );
+    if (is_scalar($permission)) {
+        return (bool) $permission
+            ? true
+            : new WP_Error(
+                'sitepulse_uptime_forbidden',
+                __('Vous n’avez pas l’autorisation de planifier des vérifications d’uptime via l’API REST.', 'sitepulse'),
+                [
+                    'status' => rest_authorization_required_code(),
+                ]
+            );
+    }
+
+    return new WP_Error(
+        'sitepulse_uptime_forbidden',
+        __('Vous n’avez pas l’autorisation de planifier des vérifications d’uptime via l’API REST.', 'sitepulse'),
+        [
+            'status' => rest_authorization_required_code(),
+        ]
+    );
 }
 
 /**

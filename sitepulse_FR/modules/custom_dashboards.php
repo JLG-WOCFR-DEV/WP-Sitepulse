@@ -3609,6 +3609,8 @@ function sitepulse_custom_dashboards_page() {
                 'impactCritical' => 60.0,
                 'weightWarning'  => 10.0,
                 'weightCritical' => 20.0,
+                'trendWarning'   => 15.0,
+                'trendCritical'  => 40.0,
             ];
 
         $thresholds = $threshold_defaults;

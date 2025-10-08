@@ -8,6 +8,8 @@
             impactCritical: 60,
             weightWarning: 10,
             weightCritical: 20,
+            trendWarning: 15,
+            trendCritical: 40,
         },
         config.thresholds || {}
     );
@@ -77,6 +79,11 @@
                 diskRecorded: parseNumber(row.dataset.diskRecorded),
                 lastRecorded: parseNumber(row.dataset.lastRecorded),
                 isMeasured: row.dataset.isMeasured === '1',
+                trendDirection: row.dataset.trendDirection || 'none',
+                trendDeltaMs: parseNumber(row.dataset.trendDeltaMs),
+                trendDeltaPct: parseNumber(row.dataset.trendDeltaPct),
+                average7d: parseNumber(row.dataset.average7d),
+                average30d: parseNumber(row.dataset.average30d),
             };
         }
 
@@ -178,6 +185,18 @@
                 severity = 'warning';
             } else if (Number.isFinite(data.impact) && data.impact >= thresholds.impactWarning) {
                 severity = 'warning';
+            } else if (
+                data.trendDirection === 'up'
+                && Number.isFinite(data.trendDeltaPct)
+                && data.trendDeltaPct >= thresholds.trendCritical
+            ) {
+                severity = 'critical';
+            } else if (
+                data.trendDirection === 'up'
+                && Number.isFinite(data.trendDeltaPct)
+                && data.trendDeltaPct >= thresholds.trendWarning
+            ) {
+                severity = 'warning';
             }
 
             row.classList.remove('sitepulse-impact-row--warning', 'sitepulse-impact-row--critical');
@@ -261,6 +280,11 @@
             'disk_space_bytes',
             'last_recorded',
             'is_measured',
+            'trend_direction',
+            'trend_delta_ms',
+            'trend_delta_pct',
+            'average_7d_ms',
+            'average_30d_ms',
         ];
 
         const csvLines = [header.map(formatCsvValue).join(';')];
@@ -278,6 +302,11 @@
                     Number.isFinite(data.diskSpace) ? Math.round(data.diskSpace) : '',
                     formatTimestamp(data.lastRecorded),
                     data.isMeasured ? '1' : '0',
+                    data.trendDirection,
+                    Number.isFinite(data.trendDeltaMs) ? data.trendDeltaMs.toFixed(4) : '',
+                    Number.isFinite(data.trendDeltaPct) ? data.trendDeltaPct.toFixed(4) : '',
+                    Number.isFinite(data.average7d) ? data.average7d.toFixed(4) : '',
+                    Number.isFinite(data.average30d) ? data.average30d.toFixed(4) : '',
                 ]
                     .map(formatCsvValue)
                     .join(';')

@@ -15,6 +15,10 @@ if (!defined('SITEPULSE_OPTION_SPEED_SCAN_HISTORY')) {
     define('SITEPULSE_OPTION_SPEED_SCAN_HISTORY', 'sitepulse_speed_scan_history');
 }
 
+if (!defined('SITEPULSE_OPTION_PLUGIN_IMPACT_HISTORY')) {
+    define('SITEPULSE_OPTION_PLUGIN_IMPACT_HISTORY', 'sitepulse_plugin_impact_history');
+}
+
 if (!isset($sitepulse_plugin_impact_tracker_last_tick) || !is_float($sitepulse_plugin_impact_tracker_last_tick)) {
     $sitepulse_plugin_impact_tracker_last_tick = microtime(true);
 }
@@ -48,6 +52,153 @@ function sitepulse_plugin_impact_tracker_bootstrap() {
 
     add_action('plugin_loaded', 'sitepulse_plugin_impact_tracker_on_plugin_loaded', PHP_INT_MAX, 1);
     add_action('shutdown', 'sitepulse_plugin_impact_tracker_persist', PHP_INT_MAX);
+}
+
+/**
+ * Normalizes and persists the plugin impact history entries.
+ *
+ * @param array<string,array> $samples  Latest plugin measurements keyed by plugin file.
+ * @param int                 $now      Current timestamp.
+ *
+ * @return void
+ */
+function sitepulse_plugin_impact_tracker_update_history(array $samples, $now) {
+    if (!defined('SITEPULSE_OPTION_PLUGIN_IMPACT_HISTORY')) {
+        return;
+    }
+
+    $stored = get_option(SITEPULSE_OPTION_PLUGIN_IMPACT_HISTORY, []);
+
+    if (!is_array($stored)) {
+        $stored = [];
+    }
+
+    $plugins_history = isset($stored['plugins']) && is_array($stored['plugins']) ? $stored['plugins'] : [];
+
+    $total_impact = 0.0;
+
+    foreach ($samples as $sample) {
+        if (!is_array($sample) || !isset($sample['avg_ms']) || !is_numeric($sample['avg_ms'])) {
+            continue;
+        }
+
+        $total_impact += max(0.0, (float) $sample['avg_ms']);
+    }
+
+    $retention_days = apply_filters('sitepulse_plugin_impact_history_retention_days', 30, $samples);
+    $retention_days = is_numeric($retention_days) ? (int) $retention_days : 30;
+    $retention_days = max(-1, $retention_days);
+    $cutoff = $retention_days > 0 ? $now - ($retention_days * DAY_IN_SECONDS) : null;
+
+    $default_max_entries = apply_filters('sitepulse_plugin_impact_history_max_entries', 90, $samples);
+    $default_max_entries = is_numeric($default_max_entries) ? (int) $default_max_entries : 90;
+    $default_max_entries = max(0, $default_max_entries);
+
+    foreach ($samples as $plugin_file => $sample) {
+        if (!is_string($plugin_file) || $plugin_file === '') {
+            continue;
+        }
+
+        if (!is_array($sample) || !isset($sample['avg_ms']) || !is_numeric($sample['avg_ms'])) {
+            continue;
+        }
+
+        $avg_ms = max(0.0, (float) $sample['avg_ms']);
+        $entry = [
+            'timestamp' => $now,
+            'avg_ms'    => $avg_ms,
+        ];
+
+        if (isset($sample['samples']) && is_numeric($sample['samples'])) {
+            $entry['samples'] = max(0, (int) $sample['samples']);
+        }
+
+        if (isset($sample['last_ms']) && is_numeric($sample['last_ms'])) {
+            $entry['last_ms'] = max(0.0, (float) $sample['last_ms']);
+        }
+
+        if ($total_impact > 0) {
+            $entry['weight'] = ($avg_ms / $total_impact) * 100;
+        }
+
+        $existing_history = isset($plugins_history[$plugin_file]) && is_array($plugins_history[$plugin_file])
+            ? $plugins_history[$plugin_file]
+            : [];
+
+        $normalized_entries = [];
+
+        foreach ($existing_history as $historical_entry) {
+            if (!is_array($historical_entry)) {
+                continue;
+            }
+
+            $timestamp = isset($historical_entry['timestamp']) ? (int) $historical_entry['timestamp'] : 0;
+            $average = isset($historical_entry['avg_ms']) ? (float) $historical_entry['avg_ms'] : null;
+
+            if ($timestamp <= 0 || $average === null || !is_numeric($average)) {
+                continue;
+            }
+
+            if (null !== $cutoff && $timestamp < $cutoff) {
+                continue;
+            }
+
+            $normalized_entries[$timestamp] = [
+                'timestamp' => $timestamp,
+                'avg_ms'    => max(0.0, (float) $average),
+            ];
+
+            if (isset($historical_entry['samples']) && is_numeric($historical_entry['samples'])) {
+                $normalized_entries[$timestamp]['samples'] = max(0, (int) $historical_entry['samples']);
+            }
+
+            if (isset($historical_entry['last_ms']) && is_numeric($historical_entry['last_ms'])) {
+                $normalized_entries[$timestamp]['last_ms'] = max(0.0, (float) $historical_entry['last_ms']);
+            }
+
+            if (isset($historical_entry['weight']) && is_numeric($historical_entry['weight'])) {
+                $normalized_entries[$timestamp]['weight'] = max(0.0, (float) $historical_entry['weight']);
+            }
+        }
+
+        $normalized_entries[$now] = $entry;
+
+        ksort($normalized_entries);
+
+        $entries = array_values($normalized_entries);
+
+        $max_entries_for_plugin = apply_filters('sitepulse_plugin_impact_history_max_entries_for_plugin', $default_max_entries, $plugin_file, $samples);
+        $max_entries_for_plugin = is_numeric($max_entries_for_plugin) ? (int) $max_entries_for_plugin : $default_max_entries;
+        $max_entries_for_plugin = max(0, $max_entries_for_plugin);
+
+        if ($max_entries_for_plugin > 0 && count($entries) > $max_entries_for_plugin) {
+            $entries = array_slice($entries, -$max_entries_for_plugin);
+        }
+
+        $plugins_history[$plugin_file] = $entries;
+    }
+
+    $stored_plugins = [];
+
+    foreach ($plugins_history as $plugin_file => $history_entries) {
+        if (!is_string($plugin_file) || $plugin_file === '') {
+            continue;
+        }
+
+        if (empty($history_entries) || !is_array($history_entries)) {
+            continue;
+        }
+
+        $stored_plugins[$plugin_file] = array_values($history_entries);
+    }
+
+    $payload = [
+        'updated_at'   => $now,
+        'total_impact' => $total_impact,
+        'plugins'      => $stored_plugins,
+    ];
+
+    update_option(SITEPULSE_OPTION_PLUGIN_IMPACT_HISTORY, $payload, false);
 }
 
 /**
@@ -406,6 +557,8 @@ function sitepulse_plugin_impact_tracker_persist() {
         'interval'     => $interval,
         'samples'      => $samples,
     ];
+
+    sitepulse_plugin_impact_tracker_update_history($samples, $now);
 
     update_option($option_key, $payload, false);
 }

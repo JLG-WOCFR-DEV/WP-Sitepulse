@@ -52,6 +52,8 @@ function sitepulse_plugin_impact_enqueue_assets($hook_suffix) {
             'impactCritical' => 60.0,
             'weightWarning'  => 10.0,
             'weightCritical' => 20.0,
+            'trendWarning'   => 15.0,
+            'trendCritical'  => 40.0,
         ];
 
     $stored_thresholds = [
@@ -367,6 +369,22 @@ function sitepulse_plugin_impact_scanner_page() {
         $impacts[$plugin_file] = $impact_data;
     }
 
+    $history = sitepulse_plugin_impact_get_history();
+    $history_plugins = isset($history['plugins']) && is_array($history['plugins']) ? $history['plugins'] : [];
+
+    foreach ($impacts as $plugin_file => &$impact_data) {
+        $history_entries = isset($history_plugins[$plugin_file]) && is_array($history_plugins[$plugin_file])
+            ? $history_plugins[$plugin_file]
+            : [];
+
+        $trend = sitepulse_plugin_impact_calculate_trend($history_entries, $impact_data['impact'], $current_time);
+        $impact_data['trend'] = $trend;
+        $impact_data['trend_label'] = sitepulse_plugin_impact_format_trend_label($trend);
+        $impact_data['average_7d'] = isset($trend['average_7d']) ? $trend['average_7d'] : null;
+        $impact_data['average_30d'] = isset($trend['average_30d']) ? $trend['average_30d'] : null;
+    }
+    unset($impact_data);
+
     uasort(
         $impacts,
         function ($a, $b) {
@@ -522,6 +540,10 @@ function sitepulse_plugin_impact_scanner_page() {
 
                         $impact_lines = [];
 
+                        $trend_label = isset($data['trend_label']) ? (string) $data['trend_label'] : '';
+                        $average_7d = isset($data['average_7d']) && is_numeric($data['average_7d']) ? (float) $data['average_7d'] : null;
+                        $average_30d = isset($data['average_30d']) && is_numeric($data['average_30d']) ? (float) $data['average_30d'] : null;
+
                         if ($data['impact'] !== null) {
                             $impact_lines[] = sprintf(
                                 /* translators: %s: duration in milliseconds */
@@ -546,6 +568,24 @@ function sitepulse_plugin_impact_scanner_page() {
                                 __('Nombre d’échantillons : %d', 'sitepulse'),
                                 max(1, (int) $data['samples'])
                             );
+
+                            if ($trend_label !== '') {
+                                $impact_lines[] = $trend_label;
+                            }
+
+                            if ($average_7d !== null) {
+                                $impact_lines[] = sprintf(
+                                    __('Moyenne 7 jours : %s ms', 'sitepulse'),
+                                    number_format_i18n($average_7d, 2)
+                                );
+                            }
+
+                            if ($average_30d !== null) {
+                                $impact_lines[] = sprintf(
+                                    __('Moyenne 30 jours : %s ms', 'sitepulse'),
+                                    number_format_i18n($average_30d, 2)
+                                );
+                            }
                         } else {
                             $impact_lines[] = __('Non mesuré pour le moment.', 'sitepulse');
                         }
@@ -558,6 +598,15 @@ function sitepulse_plugin_impact_scanner_page() {
                         $samples_value = number_format((float) max(0, (int) $data['samples']), 0, '.', '');
                         $disk_space_value = number_format((float) $data['disk_space'], 0, '.', '');
                         $last_recorded_value = $data['last_recorded'] ? (int) $data['last_recorded'] : '';
+                        $trend_direction = isset($data['trend']['direction']) ? (string) $data['trend']['direction'] : 'none';
+                        $trend_delta_ms = isset($data['trend']['change_ms']) && is_numeric($data['trend']['change_ms'])
+                            ? number_format((float) $data['trend']['change_ms'], 4, '.', '')
+                            : '';
+                        $trend_delta_pct = isset($data['trend']['change_pct']) && is_numeric($data['trend']['change_pct'])
+                            ? number_format((float) $data['trend']['change_pct'], 4, '.', '')
+                            : '';
+                        $average_7d_value = $average_7d !== null ? number_format($average_7d, 4, '.', '') : '';
+                        $average_30d_value = $average_30d !== null ? number_format($average_30d, 4, '.', '') : '';
                         $disk_space_files = isset($data['disk_space_files']) ? $data['disk_space_files'] : null;
                         $disk_space_recorded = isset($data['disk_space_recorded']) ? (int) $data['disk_space_recorded'] : 0;
                         $plugin_slug = $data['slug'];
@@ -613,6 +662,11 @@ function sitepulse_plugin_impact_scanner_page() {
                             data-disk-recorded="<?php echo esc_attr($disk_space_recorded ? $disk_space_recorded : ''); ?>"
                             data-last-recorded="<?php echo esc_attr($last_recorded_value); ?>"
                             data-is-measured="<?php echo $data['impact'] !== null ? '1' : '0'; ?>"
+                            data-trend-direction="<?php echo esc_attr($trend_direction); ?>"
+                            data-trend-delta-ms="<?php echo esc_attr($trend_delta_ms); ?>"
+                            data-trend-delta-pct="<?php echo esc_attr($trend_delta_pct); ?>"
+                            data-average-7d="<?php echo esc_attr($average_7d_value); ?>"
+                            data-average-30d="<?php echo esc_attr($average_30d_value); ?>"
                         >
                             <td data-colname="<?php echo esc_attr__('Plugin', 'sitepulse'); ?>"><strong><?php echo esc_html($data['name']); ?></strong></td>
                             <td data-colname="<?php echo esc_attr__('Durée mesurée', 'sitepulse'); ?>"><?php echo $impact_output; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></td>
@@ -708,6 +762,245 @@ function sitepulse_plugin_impact_get_measurements() {
         'interval'     => isset($data['interval']) ? max(1, (int) $data['interval']) : $default_interval,
         'samples'      => isset($data['samples']) && is_array($data['samples']) ? $data['samples'] : [],
     ];
+}
+
+/**
+ * Retrieves the persisted plugin impact history.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_plugin_impact_get_history() {
+    if (!defined('SITEPULSE_OPTION_PLUGIN_IMPACT_HISTORY')) {
+        return [
+            'updated_at' => 0,
+            'plugins'    => [],
+        ];
+    }
+
+    $stored = get_option(SITEPULSE_OPTION_PLUGIN_IMPACT_HISTORY, []);
+
+    if (!is_array($stored)) {
+        $stored = [];
+    }
+
+    $updated_at = isset($stored['updated_at']) ? (int) $stored['updated_at'] : 0;
+    $plugins = [];
+
+    if (isset($stored['plugins']) && is_array($stored['plugins'])) {
+        foreach ($stored['plugins'] as $plugin_file => $entries) {
+            if (!is_string($plugin_file) || $plugin_file === '' || !is_array($entries)) {
+                continue;
+            }
+
+            $normalized = [];
+
+            foreach ($entries as $entry) {
+                if (!is_array($entry)) {
+                    continue;
+                }
+
+                $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+                $average = isset($entry['avg_ms']) ? (float) $entry['avg_ms'] : null;
+
+                if ($timestamp <= 0 || $average === null || !is_numeric($average)) {
+                    continue;
+                }
+
+                $normalized[$timestamp] = [
+                    'timestamp' => $timestamp,
+                    'avg_ms'    => max(0.0, (float) $average),
+                ];
+
+                if (isset($entry['samples']) && is_numeric($entry['samples'])) {
+                    $normalized[$timestamp]['samples'] = max(0, (int) $entry['samples']);
+                }
+
+                if (isset($entry['weight']) && is_numeric($entry['weight'])) {
+                    $normalized[$timestamp]['weight'] = max(0.0, (float) $entry['weight']);
+                }
+
+                if (isset($entry['last_ms']) && is_numeric($entry['last_ms'])) {
+                    $normalized[$timestamp]['last_ms'] = max(0.0, (float) $entry['last_ms']);
+                }
+            }
+
+            if (empty($normalized)) {
+                continue;
+            }
+
+            ksort($normalized);
+
+            $plugins[$plugin_file] = array_values($normalized);
+        }
+    }
+
+    return [
+        'updated_at' => max(0, $updated_at),
+        'plugins'    => $plugins,
+    ];
+}
+
+/**
+ * Calculates trend data for a plugin using history entries.
+ *
+ * @param array<int,array<string,float|int>> $history_entries Sorted history entries.
+ * @param float|null                         $current_average Latest average in milliseconds.
+ * @param int                                $current_time    Current timestamp.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_plugin_impact_calculate_trend(array $history_entries, $current_average, $current_time) {
+    $entry_count = count($history_entries);
+
+    if (0 === $entry_count) {
+        return [
+            'direction'   => 'none',
+            'change_ms'   => null,
+            'change_pct'  => null,
+            'previous'    => null,
+            'average_7d'  => null,
+            'average_30d' => null,
+        ];
+    }
+
+    $latest = $history_entries[$entry_count - 1];
+    $previous = $entry_count > 1 ? $history_entries[$entry_count - 2] : null;
+
+    $latest_avg = isset($latest['avg_ms']) ? (float) $latest['avg_ms'] : null;
+    $previous_avg = ($previous !== null && isset($previous['avg_ms'])) ? (float) $previous['avg_ms'] : null;
+
+    if ($current_average !== null && is_numeric($current_average)) {
+        $latest_avg = (float) $current_average;
+    }
+
+    $change_ms = null;
+    $change_pct = null;
+    $direction = 'none';
+
+    if ($latest_avg !== null && $previous_avg !== null) {
+        $change_ms = $latest_avg - $previous_avg;
+
+        if (abs($change_ms) < 0.01) {
+            $change_ms = 0.0;
+        }
+
+        if (abs($previous_avg) > 0.0001) {
+            $change_pct = ($change_ms / $previous_avg) * 100;
+        }
+
+        if ($change_ms > 0.0) {
+            $direction = 'up';
+        } elseif ($change_ms < 0.0) {
+            $direction = 'down';
+        } else {
+            $direction = 'flat';
+        }
+    }
+
+    $seven_days_ago = $current_time - (7 * DAY_IN_SECONDS);
+    $thirty_days_ago = $current_time - (30 * DAY_IN_SECONDS);
+
+    $average_7d = sitepulse_plugin_impact_average_window($history_entries, $seven_days_ago);
+    $average_30d = sitepulse_plugin_impact_average_window($history_entries, $thirty_days_ago);
+
+    return [
+        'direction'   => $direction,
+        'change_ms'   => $change_ms,
+        'change_pct'  => $change_pct,
+        'previous'    => $previous_avg,
+        'average_7d'  => $average_7d,
+        'average_30d' => $average_30d,
+    ];
+}
+
+/**
+ * Computes the rolling average of the provided history entries after a cutoff.
+ *
+ * @param array<int,array<string,float|int>> $history_entries History entries.
+ * @param int                                $cutoff          Minimum timestamp to include.
+ *
+ * @return float|null
+ */
+function sitepulse_plugin_impact_average_window(array $history_entries, $cutoff) {
+    $cutoff = (int) $cutoff;
+
+    $sum = 0.0;
+    $count = 0;
+
+    foreach ($history_entries as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+
+        $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+
+        if ($timestamp <= 0 || $timestamp < $cutoff) {
+            continue;
+        }
+
+        if (!isset($entry['avg_ms']) || !is_numeric($entry['avg_ms'])) {
+            continue;
+        }
+
+        $sum += max(0.0, (float) $entry['avg_ms']);
+        $count++;
+    }
+
+    if (0 === $count) {
+        return null;
+    }
+
+    return $sum / $count;
+}
+
+/**
+ * Formats the trend change for display.
+ *
+ * @param array<string,mixed> $trend Trend payload returned by {@see sitepulse_plugin_impact_calculate_trend()}.
+ *
+ * @return string
+ */
+function sitepulse_plugin_impact_format_trend_label($trend) {
+    if (!is_array($trend)) {
+        return '';
+    }
+
+    $direction = isset($trend['direction']) ? (string) $trend['direction'] : 'none';
+    $change_ms = isset($trend['change_ms']) && is_numeric($trend['change_ms']) ? (float) $trend['change_ms'] : null;
+    $change_pct = isset($trend['change_pct']) && is_numeric($trend['change_pct']) ? (float) $trend['change_pct'] : null;
+
+    if ($change_ms === null || $direction === 'none') {
+        return '';
+    }
+
+    $arrow = '→';
+
+    if ($direction === 'up') {
+        $arrow = '↑';
+    } elseif ($direction === 'down') {
+        $arrow = '↓';
+    }
+
+    $formatted_ms = number_format_i18n(abs($change_ms), 2);
+
+    if ($change_pct !== null) {
+        $formatted_pct = number_format_i18n(abs($change_pct), 1);
+
+        return sprintf(
+            /* translators: 1: arrow indicator, 2: delta in milliseconds, 3: delta percentage. */
+            __('Variation vs précédente mesure : %1$s %2$s ms (%3$s %%).', 'sitepulse'),
+            $arrow,
+            $formatted_ms,
+            $formatted_pct
+        );
+    }
+
+    return sprintf(
+        /* translators: 1: arrow indicator, 2: delta in milliseconds. */
+        __('Variation vs précédente mesure : %1$s %2$s ms.', 'sitepulse'),
+        $arrow,
+        $formatted_ms
+    );
 }
 
 function sitepulse_plugin_impact_normalize_timestamp_for_display($timestamp) {
