@@ -56,13 +56,19 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
 
                 if (is_numeric($value)) {
                     $numeric_value = (float) $value;
-                    $rounded_integer = round($numeric_value);
-                    $is_near_integer = abs($numeric_value - $rounded_integer) < 0.001;
 
-                    if ($is_near_integer) {
-                        $values[] = number_format_i18n($rounded_integer, 0);
+                    if (is_finite($numeric_value)) {
+                        $rounded_integer = round($numeric_value);
+                        $rounded_two_decimals = round($numeric_value, 2);
+                        $is_near_integer = abs($rounded_two_decimals - $rounded_integer) < 0.0005;
+
+                        if ($is_near_integer) {
+                            $values[] = number_format_i18n($rounded_integer, 0);
+                        } else {
+                            $values[] = number_format_i18n($rounded_two_decimals, 2);
+                        }
                     } else {
-                        $values[] = number_format_i18n(round($numeric_value, 2), 2);
+                        $values[] = (string) $value;
                     }
                 } elseif (is_scalar($value)) {
                     $values[] = (string) $value;
@@ -199,6 +205,85 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
     }
 
     /**
+     * Renders a dashboard preview card from a normalized definition.
+     *
+     * @param array $definition    Card definition (classes, title, subtitle, metric value, etc.).
+     * @param array $status_labels Status labels map coming from the block context.
+     *
+     * @return string
+     */
+    function sitepulse_dashboard_preview_render_card_section($definition, $status_labels) {
+        if (!is_array($definition)) {
+            return '';
+        }
+
+        $classes = [];
+
+        if (isset($definition['classes'])) {
+            if (is_array($definition['classes'])) {
+                $classes = $definition['classes'];
+            } else {
+                $classes = preg_split('/\s+/', (string) $definition['classes']);
+            }
+        }
+
+        if (empty($classes)) {
+            $classes = ['sitepulse-card'];
+        }
+
+        $classes = array_filter(array_map('sanitize_html_class', $classes));
+
+        if (!in_array('sitepulse-card', $classes, true)) {
+            $classes[] = 'sitepulse-card';
+        }
+
+        $class_attribute = implode(' ', array_unique($classes));
+
+        $title = isset($definition['title']) ? (string) $definition['title'] : '';
+        $subtitle = isset($definition['subtitle']) ? (string) $definition['subtitle'] : '';
+        $description = isset($definition['description']) ? (string) $definition['description'] : '';
+        $status = isset($definition['status']) ? (string) $definition['status'] : '';
+
+        $metric_value_html = isset($definition['metric_value_html']) && $definition['metric_value_html'] !== ''
+            ? (string) $definition['metric_value_html']
+            : sprintf(
+                '<span class="sitepulse-metric-value">%s</span>',
+                esc_html__('N/A', 'sitepulse')
+            );
+
+        $after_metric_html = isset($definition['after_metric_html']) ? (string) $definition['after_metric_html'] : '';
+
+        $chart_id = isset($definition['chart_id']) ? (string) $definition['chart_id'] : '';
+
+        if ($chart_id === '') {
+            $chart_id = function_exists('wp_unique_id')
+                ? wp_unique_id('sitepulse-preview-chart-')
+                : uniqid('sitepulse-preview-chart-');
+        }
+
+        $chart_payload = isset($definition['chart']) ? $definition['chart'] : null;
+        $chart_html = sitepulse_dashboard_preview_render_chart_area($chart_id, $chart_payload);
+
+        $status_meta = sitepulse_dashboard_preview_get_status_meta($status, $status_labels);
+        $status_badge_class = sanitize_html_class($status);
+
+        return sprintf(
+            '<section class="%1$s"><div class="sitepulse-card-header"><h3>%2$s</h3></div><p class="sitepulse-card-subtitle">%3$s</p>%4$s<p class="sitepulse-metric"><span class="status-badge %5$s" aria-hidden="true"><span class="status-icon">%6$s</span><span class="status-text">%7$s</span></span><span class="screen-reader-text">%8$s</span>%9$s</p>%10$s<p class="description">%11$s</p></section>',
+            esc_attr($class_attribute),
+            esc_html($title),
+            esc_html($subtitle),
+            $chart_html,
+            esc_attr($status_badge_class),
+            esc_html($status_meta['icon']),
+            esc_html($status_meta['label']),
+            esc_html($status_meta['sr']),
+            $metric_value_html,
+            $after_metric_html,
+            esc_html($description)
+        );
+    }
+
+    /**
      * Server-side render callback for the dashboard preview block.
      *
      * @param array  $attributes Block attributes.
@@ -296,129 +381,180 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
         $cards = [];
         $unique_prefix = sanitize_html_class('sitepulse-preview-' . uniqid());
 
-        // Speed card.
-        if ($show_speed && isset($modules['speed']) && !empty($modules['speed']['enabled']) && isset($modules['speed']['card'])) {
-            $card = $modules['speed']['card'];
-            $chart = isset($modules['speed']['chart']) ? $modules['speed']['chart'] : null;
-            $thresholds = isset($modules['speed']['thresholds']) ? $modules['speed']['thresholds'] : [];
-            $warning_threshold = isset($thresholds['warning']) ? (int) $thresholds['warning'] : (defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200);
-            $critical_threshold = isset($thresholds['critical']) ? (int) $thresholds['critical'] : (defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? (int) SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500);
-            $status_meta = sitepulse_dashboard_preview_get_status_meta(isset($card['status']) ? $card['status'] : '', $status_labels);
-            $canvas_id = $unique_prefix . '-speed-chart';
+        $card_configs = [
+            'speed' => [
+                'enabled'      => $show_speed,
+                'module_key'   => 'speed',
+                'chart_suffix' => 'speed',
+                'classes'      => ['sitepulse-card', 'sitepulse-card--speed'],
+                'title'        => __('Performance PHP', 'sitepulse'),
+                'subtitle'     => __('Dernier temps de traitement mesuré lors d’un scan récent.', 'sitepulse'),
+                'metric'       => static function ($card_data) {
+                    $display = isset($card_data['display']) && $card_data['display'] !== ''
+                        ? (string) $card_data['display']
+                        : __('N/A', 'sitepulse');
 
-            $cards[] = sprintf(
-                '<section class="sitepulse-card sitepulse-card--speed"><div class="sitepulse-card-header"><h3>%1$s</h3></div><p class="sitepulse-card-subtitle">%2$s</p>%3$s<p class="sitepulse-metric"><span class="status-badge %4$s" aria-hidden="true"><span class="status-icon">%5$s</span><span class="status-text">%6$s</span></span><span class="screen-reader-text">%7$s</span><span class="sitepulse-metric-value">%8$s</span></p><p class="description">%9$s</p></section>',
-                esc_html__('Performance PHP', 'sitepulse'),
-                esc_html__('Dernier temps de traitement mesuré lors d’un scan récent.', 'sitepulse'),
-                sitepulse_dashboard_preview_render_chart_area($canvas_id, $chart),
-                esc_attr(isset($card['status']) ? $card['status'] : ''),
-                esc_html($status_meta['icon']),
-                esc_html($status_meta['label']),
-                esc_html($status_meta['sr']),
-                esc_html(isset($card['display']) ? $card['display'] : __('N/A', 'sitepulse')),
-                esc_html(sprintf(
-                    /* translators: 1: warning threshold in ms, 2: critical threshold in ms */
-                    __('En dessous de %1$d ms, tout va bien. Au-delà de %2$d ms, investiguez les plugins ou l’hébergement.', 'sitepulse'),
-                    $warning_threshold,
-                    $critical_threshold
-                ))
-            );
-        }
+                    return sprintf(
+                        '<span class="sitepulse-metric-value">%s</span>',
+                        esc_html($display)
+                    );
+                },
+                'description'  => static function ($card_data, $module_data) {
+                    unset($card_data);
 
-        // Uptime card.
-        if ($show_uptime && isset($modules['uptime']) && !empty($modules['uptime']['enabled']) && isset($modules['uptime']['card'])) {
-            $card = $modules['uptime']['card'];
-            $chart = isset($modules['uptime']['chart']) ? $modules['uptime']['chart'] : null;
-            $status_meta = sitepulse_dashboard_preview_get_status_meta(isset($card['status']) ? $card['status'] : '', $status_labels);
-            $canvas_id = $unique_prefix . '-uptime-chart';
-            $percentage = isset($card['percentage']) ? round((float) $card['percentage'], 2) : 0;
+                    $thresholds = isset($module_data['thresholds']) && is_array($module_data['thresholds'])
+                        ? $module_data['thresholds']
+                        : [];
 
-            $cards[] = sprintf(
-                '<section class="sitepulse-card sitepulse-card--uptime"><div class="sitepulse-card-header"><h3>%1$s</h3></div><p class="sitepulse-card-subtitle">%2$s</p>%3$s<p class="sitepulse-metric"><span class="status-badge %4$s" aria-hidden="true"><span class="status-icon">%5$s</span><span class="status-text">%6$s</span></span><span class="screen-reader-text">%7$s</span><span class="sitepulse-metric-value">%8$s<span class="sitepulse-metric-unit">%9$s</span></span></p><p class="description">%10$s</p></section>',
-                esc_html__('Disponibilité', 'sitepulse'),
-                esc_html__('Taux de réussite des 30 dernières vérifications horaires.', 'sitepulse'),
-                sitepulse_dashboard_preview_render_chart_area($canvas_id, $chart),
-                esc_attr(isset($card['status']) ? $card['status'] : ''),
-                esc_html($status_meta['icon']),
-                esc_html($status_meta['label']),
-                esc_html($status_meta['sr']),
-                esc_html(number_format_i18n($percentage, 2)),
-                esc_html__('%', 'sitepulse'),
-                esc_html__('Chaque barre représente une vérification de disponibilité programmée.', 'sitepulse')
-            );
-        }
+                    $warning_threshold = isset($thresholds['warning'])
+                        ? (int) $thresholds['warning']
+                        : (defined('SITEPULSE_DEFAULT_SPEED_WARNING_MS') ? (int) SITEPULSE_DEFAULT_SPEED_WARNING_MS : 200);
+                    $critical_threshold = isset($thresholds['critical'])
+                        ? (int) $thresholds['critical']
+                        : (defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? (int) SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500);
 
-        // Database card.
-        if ($show_database && isset($modules['database']) && !empty($modules['database']['enabled']) && isset($modules['database']['card'])) {
-            $card = $modules['database']['card'];
-            $chart = isset($modules['database']['chart']) ? $modules['database']['chart'] : null;
-            $status_meta = sitepulse_dashboard_preview_get_status_meta(isset($card['status']) ? $card['status'] : '', $status_labels);
-            $canvas_id = $unique_prefix . '-database-chart';
-            $limit = isset($card['limit']) ? (int) $card['limit'] : 0;
-            $revision_count = isset($card['revisions']) ? (int) $card['revisions'] : 0;
+                    return sprintf(
+                        /* translators: 1: warning threshold in ms, 2: critical threshold in ms */
+                        __('En dessous de %1$d ms, tout va bien. Au-delà de %2$d ms, investiguez les plugins ou l’hébergement.', 'sitepulse'),
+                        $warning_threshold,
+                        $critical_threshold
+                    );
+                },
+            ],
+            'uptime' => [
+                'enabled'      => $show_uptime,
+                'module_key'   => 'uptime',
+                'chart_suffix' => 'uptime',
+                'classes'      => ['sitepulse-card', 'sitepulse-card--uptime'],
+                'title'        => __('Disponibilité', 'sitepulse'),
+                'subtitle'     => __('Taux de réussite des 30 dernières vérifications horaires.', 'sitepulse'),
+                'metric'       => static function ($card_data) {
+                    $percentage = isset($card_data['percentage']) ? round((float) $card_data['percentage'], 2) : 0;
 
-            $cards[] = sprintf(
-                '<section class="sitepulse-card sitepulse-card--database"><div class="sitepulse-card-header"><h3>%1$s</h3></div><p class="sitepulse-card-subtitle">%2$s</p>%3$s<p class="sitepulse-metric"><span class="status-badge %4$s" aria-hidden="true"><span class="status-icon">%5$s</span><span class="status-text">%6$s</span></span><span class="screen-reader-text">%7$s</span><span class="sitepulse-metric-value">%8$s<span class="sitepulse-metric-unit">%9$s</span></span></p><p class="description">%10$s</p></section>',
-                esc_html__('Santé de la base', 'sitepulse'),
-                esc_html__('Volume des révisions par rapport au budget défini.', 'sitepulse'),
-                sitepulse_dashboard_preview_render_chart_area($canvas_id, $chart),
-                esc_attr(isset($card['status']) ? $card['status'] : ''),
-                esc_html($status_meta['icon']),
-                esc_html($status_meta['label']),
-                esc_html($status_meta['sr']),
-                esc_html(number_format_i18n($revision_count)),
-                esc_html__('révisions', 'sitepulse'),
-                esc_html(sprintf(
-                    /* translators: %d: recommended revision limit */
-                    __('Essayez de rester sous la barre des %d révisions pour éviter de gonfler la table des articles.', 'sitepulse'),
-                    $limit
-                ))
-            );
-        }
+                    return sprintf(
+                        '<span class="sitepulse-metric-value">%s<span class="sitepulse-metric-unit">%s</span></span>',
+                        esc_html(number_format_i18n($percentage, 2)),
+                        esc_html__('%', 'sitepulse')
+                    );
+                },
+                'description'  => static function () {
+                    return __('Chaque barre représente une vérification de disponibilité programmée.', 'sitepulse');
+                },
+            ],
+            'database' => [
+                'enabled'      => $show_database,
+                'module_key'   => 'database',
+                'chart_suffix' => 'database',
+                'classes'      => ['sitepulse-card', 'sitepulse-card--database'],
+                'title'        => __('Santé de la base', 'sitepulse'),
+                'subtitle'     => __('Volume des révisions par rapport au budget défini.', 'sitepulse'),
+                'metric'       => static function ($card_data) {
+                    $revision_count = isset($card_data['revisions']) ? (int) $card_data['revisions'] : 0;
 
-        // Logs card.
-        if ($show_logs && isset($modules['logs']) && !empty($modules['logs']['enabled']) && isset($modules['logs']['card'])) {
-            $card = $modules['logs']['card'];
-            $chart = isset($modules['logs']['chart']) ? $modules['logs']['chart'] : null;
-            $status_meta = sitepulse_dashboard_preview_get_status_meta(isset($card['status']) ? $card['status'] : '', $status_labels);
-            $canvas_id = $unique_prefix . '-logs-chart';
-            $counts = isset($card['counts']) && is_array($card['counts']) ? $card['counts'] : [];
+                    return sprintf(
+                        '<span class="sitepulse-metric-value">%s<span class="sitepulse-metric-unit">%s</span></span>',
+                        esc_html(number_format_i18n($revision_count)),
+                        esc_html__('révisions', 'sitepulse')
+                    );
+                },
+                'description'  => static function ($card_data) {
+                    $limit = isset($card_data['limit']) ? (int) $card_data['limit'] : 0;
 
-            $legend_items = [
-                [__('Erreurs fatales', 'sitepulse'), 'fatal', '#a0141e'],
-                [__('Avertissements', 'sitepulse'), 'warning', '#8a6100'],
-                [__('Notices', 'sitepulse'), 'notice', '#2196F3'],
-                [__('Obsolescences', 'sitepulse'), 'deprecated', '#9C27B0'],
-            ];
+                    return sprintf(
+                        /* translators: %d: recommended revision limit */
+                        __('Essayez de rester sous la barre des %d révisions pour éviter de gonfler la table des articles.', 'sitepulse'),
+                        $limit
+                    );
+                },
+            ],
+            'logs' => [
+                'enabled'      => $show_logs,
+                'module_key'   => 'logs',
+                'chart_suffix' => 'logs',
+                'classes'      => ['sitepulse-card', 'sitepulse-card--logs'],
+                'title'        => __('Journal d’erreurs', 'sitepulse'),
+                'subtitle'     => __('Répartition des évènements récents trouvés dans le fichier debug.log.', 'sitepulse'),
+                'metric'       => static function ($card_data) {
+                    $summary = isset($card_data['summary']) && $card_data['summary'] !== ''
+                        ? (string) $card_data['summary']
+                        : __('Aucune donnée disponible.', 'sitepulse');
 
-            $legend_html_parts = [];
+                    return sprintf(
+                        '<span class="sitepulse-metric-value">%s</span>',
+                        esc_html($summary)
+                    );
+                },
+                'after_metric' => static function ($card_data) {
+                    $counts = isset($card_data['counts']) && is_array($card_data['counts']) ? $card_data['counts'] : [];
 
-            foreach ($legend_items as $item) {
-                list($label, $key, $color) = $item;
-                $value = isset($counts[$key]) ? (int) $counts[$key] : 0;
-                $legend_html_parts[] = sprintf(
-                    '<li><span class="label"><span class="badge" style="background-color: %1$s;"></span>%2$s</span><span class="value">%3$s</span></li>',
-                    esc_attr($color),
-                    esc_html($label),
-                    esc_html(number_format_i18n($value))
-                );
+                    $legend_items = [
+                        [__('Erreurs fatales', 'sitepulse'), 'fatal', '#a0141e'],
+                        [__('Avertissements', 'sitepulse'), 'warning', '#8a6100'],
+                        [__('Notices', 'sitepulse'), 'notice', '#2196F3'],
+                        [__('Obsolescences', 'sitepulse'), 'deprecated', '#9C27B0'],
+                    ];
+
+                    $legend_html_parts = [];
+
+                    foreach ($legend_items as $item) {
+                        list($label, $key, $color) = $item;
+                        $value = isset($counts[$key]) ? (int) $counts[$key] : 0;
+
+                        $legend_html_parts[] = sprintf(
+                            '<li><span class="label"><span class="badge" style="background-color: %1$s;"></span>%2$s</span><span class="value">%3$s</span></li>',
+                            esc_attr($color),
+                            esc_html($label),
+                            esc_html(number_format_i18n($value))
+                        );
+                    }
+
+                    return '<ul class="sitepulse-legend">' . implode('', $legend_html_parts) . '</ul>';
+                },
+                'description'  => static function () {
+                    return __('Analysez le journal complet depuis l’interface SitePulse pour plus de détails.', 'sitepulse');
+                },
+            ],
+        ];
+
+        foreach ($card_configs as $config) {
+            if (empty($config['enabled'])) {
+                continue;
             }
 
-            $legend_html = '<ul class="sitepulse-legend">' . implode('', $legend_html_parts) . '</ul>';
+            $module_key = isset($config['module_key']) ? $config['module_key'] : '';
 
-            $cards[] = sprintf(
-                '<section class="sitepulse-card sitepulse-card--logs"><div class="sitepulse-card-header"><h3>%1$s</h3></div><p class="sitepulse-card-subtitle">%2$s</p>%3$s<p class="sitepulse-metric"><span class="status-badge %4$s" aria-hidden="true"><span class="status-icon">%5$s</span><span class="status-text">%6$s</span></span><span class="screen-reader-text">%7$s</span><span class="sitepulse-metric-value">%8$s</span></p>%9$s<p class="description">%10$s</p></section>',
-                esc_html__('Journal d’erreurs', 'sitepulse'),
-                esc_html__('Répartition des évènements récents trouvés dans le fichier debug.log.', 'sitepulse'),
-                sitepulse_dashboard_preview_render_chart_area($canvas_id, $chart),
-                esc_attr(isset($card['status']) ? $card['status'] : ''),
-                esc_html($status_meta['icon']),
-                esc_html($status_meta['label']),
-                esc_html($status_meta['sr']),
-                esc_html(isset($card['summary']) ? $card['summary'] : __('Aucune donnée disponible.', 'sitepulse')),
-                $legend_html,
-                esc_html__('Analysez le journal complet depuis l’interface SitePulse pour plus de détails.', 'sitepulse')
-            );
+            if ($module_key === '' || !isset($modules[$module_key]) || empty($modules[$module_key]['enabled']) || !isset($modules[$module_key]['card'])) {
+                continue;
+            }
+
+            $module_data = $modules[$module_key];
+            $card_data = is_array($module_data['card']) ? $module_data['card'] : [];
+            $chart_data = isset($module_data['chart']) ? $module_data['chart'] : null;
+
+            $metric_callback = isset($config['metric']) && is_callable($config['metric']) ? $config['metric'] : null;
+            $description_callback = isset($config['description']) && is_callable($config['description']) ? $config['description'] : null;
+            $after_metric_callback = isset($config['after_metric']) && is_callable($config['after_metric']) ? $config['after_metric'] : null;
+
+            $metric_value_html = $metric_callback ? (string) $metric_callback($card_data, $module_data) : '';
+            $description_text = $description_callback ? (string) $description_callback($card_data, $module_data) : '';
+            $after_metric_html = $after_metric_callback ? (string) $after_metric_callback($card_data, $module_data) : '';
+
+            $chart_suffix = isset($config['chart_suffix']) ? (string) $config['chart_suffix'] : $module_key;
+            $chart_id = $unique_prefix . '-' . sanitize_key($chart_suffix) . '-chart';
+
+            $definition = [
+                'classes'           => isset($config['classes']) ? $config['classes'] : ['sitepulse-card'],
+                'title'             => isset($config['title']) ? $config['title'] : '',
+                'subtitle'          => isset($config['subtitle']) ? $config['subtitle'] : '',
+                'chart'             => $chart_data,
+                'chart_id'          => $chart_id,
+                'status'            => isset($card_data['status']) ? (string) $card_data['status'] : '',
+                'metric_value_html' => $metric_value_html,
+                'after_metric_html' => $after_metric_html,
+                'description'       => $description_text,
+            ];
+
+            $cards[] = sitepulse_dashboard_preview_render_card_section($definition, $status_labels);
         }
 
         if (empty($cards)) {
