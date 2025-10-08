@@ -17,6 +17,10 @@ if (!defined('SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE')) {
     define('SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE', 'sitepulse_uptime_remote_queue');
 }
 
+if (!defined('SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE_METRICS')) {
+    define('SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE_METRICS', 'sitepulse_uptime_remote_queue_metrics');
+}
+
 if (!defined('SITEPULSE_UPTIME_REMOTE_QUEUE_MAX_SIZE')) {
     define('SITEPULSE_UPTIME_REMOTE_QUEUE_MAX_SIZE', 200);
 }
@@ -734,6 +738,90 @@ function sitepulse_uptime_get_remote_queue_item_ttl() {
 }
 
 /**
+ * Returns the default metrics payload used when instrumenting the remote queue.
+ *
+ * @param int $now Timestamp used for calculations.
+ * @param int $ttl Configured TTL for queue items.
+ * @param int $max_size Maximum number of entries allowed in the queue.
+ * @return array<string,int|null>
+ */
+function sitepulse_uptime_get_default_queue_metrics($now, $ttl, $max_size) {
+    return [
+        'requested'          => 0,
+        'retained'           => 0,
+        'dropped_invalid'    => 0,
+        'dropped_expired'    => 0,
+        'dropped_duplicates' => 0,
+        'dropped_overflow'   => 0,
+        'queue_length'       => 0,
+        'delayed_jobs'       => 0,
+        'max_wait_seconds'   => 0,
+        'avg_wait_seconds'   => 0,
+        'next_scheduled_at'  => null,
+        'oldest_created_at'  => null,
+        'limit_ttl'          => (int) $ttl,
+        'limit_size'         => (int) $max_size,
+        'evaluated_at'       => (int) $now,
+    ];
+}
+
+/**
+ * Stores the latest remote queue metrics and fires an action for observers.
+ *
+ * @param array<string,int|null> $metrics Metrics payload.
+ * @return void
+ */
+function sitepulse_uptime_record_queue_metrics($metrics) {
+    if (!is_array($metrics)) {
+        return;
+    }
+
+    $metrics = array_merge(sitepulse_uptime_get_default_queue_metrics((int) current_time('timestamp', true), 0, 0), $metrics);
+
+    $payload = [
+        'updated_at' => (int) current_time('timestamp', true),
+        'metrics'    => $metrics,
+    ];
+
+    update_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE_METRICS, $payload, false);
+
+    /**
+     * Fires once the remote queue metrics have been updated.
+     *
+     * @param array<string,mixed> $payload Recorded metrics payload.
+     */
+    do_action('sitepulse_uptime_remote_queue_metrics_recorded', $payload);
+}
+
+/**
+ * Retrieves the latest stored remote queue metrics.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_uptime_get_remote_queue_metrics() {
+    $payload = get_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE_METRICS, []);
+
+    $now = (int) current_time('timestamp', true);
+    $defaults = sitepulse_uptime_get_default_queue_metrics($now, sitepulse_uptime_get_remote_queue_item_ttl(), sitepulse_uptime_get_remote_queue_max_size());
+
+    if (!is_array($payload)) {
+        return [
+            'updated_at' => 0,
+            'metrics'    => $defaults,
+        ];
+    }
+
+    $metrics = isset($payload['metrics']) && is_array($payload['metrics'])
+        ? array_merge($defaults, $payload['metrics'])
+        : $defaults;
+
+    return [
+        'updated_at' => isset($payload['updated_at']) ? (int) $payload['updated_at'] : 0,
+        'metrics'    => $metrics,
+    ];
+}
+
+/**
  * Normalises and prunes a remote worker queue.
  *
  * @param array<int,array<string,mixed>> $queue Existing queue.
@@ -741,13 +829,16 @@ function sitepulse_uptime_get_remote_queue_item_ttl() {
  * @return array<int,array<string,mixed>>
  */
 function sitepulse_uptime_normalize_remote_queue($queue, $now = null) {
-    if (!is_array($queue) || empty($queue)) {
-        return [];
-    }
-
     $now = null === $now ? (int) current_time('timestamp', true) : (int) $now;
     $ttl = sitepulse_uptime_get_remote_queue_item_ttl();
     $max_size = sitepulse_uptime_get_remote_queue_max_size();
+    $metrics = sitepulse_uptime_get_default_queue_metrics($now, $ttl, $max_size);
+
+    if (!is_array($queue) || empty($queue)) {
+        sitepulse_uptime_record_queue_metrics($metrics);
+
+        return [];
+    }
     $encoder = function ($payload) {
         if (!is_array($payload)) {
             return '';
@@ -765,7 +856,10 @@ function sitepulse_uptime_normalize_remote_queue($queue, $now = null) {
     $unique = [];
 
     foreach ($queue as $item) {
+        $metrics['requested']++;
+
         if (!is_array($item)) {
+            $metrics['dropped_invalid']++;
             continue;
         }
 
@@ -775,10 +869,28 @@ function sitepulse_uptime_normalize_remote_queue($queue, $now = null) {
         $created_at = isset($item['created_at']) ? (int) $item['created_at'] : $now;
 
         if ($ttl > 0 && $scheduled_at <= ($now - $ttl)) {
+            $metrics['dropped_expired']++;
             continue;
         }
 
         $key = $agent . '|' . $scheduled_at . '|' . md5($encoder($payload));
+
+        if (isset($unique[$key])) {
+            $metrics['dropped_duplicates']++;
+
+            $existing_created = isset($unique[$key]['created_at']) ? (int) $unique[$key]['created_at'] : null;
+            $existing_scheduled = isset($unique[$key]['scheduled_at']) ? (int) $unique[$key]['scheduled_at'] : null;
+
+            if (null !== $existing_created && ($created_at > 0 && $created_at < $existing_created)) {
+                $unique[$key]['created_at'] = $created_at;
+            }
+
+            if (null !== $existing_scheduled && ($scheduled_at > 0 && $scheduled_at < $existing_scheduled)) {
+                $unique[$key]['scheduled_at'] = $scheduled_at;
+            }
+
+            continue;
+        }
 
         $unique[$key] = [
             'agent'       => $agent,
@@ -789,6 +901,8 @@ function sitepulse_uptime_normalize_remote_queue($queue, $now = null) {
     }
 
     if (empty($unique)) {
+        sitepulse_uptime_record_queue_metrics($metrics);
+
         return [];
     }
 
@@ -808,9 +922,60 @@ function sitepulse_uptime_normalize_remote_queue($queue, $now = null) {
         return $a_scheduled <=> $b_scheduled;
     });
 
-    if ($max_size > 0 && count($normalized) > $max_size) {
+    $original_count = count($normalized);
+
+    if ($max_size > 0 && $original_count > $max_size) {
+        $metrics['dropped_overflow'] = $original_count - $max_size;
         $normalized = array_slice($normalized, 0, $max_size);
     }
+
+    $metrics['retained'] = count($normalized);
+    $metrics['queue_length'] = $metrics['retained'];
+
+    $next_scheduled_at = null;
+    $oldest_created_at = null;
+    $delayed_jobs = 0;
+    $wait_total = 0;
+    $max_wait = 0;
+
+    foreach ($normalized as $item) {
+        if (isset($item['scheduled_at']) && (int) $item['scheduled_at'] > 0) {
+            $timestamp = (int) $item['scheduled_at'];
+
+            if (null === $next_scheduled_at || $timestamp < $next_scheduled_at) {
+                $next_scheduled_at = $timestamp;
+            }
+
+            $wait = $now - $timestamp;
+
+            if ($wait > 0) {
+                $delayed_jobs++;
+                $wait_total += $wait;
+
+                if ($wait > $max_wait) {
+                    $max_wait = $wait;
+                }
+            }
+        }
+
+        if (isset($item['created_at']) && (int) $item['created_at'] > 0) {
+            $created = (int) $item['created_at'];
+
+            if (null === $oldest_created_at || $created < $oldest_created_at) {
+                $oldest_created_at = $created;
+            }
+        }
+    }
+
+    $metrics['delayed_jobs'] = $delayed_jobs;
+    $metrics['max_wait_seconds'] = $max_wait > 0 ? (int) $max_wait : 0;
+    $metrics['avg_wait_seconds'] = ($delayed_jobs > 0 && $wait_total > 0)
+        ? (int) round($wait_total / $delayed_jobs)
+        : 0;
+    $metrics['next_scheduled_at'] = null !== $next_scheduled_at ? (int) $next_scheduled_at : null;
+    $metrics['oldest_created_at'] = null !== $oldest_created_at ? (int) $oldest_created_at : null;
+
+    sitepulse_uptime_record_queue_metrics($metrics);
 
     return $normalized;
 }
