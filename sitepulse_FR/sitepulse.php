@@ -342,6 +342,7 @@ if (!defined('SITEPULSE_DEBUG_LOG_RETENTION')) {
 
 require_once SITEPULSE_PATH . 'includes/debug-notices.php';
 require_once SITEPULSE_PATH . 'includes/plugin-impact-tracker.php';
+require_once SITEPULSE_PATH . 'includes/site-health-alerts.php';
 sitepulse_plugin_impact_tracker_bootstrap();
 
 
@@ -519,67 +520,6 @@ function sitepulse_register_site_health_tests($tests) {
     return $tests;
 }
 add_filter('site_status_tests', 'sitepulse_register_site_health_tests');
-
-/**
- * Retrieves SitePulse alerts stored in the WordPress options table.
- *
- * @return array{
- *     cron: string[],
- *     ai: string[],
- * }
- */
-function sitepulse_get_site_health_alert_messages() {
-    $cron_warnings_option = get_option(SITEPULSE_OPTION_CRON_WARNINGS, []);
-    $cron_messages         = [];
-
-    if (is_array($cron_warnings_option)) {
-        foreach ($cron_warnings_option as $warning) {
-            if (is_array($warning) && isset($warning['message'])) {
-                $message = trim(wp_strip_all_tags((string) $warning['message']));
-
-                if ($message !== '') {
-                    $cron_messages[] = $message;
-                }
-            }
-        }
-    }
-
-    $ai_option_name = defined('SITEPULSE_OPTION_AI_INSIGHT_ERRORS')
-        ? SITEPULSE_OPTION_AI_INSIGHT_ERRORS
-        : 'sitepulse_ai_insight_errors';
-
-    $ai_errors_option = get_option($ai_option_name, []);
-    $ai_messages       = [];
-
-    if (is_array($ai_errors_option)) {
-        foreach ($ai_errors_option as $error) {
-            if (is_array($error) && isset($error['message'])) {
-                $message = trim(wp_strip_all_tags((string) $error['message']));
-
-                if ($message !== '') {
-                    $ai_messages[] = $message;
-                }
-            } elseif (is_string($error)) {
-                $message = trim(wp_strip_all_tags($error));
-
-                if ($message !== '') {
-                    $ai_messages[] = $message;
-                }
-            }
-        }
-    } elseif (is_string($ai_errors_option)) {
-        $message = trim(wp_strip_all_tags($ai_errors_option));
-
-        if ($message !== '') {
-            $ai_messages[] = $message;
-        }
-    }
-
-    return [
-        'cron' => array_values(array_unique($cron_messages)),
-        'ai'   => array_values(array_unique($ai_messages)),
-    ];
-}
 
 /**
  * Site Health test summarizing SitePulse alerts stored in options.
