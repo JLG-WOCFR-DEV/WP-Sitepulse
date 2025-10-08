@@ -82,6 +82,10 @@ SitePulse - JLG est un plugin WordPress modulaire qui surveille la vitesse, la b
 
   Assurez-vous de créer le dossier cible avec les bonnes permissions si WordPress ne peut pas le faire automatiquement.【F:sitepulse_FR/sitepulse.php†L372-L378】
 
+## Personnalisation visuelle
+- Trois presets CSS prêts à l’emploi (`soft-mint`, `midnight`, `contrast`) complètent la présentation WordPress d’origine. Activez-les via le filtre `sitepulse_active_css_preset` pour harmoniser l’interface SitePulse, le widget d’administration et le bloc Gutenberg « Dashboard preview ».【F:sitepulse_FR/includes/appearance-presets.php†L6-L123】【F:sitepulse_FR/modules/css/appearance-presets.css†L1-L208】
+- Consultez le guide [docs/css-presets.md](docs/css-presets.md) pour obtenir des exemples de bascule, appliquer un preset par bloc et créer vos variantes sur mesure.【F:docs/css-presets.md†L1-L72】
+
 ## Tests
 Un harnais PHPUnit/WP-Unit est disponible dans `tests/phpunit/` (configuré via `phpunit.xml.dist`) afin de valider les modules clefs : suivi d'uptime, notices de debug, nettoyage des transients ainsi que l'analyse du journal d'erreurs (pointeurs de lecture, détection des fatals et verrou de cooldown).【F:tests/phpunit/test-error-alerts.php†L1-L200】
 
