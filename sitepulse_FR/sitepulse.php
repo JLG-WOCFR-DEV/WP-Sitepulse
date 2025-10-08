@@ -12,105 +12,29 @@
  * Domain Path: /languages
  */
 
-if (!defined('ABSPATH')) exit;
-
-if (!function_exists('sitepulse_define_constant')) {
-    /**
-     * Defines a constant when it has not yet been set.
-     *
-     * @param string $name  Constant name.
-     * @param mixed  $value Constant value.
-     *
-     * @return void
-     */
-    function sitepulse_define_constant($name, $value) {
-        if (!defined($name)) {
-            define($name, $value);
-        }
-    }
+if (!defined('ABSPATH')) {
+    exit;
 }
 
-// Define constants
-sitepulse_define_constant('SITEPULSE_VERSION', '1.0');
+require_once __DIR__ . '/includes/bootstrap/helpers.php';
+
 sitepulse_define_constant('SITEPULSE_PATH', plugin_dir_path(__FILE__));
 sitepulse_define_constant('SITEPULSE_URL', plugin_dir_url(__FILE__));
 
-sitepulse_define_constant('SITEPULSE_OPTION_ACTIVE_MODULES', 'sitepulse_active_modules');
-sitepulse_define_constant('SITEPULSE_OPTION_DEBUG_MODE', 'sitepulse_debug_mode');
-sitepulse_define_constant('SITEPULSE_OPTION_GEMINI_API_KEY', 'sitepulse_gemini_api_key');
-sitepulse_define_constant('SITEPULSE_OPTION_AI_MODEL', 'sitepulse_ai_model');
-sitepulse_define_constant('SITEPULSE_OPTION_AI_RATE_LIMIT', 'sitepulse_ai_rate_limit');
-sitepulse_define_constant('SITEPULSE_OPTION_AI_LAST_RUN', 'sitepulse_ai_last_run');
-sitepulse_define_constant('SITEPULSE_OPTION_AI_RETRY_AFTER', 'sitepulse_ai_retry_after');
-sitepulse_define_constant('SITEPULSE_DEFAULT_AI_MODEL', 'gemini-1.5-flash');
-sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_LOG', 'sitepulse_uptime_log');
-sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_URL', 'sitepulse_uptime_url');
-sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_TIMEOUT', 'sitepulse_uptime_timeout');
-sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_FREQUENCY', 'sitepulse_uptime_frequency');
-sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_HTTP_METHOD', 'sitepulse_uptime_http_method');
-sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_HTTP_HEADERS', 'sitepulse_uptime_http_headers');
-sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_EXPECTED_CODES', 'sitepulse_uptime_expected_codes');
-sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_LATENCY_THRESHOLD', 'sitepulse_uptime_latency_threshold');
-sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_KEYWORD', 'sitepulse_uptime_keyword');
-sitepulse_define_constant('SITEPULSE_OPTION_LAST_LOAD_TIME', 'sitepulse_last_load_time');
-sitepulse_define_constant('SITEPULSE_OPTION_SPEED_SCAN_HISTORY', 'sitepulse_speed_scan_history');
-sitepulse_define_constant('SITEPULSE_OPTION_SPEED_AUTOMATION_CONFIG', 'sitepulse_speed_automation_config');
-sitepulse_define_constant('SITEPULSE_OPTION_SPEED_AUTOMATION_HISTORY', 'sitepulse_speed_automation_history');
-sitepulse_define_constant('SITEPULSE_OPTION_SPEED_AUTOMATION_QUEUE', 'sitepulse_speed_automation_queue');
-sitepulse_define_constant('SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS', 'sitepulse_alert_enabled_channels');
-sitepulse_define_constant('SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS', 'sitepulse_error_alert_delivery_channels');
-sitepulse_define_constant('SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS', 'sitepulse_error_alert_webhooks');
-sitepulse_define_constant('SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES', 'sitepulse_error_alert_severities');
-sitepulse_define_constant('SITEPULSE_OPTION_CPU_ALERT_THRESHOLD', 'sitepulse_cpu_alert_threshold');
-sitepulse_define_constant('SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD', 'sitepulse_php_fatal_alert_threshold');
-sitepulse_define_constant('SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES', 'sitepulse_alert_cooldown_minutes');
-sitepulse_define_constant('SITEPULSE_OPTION_ALERT_INTERVAL', 'sitepulse_alert_interval');
-sitepulse_define_constant('SITEPULSE_OPTION_ALERT_RECIPIENTS', 'sitepulse_alert_recipients');
-sitepulse_define_constant('SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE', 'sitepulse_impact_loader_signature');
-sitepulse_define_constant('SITEPULSE_OPTION_IMPACT_THRESHOLDS', 'sitepulse_impact_thresholds');
-sitepulse_define_constant('SITEPULSE_OPTION_PLUGIN_BASENAME', 'sitepulse_plugin_basename');
-sitepulse_define_constant('SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER', 'sitepulse_error_alert_log_pointer');
-sitepulse_define_constant('SITEPULSE_OPTION_CRON_WARNINGS', 'sitepulse_cron_warnings');
-sitepulse_define_constant('SITEPULSE_OPTION_DEBUG_NOTICES', 'sitepulse_debug_notices');
-sitepulse_define_constant('SITEPULSE_OPTION_DASHBOARD_RANGE', 'sitepulse_dashboard_range');
-sitepulse_define_constant('SITEPULSE_OPTION_SPEED_WARNING_MS', 'sitepulse_speed_warning_ms');
-sitepulse_define_constant('SITEPULSE_OPTION_SPEED_CRITICAL_MS', 'sitepulse_speed_critical_ms');
-sitepulse_define_constant('SITEPULSE_OPTION_UPTIME_WARNING_PERCENT', 'sitepulse_uptime_warning_percent');
-sitepulse_define_constant('SITEPULSE_OPTION_REVISION_LIMIT', 'sitepulse_revision_limit');
+$sitepulse_constant_definitions = require __DIR__ . '/includes/bootstrap/constants.php';
 
-sitepulse_define_constant('SITEPULSE_DEFAULT_UPTIME_TIMEOUT', 10);
-sitepulse_define_constant('SITEPULSE_DEFAULT_UPTIME_FREQUENCY', 'hourly');
-sitepulse_define_constant('SITEPULSE_DEFAULT_UPTIME_HTTP_METHOD', 'GET');
-sitepulse_define_constant('SITEPULSE_DEFAULT_UPTIME_LATENCY_THRESHOLD', 0.0);
-sitepulse_define_constant('SITEPULSE_DEFAULT_SPEED_WARNING_MS', 200);
-sitepulse_define_constant('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS', 500);
-sitepulse_define_constant('SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT', 99);
-sitepulse_define_constant('SITEPULSE_DEFAULT_REVISION_LIMIT', 100);
+if (is_array($sitepulse_constant_definitions)) {
+    foreach ($sitepulse_constant_definitions as $name => $value) {
+        if (!is_string($name) || $name === '') {
+            continue;
+        }
 
-sitepulse_define_constant('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS', 'sitepulse_speed_scan_results');
-sitepulse_define_constant('SITEPULSE_TRANSIENT_SPEED_SCAN_LOCK', 'sitepulse_speed_scan_lock');
-sitepulse_define_constant('SITEPULSE_TRANSIENT_AI_INSIGHT', 'sitepulse_ai_insight');
-sitepulse_define_constant('SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX', 'sitepulse_error_alert_');
-sitepulse_define_constant('SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX', '_lock');
-sitepulse_define_constant('SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK', SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX . 'cpu' . SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX);
-sitepulse_define_constant('SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK', SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX . 'php_fatal' . SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX);
-sitepulse_define_constant('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX', 'sitepulse_plugin_dir_size_');
-sitepulse_define_constant('SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT', 'sitepulse_resource_monitor_snapshot');
-sitepulse_define_constant('SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY', 'sitepulse_resource_monitor_history');
-sitepulse_define_constant('SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT', 'sitepulse_resource_monitor_cpu_threshold_percent');
-sitepulse_define_constant('SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT', 'sitepulse_resource_monitor_memory_threshold_percent');
-sitepulse_define_constant('SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT', 'sitepulse_resource_monitor_disk_threshold_percent');
+        sitepulse_define_constant($name, $value);
+    }
+}
 
-sitepulse_define_constant('SITEPULSE_DEFAULT_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT', 85);
-sitepulse_define_constant('SITEPULSE_DEFAULT_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT', 90);
-sitepulse_define_constant('SITEPULSE_DEFAULT_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT', 85);
-
-sitepulse_define_constant('SITEPULSE_NONCE_ACTION_AI_INSIGHT', 'sitepulse_get_ai_insight');
-sitepulse_define_constant('SITEPULSE_NONCE_ACTION_ALERT_TEST', 'sitepulse_alert_test');
-sitepulse_define_constant('SITEPULSE_NONCE_ACTION_CLEANUP', 'sitepulse_cleanup');
-sitepulse_define_constant('SITEPULSE_NONCE_FIELD_CLEANUP', 'sitepulse_cleanup_nonce');
-sitepulse_define_constant('SITEPULSE_ACTION_PLUGIN_IMPACT_REFRESH', 'sitepulse_plugin_impact_refresh');
-sitepulse_define_constant('SITEPULSE_NONCE_ACTION_RESOURCE_MONITOR_EXPORT', 'sitepulse_resource_monitor_export');
+require_once __DIR__ . '/includes/bootstrap/module-manager.php';
+require_once __DIR__ . '/includes/bootstrap/plugin-impact-loader.php';
 
 /**
  * Retrieves the absolute path to the WordPress debug log file.
@@ -420,97 +344,6 @@ require_once SITEPULSE_PATH . 'includes/debug-notices.php';
 require_once SITEPULSE_PATH . 'includes/plugin-impact-tracker.php';
 sitepulse_plugin_impact_tracker_bootstrap();
 
-/**
- * Returns the absolute path to the SitePulse MU loader file.
- *
- * @return array{dir:string,file:string}
- */
-function sitepulse_plugin_impact_get_mu_loader_paths() {
-    $mu_dir = trailingslashit(WP_CONTENT_DIR) . 'mu-plugins';
-
-    return [
-        'dir'  => $mu_dir,
-        'file' => trailingslashit($mu_dir) . 'sitepulse-impact-loader.php',
-    ];
-}
-
-/**
- * Returns the expected MU loader contents for the current installation.
- *
- * @return string
- */
-function sitepulse_plugin_impact_get_loader_contents() {
-    $plugin_basename = sitepulse_get_stored_plugin_basename();
-    $option_name     = SITEPULSE_OPTION_PLUGIN_BASENAME;
-
-    $exported_option_name = var_export($option_name, true);
-    $exported_basename    = var_export($plugin_basename, true);
-
-    $contents = <<<'PHP'
-<?php
-/**
- * Plugin Name: SitePulse Impact Bootstrap
- * Description: Ensures SitePulse plugin impact tracking is hooked before standard plugins load.
- *
- * This file is auto-generated. Any manual edits may be overwritten.
- */
-
-if (!defined('ABSPATH')) {
-    exit;
-}
-
-$sitepulse_plugin_basename_option = %s;
-$sitepulse_plugin_basename = get_option($sitepulse_plugin_basename_option);
-
-if (!is_string($sitepulse_plugin_basename) || $sitepulse_plugin_basename === '') {
-    $sitepulse_plugin_basename = %s;
-}
-
-$sitepulse_plugin_basename = ltrim($sitepulse_plugin_basename, '/\\');
-$sitepulse_plugin_file = WP_PLUGIN_DIR . '/' . $sitepulse_plugin_basename;
-$sitepulse_plugin_directory = dirname($sitepulse_plugin_file);
-
-if ($sitepulse_plugin_directory === '.' || $sitepulse_plugin_directory === '') {
-    $sitepulse_plugin_directory = WP_PLUGIN_DIR;
-}
-
-if (function_exists('trailingslashit')) {
-    $sitepulse_plugin_directory = trailingslashit($sitepulse_plugin_directory);
-} else {
-    $sitepulse_plugin_directory = rtrim($sitepulse_plugin_directory, '/\\') . '/';
-}
-
-$sitepulse_tracker_file = $sitepulse_plugin_directory . 'includes/plugin-impact-tracker.php';
-
-if (file_exists($sitepulse_tracker_file)) {
-    require_once $sitepulse_tracker_file;
-
-    if (function_exists('sitepulse_plugin_impact_tracker_bootstrap')) {
-        sitepulse_plugin_impact_tracker_bootstrap();
-    }
-}
-
-PHP;
-
-    return sprintf($contents, $exported_option_name, $exported_basename);
-}
-
-/**
- * Returns the checksum of the bundled MU loader file.
- *
- * @return string|null
- */
-function sitepulse_plugin_impact_get_loader_signature() {
-    $contents = sitepulse_plugin_impact_get_loader_contents();
-
-    if (!is_string($contents) || $contents === '') {
-        return null;
-    }
-
-    $signature = hash('sha256', $contents);
-
-    return $signature !== false ? $signature : null;
-}
 
 /**
  * Timing safe string comparison with graceful fallback.
@@ -938,200 +771,6 @@ function sitepulse_get_filesystem() {
     }
 
     return $sitepulse_filesystem_instance;
-}
-
-/**
- * Installs or refreshes the MU loader responsible for early instrumentation.
- *
- * @return void
- */
-function sitepulse_plugin_impact_install_mu_loader() {
-    $paths = sitepulse_plugin_impact_get_mu_loader_paths();
-    $target_dir = $paths['dir'];
-    $target_file = $paths['file'];
-
-    sitepulse_update_plugin_basename_option();
-
-    $loader_contents = sitepulse_plugin_impact_get_loader_contents();
-
-    if (!is_string($loader_contents) || $loader_contents === '') {
-        return;
-    }
-
-    $signature = hash('sha256', $loader_contents);
-
-    if ($signature === false) {
-        return;
-    }
-
-    $filesystem = sitepulse_get_filesystem();
-    $stored_signature = get_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
-    $warning_message = sprintf(
-        __(
-            'SitePulse n’a pas pu installer le chargeur MU du suivi d’impact (%s). Vérifiez les permissions du dossier mu-plugins.',
-            'sitepulse'
-        ),
-        $target_dir
-    );
-
-    if ($filesystem instanceof WP_Filesystem_Base) {
-        if (!$filesystem->is_dir($target_dir)) {
-            $filesystem->mkdir($target_dir, defined('FS_CHMOD_DIR') ? FS_CHMOD_DIR : false);
-        }
-
-        if (!$filesystem->is_dir($target_dir) || !$filesystem->is_writable($target_dir)) {
-            sitepulse_log(sprintf('SitePulse impact loader directory not writable via WP_Filesystem (%s).', $target_dir), 'ERROR');
-            delete_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
-            sitepulse_register_cron_warning('plugin_impact', $warning_message);
-
-            return;
-        }
-    } else {
-        if (!is_dir($target_dir) && function_exists('wp_mkdir_p')) {
-            wp_mkdir_p($target_dir);
-        }
-
-        if (!is_dir($target_dir) || !is_writable($target_dir)) {
-            sitepulse_log(sprintf('SitePulse impact loader directory not writable (%s).', $target_dir), 'ERROR');
-            delete_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
-            sitepulse_register_cron_warning('plugin_impact', $warning_message);
-
-            return;
-        }
-    }
-
-    $has_valid_loader = false;
-    $needs_write = true;
-
-    if (is_string($stored_signature) && sitepulse_hash_equals($signature, $stored_signature)) {
-        if ($filesystem instanceof WP_Filesystem_Base) {
-            if ($filesystem->exists($target_file)) {
-                $has_valid_loader = true;
-                $needs_write     = false;
-            }
-        } elseif (file_exists($target_file)) {
-            $has_valid_loader = true;
-            $needs_write     = false;
-        }
-    }
-
-    if ($needs_write) {
-        if ($filesystem instanceof WP_Filesystem_Base && $filesystem->exists($target_file)) {
-            $contents = $filesystem->get_contents($target_file);
-
-            if (is_string($contents)) {
-                $existing_signature = hash('sha256', $contents);
-
-                if ($existing_signature !== false && sitepulse_hash_equals($signature, $existing_signature)) {
-                    $has_valid_loader = true;
-                    $needs_write     = false;
-                }
-            }
-        } elseif (file_exists($target_file)) {
-            $existing_signature = hash_file('sha256', $target_file);
-
-            if ($existing_signature !== false && sitepulse_hash_equals($signature, $existing_signature)) {
-                $has_valid_loader = true;
-                $needs_write     = false;
-            }
-        }
-    }
-
-    if ($needs_write) {
-        $written = false;
-
-        if ($filesystem instanceof WP_Filesystem_Base) {
-            $written = $filesystem->put_contents(
-                $target_file,
-                $loader_contents,
-                defined('FS_CHMOD_FILE') ? FS_CHMOD_FILE : false
-            );
-        }
-
-        if (!$written) {
-            $written = file_put_contents($target_file, $loader_contents) !== false;
-
-            if ($written && function_exists('chmod')) {
-                @chmod($target_file, 0644);
-            }
-        }
-
-        if ($written) {
-            if ($filesystem instanceof WP_Filesystem_Base) {
-                $contents = $filesystem->get_contents($target_file);
-                if (is_string($contents)) {
-                    $existing_signature = hash('sha256', $contents);
-
-                    if ($existing_signature !== false && sitepulse_hash_equals($signature, $existing_signature)) {
-                        $has_valid_loader = true;
-                    }
-                }
-            }
-
-            if (!$has_valid_loader && file_exists($target_file)) {
-                $existing_signature = hash_file('sha256', $target_file);
-                $has_valid_loader   = $existing_signature !== false && sitepulse_hash_equals($signature, $existing_signature);
-            }
-        }
-    }
-
-    if ($has_valid_loader) {
-        update_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE, $signature, false);
-        sitepulse_clear_cron_warning('plugin_impact');
-
-        return;
-    }
-
-    delete_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
-    sitepulse_log(sprintf('SitePulse impact loader installation failed for %s.', $target_file), 'ERROR');
-    sitepulse_register_cron_warning('plugin_impact', $warning_message);
-}
-
-/**
- * Removes the SitePulse MU loader.
- *
- * @return void
- */
-function sitepulse_plugin_impact_remove_mu_loader() {
-    $paths = sitepulse_plugin_impact_get_mu_loader_paths();
-    $target_file = $paths['file'];
-    $filesystem = sitepulse_get_filesystem();
-    $deleted = false;
-
-    if ($filesystem instanceof WP_Filesystem_Base && $filesystem->exists($target_file)) {
-        $deleted = $filesystem->delete($target_file);
-    }
-
-    if (!$deleted && file_exists($target_file)) {
-        $deleted = @unlink($target_file);
-    }
-
-    if (!$deleted && file_exists($target_file)) {
-        sitepulse_log(sprintf('SitePulse impact loader removal failed for %s.', $target_file), 'ERROR');
-    }
-
-    delete_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
-}
-
-/**
- * Ensures the MU loader is present and up to date.
- *
- * @return void
- */
-function sitepulse_plugin_impact_maybe_refresh_mu_loader() {
-    $signature = sitepulse_plugin_impact_get_loader_signature();
-
-    if ($signature === null) {
-        return;
-    }
-
-    $paths = sitepulse_plugin_impact_get_mu_loader_paths();
-    $target_file = $paths['file'];
-    $stored_signature = get_option(SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE);
-
-    if (!file_exists($target_file) || $stored_signature !== $signature) {
-        sitepulse_plugin_impact_install_mu_loader();
-    }
 }
 
 sitepulse_plugin_impact_maybe_refresh_mu_loader();
@@ -1797,42 +1436,47 @@ add_action('enqueue_block_editor_assets', 'sitepulse_localize_dashboard_preview_
  * Loads all active modules selected in the settings.
  */
 function sitepulse_load_modules() {
-    $modules = [
-        'log_analyzer'          => 'Log Analyzer',
-        'resource_monitor'      => 'Resource Monitor',
-        'plugin_impact_scanner' => 'Plugin Impact Scanner',
-        'speed_analyzer'        => 'Speed Analyzer',
-        'database_optimizer'    => 'Database Optimizer',
-        'maintenance_advisor'   => 'Maintenance Advisor',
-        'uptime_tracker'        => 'Uptime Tracker',
-        'ai_insights'           => 'AI-Powered Insights',
-        'custom_dashboards'     => 'Custom Dashboards',
-        'error_alerts'          => 'Error Alerts',
-    ];
-    
+    static $registered = false;
+
+    $definitions_file = SITEPULSE_PATH . 'includes/bootstrap/module-definitions.php';
+    $definitions = file_exists($definitions_file) ? require $definitions_file : [];
+
+    if (!is_array($definitions)) {
+        $definitions = [];
+    }
+
+    $manager = \Sitepulse\Bootstrap\ModuleManager::instance();
+
+    if (!$registered) {
+        $manager->register_from_config($definitions);
+        $registered = true;
+    }
+
+    $labels = [];
+
+    foreach ($definitions as $definition_key => $definition) {
+        $labels[(string) $definition_key] = isset($definition['label']) && is_string($definition['label'])
+            ? $definition['label']
+            : (string) $definition_key;
+    }
+
     $active_modules_option = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
     $active_modules = array_values(array_filter(array_map('strval', (array) $active_modules_option), static function ($module) {
         return $module !== '';
     }));
-    sitepulse_log('Loading active modules: ' . implode(', ', $active_modules));
+
+    if (!empty($active_modules)) {
+        sitepulse_log('Loading active modules: ' . implode(', ', $active_modules));
+    }
 
     foreach ($active_modules as $module_key) {
-        if (!array_key_exists($module_key, $modules)) {
+        if (!isset($labels[$module_key])) {
             sitepulse_log("Module $module_key not found or invalid", 'WARNING');
             continue;
         }
 
-        $module_path = SITEPULSE_PATH . 'modules/' . $module_key . '.php';
-
-        if (!is_readable($module_path)) {
-            sitepulse_log("Module file for $module_key is not readable: $module_path", 'ERROR');
-            continue;
-        }
-
-        $include_result = include_once $module_path;
-
-        if ($include_result === false) {
-            sitepulse_log("Failed to load module $module_key from $module_path", 'ERROR');
+        if (!$manager->boot_module($module_key)) {
+            sitepulse_log("Failed to load module $module_key", 'ERROR');
         }
     }
 }
@@ -1878,30 +1522,33 @@ function sitepulse_is_module_active($module_key) {
 function sitepulse_activate_site() {
     sitepulse_update_plugin_basename_option();
 
-    // **FIX:** Activate the dashboard by default to prevent fatal errors on first load.
-    add_option(SITEPULSE_OPTION_ACTIVE_MODULES, ['custom_dashboards'], '', false);
-    add_option(SITEPULSE_OPTION_DEBUG_MODE, false, '', false);
-    if (!function_exists('sitepulse_is_gemini_api_key_overridden') || !sitepulse_is_gemini_api_key_overridden()) {
-        add_option(SITEPULSE_OPTION_GEMINI_API_KEY, '', '', false);
+    $option_definitions_file = SITEPULSE_PATH . 'includes/bootstrap/default-options.php';
+    $option_definitions = file_exists($option_definitions_file) ? require $option_definitions_file : [];
+
+    if (!is_array($option_definitions)) {
+        $option_definitions = [];
     }
-    add_option(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS, ['cpu', 'php_fatal'], '', false);
-    add_option(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD, 5, '', false);
-    add_option(SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD, 1, '', false);
-    add_option(SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES, 60, '', false);
-    add_option(SITEPULSE_OPTION_ALERT_INTERVAL, 5, '', false);
-    add_option(SITEPULSE_OPTION_ALERT_RECIPIENTS, [], '', false);
-    add_option(SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS, ['email'], '', false);
-    add_option(SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS, [], '', false);
-    add_option(SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES, ['warning', 'critical'], '', false);
-    add_option(SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER, [], '', false);
-    add_option(SITEPULSE_OPTION_CRON_WARNINGS, [], '', false);
-    add_option(SITEPULSE_OPTION_SPEED_WARNING_MS, SITEPULSE_DEFAULT_SPEED_WARNING_MS, '', false);
-    add_option(SITEPULSE_OPTION_SPEED_CRITICAL_MS, SITEPULSE_DEFAULT_SPEED_CRITICAL_MS, '', false);
-    add_option(SITEPULSE_OPTION_UPTIME_WARNING_PERCENT, SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT, '', false);
-    add_option(SITEPULSE_OPTION_REVISION_LIMIT, SITEPULSE_DEFAULT_REVISION_LIMIT, '', false);
-    add_option(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT, SITEPULSE_DEFAULT_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT, '', false);
-    add_option(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT, SITEPULSE_DEFAULT_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT, '', false);
-    add_option(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT, SITEPULSE_DEFAULT_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT, '', false);
+
+    foreach ($option_definitions as $option_name => $definition) {
+        if (!is_string($option_name) || $option_name === '') {
+            continue;
+        }
+
+        $should_add = true;
+
+        if (isset($definition['condition']) && is_callable($definition['condition'])) {
+            $should_add = (bool) call_user_func($definition['condition']);
+        }
+
+        if (!$should_add) {
+            continue;
+        }
+
+        $value = $definition['value'] ?? '';
+        $autoload = isset($definition['autoload']) ? (bool) $definition['autoload'] : false;
+
+        add_option($option_name, $value, '', $autoload ? 'yes' : 'no');
+    }
 
     sitepulse_plugin_impact_install_mu_loader();
 
