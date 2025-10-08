@@ -49,5 +49,33 @@ class Sitepulse_Dashboard_Preview_Summary_Test extends WP_UnitTestCase {
             $summary['html']
         );
     }
+
+    public function test_status_badge_falls_back_to_warning_when_status_missing(): void {
+        $definition = [
+            'title'       => 'Test card',
+            'subtitle'    => 'Subtitle',
+            'description' => 'Description',
+            'chart'       => [
+                'labels'   => ['foo'],
+                'datasets' => [
+                    [
+                        'data' => [1],
+                    ],
+                ],
+            ],
+        ];
+
+        $status_labels = [
+            'status-warn' => [
+                'label' => 'Warning',
+                'sr'    => 'Statut avertissement',
+                'icon'  => '!',
+            ],
+        ];
+
+        $markup = sitepulse_dashboard_preview_render_card_section($definition, $status_labels);
+
+        $this->assertStringContainsString('class="status-badge status-warn"', $markup);
+    }
 }
 
