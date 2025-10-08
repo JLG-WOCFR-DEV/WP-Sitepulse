@@ -7,12 +7,48 @@ if (!defined('HOUR_IN_SECONDS')) {
     define('HOUR_IN_SECONDS', 3600);
 }
 
+if (!defined('DAY_IN_SECONDS')) {
+    define('DAY_IN_SECONDS', 86400);
+}
+
 if (!defined('SITEPULSE_OPTION_UPTIME_LOG')) {
     define('SITEPULSE_OPTION_UPTIME_LOG', 'sitepulse_uptime_log');
 }
 
 if (!defined('SITEPULSE_OPTION_UPTIME_FAILURE_STREAK')) {
     define('SITEPULSE_OPTION_UPTIME_FAILURE_STREAK', 'sitepulse_uptime_failure_streak');
+}
+
+if (!defined('SITEPULSE_OPTION_UPTIME_TIMEOUT')) {
+    define('SITEPULSE_OPTION_UPTIME_TIMEOUT', 'sitepulse_uptime_timeout');
+}
+
+if (!defined('SITEPULSE_OPTION_UPTIME_FREQUENCY')) {
+    define('SITEPULSE_OPTION_UPTIME_FREQUENCY', 'sitepulse_uptime_frequency');
+}
+
+if (!defined('SITEPULSE_OPTION_UPTIME_HTTP_METHOD')) {
+    define('SITEPULSE_OPTION_UPTIME_HTTP_METHOD', 'sitepulse_uptime_http_method');
+}
+
+if (!defined('SITEPULSE_OPTION_UPTIME_HTTP_HEADERS')) {
+    define('SITEPULSE_OPTION_UPTIME_HTTP_HEADERS', 'sitepulse_uptime_http_headers');
+}
+
+if (!defined('SITEPULSE_OPTION_UPTIME_EXPECTED_CODES')) {
+    define('SITEPULSE_OPTION_UPTIME_EXPECTED_CODES', 'sitepulse_uptime_expected_codes');
+}
+
+if (!defined('SITEPULSE_OPTION_UPTIME_LATENCY_THRESHOLD')) {
+    define('SITEPULSE_OPTION_UPTIME_LATENCY_THRESHOLD', 'sitepulse_uptime_latency_threshold');
+}
+
+if (!defined('SITEPULSE_OPTION_UPTIME_KEYWORD')) {
+    define('SITEPULSE_OPTION_UPTIME_KEYWORD', 'sitepulse_uptime_keyword');
+}
+
+if (!defined('SITEPULSE_OPTION_UPTIME_URL')) {
+    define('SITEPULSE_OPTION_UPTIME_URL', 'sitepulse_uptime_url');
 }
 
 $GLOBALS['sitepulse_options'] = [];
@@ -40,10 +76,12 @@ if (!class_exists('WP_Error')) {
 }
 
 function add_action(...$args) {}
+function add_filter(...$args) {}
 function add_submenu_page(...$args) {}
 function sitepulse_get_cron_hook($hook) { return $hook; }
 function wp_next_scheduled(...$args) { return false; }
 function wp_schedule_event(...$args) { return true; }
+function do_action(...$args) {}
 function sitepulse_register_cron_warning(...$args) {}
 function sitepulse_clear_cron_warning(...$args) {}
 function current_user_can(...$args) { return true; }
@@ -52,7 +90,12 @@ function __($text, $domain = null) { return $text; }
 function esc_html__($text, $domain = null) { return $text; }
 function esc_html($text) { return $text; }
 function esc_attr($text) { return $text; }
+function sanitize_key($key) { return strtolower(preg_replace('/[^a-z0-9_\-]/', '', (string) $key)); }
+function sanitize_text_field($text) { return is_string($text) ? trim($text) : $text; }
+function wp_parse_args($args, $defaults = []) { return array_merge($defaults, (array) $args); }
+function wp_http_validate_url($url) { return filter_var($url, FILTER_VALIDATE_URL) ? $url : false; }
 function date_i18n($format, $timestamp) { return date($format, $timestamp); }
+function wp_date($format, $timestamp = null) { return date($format, $timestamp ?? time()); }
 function human_time_diff($from, $to) { return ($to - $from) . ' seconds'; }
 function get_option($name, $default = false) {
     return $GLOBALS['sitepulse_options'][$name] ?? $default;
@@ -81,12 +124,20 @@ function wp_remote_get($url, $args = []) {
 
     return array_shift($GLOBALS['sitepulse_remote_queue']);
 }
+function wp_remote_request($url, $args = []) { return wp_remote_get($url, $args); }
 function wp_remote_retrieve_response_code($response) {
     if (is_array($response) && isset($response['response']['code'])) {
         return (int) $response['response']['code'];
     }
 
     return 0;
+}
+function wp_remote_retrieve_body($response) {
+    if (is_array($response) && isset($response['body'])) {
+        return (string) $response['body'];
+    }
+
+    return '';
 }
 function is_wp_error($thing) {
     return $thing instanceof WP_Error;
@@ -153,7 +204,72 @@ $log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
 sitepulse_assert(end($log)['status'] === true, 'Successful check should be marked as up.');
 sitepulse_assert(get_option(SITEPULSE_OPTION_UPTIME_FAILURE_STREAK, 0) === 0, 'Failure streak should reset after success.');
 
-// Scenario 4: persistent outage with unknown sample keeps original incident start.
+// Scenario 4: queue instrumentation records pruning statistics and backlog metrics.
+sitepulse_reset_state();
+
+$GLOBALS['sitepulse_filter_overrides']['sitepulse_uptime_remote_queue_max_size'] = function () {
+    return 2;
+};
+
+$now = $GLOBALS['sitepulse_fake_time'];
+
+$raw_queue = [
+    [
+        'agent'       => 'agent-a',
+        'payload'     => ['url' => 'https://example.com'],
+        'scheduled_at'=> $now - 400,
+        'created_at'  => $now - 500,
+    ],
+    [
+        'agent'       => 'agent-a',
+        'payload'     => ['url' => 'https://example.com'],
+        'scheduled_at'=> $now - 400,
+        'created_at'  => $now - 100,
+    ],
+    [
+        'agent'       => 'agent-b',
+        'payload'     => ['url' => 'https://example.net'],
+        'scheduled_at'=> $now - (DAY_IN_SECONDS + 100),
+        'created_at'  => $now - (DAY_IN_SECONDS + 50),
+    ],
+    [
+        'agent'       => 'agent-c',
+        'payload'     => ['url' => 'https://example.org'],
+        'scheduled_at'=> $now + 600,
+        'created_at'  => $now - 50,
+    ],
+    [
+        'agent'       => 'agent-d',
+        'payload'     => ['url' => 'https://example.net/ping'],
+        'scheduled_at'=> $now - 10,
+        'created_at'  => $now - 20,
+    ],
+    'invalid-item',
+];
+
+$normalized = sitepulse_uptime_normalize_remote_queue($raw_queue, $now);
+
+sitepulse_assert(count($normalized) === 2, 'Normalized queue should honour remote queue max size.');
+
+$metrics_payload = get_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE_METRICS, []);
+sitepulse_assert(is_array($metrics_payload), 'Metrics payload must be stored as an array.');
+sitepulse_assert(isset($metrics_payload['metrics']), 'Metrics payload should include collected metrics.');
+
+$metrics = $metrics_payload['metrics'];
+
+sitepulse_assert($metrics['requested'] === 6, 'Expected six items to be processed for instrumentation.');
+sitepulse_assert($metrics['retained'] === 2, 'Two entries should remain after normalization.');
+sitepulse_assert($metrics['dropped_duplicates'] === 1, 'Duplicate entries should be counted.');
+sitepulse_assert($metrics['dropped_expired'] === 1, 'Expired entries should be pruned.');
+sitepulse_assert($metrics['dropped_invalid'] === 1, 'Invalid entries should be reported.');
+sitepulse_assert($metrics['dropped_overflow'] === 1, 'Overflow entries should be tracked when the limit is reached.');
+sitepulse_assert($metrics['delayed_jobs'] === 2, 'Both retained entries are already due and must be counted as delayed.');
+sitepulse_assert($metrics['max_wait_seconds'] === 400, 'Max wait should reflect the oldest scheduled timestamp.');
+sitepulse_assert($metrics['avg_wait_seconds'] === 205, 'Average wait should be rounded to the nearest second.');
+sitepulse_assert($metrics['next_scheduled_at'] === $now - 400, 'Next scheduled timestamp should match the oldest entry.');
+sitepulse_assert($metrics['oldest_created_at'] === $now - 500, 'Oldest created timestamp should track the earliest queue entry.');
+
+// Scenario 5: persistent outage with unknown sample keeps original incident start.
 sitepulse_reset_state();
 $base_time = 1_700_000_000;
 

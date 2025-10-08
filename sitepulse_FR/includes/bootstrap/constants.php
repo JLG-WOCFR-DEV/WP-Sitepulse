@@ -22,6 +22,7 @@ return [
     'SITEPULSE_OPTION_UPTIME_EXPECTED_CODES' => 'sitepulse_uptime_expected_codes',
     'SITEPULSE_OPTION_UPTIME_LATENCY_THRESHOLD' => 'sitepulse_uptime_latency_threshold',
     'SITEPULSE_OPTION_UPTIME_KEYWORD' => 'sitepulse_uptime_keyword',
+    'SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE_METRICS' => 'sitepulse_uptime_remote_queue_metrics',
     'SITEPULSE_OPTION_LAST_LOAD_TIME' => 'sitepulse_last_load_time',
     'SITEPULSE_OPTION_SPEED_SCAN_HISTORY' => 'sitepulse_speed_scan_history',
     'SITEPULSE_OPTION_SPEED_AUTOMATION_CONFIG' => 'sitepulse_speed_automation_config',
