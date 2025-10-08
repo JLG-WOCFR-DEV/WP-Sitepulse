@@ -281,6 +281,82 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $this->assertSame($expected_interval, $normalized[2]['timestamp'] - $normalized[1]['timestamp']);
     }
 
+    public function test_normalize_log_handles_string_status_values() {
+        $now = current_time('timestamp');
+        $error = new WP_Error('timeout', 'Temps de réponse dépassé');
+        $error->add('timeout', 'Nouvelle tentative requise');
+
+        $log = [
+            ['timestamp' => $now - 90, 'status' => 'DOWN'],
+            ['timestamp' => $now - 60, 'status' => 'Unknown', 'error' => $error],
+            ['timestamp' => $now - 30, 'status' => 'UP'],
+            ['timestamp' => $now, 'status' => 'maintenance', 'agent' => 'paris'],
+        ];
+
+        $normalized = sitepulse_normalize_uptime_log($log);
+
+        $this->assertCount(4, $normalized);
+
+        $this->assertFalse($normalized[0]['status']);
+        $this->assertArrayHasKey('incident_start', $normalized[0]);
+        $this->assertSame($normalized[0]['timestamp'], $normalized[0]['incident_start']);
+        $this->assertSame('DOWN', $normalized[0]['raw_status']);
+
+        $this->assertSame('unknown', $normalized[1]['status']);
+        $this->assertArrayNotHasKey('incident_start', $normalized[1]);
+        $this->assertArrayHasKey('error', $normalized[1]);
+        $this->assertStringContainsString('Temps de réponse dépassé', $normalized[1]['error']);
+        $this->assertStringContainsString('Nouvelle tentative requise', $normalized[1]['error']);
+        $this->assertSame('Unknown', $normalized[1]['raw_status']);
+
+        $this->assertTrue($normalized[2]['status']);
+        $this->assertArrayNotHasKey('incident_start', $normalized[2]);
+        $this->assertSame('UP', $normalized[2]['raw_status']);
+
+        $this->assertSame('maintenance', $normalized[3]['status']);
+        $this->assertSame('paris', $normalized[3]['agent']);
+        $this->assertArrayNotHasKey('raw_status', $normalized[3]);
+    }
+
+    public function test_normalize_log_handles_numeric_status_values() {
+        $now = current_time('timestamp');
+
+        $log = [
+            ['timestamp' => $now - 60, 'status' => 0],
+            ['timestamp' => $now - 30, 'status' => 1],
+            ['timestamp' => $now, 'status' => -1],
+        ];
+
+        $normalized = sitepulse_normalize_uptime_log($log);
+
+        $this->assertCount(3, $normalized);
+
+        $this->assertFalse($normalized[0]['status']);
+        $this->assertSame(0, $normalized[0]['raw_status']);
+        $this->assertSame($normalized[0]['timestamp'], $normalized[0]['incident_start']);
+
+        $this->assertTrue($normalized[1]['status']);
+        $this->assertSame(1, $normalized[1]['raw_status']);
+        $this->assertArrayNotHasKey('incident_start', $normalized[1]);
+
+        $this->assertFalse($normalized[2]['status']);
+        $this->assertSame(-1, $normalized[2]['raw_status']);
+        $this->assertSame($normalized[0]['incident_start'], $normalized[2]['incident_start']);
+    }
+
+    public function test_normalize_log_falls_back_to_unknown_for_unmapped_statuses() {
+        $log = [
+            ['status' => ['unexpected' => 'structure']],
+        ];
+
+        $normalized = sitepulse_normalize_uptime_log($log);
+
+        $this->assertCount(1, $normalized);
+        $this->assertSame('unknown', $normalized[0]['status']);
+        $this->assertArrayNotHasKey('incident_start', $normalized[0]);
+        $this->assertArrayNotHasKey('raw_status', $normalized[0]);
+    }
+
     public function test_uptime_tracker_page_includes_extended_metrics() {
         $now = time();
         $archive = [];
@@ -525,6 +601,44 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         });
 
         $this->assertNotEmpty($active_windows);
+    }
+
+    public function test_rest_permission_respects_wp_error_from_filter() {
+        $error = new WP_Error('custom_denied', 'Accès refusé');
+
+        add_filter('sitepulse_uptime_rest_schedule_permission', function () use ($error) {
+            return $error;
+        });
+
+        $request = new WP_REST_Request('POST', '/sitepulse/v1/uptime/schedule');
+        $result = sitepulse_uptime_rest_schedule_permission_check($request);
+
+        $this->assertInstanceOf(WP_Error::class, $result);
+        $this->assertSame('custom_denied', $result->get_error_code());
+
+        remove_all_filters('sitepulse_uptime_rest_schedule_permission');
+    }
+
+    public function test_rest_permission_returns_error_when_unauthorised() {
+        $request = new WP_REST_Request('POST', '/sitepulse/v1/uptime/schedule');
+        $result = sitepulse_uptime_rest_schedule_permission_check($request);
+
+        $this->assertInstanceOf(WP_Error::class, $result);
+        $this->assertSame('sitepulse_uptime_forbidden', $result->get_error_code());
+        $this->assertSame(rest_authorization_required_code(), $result->get_error_data()['status']);
+    }
+
+    public function test_rest_permission_accepts_structured_filter_response() {
+        add_filter('sitepulse_uptime_rest_schedule_permission', function () {
+            return ['allowed' => true];
+        });
+
+        $request = new WP_REST_Request('POST', '/sitepulse/v1/uptime/schedule');
+        $result = sitepulse_uptime_rest_schedule_permission_check($request);
+
+        $this->assertTrue($result);
+
+        remove_all_filters('sitepulse_uptime_rest_schedule_permission');
     }
 
     public function test_rest_endpoint_allows_remote_workers_to_queue_checks() {

@@ -207,20 +207,57 @@ function sitepulse_uptime_rest_schedule_permission_check($request) {
      * signed tokens, etc.) to authorise remote workers without granting the full
      * SitePulse capability.
      *
-     * @param bool             $allowed Whether the request is authorised.
-     * @param WP_REST_Request  $request REST request instance.
+     * @param bool|WP_Error|WP_HTTP_Response|WP_REST_Response|array $allowed Whether the request is authorised.
+     * @param WP_REST_Request                                       $request REST request instance.
      */
     $permission = apply_filters('sitepulse_uptime_rest_schedule_permission', false, $request);
+
+    if ($permission instanceof WP_REST_Response || $permission instanceof WP_HTTP_Response) {
+        return $permission;
+    }
 
     if (is_wp_error($permission)) {
         return $permission;
     }
 
-    if (true === $permission || false === $permission) {
-        return $permission;
+    if (is_array($permission) && array_key_exists('allowed', $permission)) {
+        $allowed = $permission['allowed'];
+        $error   = isset($permission['error']) && is_wp_error($permission['error']) ? $permission['error'] : null;
+
+        if ($error instanceof WP_Error) {
+            return $error;
+        }
+
+        $permission = (bool) $allowed;
     }
 
-    return (bool) $permission;
+    if (true === $permission) {
+        return true;
+    }
+
+    if (false === $permission) {
+        return new WP_Error(
+            'sitepulse_uptime_forbidden',
+            __('Vous n’avez pas l’autorisation de planifier des vérifications d’uptime via l’API REST.', 'sitepulse'),
+            [
+                'status' => rest_authorization_required_code(),
+            ]
+        );
+    }
+
+    if (null === $permission) {
+        $permission = false;
+    }
+
+    return $permission
+        ? true
+        : new WP_Error(
+            'sitepulse_uptime_forbidden',
+            __('Vous n’avez pas l’autorisation de planifier des vérifications d’uptime via l’API REST.', 'sitepulse'),
+            [
+                'status' => rest_authorization_required_code(),
+            ]
+        );
 }
 
 /**
@@ -1207,6 +1244,82 @@ function sitepulse_uptime_tracker_ensure_cron() {
         sitepulse_clear_cron_warning('uptime_tracker');
     }
 }
+/**
+ * Normalizes a raw uptime status value into canonical form.
+ *
+ * @param mixed $status Raw status field from the log entry.
+ * @return bool|string|null Returns true/false for up/down, 'maintenance', 'unknown' or null when indeterminate.
+ */
+function sitepulse_uptime_normalize_status_value($status) {
+    if (is_bool($status)) {
+        return $status;
+    }
+
+    if (is_int($status) || is_float($status)) {
+        return (int) $status !== 0;
+    }
+
+    if (is_string($status)) {
+        $normalized = strtolower(trim($status));
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        if (in_array($normalized, ['1', 'true', 'yes', 'on', 'ok', 'up', 'online', 'success'], true)) {
+            return true;
+        }
+
+        if (in_array($normalized, ['0', 'false', 'no', 'off', 'down', 'offline', 'failed', 'failure', 'error'], true)) {
+            return false;
+        }
+
+        if (in_array($normalized, ['maintenance', 'paused', 'snoozed'], true)) {
+            return 'maintenance';
+        }
+
+        if (in_array($normalized, ['unknown', 'n/a', 'na', 'indeterminate'], true)) {
+            return 'unknown';
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Converts an arbitrary error payload into a string message.
+ *
+ * @param mixed $error Raw error payload.
+ * @return string|null
+ */
+function sitepulse_uptime_normalize_error_message($error) {
+    if (null === $error || '' === $error) {
+        return null;
+    }
+
+    if (is_wp_error($error)) {
+        $messages = $error->get_error_messages();
+
+        if (empty($messages)) {
+            $messages = [$error->get_error_code()];
+        }
+
+        return implode('; ', array_filter(array_map('strval', $messages)));
+    }
+
+    if (is_scalar($error)) {
+        return (string) $error;
+    }
+
+    $encoded_error = wp_json_encode($error);
+
+    if (false !== $encoded_error) {
+        return $encoded_error;
+    }
+
+    return null;
+}
+
 function sitepulse_normalize_uptime_log($log) {
     if (!is_array($log) || empty($log)) {
         return [];
@@ -1250,6 +1363,7 @@ function sitepulse_normalize_uptime_log($log) {
         $entry = $item['entry'];
         $timestamp = $item['timestamp'];
         $status = null;
+        $raw_status_value = null;
         $incident_start = null;
         $error_message = null;
         $agent = 'default';
@@ -1257,8 +1371,10 @@ function sitepulse_normalize_uptime_log($log) {
         if (is_array($entry)) {
             if (array_key_exists('status', $entry)) {
                 $status = $entry['status'];
+                $raw_status_value = $entry['status'];
             } else {
                 $status = !empty($entry);
+                $raw_status_value = $status;
             }
 
             if (isset($entry['incident_start']) && is_numeric($entry['incident_start'])) {
@@ -1266,25 +1382,24 @@ function sitepulse_normalize_uptime_log($log) {
             }
 
             if (array_key_exists('error', $entry)) {
-                $raw_error = $entry['error'];
-
-                if (is_scalar($raw_error)) {
-                    $error_message = (string) $raw_error;
-                } elseif (null !== $raw_error) {
-                    $encoded_error = wp_json_encode($raw_error);
-
-                    if (false !== $encoded_error) {
-                        $error_message = $encoded_error;
-                    }
-                }
+                $error_message = sitepulse_uptime_normalize_error_message($entry['error']);
             }
 
             if (isset($entry['agent']) && is_string($entry['agent'])) {
                 $agent = sitepulse_uptime_normalize_agent_id($entry['agent']);
             }
         } else {
+            $raw_status_value = $entry;
             $status = (bool) (is_int($entry) ? $entry : !empty($entry));
         }
+
+        $normalized_status = sitepulse_uptime_normalize_status_value($status);
+
+        if (null === $normalized_status) {
+            $normalized_status = 'unknown';
+        }
+
+        $status = $normalized_status;
 
         if ('maintenance' === $status) {
             $incident_start = null;
@@ -1321,9 +1436,20 @@ function sitepulse_normalize_uptime_log($log) {
             'incident_start' => $incident_start,
             'error'          => $error_message,
             'agent'          => $agent,
+            'raw_status'     => $raw_status_value,
         ], function ($value) {
             return null !== $value;
         });
+
+        if (array_key_exists('raw_status', $normalized_entry)) {
+            if ($normalized_entry['raw_status'] === $status) {
+                unset($normalized_entry['raw_status']);
+            } elseif (is_bool($status) && is_bool($normalized_entry['raw_status'])) {
+                if ($normalized_entry['raw_status'] === $status) {
+                    unset($normalized_entry['raw_status']);
+                }
+            }
+        }
 
         $normalized[] = $normalized_entry;
     }
