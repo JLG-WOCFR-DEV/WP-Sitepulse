@@ -377,7 +377,11 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->assertIsString($stored_secret);
         $this->assertSame(64, strlen($stored_secret));
 
-        $filter = static function ($secret) {
+        $passed_secret = null;
+
+        $filter = static function ( $secret ) use ( &$passed_secret ) {
+            $passed_secret = $secret;
+
             return 'filtered-secret-value';
         };
 
@@ -387,6 +391,7 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
 
         remove_filter('sitepulse_ai_job_secret', $filter);
 
+        $this->assertSame($stored_secret, $passed_secret);
         $this->assertSame('filtered-secret-value', $filtered_secret);
         $this->assertSame($stored_secret, sitepulse_ai_get_job_secret());
     }
