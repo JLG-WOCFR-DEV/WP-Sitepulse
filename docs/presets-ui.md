@@ -1,6 +1,6 @@
 # Presets graphiques et bibliothèques UI
 
-Cette fiche répertorie différentes bibliothèques de composants, kits CSS et moteurs d'animation offrant des approches comparables à Headless UI, Shadcn UI, Radix UI, Bootstrap, Semantic UI et Anime.js. Chaque proposition comprend les points forts, l'écosystème ciblé et des idées d'utilisation pour SitePulse ou d'autres projets WordPress.
+Cette fiche répertorie différentes bibliothèques de composants, kits CSS et moteurs d'animation offrant des approches comparables à Headless UI, Shadcn UI, Radix UI, Bootstrap, Semantic UI et Anime.js. Chaque proposition comprend les points forts, l'écosystème ciblé et des idées d'utilisation pour SitePulse ou d'autres projets WordPress. Vous retrouvez désormais ces informations directement dans l'interface d'administration via la page **SitePulse → Presets UI** qui offre un rendu structuré et filtrable.
 
 ## Bibliothèques React/JS orientées accessibilité
 
