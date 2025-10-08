@@ -198,7 +198,17 @@ function sitepulse_uptime_rest_schedule_permission_check($request) {
      * @param bool             $allowed Whether the request is authorised.
      * @param WP_REST_Request  $request REST request instance.
      */
-    return (bool) apply_filters('sitepulse_uptime_rest_schedule_permission', false, $request);
+    $permission = apply_filters('sitepulse_uptime_rest_schedule_permission', false, $request);
+
+    if (is_wp_error($permission)) {
+        return $permission;
+    }
+
+    if (true === $permission || false === $permission) {
+        return $permission;
+    }
+
+    return (bool) $permission;
 }
 
 /**
@@ -867,7 +877,6 @@ function sitepulse_normalize_uptime_log($log) {
         return [];
     }
 
-    $normalized = [];
     $count = count($log);
     $now = (int) current_time('timestamp');
 
@@ -876,19 +885,41 @@ function sitepulse_normalize_uptime_log($log) {
 
     $approximate_start = $now - max(0, ($count - 1) * $interval);
 
+    $prepared = [];
+
     foreach (array_values($log) as $index => $entry) {
         $timestamp = $approximate_start + ($index * $interval);
+
+        if (is_array($entry) && isset($entry['timestamp']) && is_numeric($entry['timestamp'])) {
+            $timestamp = (int) $entry['timestamp'];
+        }
+
+        $prepared[] = [
+            'entry'     => $entry,
+            'timestamp' => $timestamp,
+            'order'     => $index,
+        ];
+    }
+
+    usort($prepared, function ($a, $b) {
+        if ($a['timestamp'] === $b['timestamp']) {
+            return $a['order'] <=> $b['order'];
+        }
+
+        return $a['timestamp'] <=> $b['timestamp'];
+    });
+
+    $normalized = [];
+
+    foreach ($prepared as $item) {
+        $entry = $item['entry'];
+        $timestamp = $item['timestamp'];
         $status = null;
         $incident_start = null;
         $error_message = null;
-
         $agent = 'default';
 
         if (is_array($entry)) {
-            if (isset($entry['timestamp']) && is_numeric($entry['timestamp'])) {
-                $timestamp = (int) $entry['timestamp'];
-            }
-
             if (array_key_exists('status', $entry)) {
                 $status = $entry['status'];
             } else {
@@ -961,10 +992,6 @@ function sitepulse_normalize_uptime_log($log) {
 
         $normalized[] = $normalized_entry;
     }
-
-    usort($normalized, function ($a, $b) {
-        return $a['timestamp'] <=> $b['timestamp'];
-    });
 
     return array_values($normalized);
 }
