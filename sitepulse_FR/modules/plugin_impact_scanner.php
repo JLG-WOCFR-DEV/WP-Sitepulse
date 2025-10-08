@@ -305,10 +305,16 @@ function sitepulse_plugin_impact_scanner_page() {
         if ($plugin_dir === '.' || $plugin_dir === '') {
             $plugin_path = WP_PLUGIN_DIR . '/' . $plugin_file;
             $disk_space = is_file($plugin_path) && is_readable($plugin_path) ? filesize($plugin_path) : 0;
+            $disk_space_files = null;
+            $disk_space_generated_at = null;
         } else {
             $dir_size = sitepulse_get_dir_size_with_cache(WP_PLUGIN_DIR . '/' . $plugin_dir);
             $disk_space = isset($dir_size['size']) ? (int) $dir_size['size'] : 0;
             $disk_space_status = isset($dir_size['status']) ? $dir_size['status'] : 'complete';
+            $disk_space_files = isset($dir_size['files']) && is_numeric($dir_size['files'])
+                ? max(0, (int) $dir_size['files'])
+                : null;
+            $disk_space_generated_at = isset($dir_size['generated_at']) ? (int) $dir_size['generated_at'] : null;
         }
 
         $is_network_active = function_exists('is_plugin_active_for_network')
@@ -325,6 +331,8 @@ function sitepulse_plugin_impact_scanner_page() {
             'last_recorded'     => null,
             'disk_space'        => $disk_space,
             'disk_space_status' => $disk_space_status,
+            'disk_space_files'  => $disk_space_files,
+            'disk_space_recorded' => $disk_space_generated_at,
             'is_active'         => ($is_network_active || $is_site_active),
             'is_network_active' => $is_network_active,
             'plugin_uri'        => isset($plugin_data['PluginURI']) ? $plugin_data['PluginURI'] : '',
@@ -550,6 +558,8 @@ function sitepulse_plugin_impact_scanner_page() {
                         $samples_value = number_format((float) max(0, (int) $data['samples']), 0, '.', '');
                         $disk_space_value = number_format((float) $data['disk_space'], 0, '.', '');
                         $last_recorded_value = $data['last_recorded'] ? (int) $data['last_recorded'] : '';
+                        $disk_space_files = isset($data['disk_space_files']) ? $data['disk_space_files'] : null;
+                        $disk_space_recorded = isset($data['disk_space_recorded']) ? (int) $data['disk_space_recorded'] : 0;
                         $plugin_slug = $data['slug'];
                         $plugin_uri = $data['plugin_uri'];
                         $is_active = !empty($data['is_active']);
@@ -599,6 +609,8 @@ function sitepulse_plugin_impact_scanner_page() {
                             data-weight="<?php echo esc_attr($weight_value); ?>"
                             data-samples="<?php echo esc_attr($samples_value); ?>"
                             data-disk-space="<?php echo esc_attr($disk_space_value); ?>"
+                            data-disk-files="<?php echo esc_attr($disk_space_files !== null ? (int) $disk_space_files : ''); ?>"
+                            data-disk-recorded="<?php echo esc_attr($disk_space_recorded ? $disk_space_recorded : ''); ?>"
                             data-last-recorded="<?php echo esc_attr($last_recorded_value); ?>"
                             data-is-measured="<?php echo $data['impact'] !== null ? '1' : '0'; ?>"
                         >
@@ -609,7 +621,28 @@ function sitepulse_plugin_impact_scanner_page() {
                                 if (isset($data['disk_space_status']) && $data['disk_space_status'] === 'pending') {
                                     echo esc_html__('en cours…', 'sitepulse');
                                 } else {
-                                    echo wp_kses_post(size_format((float) $data['disk_space'], 2));
+                                    $disk_space_lines = [wp_kses_post(size_format((float) $data['disk_space'], 2))];
+
+                                    if ($disk_space_files !== null) {
+                                        $disk_space_lines[] = esc_html(
+                                            sprintf(
+                                                _n('%s fichier', '%s fichiers', $disk_space_files, 'sitepulse'),
+                                                number_format_i18n($disk_space_files)
+                                            )
+                                        );
+                                    }
+
+                                    if ($disk_space_recorded > 0) {
+                                        $disk_space_lines[] = esc_html(
+                                            sprintf(
+                                                /* translators: %s: human time difference */
+                                                __('Mesuré il y a %s', 'sitepulse'),
+                                                human_time_diff($disk_space_recorded, $current_time)
+                                            )
+                                        );
+                                    }
+
+                                    echo implode('<br />', $disk_space_lines); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
                                 }
                                 ?>
                             </td>
@@ -752,8 +785,12 @@ function sitepulse_get_dir_size_with_cache($dir) {
         return [
             'status' => 'complete',
             'size'   => 0,
+            'files'  => null,
+            'generated_at' => null,
         ];
     }
+
+    $timestamp = sitepulse_plugin_impact_get_timestamp();
 
     if (!defined('SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX')) {
         $size_info = sitepulse_get_dir_size_recursive($dir);
@@ -761,6 +798,8 @@ function sitepulse_get_dir_size_with_cache($dir) {
         return [
             'status' => 'complete',
             'size'   => isset($size_info['size']) ? (int) $size_info['size'] : 0,
+            'files'  => isset($size_info['files']) ? max(0, (int) $size_info['files']) : null,
+            'generated_at' => $timestamp,
         ];
     }
 
@@ -768,21 +807,37 @@ function sitepulse_get_dir_size_with_cache($dir) {
     $cached_size = get_transient($transient_key);
 
     if ($cached_size !== false) {
+        if (is_array($cached_size)) {
+            $status = isset($cached_size['status']) ? $cached_size['status'] : 'complete';
+
+            if ($status === 'pending') {
+                sitepulse_plugin_dir_scan_enqueue($dir);
+
+                return [
+                    'status' => 'pending',
+                    'size'   => null,
+                    'files'  => null,
+                    'generated_at' => isset($cached_size['generated_at']) ? (int) $cached_size['generated_at'] : null,
+                ];
+            }
+
+            return [
+                'status' => 'complete',
+                'size'   => isset($cached_size['size']) ? (int) $cached_size['size'] : 0,
+                'files'  => isset($cached_size['files']) ? max(0, (int) $cached_size['files']) : null,
+                'generated_at' => isset($cached_size['generated_at']) ? (int) $cached_size['generated_at'] : null,
+            ];
+        }
+
         if (is_numeric($cached_size)) {
             return [
                 'status' => 'complete',
                 'size'   => (int) $cached_size,
+                'files'  => null,
+                'generated_at' => null,
             ];
         }
 
-        if (is_array($cached_size) && isset($cached_size['status']) && $cached_size['status'] === 'pending') {
-            sitepulse_plugin_dir_scan_enqueue($dir);
-
-            return [
-                'status' => 'pending',
-                'size'   => null,
-            ];
-        }
     }
 
     $threshold = sitepulse_get_plugin_dir_size_threshold($dir);
@@ -802,31 +857,33 @@ function sitepulse_get_dir_size_with_cache($dir) {
     }
 
     if (isset($size_info['exceeded']) && $size_info['exceeded']) {
-        set_transient(
-            $transient_key,
-            [
-                'status' => 'pending',
-                'size'   => null,
-            ],
-            $expiration
-        );
+        $payload = [
+            'status' => 'pending',
+            'size'   => null,
+            'files'  => null,
+            'generated_at' => $timestamp,
+        ];
+
+        set_transient($transient_key, $payload, $expiration);
 
         sitepulse_plugin_dir_scan_enqueue($dir);
 
-        return [
-            'status' => 'pending',
-            'size'   => null,
-        ];
+        return $payload;
     }
 
     $size = isset($size_info['size']) ? (int) $size_info['size'] : 0;
+    $files = isset($size_info['files']) ? max(0, (int) $size_info['files']) : null;
 
-    set_transient($transient_key, $size, $expiration);
-
-    return [
+    $payload = [
         'status' => 'complete',
         'size'   => $size,
+        'files'  => $files,
+        'generated_at' => $timestamp,
     ];
+
+    set_transient($transient_key, $payload, $expiration);
+
+    return $payload;
 }
 
 function sitepulse_clear_dir_size_cache($dir) {
@@ -1066,6 +1123,7 @@ function sitepulse_process_plugin_dir_scan_queue() {
     );
 
     $size = isset($size_info['size']) ? (int) $size_info['size'] : 0;
+    $files = isset($size_info['files']) ? max(0, (int) $size_info['files']) : null;
 
     $expiration = (int) apply_filters('sitepulse_plugin_dir_size_cache_ttl', 6 * HOUR_IN_SECONDS, $dir);
 
@@ -1073,11 +1131,26 @@ function sitepulse_process_plugin_dir_scan_queue() {
         $expiration = 6 * HOUR_IN_SECONDS;
     }
 
+    $payload = [
+        'status' => 'complete',
+        'size'   => $size,
+        'files'  => $files,
+        'generated_at' => sitepulse_plugin_impact_get_timestamp(),
+    ];
+
     $transient_key = SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX . md5($dir);
 
-    set_transient($transient_key, $size, $expiration);
+    set_transient($transient_key, $payload, $expiration);
 
     if (!empty($queue)) {
         sitepulse_schedule_plugin_dir_scan();
     }
+}
+
+function sitepulse_plugin_impact_get_timestamp() {
+    if (function_exists('current_time')) {
+        return (int) current_time('timestamp');
+    }
+
+    return time();
 }
