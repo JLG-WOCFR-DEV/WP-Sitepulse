@@ -38,10 +38,10 @@ Ce document répertorie les fonctions de SitePulse qui gagneraient à être alig
 
 ## Module « Uptime Tracker »
 
-- **Constat :** le module gère désormais plusieurs agents (`SITEPULSE_OPTION_UPTIME_AGENTS`), une file d’attente de jobs distants et une rétention configurable entre 30 et 365 jours, mais il manque encore un reporting SLA consolidé et des garde-fous sur la taille de la queue distante pour s’aligner sur les consoles pro.【F:sitepulse_FR/modules/uptime_tracker.php†L277-L346】【F:sitepulse_FR/modules/uptime_tracker.php†L696-L820】【F:sitepulse_FR/modules/uptime_tracker.php†L1004-L1028】
+- **Constat :** le module gère désormais plusieurs agents (`SITEPULSE_OPTION_UPTIME_AGENTS`), normalise la file d’attente distante (TTL filtrable, taille maximum configurable, déduplication) et conserve une rétention configurable entre 30 et 365 jours. En revanche, il manque encore un reporting SLA consolidé, des métriques d’attente exposées à l’UI et une gouvernance avancée des agents pour rejoindre les consoles pro.【F:sitepulse_FR/modules/uptime_tracker.php†L277-L346】【F:sitepulse_FR/modules/uptime_tracker.php†L706-L836】【F:sitepulse_FR/modules/uptime_tracker.php†L1004-L1028】
 - **Pistes pro :**
   - Générer des rapports SLA mensuels (CSV/PDF) agrégeant tous les agents et intégrant les fenêtres de maintenance (`sitepulse_uptime_get_agents()` + annotations) pour rivaliser avec Pingdom/Better Uptime.
-  - Introduire une politique de rétention spécifique à la file distante (taille max, purge automatique des jobs échoués) et des métriques de supervision (compteur de jobs en attente) pour prévenir les dérives en cas de Cron inactif.
+  - Instrumenter la file distante (compteur, temps d’attente moyen, alertes si la limite est atteinte) et exposer ces métriques dans l’interface ou via l’API pour prévenir les dérives en cas de Cron inactif.
   - Ajouter des canaux d’alerte temps réel (webhooks dédiés, SMS) et une page de statut publique afin de se rapprocher des offres premium.
 
 ## Module « Resource Monitor »

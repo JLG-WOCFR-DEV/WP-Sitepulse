@@ -52,7 +52,7 @@ Toggle modules in the admin panel to keep it lightweight. Includes debug mode an
 | --- | --- | --- |
 | **Speed Analyzer** | Mesurer la performance front-end | Scans manuels et planifiés, agrégation mobile/desktop, recommandations contextualisées, budgets de vitesse personnalisables |
 | **Database Optimizer** | Nettoyer et optimiser la base | Purge des révisions/transients, historique des opérations, seuils ajustables et notifications de nettoyage |
-| **Uptime Tracker** | Surveiller la disponibilité | Agents multiples avec file d’attente distants, rétention 30-365 jours, export CSV, intégration Site Health, fenêtres de maintenance ciblées par agent |
+| **Uptime Tracker** | Surveiller la disponibilité | Agents multiples avec file d’attente distante normalisée (TTL/limite filtrables), rétention 30-365 jours, export CSV, intégration Site Health, fenêtres de maintenance ciblées par agent |
 | **Resource Monitor** | Suivre CPU/RAM/Disque | Snapshots réguliers, historique 24 h, export JSON/CSV, alertes visuelles basées sur les seuils |
 | **Error Alerts** | Détecter les erreurs PHP/JS | Lecture sécurisée de `debug.log`, webhooks Slack/Teams/Discord, filtrage par gravité, journal d’alertes |
 | **AI Insights** | Générer des recommandations | Orchestrateur Gemini avec cache, historique commentable, export CSV/clipboard, module de notes collaboratif |

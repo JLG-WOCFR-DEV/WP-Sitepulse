@@ -17,6 +17,14 @@ if (!defined('SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE')) {
     define('SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE', 'sitepulse_uptime_remote_queue');
 }
 
+if (!defined('SITEPULSE_UPTIME_REMOTE_QUEUE_MAX_SIZE')) {
+    define('SITEPULSE_UPTIME_REMOTE_QUEUE_MAX_SIZE', 200);
+}
+
+if (!defined('SITEPULSE_UPTIME_REMOTE_QUEUE_ITEM_TTL')) {
+    define('SITEPULSE_UPTIME_REMOTE_QUEUE_ITEM_TTL', DAY_IN_SECONDS);
+}
+
 if (!defined('SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS')) {
     define('SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS', 'sitepulse_uptime_maintenance_windows');
 }
@@ -686,6 +694,155 @@ function sitepulse_uptime_is_in_maintenance_window($agent_id, $timestamp = null)
 }
 
 /**
+ * Returns the maximum number of items allowed in the remote queue.
+ *
+ * @return int
+ */
+function sitepulse_uptime_get_remote_queue_max_size() {
+    $default = defined('SITEPULSE_UPTIME_REMOTE_QUEUE_MAX_SIZE')
+        ? (int) SITEPULSE_UPTIME_REMOTE_QUEUE_MAX_SIZE
+        : 200;
+
+    /**
+     * Filters the maximum number of queued remote uptime requests.
+     *
+     * @param int $max_size Queue size limit (0 disables the limit).
+     */
+    $max_size = apply_filters('sitepulse_uptime_remote_queue_max_size', $default);
+
+    return max(0, (int) $max_size);
+}
+
+/**
+ * Returns the retention duration for remote queue items.
+ *
+ * @return int
+ */
+function sitepulse_uptime_get_remote_queue_item_ttl() {
+    $default = defined('SITEPULSE_UPTIME_REMOTE_QUEUE_ITEM_TTL')
+        ? (int) SITEPULSE_UPTIME_REMOTE_QUEUE_ITEM_TTL
+        : DAY_IN_SECONDS;
+
+    /**
+     * Filters the retention duration (in seconds) for queued remote requests.
+     *
+     * @param int $ttl Retention duration (0 disables pruning by age).
+     */
+    $ttl = apply_filters('sitepulse_uptime_remote_queue_item_ttl', $default);
+
+    return max(0, (int) $ttl);
+}
+
+/**
+ * Normalises and prunes a remote worker queue.
+ *
+ * @param array<int,array<string,mixed>> $queue Existing queue.
+ * @param int|null                       $now   Reference timestamp.
+ * @return array<int,array<string,mixed>>
+ */
+function sitepulse_uptime_normalize_remote_queue($queue, $now = null) {
+    if (!is_array($queue) || empty($queue)) {
+        return [];
+    }
+
+    $now = null === $now ? (int) current_time('timestamp', true) : (int) $now;
+    $ttl = sitepulse_uptime_get_remote_queue_item_ttl();
+    $max_size = sitepulse_uptime_get_remote_queue_max_size();
+    $encoder = function ($payload) {
+        if (!is_array($payload)) {
+            return '';
+        }
+
+        ksort($payload);
+
+        if (function_exists('wp_json_encode')) {
+            return wp_json_encode($payload);
+        }
+
+        return json_encode($payload);
+    };
+
+    $unique = [];
+
+    foreach ($queue as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+
+        $agent = isset($item['agent']) ? sitepulse_uptime_normalize_agent_id($item['agent']) : 'default';
+        $payload = isset($item['payload']) && is_array($item['payload']) ? $item['payload'] : [];
+        $scheduled_at = isset($item['scheduled_at']) ? (int) $item['scheduled_at'] : $now;
+        $created_at = isset($item['created_at']) ? (int) $item['created_at'] : $now;
+
+        if ($ttl > 0 && $scheduled_at <= ($now - $ttl)) {
+            continue;
+        }
+
+        $key = $agent . '|' . $scheduled_at . '|' . md5($encoder($payload));
+
+        $unique[$key] = [
+            'agent'       => $agent,
+            'payload'     => $payload,
+            'scheduled_at'=> $scheduled_at,
+            'created_at'  => $created_at,
+        ];
+    }
+
+    if (empty($unique)) {
+        return [];
+    }
+
+    $normalized = array_values($unique);
+
+    usort($normalized, function ($a, $b) {
+        $a_scheduled = isset($a['scheduled_at']) ? (int) $a['scheduled_at'] : 0;
+        $b_scheduled = isset($b['scheduled_at']) ? (int) $b['scheduled_at'] : 0;
+
+        if ($a_scheduled === $b_scheduled) {
+            $a_created = isset($a['created_at']) ? (int) $a['created_at'] : 0;
+            $b_created = isset($b['created_at']) ? (int) $b['created_at'] : 0;
+
+            return $a_created <=> $b_created;
+        }
+
+        return $a_scheduled <=> $b_scheduled;
+    });
+
+    if ($max_size > 0 && count($normalized) > $max_size) {
+        $normalized = array_slice($normalized, 0, $max_size);
+    }
+
+    return $normalized;
+}
+
+/**
+ * Determines the next scheduled timestamp for the provided queue.
+ *
+ * @param array<int,array<string,mixed>> $queue    Queue entries.
+ * @param int|null                       $fallback Fallback timestamp.
+ * @return int|null
+ */
+function sitepulse_uptime_get_queue_next_scheduled_at($queue, $fallback = null) {
+    if (!is_array($queue) || empty($queue)) {
+        return null === $fallback ? null : (int) $fallback;
+    }
+
+    $timestamps = array_map(function ($item) {
+        return isset($item['scheduled_at']) ? (int) $item['scheduled_at'] : 0;
+    }, $queue);
+
+    $timestamps = array_filter($timestamps, function ($timestamp) {
+        return $timestamp > 0;
+    });
+
+    if (empty($timestamps)) {
+        return null === $fallback ? null : (int) $fallback;
+    }
+
+    return min($timestamps);
+}
+
+/**
  * Queues a remote worker request so it is executed internally.
  *
  * @param string   $agent_id  Agent identifier.
@@ -714,9 +871,15 @@ function sitepulse_uptime_schedule_internal_request($agent_id, $payload = [], $t
         'created_at'  => (int) current_time('timestamp', true),
     ];
 
+    $queue = sitepulse_uptime_normalize_remote_queue($queue);
+
     update_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, $queue, false);
 
-    sitepulse_uptime_maybe_schedule_queue_processor($timestamp);
+    $next_timestamp = sitepulse_uptime_get_queue_next_scheduled_at($queue, $timestamp);
+
+    if (null !== $next_timestamp) {
+        sitepulse_uptime_maybe_schedule_queue_processor($next_timestamp);
+    }
 }
 
 /**
@@ -747,8 +910,10 @@ function sitepulse_uptime_maybe_schedule_queue_processor($timestamp) {
  */
 function sitepulse_uptime_process_remote_queue() {
     $queue = get_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, []);
+    $queue = sitepulse_uptime_normalize_remote_queue($queue);
 
     if (!is_array($queue) || empty($queue)) {
+        update_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, [], false);
         return;
     }
 
@@ -773,15 +938,20 @@ function sitepulse_uptime_process_remote_queue() {
         sitepulse_run_uptime_check($agent, $payload);
     }
 
-    update_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, array_values($remaining), false);
-
     if (!empty($remaining)) {
-        $next_timestamp = min(array_map(function ($item) {
-            return isset($item['scheduled_at']) ? (int) $item['scheduled_at'] : (int) current_time('timestamp', true);
-        }, $remaining));
+        $remaining = sitepulse_uptime_normalize_remote_queue($remaining, $now);
+        update_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, $remaining, false);
 
-        sitepulse_uptime_maybe_schedule_queue_processor($next_timestamp);
+        $next_timestamp = sitepulse_uptime_get_queue_next_scheduled_at($remaining, $now);
+
+        if (null !== $next_timestamp) {
+            sitepulse_uptime_maybe_schedule_queue_processor($next_timestamp);
+        }
+
+        return;
     }
+
+    update_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, [], false);
 }
 
 /**
