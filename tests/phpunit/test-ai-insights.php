@@ -326,6 +326,72 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
     }
 
     /**
+     * @covers ::sitepulse_ai_prepare_insight_variants
+     */
+    public function test_prepare_insight_variants_generates_html_from_plain_text() {
+        $plain_text = "First line\n\nSecond line";
+
+        $variants = sitepulse_ai_prepare_insight_variants($plain_text, '');
+
+        $this->assertSame($plain_text, $variants['text']);
+        $this->assertNotSame('', $variants['html']);
+        $this->assertStringContainsString('<p>First line</p>', $variants['html']);
+        $this->assertStringContainsString('<p>Second line</p>', $variants['html']);
+    }
+
+    /**
+     * @covers ::sitepulse_ai_prepare_insight_variants
+     */
+    public function test_prepare_insight_variants_filters_disallowed_markup() {
+        $raw_text = "Keep <script>alert('bad')</script> text";
+        $raw_html = "<p><em>Allowed</em> markup</p><script>alert('bad')</script>";
+
+        $variants = sitepulse_ai_prepare_insight_variants($raw_text, $raw_html);
+
+        $this->assertSame(sitepulse_ai_sanitize_insight_text($raw_text), $variants['text']);
+        $this->assertStringNotContainsString('<script>', $variants['html']);
+        $this->assertStringContainsString('<p><em>Allowed</em> markup</p>', $variants['html']);
+    }
+
+    /**
+     * @covers ::sitepulse_ai_prepare_insight_variants
+     */
+    public function test_prepare_insight_variants_recovers_html_when_markup_removed() {
+        $raw_text = 'Keep <strong>content</strong>';
+        $raw_html = '<script>alert("bad")</script>';
+
+        $variants = sitepulse_ai_prepare_insight_variants($raw_text, $raw_html);
+
+        $this->assertSame('Keep content', $variants['text']);
+        $this->assertStringContainsString('<p>Keep content</p>', $variants['html']);
+    }
+
+    /**
+     * @covers ::sitepulse_ai_get_job_secret
+     */
+    public function test_job_secret_is_persistent_and_filterable() {
+        delete_option(SITEPULSE_OPTION_AI_JOB_SECRET);
+
+        $stored_secret = sitepulse_ai_get_job_secret();
+
+        $this->assertIsString($stored_secret);
+        $this->assertSame(64, strlen($stored_secret));
+
+        $filter = static function () {
+            return 'filtered-secret-value';
+        };
+
+        add_filter('sitepulse_ai_job_secret', $filter);
+
+        $filtered_secret = sitepulse_ai_get_job_secret();
+
+        remove_filter('sitepulse_ai_job_secret', $filter);
+
+        $this->assertSame('filtered-secret-value', $filtered_secret);
+        $this->assertSame($stored_secret, sitepulse_ai_get_job_secret());
+    }
+
+    /**
      * Ensures the Gemini prompt includes the collected metric summary when available.
      */
     public function test_prompt_includes_metric_summary_when_available() {
