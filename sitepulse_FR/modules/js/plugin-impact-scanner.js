@@ -73,6 +73,8 @@
                 weight: parseNumber(row.dataset.weight),
                 samples: parseNumber(row.dataset.samples),
                 diskSpace: parseNumber(row.dataset.diskSpace),
+                diskFiles: parseNumber(row.dataset.diskFiles),
+                diskRecorded: parseNumber(row.dataset.diskRecorded),
                 lastRecorded: parseNumber(row.dataset.lastRecorded),
                 isMeasured: row.dataset.isMeasured === '1',
             };
