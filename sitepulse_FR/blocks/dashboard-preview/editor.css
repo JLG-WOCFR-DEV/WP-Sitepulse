@@ -6,6 +6,12 @@
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
+.editor-styles-wrapper .wp-block-sitepulse-dashboard-preview.is-layout-grid,
+.editor-styles-wrapper .wp-block-sitepulse-dashboard-preview.is-layout-flex {
+    display: block;
+    gap: 0;
+}
+
 .editor-styles-wrapper .wp-block-sitepulse-dashboard-preview .sitepulse-dashboard-preview__header {
     margin-bottom: var(--sitepulse-dashboard-header-spacing, 24px);
 }

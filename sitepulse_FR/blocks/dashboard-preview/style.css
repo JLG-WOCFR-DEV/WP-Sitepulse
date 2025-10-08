@@ -6,6 +6,12 @@
     margin-block: var(--wp--style--block-gap, 0);
 }
 
+.wp-block-sitepulse-dashboard-preview.is-layout-grid,
+.wp-block-sitepulse-dashboard-preview.is-layout-flex {
+    display: block;
+    gap: 0;
+}
+
 .wp-block-sitepulse-dashboard-preview:not(.alignwide):not(.alignfull) {
     margin-inline: auto;
 }
