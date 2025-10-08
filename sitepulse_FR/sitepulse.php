@@ -1280,6 +1280,46 @@ require_once SITEPULSE_PATH . 'includes/integrations.php';
 require_once SITEPULSE_PATH . 'includes/appearance-presets.php';
 require_once SITEPULSE_PATH . 'blocks/dashboard-preview/render.php';
 
+if (!function_exists('sitepulse_get_dashboard_module_definitions')) {
+    /**
+     * Returns the module definitions used by dashboard previews and widgets.
+     *
+     * @return array<string, array<string, string>>
+     */
+    function sitepulse_get_dashboard_module_definitions() {
+        static $definitions = null;
+
+        if ($definitions !== null) {
+            return $definitions;
+        }
+
+        $definitions = [
+            'speed' => [
+                'module'       => 'speed_analyzer',
+                'label'        => __('Vitesse', 'sitepulse'),
+                'controlLabel' => __('Afficher la carte Vitesse', 'sitepulse'),
+            ],
+            'uptime' => [
+                'module'       => 'uptime_tracker',
+                'label'        => __('Disponibilité', 'sitepulse'),
+                'controlLabel' => __('Afficher la carte Uptime', 'sitepulse'),
+            ],
+            'database' => [
+                'module'       => 'database_optimizer',
+                'label'        => __('Base de données', 'sitepulse'),
+                'controlLabel' => __('Afficher la carte Base de données', 'sitepulse'),
+            ],
+            'logs' => [
+                'module'       => 'log_analyzer',
+                'label'        => __('Journal d’erreurs', 'sitepulse'),
+                'controlLabel' => __('Afficher la carte Journal d’erreurs', 'sitepulse'),
+            ],
+        ];
+
+        return $definitions;
+    }
+}
+
 /**
  * Registers the SitePulse dashboard preview block and its assets.
  *
@@ -1363,28 +1403,7 @@ function sitepulse_localize_dashboard_preview_block() {
         ? $context['modules']
         : [];
 
-    $module_definitions = [
-        'speed' => [
-            'module'       => 'speed_analyzer',
-            'label'        => __('Vitesse', 'sitepulse'),
-            'controlLabel' => __('Afficher la carte Vitesse', 'sitepulse'),
-        ],
-        'uptime' => [
-            'module'       => 'uptime_tracker',
-            'label'        => __('Disponibilité', 'sitepulse'),
-            'controlLabel' => __('Afficher la carte Uptime', 'sitepulse'),
-        ],
-        'database' => [
-            'module'       => 'database_optimizer',
-            'label'        => __('Base de données', 'sitepulse'),
-            'controlLabel' => __('Afficher la carte Base de données', 'sitepulse'),
-        ],
-        'logs' => [
-            'module'       => 'log_analyzer',
-            'label'        => __('Journal d’erreurs', 'sitepulse'),
-            'controlLabel' => __('Afficher la carte Journal d’erreurs', 'sitepulse'),
-        ],
-    ];
+    $module_definitions = sitepulse_get_dashboard_module_definitions();
 
     $modules_payload = [];
 
@@ -1433,6 +1452,269 @@ function sitepulse_localize_dashboard_preview_block() {
     );
 }
 add_action('enqueue_block_editor_assets', 'sitepulse_localize_dashboard_preview_block');
+
+/**
+ * Registers the SitePulse widget on the WordPress admin dashboard.
+ */
+function sitepulse_register_admin_dashboard_widget() {
+    if (!function_exists('wp_add_dashboard_widget')) {
+        return;
+    }
+
+    if (!current_user_can(sitepulse_get_capability())) {
+        return;
+    }
+
+    wp_add_dashboard_widget(
+        'sitepulse_admin_overview',
+        __('SitePulse – Aperçu', 'sitepulse'),
+        'sitepulse_render_admin_dashboard_widget'
+    );
+}
+add_action('wp_dashboard_setup', 'sitepulse_register_admin_dashboard_widget');
+
+/**
+ * Renders the SitePulse admin dashboard widget.
+ */
+function sitepulse_render_admin_dashboard_widget() {
+    if (!current_user_can(sitepulse_get_capability())) {
+        echo '<p>' . esc_html__("Vous n'avez pas les permissions nécessaires pour afficher ce widget.", 'sitepulse') . '</p>';
+        return;
+    }
+
+    $active_modules = array_map('strval', (array) get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []));
+    $active_modules = array_values(array_filter($active_modules, static function ($module) {
+        return $module !== '';
+    }));
+
+    $settings_url = admin_url('admin.php?page=sitepulse-settings#sitepulse-section-modules');
+
+    if (!in_array('custom_dashboards', $active_modules, true) || !function_exists('sitepulse_get_dashboard_preview_context')) {
+        $message = sprintf(
+            /* translators: %s is the URL to the SitePulse settings page. */
+            __('Activez le module « Tableaux de bord personnalisés » depuis les <a href="%s">réglages SitePulse</a> pour alimenter ce widget.', 'sitepulse'),
+            esc_url($settings_url)
+        );
+
+        echo '<p>' . wp_kses_post($message) . '</p>';
+
+        $dashboard_url = admin_url('admin.php?page=sitepulse-dashboard');
+
+        if (!empty($dashboard_url)) {
+            echo '<p><a class="button button-primary" href="' . esc_url($dashboard_url) . '">' . esc_html__('Ouvrir le tableau de bord SitePulse', 'sitepulse') . '</a></p>';
+        }
+
+        return;
+    }
+
+    $context = sitepulse_get_dashboard_preview_context();
+
+    if (!is_array($context)) {
+        echo '<p>' . esc_html__('Impossible de récupérer les données du tableau de bord pour le moment.', 'sitepulse') . '</p>';
+        return;
+    }
+
+    $default_status_labels = [
+        'status-ok'   => [
+            'label' => __('Bon', 'sitepulse'),
+            'sr'    => __('Statut : bon', 'sitepulse'),
+            'icon'  => '✔️',
+        ],
+        'status-warn' => [
+            'label' => __('Attention', 'sitepulse'),
+            'sr'    => __('Statut : attention', 'sitepulse'),
+            'icon'  => '⚠️',
+        ],
+        'status-bad'  => [
+            'label' => __('Critique', 'sitepulse'),
+            'sr'    => __('Statut : critique', 'sitepulse'),
+            'icon'  => '⛔',
+        ],
+    ];
+
+    $status_labels = isset($context['status_labels']) && is_array($context['status_labels'])
+        ? array_merge($default_status_labels, $context['status_labels'])
+        : $default_status_labels;
+
+    $modules_context = isset($context['modules']) && is_array($context['modules'])
+        ? $context['modules']
+        : [];
+
+    $module_definitions = sitepulse_get_dashboard_module_definitions();
+    $items = [];
+
+    foreach ($module_definitions as $module_key => $definition) {
+        $module_context = isset($modules_context[$module_key]) && is_array($modules_context[$module_key])
+            ? $modules_context[$module_key]
+            : [];
+        $card = isset($module_context['card']) && is_array($module_context['card']) ? $module_context['card'] : [];
+        $is_active = in_array($definition['module'], $active_modules, true);
+
+        $status_key = isset($card['status']) && is_string($card['status']) ? $card['status'] : 'status-warn';
+        $value = '';
+        $description = '';
+
+        if (!$is_active) {
+            $status_key = 'status-warn';
+            $value = __('Module désactivé', 'sitepulse');
+            $description = sprintf(
+                /* translators: %s is the URL to the SitePulse settings page. */
+                __('Activez ce module depuis les <a href="%s">réglages SitePulse</a>.', 'sitepulse'),
+                esc_url($settings_url)
+            );
+        } else {
+            switch ($module_key) {
+                case 'speed':
+                    if (isset($card['display']) && is_string($card['display']) && $card['display'] !== '') {
+                        $value = $card['display'];
+                        $description = __('Temps de traitement serveur mesuré lors du dernier scan.', 'sitepulse');
+                    } else {
+                        $value = __('En attente de mesures…', 'sitepulse');
+                        $description = __('Lancez un audit de performance pour remplir cette carte.', 'sitepulse');
+                    }
+                    break;
+                case 'uptime':
+                    if (isset($card['percentage']) && is_numeric($card['percentage'])) {
+                        $value = number_format_i18n((float) $card['percentage'], 2) . '%';
+                        $description = __('Disponibilité moyenne des vérifications récentes.', 'sitepulse');
+                    } else {
+                        $value = __('Données indisponibles', 'sitepulse');
+                        $description = __('Aucun contrôle de disponibilité enregistré pour l’instant.', 'sitepulse');
+                    }
+                    break;
+                case 'database':
+                    if (isset($card['revisions'])) {
+                        $revisions = (int) $card['revisions'];
+                        $limit = isset($card['limit']) ? (int) $card['limit'] : 0;
+                        $limit_display = $limit > 0 ? number_format_i18n($limit) : __('N/A', 'sitepulse');
+                        $value = sprintf(
+                            /* translators: 1: number of stored revisions. 2: configured limit. */
+                            __('Révisions : %1$s / %2$s', 'sitepulse'),
+                            number_format_i18n($revisions),
+                            $limit_display
+                        );
+                        $description = __('Comparez le nombre de révisions stockées avec la limite recommandée.', 'sitepulse');
+                    } else {
+                        $value = __('Données indisponibles', 'sitepulse');
+                        $description = __('Aucun instantané de révisions n’a été relevé pour le moment.', 'sitepulse');
+                    }
+                    break;
+                case 'logs':
+                    $summary = isset($card['summary']) ? (string) $card['summary'] : '';
+                    $value = $summary !== '' ? $summary : __('Résumé indisponible.', 'sitepulse');
+
+                    $counts = isset($card['counts']) && is_array($card['counts']) ? $card['counts'] : [];
+                    $counts_strings = [];
+
+                    $count_labels = [
+                        'fatal'      => __('Fatals', 'sitepulse'),
+                        'warning'    => __('Avert.', 'sitepulse'),
+                        'notice'     => __('Notices', 'sitepulse'),
+                        'deprecated' => __('Dépréciés', 'sitepulse'),
+                    ];
+
+                    foreach ($counts as $count_key => $count_value) {
+                        if (!isset($count_labels[$count_key]) || !is_numeric($count_value)) {
+                            continue;
+                        }
+
+                        if ((int) $count_value <= 0) {
+                            continue;
+                        }
+
+                        $counts_strings[] = sprintf(
+                            '%1$s : %2$s',
+                            $count_labels[$count_key],
+                            number_format_i18n((int) $count_value)
+                        );
+                    }
+
+                    if (!empty($counts_strings)) {
+                        $description = implode(' · ', $counts_strings);
+                    } else {
+                        $description = __('Analyse des dernières entrées du debug.log.', 'sitepulse');
+                    }
+
+                    break;
+                default:
+                    $value = __('Données indisponibles', 'sitepulse');
+                    $description = '';
+                    break;
+            }
+        }
+
+        if (!isset($status_labels[$status_key])) {
+            $status_key = 'status-warn';
+        }
+
+        $status_meta = isset($status_labels[$status_key]) ? $status_labels[$status_key] : $status_labels['status-warn'];
+        $icon = isset($status_meta['icon']) ? (string) $status_meta['icon'] : '';
+        $sr_status = isset($status_meta['sr']) ? (string) $status_meta['sr'] : '';
+        $status_label = isset($status_meta['label']) ? (string) $status_meta['label'] : '';
+
+        $items[] = [
+            'label'       => $definition['label'],
+            'icon'        => $icon,
+            'sr'          => $sr_status,
+            'status'      => $status_label,
+            'value'       => $value,
+            'description' => $description,
+        ];
+    }
+
+    if (empty($items)) {
+        echo '<p>' . esc_html__('Aucun module n’est configuré pour alimenter le widget.', 'sitepulse') . '</p>';
+        return;
+    }
+
+    echo '<div class="sitepulse-dashboard-widget">';
+    echo '<ul class="sitepulse-dashboard-widget__list">';
+
+    foreach ($items as $item) {
+        echo '<li class="sitepulse-dashboard-widget__item">';
+        echo '<div class="sitepulse-dashboard-widget__item-header">';
+
+        if ($item['icon'] !== '') {
+            echo '<span class="sitepulse-dashboard-widget__status-icon" aria-hidden="true">' . esc_html($item['icon']) . '</span>';
+        }
+
+        if ($item['sr'] !== '') {
+            echo '<span class="screen-reader-text">' . esc_html($item['sr']) . '</span>';
+        }
+
+        echo '<strong class="sitepulse-dashboard-widget__label">' . esc_html($item['label']) . '</strong>';
+
+        if ($item['status'] !== '') {
+            echo ' <span class="sitepulse-dashboard-widget__status-text">– ' . esc_html($item['status']) . '</span>';
+        }
+
+        echo '</div>';
+
+        if ($item['value'] !== '') {
+            echo '<div class="sitepulse-dashboard-widget__value">' . esc_html($item['value']) . '</div>';
+        }
+
+        if ($item['description'] !== '') {
+            echo '<p class="sitepulse-dashboard-widget__description">' . wp_kses_post($item['description']) . '</p>';
+        }
+
+        echo '</li>';
+    }
+
+    echo '</ul>';
+
+    $dashboard_url = admin_url('admin.php?page=sitepulse-dashboard');
+
+    if (!empty($dashboard_url)) {
+        echo '<p class="sitepulse-dashboard-widget__cta"><a class="button button-primary" href="' . esc_url($dashboard_url) . '">' . esc_html__('Ouvrir le tableau de bord SitePulse', 'sitepulse') . '</a></p>';
+    }
+
+    if (!empty($settings_url)) {
+        echo '<p class="sitepulse-dashboard-widget__cta"><a href="' . esc_url($settings_url) . '">' . esc_html__('Gérer les modules SitePulse', 'sitepulse') . '</a></p>';
+    }
+
+    echo '</div>';
+}
 
 /**
  * Loads all active modules selected in the settings.
