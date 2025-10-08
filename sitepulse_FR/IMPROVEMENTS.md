@@ -38,11 +38,11 @@ Ce document répertorie les fonctions de SitePulse qui gagneraient à être alig
 
 ## Module « Uptime Tracker »
 
-- **Constat :** l'historique conserve uniquement les 30 derniers points et un seul agent actif, ce qui limite la profondeur d'analyse et la corrélation multi-région par rapport à des outils comme Pingdom ou Better Uptime qui agrègent plusieurs sondes et publient des SLA détaillés.【F:sitepulse_FR/modules/uptime_tracker.php†L2203-L2288】【F:sitepulse_FR/modules/uptime_tracker.php†L258-L320】
+- **Constat :** le module gère désormais plusieurs agents (`SITEPULSE_OPTION_UPTIME_AGENTS`), normalise la file d’attente distante (TTL filtrable, taille maximum configurable, déduplication) et conserve une rétention configurable entre 30 et 365 jours. En revanche, il manque encore un reporting SLA consolidé, des métriques d’attente exposées à l’UI et une gouvernance avancée des agents pour rejoindre les consoles pro.【F:sitepulse_FR/modules/uptime_tracker.php†L277-L346】【F:sitepulse_FR/modules/uptime_tracker.php†L706-L836】【F:sitepulse_FR/modules/uptime_tracker.php†L1004-L1028】
 - **Pistes pro :**
-  - Permettre la configuration de multiples agents géographiques avec pondération et tests parallèles, puis générer des rapports SLA mensuels exportables.
-  - Étendre la fenêtre d'historique (via options et stockage personnalisé) pour autoriser des rétrospectives de 90 jours/12 mois et la corrélation avec les annotations de maintenance.
-  - Ajouter des canaux d'alerte temps réel (webhooks dédiés, SMS) et une page de statut publique afin de se rapprocher des offres premium.
+  - Générer des rapports SLA mensuels (CSV/PDF) agrégeant tous les agents et intégrant les fenêtres de maintenance (`sitepulse_uptime_get_agents()` + annotations) pour rivaliser avec Pingdom/Better Uptime.
+  - Instrumenter la file distante (compteur, temps d’attente moyen, alertes si la limite est atteinte) et exposer ces métriques dans l’interface ou via l’API pour prévenir les dérives en cas de Cron inactif.
+  - Ajouter des canaux d’alerte temps réel (webhooks dédiés, SMS) et une page de statut publique afin de se rapprocher des offres premium.
 
 ## Module « Resource Monitor »
 

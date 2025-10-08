@@ -1,12 +1,12 @@
 # Code Review Notes
 
-## High Priority
+## Statut des points critiques
 
-- **REST permission filter bypass** – `sitepulse_uptime_rest_schedule_permission_check()` casts the result of the `sitepulse_uptime_rest_schedule_permission` filter to a boolean before returning. Any callback that returns a `WP_Error` (which is the common pattern for REST permissions) will be converted to `true`, unintentionally authorising the request. This breaks expectations for integrators that rely on returning an error to deny access and effectively disables custom authentication failures.【F:sitepulse_FR/modules/uptime_tracker.php†L184-L202】
+- ✅ **REST permission filter bypass** – La fonction `sitepulse_uptime_rest_schedule_permission_check()` renvoie désormais l'objet `WP_Error` retourné par le filtre `sitepulse_uptime_rest_schedule_permission` et respecte explicitement les valeurs booléennes. Les intégrateurs peuvent à nouveau interrompre l'exécution en renvoyant un `WP_Error`, sans que celui-ci soit converti en `true`.【F:sitepulse_FR/modules/uptime_tracker.php†L184-L211】
 
-- **Incident start regression on unsorted logs** – `sitepulse_normalize_uptime_log()` derives `incident_start` values while iterating the raw log in its original order and only sorts entries by timestamp afterwards. When the stored log is newest-first (which can happen with legacy data or external imports that already include timestamps), downtime entries inherit the start time from the next *newer* row instead of the first outage sample. After the final sort this leaves older entries with an `incident_start` that is more recent than the sample timestamp, under-reporting downtime duration in the UI and archives.【F:sitepulse_FR/modules/uptime_tracker.php†L880-L969】
+- ✅ **Incident start regression on unsorted logs** – `sitepulse_normalize_uptime_log()` prépare maintenant un tableau trié par timestamp avant de propager `incident_start`. Les entrées sont ordonnées via `usort()` puis parcourues séquentiellement, ce qui garantit que la propagation s'appuie sur les échantillons antérieurs plutôt que suivants.【F:sitepulse_FR/modules/uptime_tracker.php†L904-L996】
+- ✅ **Garde-fous sur la queue distante** – `sitepulse_uptime_normalize_remote_queue()` impose un TTL filtrable, supprime les doublons et tronque la file à une taille maximale configurable avant chaque mise à jour. `sitepulse_uptime_get_queue_next_scheduled_at()` se charge ensuite de planifier le prochain cron sur l'échéance la plus proche pour éviter les dérives lorsque WP-Cron est ralenti.【F:sitepulse_FR/modules/uptime_tracker.php†L706-L836】
 
-## Suggestions
+## Points à surveiller
 
-- Ensure permission callbacks return either `true`, `false` or a `WP_Error` without forcing a cast, e.g. `return apply_filters(...) ?: new WP_Error(...)`.
-- Normalise the log order (e.g. sort by timestamp ascending) *before* calculating `incident_start`, or process the data in chronological order to keep the propagation logic correct.
+- Instrumenter la queue distante (compteur, temps d'attente moyen, alertes si la limite est atteinte) afin de détecter plus tôt les blocages WP-Cron et d'exposer des métriques proactives dans le dashboard ou via l'API.【F:sitepulse_FR/modules/uptime_tracker.php†L706-L836】
