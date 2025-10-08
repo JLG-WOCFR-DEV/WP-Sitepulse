@@ -31,5 +31,18 @@
 }
 
 .editor-styles-wrapper .wp-block-sitepulse-dashboard-preview .sitepulse-chart-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 200px;
+}
+
+.editor-styles-wrapper .wp-block-sitepulse-dashboard-preview .sitepulse-chart-container canvas {
+    width: 100%;
+    flex: 0 0 auto;
+}
+
+.editor-styles-wrapper .wp-block-sitepulse-dashboard-preview .sitepulse-chart-placeholder {
+    flex: 0 0 auto;
     min-height: 200px;
 }

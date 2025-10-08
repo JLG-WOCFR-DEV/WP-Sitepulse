@@ -381,13 +381,21 @@
 
 .sitepulse-chart-container {
     position: relative;
-    height: 220px;
     margin: 0 0 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 
 .sitepulse-chart-container canvas {
     width: 100% !important;
-    height: 100% !important;
+    flex: 0 0 auto;
+    height: 220px !important;
+}
+
+.sitepulse-chart-container .sitepulse-chart-placeholder {
+    flex: 0 0 auto;
+    min-height: 220px;
 }
 
 .sitepulse-chart-empty {
