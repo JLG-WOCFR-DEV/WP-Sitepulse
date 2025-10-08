@@ -265,7 +265,13 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
         $chart_html = sitepulse_dashboard_preview_render_chart_area($chart_id, $chart_payload);
 
         $status_meta = sitepulse_dashboard_preview_get_status_meta($status, $status_labels);
-        $status_badge_class = sanitize_html_class($status);
+        $status_badge_class = '';
+
+        if (is_string($status) && $status !== '' && isset($status_labels[$status])) {
+            $status_badge_class = sanitize_html_class($status);
+        } elseif (isset($status_labels['status-warn'])) {
+            $status_badge_class = 'status-warn';
+        }
 
         return sprintf(
             '<section class="%1$s"><div class="sitepulse-card-header"><h3>%2$s</h3></div><p class="sitepulse-card-subtitle">%3$s</p>%4$s<p class="sitepulse-metric"><span class="status-badge %5$s" aria-hidden="true"><span class="status-icon">%6$s</span><span class="status-text">%7$s</span></span><span class="screen-reader-text">%8$s</span>%9$s</p>%10$s<p class="description">%11$s</p></section>',
