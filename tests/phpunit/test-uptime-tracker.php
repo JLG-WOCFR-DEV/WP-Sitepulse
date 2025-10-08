@@ -475,6 +475,69 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         update_option('timezone_string', '');
     }
 
+    public function test_remote_queue_respects_size_limit() {
+        $limit_filter = function () {
+            return 3;
+        };
+
+        add_filter('sitepulse_uptime_remote_queue_max_size', $limit_filter);
+
+        $base = current_time('timestamp', true);
+
+        for ($i = 0; $i < 5; $i++) {
+            sitepulse_uptime_schedule_internal_request('agent_' . $i, [], $base + $i);
+        }
+
+        $queue = get_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, []);
+        $this->assertCount(3, $queue, 'Queue should be trimmed to the configured limit.');
+
+        $agents = array_map(function ($item) {
+            return $item['agent'];
+        }, $queue);
+
+        $this->assertSame(['agent_0', 'agent_1', 'agent_2'], $agents, 'Oldest items should be preserved when trimming.');
+
+        remove_filter('sitepulse_uptime_remote_queue_max_size', $limit_filter);
+    }
+
+    public function test_remote_queue_prunes_expired_entries() {
+        $ttl_filter = function () {
+            return MINUTE_IN_SECONDS;
+        };
+
+        add_filter('sitepulse_uptime_remote_queue_item_ttl', $ttl_filter);
+
+        $base = current_time('timestamp', true);
+
+        update_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, [[
+            'agent'       => 'legacy',
+            'payload'     => [],
+            'scheduled_at'=> $base - HOUR_IN_SECONDS,
+            'created_at'  => $base - HOUR_IN_SECONDS,
+        ]]);
+
+        sitepulse_uptime_schedule_internal_request('fresh', [], $base);
+
+        $queue = get_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, []);
+
+        $this->assertCount(1, $queue, 'Expired entries should be pruned when scheduling.');
+        $this->assertSame('fresh', $queue[0]['agent']);
+
+        remove_filter('sitepulse_uptime_remote_queue_item_ttl', $ttl_filter);
+    }
+
+    public function test_remote_queue_deduplicates_identical_requests() {
+        $base = current_time('timestamp', true);
+
+        sitepulse_uptime_schedule_internal_request('default', ['timeout' => 10], $base);
+        sitepulse_uptime_schedule_internal_request('default', ['timeout' => 20], $base);
+
+        $queue = get_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, []);
+
+        $this->assertCount(1, $queue, 'Duplicate requests should be collapsed.');
+        $this->assertSame(['timeout' => 20], $queue[0]['payload']);
+    }
+
     public function test_maintenance_window_skips_remote_requests() {
         $now = current_time('timestamp');
 
