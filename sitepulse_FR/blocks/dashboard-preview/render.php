@@ -189,8 +189,10 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
      * @return array
      */
     function sitepulse_dashboard_preview_get_status_meta($status, $status_labels) {
-        if (is_array($status_labels) && isset($status_labels[$status])) {
-            return $status_labels[$status];
+        $status_key = is_string($status) ? trim($status) : '';
+
+        if ($status_key !== '' && is_array($status_labels) && isset($status_labels[$status_key])) {
+            return $status_labels[$status_key];
         }
 
         if (is_array($status_labels) && isset($status_labels['status-warn'])) {
@@ -242,7 +244,8 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
         $title = isset($definition['title']) ? (string) $definition['title'] : '';
         $subtitle = isset($definition['subtitle']) ? (string) $definition['subtitle'] : '';
         $description = isset($definition['description']) ? (string) $definition['description'] : '';
-        $status = isset($definition['status']) ? (string) $definition['status'] : '';
+        $raw_status = isset($definition['status']) ? (string) $definition['status'] : '';
+        $status_key = trim($raw_status);
 
         $metric_value_html = isset($definition['metric_value_html']) && $definition['metric_value_html'] !== ''
             ? (string) $definition['metric_value_html']
@@ -264,8 +267,19 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
         $chart_payload = isset($definition['chart']) ? $definition['chart'] : null;
         $chart_html = sitepulse_dashboard_preview_render_chart_area($chart_id, $chart_payload);
 
-        $status_meta = sitepulse_dashboard_preview_get_status_meta($status, $status_labels);
-        $status_badge_class = sanitize_html_class($status);
+        $status_meta = sitepulse_dashboard_preview_get_status_meta($status_key, $status_labels);
+
+        $has_known_status = $status_key !== ''
+            && is_array($status_labels)
+            && isset($status_labels[$status_key]);
+
+        $status_badge_class = $has_known_status
+            ? sanitize_html_class($status_key)
+            : 'status-warn';
+
+        if ($status_badge_class === '') {
+            $status_badge_class = 'status-warn';
+        }
 
         return sprintf(
             '<section class="%1$s"><div class="sitepulse-card-header"><h3>%2$s</h3></div><p class="sitepulse-card-subtitle">%3$s</p>%4$s<p class="sitepulse-metric"><span class="status-badge %5$s" aria-hidden="true"><span class="status-icon">%6$s</span><span class="status-text">%7$s</span></span><span class="screen-reader-text">%8$s</span>%9$s</p>%10$s<p class="description">%11$s</p></section>',

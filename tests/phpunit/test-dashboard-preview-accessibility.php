@@ -98,4 +98,38 @@ class Sitepulse_Dashboard_Preview_Accessibility_Test extends WP_UnitTestCase {
         $this->assertStringContainsString('sitepulse-chart-placeholder', $html);
         $this->assertStringContainsString('Pas encore de mesures disponibles pour ce graphique.', $html);
     }
+
+    public function test_card_section_without_status_falls_back_to_warning_badge(): void {
+        $definition = [
+            'classes'     => ['sitepulse-card'],
+            'title'       => 'Carte test',
+            'subtitle'    => 'Sous-titre',
+            'chart'       => null,
+            'status'      => '',
+            'description' => 'Description.',
+        ];
+
+        $status_labels = [
+            'status-ok'   => [
+                'label' => 'Bon',
+                'sr'    => 'Statut : bon',
+                'icon'  => '✔️',
+            ],
+            'status-warn' => [
+                'label' => 'Attention',
+                'sr'    => 'Statut : attention',
+                'icon'  => '⚠️',
+            ],
+            'status-bad'  => [
+                'label' => 'Critique',
+                'sr'    => 'Statut : critique',
+                'icon'  => '⛔',
+            ],
+        ];
+
+        $html = sitepulse_dashboard_preview_render_card_section($definition, $status_labels);
+
+        $this->assertStringContainsString('class="status-badge status-warn"', $html);
+        $this->assertStringContainsString(esc_html__('Statut : attention', 'sitepulse'), $html);
+    }
 }
