@@ -377,7 +377,7 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->assertIsString($stored_secret);
         $this->assertSame(64, strlen($stored_secret));
 
-        $filter = static function () {
+        $filter = static function ($secret) {
             return 'filtered-secret-value';
         };
 
