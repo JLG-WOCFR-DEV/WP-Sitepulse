@@ -520,6 +520,170 @@
     flex-wrap: wrap;
 }
 
+.sitepulse-module-card--async .sitepulse-async-job-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 12px;
+}
+
+.sitepulse-async-job {
+    border: 1px solid var(--sitepulse-border, #dcdcde);
+    border-left: 4px solid #ccd0d4;
+    border-radius: 6px;
+    padding: 12px 14px;
+    background: var(--sitepulse-surface, #ffffff);
+}
+
+.sitepulse-async-job__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.sitepulse-async-job__label {
+    font-weight: 600;
+    color: var(--sitepulse-text, #1d2327);
+}
+
+.sitepulse-async-job__message {
+    margin: 0 0 6px;
+    color: var(--sitepulse-text, #1d2327);
+}
+
+.sitepulse-async-job__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 0;
+    color: var(--sitepulse-text-subtle, #50575e);
+    font-size: 12px;
+}
+
+.sitepulse-async-job--is-running {
+    border-left-color: #2271b1;
+}
+
+.sitepulse-async-job--is-success {
+    border-left-color: #1e8c45;
+}
+
+.sitepulse-async-job--is-error {
+    border-left-color: #d63638;
+}
+
+.sitepulse-async-job--is-pending {
+    border-left-color: #8c8f94;
+}
+
+.sitepulse-module-card--async[data-sitepulse-async-state="idle"] .sitepulse-async-job-list {
+    opacity: 0.85;
+}
+
+.sitepulse-async-job--empty {
+    border-style: dashed;
+    border-color: var(--sitepulse-border, #dcdcde);
+    border-left-color: var(--sitepulse-border, #dcdcde);
+    background: var(--sitepulse-surface-subtle, #f6f7f7);
+    color: var(--sitepulse-text-subtle, #50575e);
+    font-style: italic;
+}
+
+.sitepulse-async-job__logs {
+    margin-top: 12px;
+    border-top: 1px solid var(--sitepulse-border, #dcdcde);
+    padding-top: 12px;
+}
+
+.sitepulse-async-job__logs-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--sitepulse-text, #1d2327);
+    margin: 0;
+}
+
+.sitepulse-async-job__logs-summary .dashicons {
+    font-size: 16px;
+    line-height: 1;
+}
+
+.sitepulse-async-job__logs-summary-text {
+    font-size: 13px;
+}
+
+.sitepulse-async-job__logs[open] .sitepulse-async-job__logs-summary {
+    color: var(--sitepulse-accent, #2271b1);
+}
+
+.sitepulse-async-job__log-list {
+    list-style: none;
+    margin: 12px 0 0;
+    padding: 0;
+    display: grid;
+    gap: 10px;
+}
+
+.sitepulse-async-job__log {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 12px;
+    align-items: flex-start;
+    border: 1px solid var(--sitepulse-border, #dcdcde);
+    border-left: 4px solid var(--sitepulse-border, #dcdcde);
+    border-radius: 4px;
+    padding: 10px 12px;
+    background: var(--sitepulse-surface-subtle, #f6f7f7);
+}
+
+.sitepulse-async-job__log-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--sitepulse-text-subtle, #50575e);
+}
+
+.sitepulse-async-job__log-message {
+    font-size: 13px;
+    color: var(--sitepulse-text, #1d2327);
+}
+
+.sitepulse-async-job__log-time {
+    grid-column: 1 / -1;
+    font-size: 11px;
+    color: var(--sitepulse-text-subtle, #50575e);
+}
+
+.sitepulse-async-job__log--is-success {
+    border-left-color: var(--sitepulse-success-text, #047857);
+    background: var(--sitepulse-success-bg, #ecfdf5);
+}
+
+.sitepulse-async-job__log--is-warning {
+    border-left-color: var(--sitepulse-warning-text, #b45309);
+    background: var(--sitepulse-warning-bg, #fef3c7);
+}
+
+.sitepulse-async-job__log--is-error {
+    border-left-color: var(--sitepulse-critical-text, #b91c1c);
+    background: var(--sitepulse-critical-bg, #fee2e2);
+}
+
+.sitepulse-async-job__log--is-info {
+    border-left-color: var(--sitepulse-accent, #2271b1);
+}
+
+.sitepulse-async-job__error {
+    margin: 12px 0 0;
+    font-size: 13px;
+    color: var(--sitepulse-critical-text, #b91c1c);
+}
+
 .sitepulse-settings-actions__buttons .button.button-primary {
     padding: 6px 22px;
 }

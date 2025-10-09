@@ -275,6 +275,310 @@
             });
         });
 
+        const adminData = window.sitepulseAdminSettingsData || {};
+        const asyncCard = document.querySelector('[data-sitepulse-async-card]');
+        const asyncList = asyncCard ? asyncCard.querySelector('[data-sitepulse-async-jobs-list]') : null;
+
+        if (
+            asyncCard &&
+            asyncList &&
+            adminData.ajaxUrl &&
+            adminData.asyncJobsNonce &&
+            typeof window.fetch === 'function'
+        ) {
+            const errorRegion = asyncCard.querySelector('[data-sitepulse-async-error]');
+            const emptyMessage =
+                asyncList.getAttribute('data-sitepulse-async-empty-message') ||
+                (adminData.i18n && adminData.i18n.asyncEmpty) ||
+                '';
+            let initialJobs = [];
+
+            try {
+                const initialRaw = asyncList.getAttribute('data-sitepulse-async-initial');
+                initialJobs = initialRaw ? JSON.parse(initialRaw) : [];
+            } catch (error) {
+                initialJobs = [];
+            }
+
+            asyncList.removeAttribute('data-sitepulse-async-initial');
+
+            let lastJobsSignature = JSON.stringify(initialJobs || []);
+            let hasFetchedOnce = false;
+            let isFetching = false;
+
+            const setCardState = (state) => {
+                asyncCard.dataset.sitepulseAsyncState = state;
+            };
+
+            if (Array.isArray(initialJobs) && initialJobs.some((job) => job && job.is_active)) {
+                setCardState('busy');
+            }
+
+            const showError = (message) => {
+                if (!errorRegion) {
+                    return;
+                }
+
+                if (message) {
+                    errorRegion.textContent = message;
+                    errorRegion.hidden = false;
+                } else {
+                    errorRegion.textContent = '';
+                    errorRegion.hidden = true;
+                }
+            };
+
+            const renderJobs = (jobs) => {
+                const signature = JSON.stringify(jobs || []);
+
+                if (signature === lastJobsSignature) {
+                    return false;
+                }
+
+                lastJobsSignature = signature;
+                asyncList.innerHTML = '';
+
+                if (!Array.isArray(jobs) || !jobs.length) {
+                    const emptyItem = document.createElement('li');
+                    emptyItem.className = 'sitepulse-async-job sitepulse-async-job--empty';
+                    emptyItem.textContent = emptyMessage;
+                    asyncList.appendChild(emptyItem);
+                    setCardState('idle');
+                    return true;
+                }
+
+                let hasActive = false;
+
+                jobs.forEach((job) => {
+                    if (!job) {
+                        return;
+                    }
+
+                    const containerClass =
+                        typeof job.container_class === 'string' && job.container_class
+                            ? ` sitepulse-async-job--${job.container_class}`
+                            : '';
+                    const listItem = document.createElement('li');
+                    listItem.className = `sitepulse-async-job${containerClass}`;
+
+                    if (job.id) {
+                        listItem.setAttribute('data-sitepulse-async-id', job.id);
+                    }
+
+                    const header = document.createElement('div');
+                    header.className = 'sitepulse-async-job__header';
+
+                    const badge = document.createElement('span');
+                    const badgeClasses = ['sitepulse-status'];
+
+                    if (job.badge_class) {
+                        badgeClasses.push(job.badge_class);
+                    }
+
+                    badge.className = badgeClasses.join(' ');
+                    badge.textContent = job.status_label || '';
+                    header.appendChild(badge);
+
+                    const label = document.createElement('span');
+                    label.className = 'sitepulse-async-job__label';
+                    label.textContent = job.label || '';
+                    header.appendChild(label);
+
+                    listItem.appendChild(header);
+
+                    if (job.message) {
+                        const messageEl = document.createElement('p');
+                        messageEl.className = 'sitepulse-async-job__message';
+                        messageEl.textContent = job.message;
+                        listItem.appendChild(messageEl);
+                    }
+
+                    const shouldShowMeta =
+                        (job.progress_label && job.progress_label.length > 0) ||
+                        (job.relative && job.relative.length > 0) ||
+                        (job.progress_percent && job.progress_percent > 0 && job.progress_percent < 100);
+
+                    if (shouldShowMeta) {
+                        const meta = document.createElement('p');
+                        meta.className = 'sitepulse-async-job__meta';
+
+                        if (job.progress_label) {
+                            const progressSpan = document.createElement('span');
+                            progressSpan.textContent = job.progress_label;
+                            meta.appendChild(progressSpan);
+                        } else if (job.progress_percent && job.progress_percent > 0 && job.progress_percent < 100) {
+                            const progressSpan = document.createElement('span');
+                            progressSpan.textContent = `${job.progress_percent}%`;
+                            meta.appendChild(progressSpan);
+                        }
+
+                        if (job.relative) {
+                            const relativeSpan = document.createElement('span');
+                            relativeSpan.textContent = job.relative;
+                            meta.appendChild(relativeSpan);
+                        }
+
+                        if (meta.childNodes.length) {
+                            listItem.appendChild(meta);
+                        }
+                    }
+
+                    if (Array.isArray(job.logs) && job.logs.length) {
+                        const details = document.createElement('details');
+                        details.className = 'sitepulse-async-job__logs';
+
+                        if (job.is_active) {
+                            details.open = true;
+                        }
+
+                        const summary = document.createElement('summary');
+                        summary.className = 'sitepulse-async-job__logs-summary';
+
+                        const summaryIcon = document.createElement('span');
+                        summaryIcon.className = 'dashicons dashicons-list-view';
+                        summaryIcon.setAttribute('aria-hidden', 'true');
+                        summary.appendChild(summaryIcon);
+
+                        const summaryText = document.createElement('span');
+                        summaryText.className = 'sitepulse-async-job__logs-summary-text';
+                        summaryText.textContent = (adminData.i18n && adminData.i18n.asyncLogSummary) || 'Journal';
+                        summary.appendChild(summaryText);
+
+                        const summarySr = document.createElement('span');
+                        summarySr.className = 'screen-reader-text';
+                        summarySr.textContent = (adminData.i18n && adminData.i18n.asyncLogToggle) || '';
+                        summary.appendChild(summarySr);
+
+                        details.appendChild(summary);
+
+                        const logList = document.createElement('ul');
+                        logList.className = 'sitepulse-async-job__log-list';
+
+                        job.logs.forEach((log) => {
+                            if (!log || !log.message) {
+                                return;
+                            }
+
+                            const logItem = document.createElement('li');
+                            let logClass = 'sitepulse-async-job__log';
+
+                            if (log.level_class) {
+                                logClass += ` sitepulse-async-job__log--${log.level_class}`;
+                            }
+
+                            logItem.className = logClass;
+
+                            if (log.level_label) {
+                                const labelEl = document.createElement('span');
+                                labelEl.className = 'sitepulse-async-job__log-label';
+                                labelEl.textContent = log.level_label;
+                                logItem.appendChild(labelEl);
+                            }
+
+                            const messageEl = document.createElement('span');
+                            messageEl.className = 'sitepulse-async-job__log-message';
+                            messageEl.textContent = log.message;
+                            logItem.appendChild(messageEl);
+
+                            if (log.relative) {
+                                const timeEl = document.createElement('time');
+                                timeEl.className = 'sitepulse-async-job__log-time';
+
+                                if (log.iso) {
+                                    timeEl.setAttribute('datetime', log.iso);
+                                }
+
+                                timeEl.textContent = log.relative;
+                                logItem.appendChild(timeEl);
+                            }
+
+                            logList.appendChild(logItem);
+                        });
+
+                        details.appendChild(logList);
+                        listItem.appendChild(details);
+                    }
+
+                    asyncList.appendChild(listItem);
+
+                    if (job.is_active) {
+                        hasActive = true;
+                    }
+                });
+
+                setCardState(hasActive ? 'busy' : 'idle');
+
+                return true;
+            };
+
+            const pollInterval = Math.max(15000, parseInt(adminData.asyncPollInterval, 10) || 45000);
+
+            const fetchJobs = () => {
+                if (isFetching || document.hidden) {
+                    return;
+                }
+
+                isFetching = true;
+
+                const formData = new window.FormData();
+                formData.append('action', 'sitepulse_async_jobs_overview');
+                formData.append('nonce', adminData.asyncJobsNonce);
+
+                window.fetch(adminData.ajaxUrl, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    body: formData,
+                })
+                    .then((response) => {
+                        if (!response.ok) {
+                            throw new Error('request_failed');
+                        }
+
+                        return response.json();
+                    })
+                    .then((payload) => {
+                        if (!payload || payload.success !== true || !payload.data) {
+                            throw new Error('invalid_payload');
+                        }
+
+                        const jobs = Array.isArray(payload.data.jobs) ? payload.data.jobs : [];
+                        const updated = renderJobs(jobs);
+                        showError('');
+
+                        if (updated && hasFetchedOnce && adminData.i18n && adminData.i18n.asyncUpdated) {
+                            speak(adminData.i18n.asyncUpdated);
+                        }
+
+                        hasFetchedOnce = true;
+                    })
+                    .catch(() => {
+                        const message = (adminData.i18n && adminData.i18n.asyncError) || '';
+                        showError(message);
+
+                        if (message) {
+                            speak(message);
+                        }
+                    })
+                    .finally(() => {
+                        isFetching = false;
+                    });
+            };
+
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) {
+                    fetchJobs();
+                }
+            });
+
+            const pollId = window.setInterval(fetchJobs, pollInterval);
+
+            window.addEventListener('beforeunload', () => {
+                window.clearInterval(pollId);
+            });
+
+            fetchJobs();
+        }
+
         window.addEventListener('hashchange', () => {
             const panel = findPanelFromHash(window.location.hash);
 

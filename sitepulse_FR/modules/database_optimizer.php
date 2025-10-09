@@ -144,37 +144,42 @@ function sitepulse_database_optimizer_page() {
             }
         }
         if ($clean_transients) {
-            $cleaned = null;
-            $generic_success = false;
+            $job_scheduled = false;
 
-            if (function_exists('delete_expired_transients')) {
-                $result = delete_expired_transients();
+            if (function_exists('sitepulse_enqueue_async_job')) {
+                $job = sitepulse_enqueue_async_job(
+                    'transient_cleanup',
+                    [
+                        'max_batches'  => 4,
+                        'prefix_label' => 'expired',
+                    ],
+                    [
+                        'label'        => __('Purge des transients expirés', 'sitepulse'),
+                        'requested_by' => function_exists('get_current_user_id') ? (int) get_current_user_id() : 0,
+                    ]
+                );
 
-                if (is_int($result)) {
-                    $cleaned = max(0, $result);
-                } elseif ($result === false) {
-                    $cleaned = sitepulse_delete_expired_transients_fallback($wpdb);
-                } elseif ($result === true) {
-                    $generic_success = true;
+                if (is_array($job)) {
+                    $job_scheduled = true;
                 }
+            }
+
+            if ($job_scheduled) {
+                printf(
+                    '<div class="notice notice-success is-dismissible"><p>%s</p></div>',
+                    esc_html__(
+                        'La purge des transients expirés est planifiée. Vous pouvez quitter cette page, le traitement continue en arrière-plan.',
+                        'sitepulse'
+                    )
+                );
             } else {
                 $cleaned = sitepulse_delete_expired_transients_fallback($wpdb);
-            }
 
-            if ($cleaned !== null) {
-                $message = sitepulse_get_transients_cleanup_message($cleaned);
-            } else {
-                $message = __('Les transients expirés ont été supprimés.', 'sitepulse');
+                printf(
+                    '<div class="notice notice-success is-dismissible"><p>%s</p></div>',
+                    esc_html(sitepulse_get_transients_cleanup_message($cleaned))
+                );
             }
-
-            if ($generic_success && $cleaned === null) {
-                $message = __('Les transients expirés ont été supprimés.', 'sitepulse');
-            }
-
-            printf(
-                '<div class="notice notice-success is-dismissible"><p>%s</p></div>',
-                esc_html($message)
-            );
         }
     }
     $revisions = $wpdb->get_var("SELECT COUNT(*) FROM $wpdb->posts WHERE post_type = 'revision'");
@@ -282,7 +287,14 @@ function sitepulse_database_optimizer_page() {
       <?php
   }
 
-function sitepulse_delete_expired_transients_fallback($wpdb) {
+function sitepulse_delete_expired_transients_fallback($wpdb, $args = null) {
+    $defaults = array(
+        'max_batches_per_source' => 0,
+        'return_stats'           => false,
+    );
+
+    $args = is_array($args) ? array_merge($defaults, $args) : $defaults;
+
     $cleaned = 0;
     $current_time = time();
     $is_multisite = function_exists('is_multisite') && is_multisite();
@@ -330,14 +342,50 @@ function sitepulse_delete_expired_transients_fallback($wpdb) {
         );
     }
 
+    $sources_stats = array();
+    $has_more = false;
+    $max_batches = isset($args['max_batches_per_source']) ? (int) $args['max_batches_per_source'] : 0;
+    $max_batches = max(0, $max_batches);
+    $return_stats = !empty($args['return_stats']);
+
     foreach ($sources as $source) {
-        $cleaned += sitepulse_cleanup_transient_source($wpdb, $source, $current_time);
+        $scope = isset($source['value_prefix']) && strpos($source['value_prefix'], '_site_transient_') === 0 ? 'site-transient' : 'transient';
+        $result = sitepulse_cleanup_transient_source(
+            $wpdb,
+            $source,
+            $current_time,
+            array(
+                'max_batches'  => $max_batches,
+                'return_stats' => $return_stats,
+            )
+        );
+
+        if ($return_stats && is_array($result)) {
+            $cleaned += isset($result['deleted']) ? (int) $result['deleted'] : 0;
+            $has_more = $has_more || !empty($result['has_more']);
+            $sources_stats[] = array(
+                'scope'    => $scope,
+                'deleted'  => isset($result['deleted']) ? (int) $result['deleted'] : 0,
+                'batches'  => isset($result['batches']) ? (int) $result['batches'] : 0,
+                'has_more' => !empty($result['has_more']),
+            );
+        } else {
+            $cleaned += (int) $result;
+        }
     }
 
-    return $cleaned;
+    if ($return_stats) {
+        return array(
+            'deleted' => $cleaned,
+            'has_more' => $has_more,
+            'sources' => $sources_stats,
+        );
+    }
+
+    return (int) $cleaned;
 }
 
-function sitepulse_cleanup_transient_source($wpdb, $source, $current_time) {
+function sitepulse_cleanup_transient_source($wpdb, $source, $current_time, $args = null) {
     $table = $source['table'];
     $key_column = $source['key_column'];
     $value_column = $source['value_column'];
@@ -354,6 +402,21 @@ function sitepulse_cleanup_transient_source($wpdb, $source, $current_time) {
     $purged = 0;
 
     $expired_timeouts = [];
+    $max_batches = 0;
+    $return_stats = false;
+
+    if (is_array($args)) {
+        if (isset($args['max_batches'])) {
+            $max_batches = max(0, (int) $args['max_batches']);
+        }
+
+        if (!empty($args['return_stats'])) {
+            $return_stats = true;
+        }
+    }
+
+    $processed_batches = 0;
+    $has_more = false;
 
     do {
         $sql = "SELECT {$key_column} FROM {$table} WHERE {$key_column} LIKE %s AND CAST({$value_column} AS UNSIGNED) < %d";
@@ -402,7 +465,21 @@ function sitepulse_cleanup_transient_source($wpdb, $source, $current_time) {
                 $purged++;
             }
         }
-    } while (count($expired_timeouts) === $batch_size);
+        $processed_batches++;
+        $has_more = count($expired_timeouts) === $batch_size;
+
+        if ($max_batches > 0 && $processed_batches >= $max_batches) {
+            break;
+        }
+    } while ($has_more);
+
+    if ($return_stats) {
+        return array(
+            'deleted'  => $purged,
+            'batches'  => $processed_batches,
+            'has_more' => $has_more,
+        );
+    }
 
     return $purged;
 }

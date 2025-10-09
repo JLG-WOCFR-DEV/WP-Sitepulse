@@ -386,7 +386,10 @@ if (!function_exists('sitepulse_delete_transients_by_prefix')) {
         }
 
         $defaults = [
-            'batch_size' => defined('SITEPULSE_TRANSIENT_DELETE_BATCH') ? (int) SITEPULSE_TRANSIENT_DELETE_BATCH : 200,
+            'batch_size'   => defined('SITEPULSE_TRANSIENT_DELETE_BATCH') ? (int) SITEPULSE_TRANSIENT_DELETE_BATCH : 200,
+            'max_batches'  => 0,
+            'return_stats' => false,
+            'skip_logging' => false,
         ];
 
         $args = is_array($args) ? array_merge($defaults, $args) : $defaults;
@@ -402,6 +405,11 @@ if (!function_exists('sitepulse_delete_transients_by_prefix')) {
             $batch_size = 20;
         }
 
+        $max_batches  = isset($args['max_batches']) ? (int) $args['max_batches'] : 0;
+        $max_batches  = max(0, $max_batches);
+        $return_stats = !empty($args['return_stats']);
+        $skip_logging = !empty($args['skip_logging']);
+
         $like             = $wpdb->esc_like($prefix) . '%';
         $value_prefix     = strlen('_transient_');
         $timeout_prefix   = strlen('_transient_timeout_');
@@ -410,6 +418,7 @@ if (!function_exists('sitepulse_delete_transients_by_prefix')) {
         $batches          = 0;
         $object_cache_hit = function_exists('wp_using_ext_object_cache') && wp_using_ext_object_cache();
         $deleted_keys     = [];
+        $has_more         = false;
 
         do {
             $query = $wpdb->prepare(
@@ -423,6 +432,7 @@ if (!function_exists('sitepulse_delete_transients_by_prefix')) {
             $rows = $wpdb->get_results($query, ARRAY_A);
 
             if (empty($rows)) {
+                $has_more = false;
                 break;
             }
 
@@ -476,9 +486,15 @@ if (!function_exists('sitepulse_delete_transients_by_prefix')) {
                     );
                 }
             }
-        } while (count($rows) === $batch_size);
 
-        if ($deleted > 0) {
+            $has_more = count($rows) === $batch_size;
+
+            if ($max_batches > 0 && $batches >= $max_batches) {
+                break;
+            }
+        } while ($has_more);
+
+        if ($deleted > 0 && !$skip_logging && !$has_more) {
             if (function_exists('sitepulse_register_transient_purge_entry')) {
                 sitepulse_register_transient_purge_entry(
                     'transient',
@@ -506,6 +522,16 @@ if (!function_exists('sitepulse_delete_transients_by_prefix')) {
                     ]
                 );
             }
+        }
+
+        if ($return_stats) {
+            return [
+                'deleted'          => $deleted,
+                'unique'           => count($deleted_keys),
+                'batches'          => $batches,
+                'has_more'         => $has_more,
+                'object_cache_hit' => $object_cache_hit,
+            ];
         }
     }
 }
@@ -752,7 +778,7 @@ if (!function_exists('sitepulse_delete_site_transients_by_prefix')) {
      * @param string $prefix Site transient prefix to match.
      * @return void
      */
-    function sitepulse_delete_site_transients_by_prefix($prefix) {
+    function sitepulse_delete_site_transients_by_prefix($prefix, $args = null) {
         if (!function_exists('delete_site_transient')) {
             return;
         }
@@ -763,19 +789,41 @@ if (!function_exists('sitepulse_delete_site_transients_by_prefix')) {
             return;
         }
 
+        $defaults = [
+            'batch_size'   => defined('SITEPULSE_TRANSIENT_DELETE_BATCH') ? (int) SITEPULSE_TRANSIENT_DELETE_BATCH : 200,
+            'max_batches'  => 0,
+            'return_stats' => false,
+            'skip_logging' => false,
+            'state'        => [],
+        ];
+
+        $args = is_array($args) ? array_merge($defaults, $args) : $defaults;
+
+        $batch_size = isset($args['batch_size']) ? (int) $args['batch_size'] : 200;
+        $batch_size = max(20, $batch_size);
+        $max_batches = isset($args['max_batches']) ? (int) $args['max_batches'] : 0;
+        $max_batches = max(0, $max_batches);
+        $return_stats = !empty($args['return_stats']);
+        $skip_logging = !empty($args['skip_logging']);
+        $state = is_array($args['state']) ? $args['state'] : [];
+
         $targets = [];
 
         if (!empty($wpdb->sitemeta)) {
-            $targets[] = [
-                'table'  => $wpdb->sitemeta,
-                'column' => 'meta_key',
+            $targets['sitemeta'] = [
+                'table'      => $wpdb->sitemeta,
+                'column'     => 'meta_key',
+                'id_column'  => 'meta_id',
+                'cache_group'=> 'site-options',
             ];
         }
 
         if (!empty($wpdb->options)) {
-            $targets[] = [
-                'table'  => $wpdb->options,
-                'column' => 'option_name',
+            $targets['options'] = [
+                'table'      => $wpdb->options,
+                'column'     => 'option_name',
+                'id_column'  => 'option_id',
+                'cache_group'=> 'options',
             ];
         }
 
@@ -783,70 +831,111 @@ if (!function_exists('sitepulse_delete_site_transients_by_prefix')) {
             return;
         }
 
-        $like            = $wpdb->esc_like($prefix) . '%';
-        $value_prefix    = strlen('_site_transient_');
-        $timeout_prefix  = strlen('_site_transient_timeout_');
-        $transient_keys  = [];
-
-        foreach ($targets as $target) {
-            $table  = isset($target['table']) ? (string) $target['table'] : '';
-            $column = isset($target['column']) ? (string) $target['column'] : '';
-
-            if ($table === '' || $column === '') {
-                continue;
-            }
-
-            $meta_keys = $wpdb->get_col(
-                $wpdb->prepare(
-                    "SELECT {$column} FROM {$table} WHERE {$column} LIKE %s OR {$column} LIKE %s",
-                    '_site_transient_' . $like,
-                    '_site_transient_timeout_' . $like
-                )
-            );
-
-            if (empty($meta_keys)) {
-                continue;
-            }
-
-            foreach ($meta_keys as $meta_key) {
-                $meta_key = (string) $meta_key;
-
-                if ($meta_key === '') {
-                    continue;
-                }
-
-                if (strpos($meta_key, '_site_transient_timeout_') === 0) {
-                    $transient_key = substr($meta_key, $timeout_prefix);
-                } else {
-                    $transient_key = substr($meta_key, $value_prefix);
-                }
-
-                if ($transient_key !== '') {
-                    $transient_keys[$transient_key] = true;
-                }
-            }
-        }
-
-        if (empty($transient_keys)) {
-            return;
-        }
-
+        $like           = $wpdb->esc_like($prefix) . '%';
+        $value_prefix   = strlen('_site_transient_');
+        $timeout_prefix = strlen('_site_transient_timeout_');
         $object_cache_hit = function_exists('wp_using_ext_object_cache') && wp_using_ext_object_cache();
+        $deleted        = 0;
+        $batches        = 0;
+        $has_more       = false;
+        $next_state     = [];
+        $remaining_batches = $max_batches > 0 ? $max_batches : PHP_INT_MAX;
 
-        foreach (array_keys($transient_keys) as $transient_key) {
-            delete_site_transient($transient_key);
+        foreach ($targets as $key => $target) {
+            $table      = isset($target['table']) ? (string) $target['table'] : '';
+            $column     = isset($target['column']) ? (string) $target['column'] : '';
+            $id_column  = isset($target['id_column']) ? (string) $target['id_column'] : '';
 
-            if ($object_cache_hit && function_exists('wp_cache_delete')) {
-                wp_cache_delete($transient_key, 'site-transient');
-                wp_cache_delete($transient_key, 'site-transient_timeout');
-                wp_cache_delete($transient_key, 'transient');
-                wp_cache_delete($transient_key, 'transient_timeout');
+            if ($table === '' || $column === '' || $id_column === '') {
+                $next_state[$key] = ['last_id' => 0, 'has_more' => false];
+                continue;
+            }
+
+            $last_id = isset($state[$key]['last_id']) ? (int) $state[$key]['last_id'] : 0;
+            $target_has_more = false;
+
+            do {
+                $query = $wpdb->prepare(
+                    "SELECT {$id_column} AS id, {$column} AS name FROM {$table} WHERE {$id_column} > %d AND ({$column} LIKE %s OR {$column} LIKE %s) ORDER BY {$id_column} ASC LIMIT %d",
+                    $last_id,
+                    '_site_transient_' . $like,
+                    '_site_transient_timeout_' . $like,
+                    $batch_size
+                );
+
+                $rows = $wpdb->get_results($query, ARRAY_A);
+
+                if (empty($rows)) {
+                    $target_has_more = false;
+                    break;
+                }
+
+                $batch_keys = [];
+
+                foreach ($rows as $row) {
+                    $name = isset($row['name']) ? (string) $row['name'] : '';
+                    $last_id = isset($row['id']) ? (int) $row['id'] : $last_id;
+
+                    if ($name === '') {
+                        continue;
+                    }
+
+                    if (strpos($name, '_site_transient_timeout_') === 0) {
+                        $transient_key = substr($name, $timeout_prefix);
+                    } else {
+                        $transient_key = substr($name, $value_prefix);
+                    }
+
+                    if ($transient_key !== '') {
+                        $batch_keys[$transient_key] = true;
+                    }
+                }
+
+                if (!empty($batch_keys)) {
+                    foreach (array_keys($batch_keys) as $transient_key) {
+                        delete_site_transient($transient_key);
+
+                        if ($object_cache_hit && function_exists('wp_cache_delete')) {
+                            wp_cache_delete($transient_key, 'site-transient');
+                            wp_cache_delete($transient_key, 'site-transient_timeout');
+                            wp_cache_delete($transient_key, 'transient');
+                            wp_cache_delete($transient_key, 'transient_timeout');
+                        }
+                    }
+
+                    $deleted += count($batch_keys);
+                    ++$batches;
+
+                    if ($remaining_batches !== PHP_INT_MAX) {
+                        --$remaining_batches;
+                    }
+
+                    if ($remaining_batches === 0) {
+                        $target_has_more = true;
+                        break;
+                    }
+                }
+
+                $target_has_more = $target_has_more || count($rows) === $batch_size;
+
+                if ($remaining_batches === 0) {
+                    break;
+                }
+            } while ($target_has_more && $remaining_batches > 0);
+
+            $next_state[$key] = [
+                'last_id'  => $last_id,
+                'has_more' => $target_has_more,
+            ];
+
+            $has_more = $has_more || $target_has_more;
+
+            if ($remaining_batches === 0) {
+                break;
             }
         }
 
-        $deleted = count($transient_keys);
-
-        if ($deleted > 0) {
+        if ($deleted > 0 && !$skip_logging && !$has_more) {
             if (function_exists('sitepulse_register_transient_purge_entry')) {
                 sitepulse_register_transient_purge_entry(
                     'site-transient',
@@ -854,7 +943,7 @@ if (!function_exists('sitepulse_delete_site_transients_by_prefix')) {
                     [
                         'deleted'      => $deleted,
                         'unique'       => $deleted,
-                        'batches'      => 1,
+                        'batches'      => $batches,
                         'object_cache' => $object_cache_hit,
                     ]
                 );
@@ -866,8 +955,8 @@ if (!function_exists('sitepulse_delete_site_transients_by_prefix')) {
                     $prefix,
                     [
                         'deleted'          => $deleted,
-                        'unique_keys'      => array_keys($transient_keys),
-                        'batches'          => 1,
+                        'unique'           => $deleted,
+                        'batches'          => $batches,
                         'object_cache_hit' => $object_cache_hit,
                         'scope'            => 'site-transient',
                         'already_logged'   => true,
@@ -875,6 +964,1039 @@ if (!function_exists('sitepulse_delete_site_transients_by_prefix')) {
                 );
             }
         }
+
+        if ($return_stats) {
+            return [
+                'deleted'          => $deleted,
+                'batches'          => $batches,
+                'has_more'         => $has_more,
+                'object_cache_hit' => $object_cache_hit,
+                'state'            => $next_state,
+            ];
+        }
+    }
+}
+
+if (!function_exists('sitepulse_async_format_number')) {
+    /**
+     * Formats integers using WordPress localisation when available.
+     *
+     * @param int $value Raw integer value.
+     *
+     * @return string
+     */
+    function sitepulse_async_format_number($value) {
+        if (function_exists('number_format_i18n')) {
+            return number_format_i18n((int) $value);
+        }
+
+        return number_format((int) $value);
+    }
+}
+
+if (!function_exists('sitepulse_get_async_jobs')) {
+    /**
+     * Retrieves the asynchronous job queue.
+     *
+     * @return array<string,array<string,mixed>>
+     */
+    function sitepulse_get_async_jobs() {
+        if (!function_exists('get_option')) {
+            return [];
+        }
+
+        $raw_jobs = get_option(SITEPULSE_OPTION_ASYNC_JOBS, []);
+
+        if (!is_array($raw_jobs)) {
+            return [];
+        }
+
+        $jobs = [];
+
+        foreach ($raw_jobs as $job) {
+            if (!is_array($job) || empty($job['id'])) {
+                continue;
+            }
+
+            $jobs[(string) $job['id']] = $job;
+        }
+
+        return $jobs;
+    }
+}
+
+if (!function_exists('sitepulse_save_async_jobs')) {
+    /**
+     * Persists the asynchronous job queue.
+     *
+     * @param array<string,array<string,mixed>> $jobs Job registry keyed by job identifier.
+     *
+     * @return void
+     */
+    function sitepulse_save_async_jobs($jobs) {
+        if (!function_exists('update_option')) {
+            return;
+        }
+
+        if (!is_array($jobs)) {
+            $jobs = [];
+        }
+
+        update_option(SITEPULSE_OPTION_ASYNC_JOBS, $jobs, false);
+    }
+}
+
+if (!function_exists('sitepulse_async_job_add_log')) {
+    /**
+     * Appends a log entry to an asynchronous job payload.
+     *
+     * @param array<string,mixed> &$job    Mutable job payload.
+     * @param string              $message Message to append.
+     * @param string              $level   Optional level (info, success, warning, error).
+     *
+     * @return void
+     */
+    function sitepulse_async_job_add_log(&$job, $message, $level = 'info') {
+        if (!is_array($job)) {
+            return;
+        }
+
+        if (!isset($job['logs']) || !is_array($job['logs'])) {
+            $job['logs'] = [];
+        }
+
+        $allowed_levels = ['info', 'success', 'warning', 'error'];
+        $normalized_level = is_string($level) ? strtolower(trim($level)) : 'info';
+
+        if (!in_array($normalized_level, $allowed_levels, true)) {
+            $normalized_level = 'info';
+        }
+
+        $timestamp = function_exists('current_time') ? current_time('timestamp') : time();
+
+        $job['logs'][] = [
+            'timestamp' => $timestamp,
+            'message'   => is_string($message) ? $message : (string) $message,
+            'level'     => $normalized_level,
+        ];
+
+        if (count($job['logs']) > 25) {
+            $job['logs'] = array_slice($job['logs'], -25);
+        }
+    }
+}
+
+if (!function_exists('sitepulse_async_build_relative_label')) {
+    /**
+     * Formats a relative timestamp for async job summaries.
+     *
+     * @param int    $timestamp Unix timestamp.
+     * @param string $context   Either "updated" or "log".
+     *
+     * @return string
+     */
+    function sitepulse_async_build_relative_label($timestamp, $context = 'updated') {
+        $timestamp = (int) $timestamp;
+
+        if ($timestamp <= 0 || !function_exists('human_time_diff')) {
+            return '';
+        }
+
+        $reference = function_exists('current_time') ? current_time('timestamp') : time();
+        $diff = human_time_diff($timestamp, $reference);
+
+        if ($diff === '') {
+            return '';
+        }
+
+        if ($context === 'log') {
+            return sprintf(__('Il y a %s', 'sitepulse'), $diff);
+        }
+
+        return sprintf(__('Mis à jour il y a %s', 'sitepulse'), $diff);
+    }
+}
+
+if (!function_exists('sitepulse_prepare_async_jobs_overview')) {
+    /**
+     * Normalizes async job payloads for UI consumption.
+     *
+     * @param array<string,array<string,mixed>>|null $jobs Optional raw jobs payload.
+     * @param array<string,mixed>|null               $args Optional arguments (limit, include_logs).
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    function sitepulse_prepare_async_jobs_overview($jobs = null, $args = null) {
+        if ($jobs === null) {
+            $jobs = sitepulse_get_async_jobs();
+        }
+
+        if (!is_array($jobs)) {
+            $jobs = [];
+        }
+
+        $defaults = [
+            'limit'        => 4,
+            'include_logs' => true,
+        ];
+
+        $args = is_array($args) ? array_merge($defaults, $args) : $defaults;
+
+        $limit = isset($args['limit']) ? (int) $args['limit'] : 4;
+        $include_logs = !empty($args['include_logs']);
+
+        if (function_exists('apply_filters')) {
+            $limit = (int) apply_filters('sitepulse_async_overview_limit', $limit, $jobs, $args);
+        }
+
+        if ($limit < 0) {
+            $limit = 0;
+        }
+
+        $prepared = [];
+
+        foreach ($jobs as $job) {
+            if (!is_array($job) || empty($job['type'])) {
+                continue;
+            }
+
+            $job_type = (string) $job['type'];
+
+            if (!in_array($job_type, ['transient_cleanup', 'plugin_reset'], true)) {
+                continue;
+            }
+
+            $status = isset($job['status']) ? (string) $job['status'] : 'queued';
+            $updated_at = isset($job['updated_at']) ? (int) $job['updated_at'] : 0;
+            $progress = isset($job['progress']) ? (float) $job['progress'] : 0.0;
+            $progress = max(0.0, min(1.0, $progress));
+            $progress_percent = (int) round($progress * 100);
+
+            switch ($job_type) {
+                case 'plugin_reset':
+                    $label = __('Réinitialisation de SitePulse', 'sitepulse');
+                    break;
+                case 'transient_cleanup':
+                default:
+                    $label = __('Purge des transients expirés', 'sitepulse');
+                    break;
+            }
+
+            switch ($status) {
+                case 'completed':
+                    $status_label = __('Terminé', 'sitepulse');
+                    $badge_class = 'is-success';
+                    $container_class = 'is-success';
+                    break;
+                case 'failed':
+                    $status_label = __('Échec', 'sitepulse');
+                    $badge_class = 'is-critical';
+                    $container_class = 'is-error';
+                    break;
+                case 'running':
+                    $status_label = __('En cours', 'sitepulse');
+                    $badge_class = 'is-active';
+                    $container_class = 'is-running';
+                    break;
+                case 'queued':
+                default:
+                    $status_label = __('En attente', 'sitepulse');
+                    $badge_class = 'is-warning';
+                    $container_class = 'is-pending';
+                    break;
+            }
+
+            $message = isset($job['message']) ? (string) $job['message'] : '';
+
+            if ($message !== '') {
+                $message = function_exists('wp_strip_all_tags')
+                    ? wp_strip_all_tags($message)
+                    : strip_tags($message);
+            }
+
+            $progress_label = '';
+
+            if ($progress_percent > 0 && $progress_percent < 100) {
+                $display_percent = function_exists('number_format_i18n')
+                    ? number_format_i18n($progress_percent)
+                    : number_format($progress_percent);
+
+                $progress_label = sprintf(__('Progression : %s%%', 'sitepulse'), $display_percent);
+            }
+
+            $logs = [];
+
+            if ($include_logs && isset($job['logs']) && is_array($job['logs'])) {
+                $log_entries = array_slice($job['logs'], -5);
+
+                usort(
+                    $log_entries,
+                    static function ($a, $b) {
+                        $a_time = isset($a['timestamp']) ? (int) $a['timestamp'] : 0;
+                        $b_time = isset($b['timestamp']) ? (int) $b['timestamp'] : 0;
+
+                        return $b_time <=> $a_time;
+                    }
+                );
+
+                foreach ($log_entries as $log_entry) {
+                    if (!is_array($log_entry)) {
+                        continue;
+                    }
+
+                    $log_message = isset($log_entry['message']) ? (string) $log_entry['message'] : '';
+
+                    if ($log_message === '') {
+                        continue;
+                    }
+
+                    $log_message = function_exists('wp_strip_all_tags')
+                        ? wp_strip_all_tags($log_message)
+                        : strip_tags($log_message);
+
+                    $log_timestamp = isset($log_entry['timestamp']) ? (int) $log_entry['timestamp'] : 0;
+                    $log_level = isset($log_entry['level']) ? (string) $log_entry['level'] : 'info';
+
+                    switch ($log_level) {
+                        case 'success':
+                            $log_label = __('Succès', 'sitepulse');
+                            $log_class = 'is-success';
+                            break;
+                        case 'warning':
+                            $log_label = __('Avertissement', 'sitepulse');
+                            $log_class = 'is-warning';
+                            break;
+                        case 'error':
+                            $log_label = __('Erreur', 'sitepulse');
+                            $log_class = 'is-error';
+                            break;
+                        case 'info':
+                        default:
+                            $log_label = __('Information', 'sitepulse');
+                            $log_class = 'is-info';
+                            break;
+                    }
+
+                    $logs[] = [
+                        'message'     => $log_message,
+                        'level'       => $log_level,
+                        'level_label' => $log_label,
+                        'level_class' => $log_class,
+                        'timestamp'   => $log_timestamp,
+                        'relative'    => sitepulse_async_build_relative_label($log_timestamp, 'log'),
+                        'iso'         => $log_timestamp > 0 && function_exists('date_i18n') ? date_i18n('c', $log_timestamp) : '',
+                    ];
+                }
+            }
+
+            $prepared[] = [
+                'id'               => isset($job['id']) ? (string) $job['id'] : uniqid('job_', true),
+                'type'             => $job_type,
+                'label'            => $label,
+                'status'           => $status,
+                'status_label'     => $status_label,
+                'badge_class'      => $badge_class,
+                'container_class'  => $container_class,
+                'message'          => $message,
+                'relative'         => sitepulse_async_build_relative_label($updated_at, 'updated'),
+                'updated_at'       => $updated_at,
+                'progress'         => $progress,
+                'progress_percent' => $progress_percent,
+                'progress_label'   => $progress_label,
+                'logs'             => $logs,
+                'is_active'        => in_array($status, ['queued', 'running'], true),
+            ];
+        }
+
+        if (!empty($prepared)) {
+            usort(
+                $prepared,
+                static function ($a, $b) {
+                    return ($b['updated_at'] <=> $a['updated_at']);
+                }
+            );
+        }
+
+        if ($limit > 0 && count($prepared) > $limit) {
+            $prepared = array_slice($prepared, 0, $limit);
+        }
+
+        return $prepared;
+    }
+}
+
+if (!function_exists('sitepulse_schedule_async_runner')) {
+    /**
+     * Schedules the asynchronous job runner.
+     *
+     * @param int $delay Number of seconds before the runner executes.
+     *
+     * @return void
+     */
+    function sitepulse_schedule_async_runner($delay = 0) {
+        if (!function_exists('wp_schedule_single_event') || !function_exists('wp_next_scheduled')) {
+            return;
+        }
+
+        $hook = defined('SITEPULSE_CRON_ASYNC_JOB_RUNNER') ? SITEPULSE_CRON_ASYNC_JOB_RUNNER : 'sitepulse_run_async_jobs';
+        $timestamp = time() + max(0, (int) $delay);
+
+        if (wp_next_scheduled($hook)) {
+            return;
+        }
+
+        $scheduled = wp_schedule_single_event($timestamp, $hook);
+
+        if ($scheduled && function_exists('spawn_cron')) {
+            spawn_cron($timestamp);
+        }
+    }
+}
+
+if (!function_exists('sitepulse_enqueue_async_job')) {
+    /**
+     * Queues a new asynchronous job.
+     *
+     * @param string               $type     Job type identifier.
+     * @param array<string,mixed>  $payload  Optional payload.
+     * @param array<string,mixed>  $metadata Optional metadata such as label or requesting user.
+     *
+     * @return array<string,mixed>|false
+     */
+    function sitepulse_enqueue_async_job($type, $payload = [], $metadata = []) {
+        if (!is_string($type) || $type === '') {
+            return false;
+        }
+
+        $jobs = sitepulse_get_async_jobs();
+
+        $job_id = function_exists('wp_generate_uuid4') ? wp_generate_uuid4() : uniqid('sitepulse_job_', true);
+        $timestamp = function_exists('current_time') ? current_time('timestamp') : time();
+
+        $job = [
+            'id'         => (string) $job_id,
+            'type'       => $type,
+            'status'     => 'queued',
+            'created_at' => $timestamp,
+            'updated_at' => $timestamp,
+            'progress'   => 0,
+            'message'    => __('En file d’attente pour exécution.', 'sitepulse'),
+            'payload'    => is_array($payload) ? $payload : [],
+            'logs'       => [],
+            'meta'       => [
+                'label'        => isset($metadata['label']) ? (string) $metadata['label'] : '',
+                'requested_by' => isset($metadata['requested_by']) ? (int) $metadata['requested_by'] : 0,
+            ],
+        ];
+
+        sitepulse_async_job_add_log(
+            $job,
+            __('Tâche planifiée et en attente d’exécution.', 'sitepulse'),
+            'info'
+        );
+
+        $jobs[$job['id']] = $job;
+
+        sitepulse_save_async_jobs($jobs);
+        sitepulse_schedule_async_runner();
+
+        return $job;
+    }
+}
+
+if (!function_exists('sitepulse_process_async_jobs')) {
+    /**
+     * Cron callback responsible for processing queued jobs.
+     *
+     * @return void
+     */
+    function sitepulse_process_async_jobs() {
+        $lock_key = defined('SITEPULSE_TRANSIENT_ASYNC_LOCK') ? SITEPULSE_TRANSIENT_ASYNC_LOCK : 'sitepulse_async_jobs_lock';
+
+        if (function_exists('get_transient') && get_transient($lock_key)) {
+            return;
+        }
+
+        if (function_exists('set_transient')) {
+            set_transient($lock_key, 1, MINUTE_IN_SECONDS);
+        }
+
+        $jobs = sitepulse_get_async_jobs();
+        $updated = false;
+        $current_time = function_exists('current_time') ? current_time('timestamp') : time();
+
+        foreach ($jobs as $job_id => $job) {
+            $status = isset($job['status']) ? $job['status'] : 'queued';
+
+            if ($status !== 'queued' && $status !== 'running') {
+                continue;
+            }
+
+            if (!is_array($job)) {
+                continue;
+            }
+
+            $job['status'] = 'running';
+            $job['updated_at'] = $current_time;
+
+            if ($status === 'queued') {
+                sitepulse_async_job_add_log(
+                    $job,
+                    __('Tâche en cours d’exécution.', 'sitepulse'),
+                    'info'
+                );
+            }
+
+            $result = sitepulse_run_async_job($job);
+
+            if (is_array($result)) {
+                $jobs[$job_id] = $result;
+                $updated = true;
+            }
+
+            // Process a single job per cron invocation to avoid timeouts.
+            break;
+        }
+
+        if ($updated) {
+            sitepulse_save_async_jobs($jobs);
+        }
+
+        $has_pending = false;
+
+        foreach ($jobs as $job_state) {
+            $job_status = isset($job_state['status']) ? $job_state['status'] : '';
+
+            if ($job_status === 'queued' || $job_status === 'running') {
+                $has_pending = true;
+                break;
+            }
+        }
+
+        if ($has_pending) {
+            sitepulse_schedule_async_runner(30);
+        }
+
+        if (function_exists('delete_transient')) {
+            delete_transient($lock_key);
+        }
+    }
+
+    if (function_exists('add_action')) {
+        $hook = defined('SITEPULSE_CRON_ASYNC_JOB_RUNNER') ? SITEPULSE_CRON_ASYNC_JOB_RUNNER : 'sitepulse_run_async_jobs';
+        add_action($hook, 'sitepulse_process_async_jobs');
+    }
+}
+
+if (!function_exists('sitepulse_bootstrap_async_runner')) {
+    /**
+     * Ensures async jobs progress when WP-Cron is disabled.
+     *
+     * @return void
+     */
+    function sitepulse_bootstrap_async_runner() {
+        static $processing = false;
+
+        if ($processing) {
+            return;
+        }
+
+        if (!function_exists('sitepulse_get_async_jobs')) {
+            return;
+        }
+
+        $jobs = sitepulse_get_async_jobs();
+
+        if (empty($jobs)) {
+            return;
+        }
+
+        $has_pending = false;
+
+        foreach ($jobs as $job) {
+            if (!is_array($job)) {
+                continue;
+            }
+
+            $status = isset($job['status']) ? (string) $job['status'] : '';
+
+            if ($status === 'queued' || $status === 'running') {
+                $has_pending = true;
+                break;
+            }
+        }
+
+        if (!$has_pending) {
+            return;
+        }
+
+        if (function_exists('wp_next_scheduled')) {
+            $hook = defined('SITEPULSE_CRON_ASYNC_JOB_RUNNER') ? SITEPULSE_CRON_ASYNC_JOB_RUNNER : 'sitepulse_run_async_jobs';
+
+            if (wp_next_scheduled($hook)) {
+                return;
+            }
+        }
+
+        if (!function_exists('sitepulse_process_async_jobs')) {
+            return;
+        }
+
+        $processing = true;
+        sitepulse_process_async_jobs();
+        $processing = false;
+    }
+
+    if (function_exists('add_action')) {
+        add_action('admin_init', 'sitepulse_bootstrap_async_runner', 5);
+    }
+}
+
+if (!function_exists('sitepulse_run_async_job')) {
+    /**
+     * Dispatches the execution of an asynchronous job based on its type.
+     *
+     * @param array<string,mixed> $job Job payload.
+     *
+     * @return array<string,mixed>
+     */
+    function sitepulse_run_async_job($job) {
+        if (!is_array($job) || empty($job['type'])) {
+            return $job;
+        }
+
+        switch ($job['type']) {
+            case 'transient_cleanup':
+                return sitepulse_async_job_handle_transient_cleanup($job);
+            case 'plugin_reset':
+                return sitepulse_async_job_handle_plugin_reset($job);
+            default:
+                $job['status'] = 'failed';
+                $job['progress'] = 1;
+                $job['message'] = __('Tâche inconnue : impossible de poursuivre.', 'sitepulse');
+                sitepulse_async_job_add_log($job, sprintf(__('Type de tâche inconnu : %s', 'sitepulse'), (string) $job['type']), 'error');
+
+                return $job;
+        }
+    }
+}
+
+if (!function_exists('sitepulse_async_job_handle_transient_cleanup')) {
+    /**
+     * Processes the background cleanup of expired transients.
+     *
+     * @param array<string,mixed> $job Job payload.
+     *
+     * @return array<string,mixed>
+     */
+    function sitepulse_async_job_handle_transient_cleanup($job) {
+        global $wpdb;
+
+        if (!($wpdb instanceof wpdb)) {
+            $job['status'] = 'failed';
+            $job['progress'] = 1;
+            $job['message'] = __('Base de données inaccessible : la purge des transients a échoué.', 'sitepulse');
+            sitepulse_async_job_add_log($job, __('Impossible d’exécuter la purge sans accès à $wpdb.', 'sitepulse'), 'error');
+
+            return $job;
+        }
+
+        $payload = isset($job['payload']) && is_array($job['payload']) ? $job['payload'] : [];
+        $payload_defaults = [
+            'deleted'      => 0,
+            'runs'         => 0,
+            'sources'      => [],
+            'max_batches'  => 3,
+            'prefix_label' => 'expired',
+        ];
+        $payload = array_merge($payload_defaults, $payload);
+
+        $payload['runs'] = (int) $payload['runs'] + 1;
+        $max_batches = (int) $payload['max_batches'];
+
+        if ($max_batches <= 0) {
+            $max_batches = 3;
+        }
+
+        $result = sitepulse_delete_expired_transients_fallback($wpdb, [
+            'max_batches_per_source' => $max_batches,
+            'return_stats'           => true,
+        ]);
+
+        $deleted_this_run = isset($result['deleted']) ? (int) $result['deleted'] : 0;
+        $payload['deleted'] += $deleted_this_run;
+
+        if (!empty($result['sources']) && is_array($result['sources'])) {
+            foreach ($result['sources'] as $source_stats) {
+                $scope = isset($source_stats['scope']) ? (string) $source_stats['scope'] : 'transient';
+
+                if (!isset($payload['sources'][$scope])) {
+                    $payload['sources'][$scope] = [
+                        'deleted' => 0,
+                        'batches' => 0,
+                    ];
+                }
+
+                $payload['sources'][$scope]['deleted'] += isset($source_stats['deleted']) ? (int) $source_stats['deleted'] : 0;
+                $payload['sources'][$scope]['batches'] += isset($source_stats['batches']) ? (int) $source_stats['batches'] : 0;
+            }
+        }
+
+        $job['payload'] = $payload;
+
+        if (!empty($result['has_more'])) {
+            $job['status'] = 'running';
+            $job['progress'] = min(0.95, 0.2 + ($payload['runs'] * 0.1));
+            $job['message'] = sprintf(
+                __('Purge en arrière-plan… %s transients supprimés.', 'sitepulse'),
+                sitepulse_async_format_number($payload['deleted'])
+            );
+            sitepulse_async_job_add_log(
+                $job,
+                sprintf(__('Lot traité : %s suppressions supplémentaires.', 'sitepulse'), sitepulse_async_format_number($deleted_this_run))
+            );
+
+            return $job;
+        }
+
+        $job['status'] = 'completed';
+        $job['progress'] = 1;
+        $job['message'] = sprintf(
+            __('Purge terminée : %s transients supprimés.', 'sitepulse'),
+            sitepulse_async_format_number($payload['deleted'])
+        );
+        sitepulse_async_job_add_log(
+            $job,
+            sprintf(__('Purge finalisée (%s transients).', 'sitepulse'), sitepulse_async_format_number($payload['deleted'])),
+            'success'
+        );
+
+        $object_cache_hit = function_exists('wp_using_ext_object_cache') && wp_using_ext_object_cache();
+
+        if (!empty($payload['sources'])) {
+            foreach ($payload['sources'] as $scope => $stats) {
+                $deleted_scope = isset($stats['deleted']) ? (int) $stats['deleted'] : 0;
+                $batches_scope = isset($stats['batches']) ? (int) $stats['batches'] : 0;
+
+                if ($deleted_scope <= 0) {
+                    continue;
+                }
+
+                if (function_exists('do_action')) {
+                    $prefix = $scope === 'site-transient' ? $payload['prefix_label'] . '-network' : $payload['prefix_label'];
+
+                    do_action(
+                        'sitepulse_transient_deletion_completed',
+                        $prefix,
+                        [
+                            'deleted'          => $deleted_scope,
+                            'unique'           => $deleted_scope,
+                            'batches'          => $batches_scope,
+                            'object_cache_hit' => $object_cache_hit,
+                            'scope'            => $scope,
+                        ]
+                    );
+                }
+            }
+        }
+
+        return $job;
+    }
+}
+
+if (!function_exists('sitepulse_async_job_handle_plugin_reset')) {
+    /**
+     * Executes the plugin reset routine asynchronously.
+     *
+     * @param array<string,mixed> $job Job payload.
+     *
+     * @return array<string,mixed>
+     */
+    function sitepulse_async_job_handle_plugin_reset($job) {
+        $payload = isset($job['payload']) && is_array($job['payload']) ? $job['payload'] : [];
+
+        $defaults = [
+            'options'            => [],
+            'option_index'       => 0,
+            'transients'         => [],
+            'transient_index'    => 0,
+            'prefixes'           => [],
+            'prefix_index'       => 0,
+            'prefix_summary'     => [],
+            'prefix_state'       => [],
+            'log_path'           => '',
+            'log_deleted'        => false,
+            'log_error'          => '',
+            'cron_hooks'         => [],
+            'cron_index'         => 0,
+            'reactivated'        => false,
+        ];
+
+        $payload = array_merge($defaults, $payload);
+        $job['payload'] = $payload;
+
+        $step_message = '';
+
+        // Step 1: delete stored options in batches.
+        $options = is_array($payload['options']) ? $payload['options'] : [];
+        $option_count = count($options);
+
+        if ($payload['option_index'] < $option_count) {
+            $batch = 0;
+            $limit = 20;
+
+            while ($payload['option_index'] < $option_count && $batch < $limit) {
+                $option_key = $options[$payload['option_index']];
+
+                if (is_string($option_key) && $option_key !== '' && function_exists('delete_option')) {
+                    delete_option($option_key);
+                }
+
+                $payload['option_index']++;
+                $batch++;
+            }
+
+            $job['payload'] = $payload;
+            $job['status'] = 'running';
+            $job['progress'] = min(0.2, ($payload['option_index'] / max(1, $option_count)) * 0.2);
+            $step_message = sprintf(
+                __('Réinitialisation : suppression des options (%1$s sur %2$s).', 'sitepulse'),
+                sitepulse_async_format_number($payload['option_index']),
+                sitepulse_async_format_number($option_count)
+            );
+            $job['message'] = $step_message;
+
+            return $job;
+        }
+
+        // Step 2: delete named transients.
+        $transients = is_array($payload['transients']) ? $payload['transients'] : [];
+        $transient_count = count($transients);
+
+        if ($payload['transient_index'] < $transient_count) {
+            $batch = 0;
+            $limit = 25;
+
+            while ($payload['transient_index'] < $transient_count && $batch < $limit) {
+                $transient_key = $transients[$payload['transient_index']];
+
+                if (is_string($transient_key) && $transient_key !== '') {
+                    if (function_exists('delete_transient')) {
+                        delete_transient($transient_key);
+                    }
+
+                    if (function_exists('delete_site_transient')) {
+                        delete_site_transient($transient_key);
+                    }
+                }
+
+                $payload['transient_index']++;
+                $batch++;
+            }
+
+            $job['payload'] = $payload;
+            $job['status'] = 'running';
+            $job['progress'] = 0.2 + min(0.2, ($payload['transient_index'] / max(1, $transient_count)) * 0.2);
+            $job['message'] = sprintf(
+                __('Réinitialisation : nettoyage des verrous (%1$s sur %2$s).', 'sitepulse'),
+                sitepulse_async_format_number($payload['transient_index']),
+                sitepulse_async_format_number($transient_count)
+            );
+
+            return $job;
+        }
+
+        // Step 3: purge transient prefixes progressively.
+        $prefixes = is_array($payload['prefixes']) ? array_values($payload['prefixes']) : [];
+        $prefix_count = count($prefixes);
+
+        if ($payload['prefix_index'] < $prefix_count) {
+            $current_prefix = $prefixes[$payload['prefix_index']];
+            $current_prefix = is_string($current_prefix) ? $current_prefix : '';
+
+            if ($current_prefix !== '') {
+                $prefix_stats = isset($payload['prefix_summary'][$current_prefix]) && is_array($payload['prefix_summary'][$current_prefix])
+                    ? $payload['prefix_summary'][$current_prefix]
+                    : ['transient' => 0, 'site_transient' => 0, 'batches' => 0];
+
+                $transient_result = sitepulse_delete_transients_by_prefix($current_prefix, [
+                    'max_batches'  => 2,
+                    'return_stats' => true,
+                    'skip_logging' => true,
+                ]);
+
+                if (is_array($transient_result)) {
+                    $prefix_stats['transient'] += isset($transient_result['deleted']) ? (int) $transient_result['deleted'] : 0;
+                    $prefix_stats['batches'] += isset($transient_result['batches']) ? (int) $transient_result['batches'] : 0;
+
+                    if (!empty($transient_result['has_more'])) {
+                        $payload['prefix_summary'][$current_prefix] = $prefix_stats;
+                        $job['payload'] = $payload;
+                        $job['status'] = 'running';
+                        $job['progress'] = 0.4 + min(0.3, ($payload['prefix_index'] / max(1, $prefix_count)) * 0.3);
+                        $job['message'] = sprintf(
+                            __('Réinitialisation : purge du préfixe %s en cours…', 'sitepulse'),
+                            sanitize_text_field($current_prefix)
+                        );
+
+                        return $job;
+                    }
+                }
+
+                $site_state = isset($payload['prefix_state'][$current_prefix]) ? $payload['prefix_state'][$current_prefix] : [];
+                $site_result = sitepulse_delete_site_transients_by_prefix($current_prefix, [
+                    'max_batches'  => 1,
+                    'return_stats' => true,
+                    'skip_logging' => true,
+                    'state'        => $site_state,
+                ]);
+
+                if (is_array($site_result)) {
+                    $prefix_stats['site_transient'] += isset($site_result['deleted']) ? (int) $site_result['deleted'] : 0;
+                    $prefix_stats['batches'] += isset($site_result['batches']) ? (int) $site_result['batches'] : 0;
+                    $payload['prefix_state'][$current_prefix] = isset($site_result['state']) ? $site_result['state'] : $site_state;
+
+                    if (!empty($site_result['has_more'])) {
+                        $payload['prefix_summary'][$current_prefix] = $prefix_stats;
+                        $job['payload'] = $payload;
+                        $job['status'] = 'running';
+                        $job['progress'] = 0.4 + min(0.3, ($payload['prefix_index'] / max(1, $prefix_count)) * 0.3);
+                        $job['message'] = sprintf(
+                            __('Réinitialisation : purge réseau du préfixe %s…', 'sitepulse'),
+                            sanitize_text_field($current_prefix)
+                        );
+
+                        return $job;
+                    }
+                }
+
+                $payload['prefix_summary'][$current_prefix] = $prefix_stats;
+
+                if (function_exists('do_action')) {
+                    $total_deleted = (int) $prefix_stats['transient'] + (int) $prefix_stats['site_transient'];
+
+                    if ($total_deleted > 0) {
+                        do_action(
+                            'sitepulse_transient_deletion_completed',
+                            $current_prefix,
+                            [
+                                'deleted'          => $total_deleted,
+                                'unique'           => $total_deleted,
+                                'batches'          => (int) $prefix_stats['batches'],
+                                'object_cache_hit' => function_exists('wp_using_ext_object_cache') && wp_using_ext_object_cache(),
+                                'scope'            => 'transient',
+                                'already_logged'   => false,
+                            ]
+                        );
+                    }
+                }
+            }
+
+            $payload['prefix_index']++;
+            $job['payload'] = $payload;
+            $job['status'] = 'running';
+            $job['progress'] = 0.4 + min(0.3, ($payload['prefix_index'] / max(1, $prefix_count)) * 0.3);
+            $job['message'] = sprintf(
+                __('Réinitialisation : %1$s/%2$s préfixes purgés.', 'sitepulse'),
+                sitepulse_async_format_number($payload['prefix_index']),
+                sitepulse_async_format_number($prefix_count)
+            );
+
+            return $job;
+        }
+
+        // Step 4: remove debug log file.
+        if (!$payload['log_deleted'] && $payload['log_path'] !== '') {
+            $log_path = $payload['log_path'];
+            $deleted  = false;
+            $error    = '';
+
+            if (function_exists('wp_delete_file')) {
+                $result = wp_delete_file($log_path);
+
+                if ($result === false) {
+                    $error = 'wp_delete_file returned false.';
+                } elseif ($result instanceof WP_Error) {
+                    $error = $result->get_error_message();
+                }
+
+                $deleted = file_exists($log_path) ? false : true;
+            }
+
+            if (!$deleted && file_exists($log_path)) {
+                $deleted = @unlink($log_path);
+
+                if (!$deleted && $error === '') {
+                    $error = 'unlink failed.';
+                }
+            }
+
+            $payload['log_deleted'] = $deleted;
+            $payload['log_error'] = $deleted ? '' : $error;
+            $job['payload'] = $payload;
+            $job['status'] = 'running';
+            $job['progress'] = 0.8;
+            $job['message'] = $deleted
+                ? __('Réinitialisation : journal de débogage supprimé.', 'sitepulse')
+                : __('Réinitialisation : impossible de supprimer le journal (permissions).', 'sitepulse');
+
+            if ($deleted) {
+                sitepulse_async_job_add_log($job, __('Journal de débogage effacé.', 'sitepulse'), 'success');
+            } elseif ($error !== '') {
+                sitepulse_async_job_add_log($job, sprintf(__('Journal non supprimé (%s).', 'sitepulse'), $error), 'warning');
+            }
+
+            return $job;
+        }
+
+        // Step 5: clear scheduled hooks.
+        $cron_hooks = is_array($payload['cron_hooks']) ? $payload['cron_hooks'] : [];
+        $cron_count = count($cron_hooks);
+
+        if ($payload['cron_index'] < $cron_count) {
+            $batch = 0;
+            $limit = 10;
+
+            while ($payload['cron_index'] < $cron_count && $batch < $limit) {
+                $hook = $cron_hooks[$payload['cron_index']];
+
+                if (is_string($hook) && $hook !== '' && function_exists('wp_clear_scheduled_hook')) {
+                    wp_clear_scheduled_hook($hook);
+                }
+
+                $payload['cron_index']++;
+                $batch++;
+            }
+
+            $job['payload'] = $payload;
+            $job['status'] = 'running';
+            $job['progress'] = 0.9;
+            $job['message'] = __('Réinitialisation : purge des tâches planifiées…', 'sitepulse');
+
+            return $job;
+        }
+
+        // Step 6: reactivate default plugin state.
+        if (!$payload['reactivated']) {
+            if (function_exists('sitepulse_activate_site')) {
+                sitepulse_activate_site();
+            }
+
+            $payload['reactivated'] = true;
+            $job['payload'] = $payload;
+            $job['status'] = 'running';
+            $job['progress'] = 0.98;
+            $job['message'] = __('Réinitialisation : configuration par défaut restaurée…', 'sitepulse');
+
+            return $job;
+        }
+
+        $job['status'] = 'completed';
+        $job['progress'] = 1;
+        $job['message'] = __('SitePulse a été réinitialisé avec succès.', 'sitepulse');
+        sitepulse_async_job_add_log($job, __('Réinitialisation terminée.', 'sitepulse'), 'success');
+
+        return $job;
     }
 }
 

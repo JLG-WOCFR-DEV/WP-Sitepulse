@@ -147,8 +147,83 @@ function sitepulse_admin_settings_enqueue_assets($hook_suffix) {
     }
 
     wp_enqueue_script($script_handle);
+
+    if (function_exists('admin_url')) {
+        $poll_interval = 45000;
+
+        if (function_exists('apply_filters')) {
+            $poll_interval = (int) apply_filters('sitepulse_async_status_poll_interval', $poll_interval);
+        }
+
+        if ($poll_interval < 15000) {
+            $poll_interval = 15000;
+        }
+
+        $ajax_nonce = function_exists('wp_create_nonce') ? wp_create_nonce('sitepulse_async_jobs') : '';
+
+        $localization = [
+            'ajaxUrl'           => admin_url('admin-ajax.php'),
+            'asyncJobsNonce'    => $ajax_nonce,
+            'asyncPollInterval' => $poll_interval,
+            'i18n'              => [
+                'asyncEmpty'      => __('Aucun traitement en arrière-plan pour le moment.', 'sitepulse'),
+                'asyncError'      => __('Impossible de rafraîchir le statut des traitements. Réessayez plus tard.', 'sitepulse'),
+                'asyncUpdated'    => __('Statut des traitements en arrière-plan mis à jour.', 'sitepulse'),
+                'asyncLogSummary' => __('Journal des opérations', 'sitepulse'),
+                'asyncLogToggle'  => __('Afficher ou masquer le journal détaillé', 'sitepulse'),
+            ],
+        ];
+
+        wp_localize_script($script_handle, 'sitepulseAdminSettingsData', $localization);
+    }
 }
 add_action('admin_enqueue_scripts', 'sitepulse_admin_settings_enqueue_assets');
+
+if (!function_exists('sitepulse_ajax_async_jobs_overview')) {
+    /**
+     * Ajax handler returning the latest async job summaries.
+     *
+     * @return void
+     */
+    function sitepulse_ajax_async_jobs_overview() {
+        if (!current_user_can(sitepulse_get_capability())) {
+            wp_send_json_error(
+                ['message' => __('Permission refusée pour cette action.', 'sitepulse')],
+                403
+            );
+        }
+
+        $nonce = isset($_POST['nonce']) ? sanitize_text_field(wp_unslash($_POST['nonce'])) : '';
+
+        if (!wp_verify_nonce($nonce, 'sitepulse_async_jobs')) {
+            wp_send_json_error(
+                ['message' => __('Nonce invalide : impossible de mettre à jour le statut.', 'sitepulse')],
+                400
+            );
+        }
+
+        $jobs = function_exists('sitepulse_prepare_async_jobs_overview')
+            ? sitepulse_prepare_async_jobs_overview(null, ['include_logs' => true])
+            : [];
+
+        $state = 'idle';
+
+        foreach ($jobs as $job) {
+            if (!empty($job['is_active'])) {
+                $state = 'busy';
+                break;
+            }
+        }
+
+        wp_send_json_success([
+            'jobs'        => $jobs,
+            'state'       => $state,
+            'generated_at'=> function_exists('current_time') ? current_time('timestamp') : time(),
+        ]);
+    }
+
+    add_action('wp_ajax_sitepulse_async_jobs_overview', 'sitepulse_ajax_async_jobs_overview');
+}
 
 /**
  * Registers the settings fields.
@@ -1999,6 +2074,29 @@ function sitepulse_settings_page() {
             'top_prefixes' => [],
         ];
 
+    $async_jobs_overview = function_exists('sitepulse_prepare_async_jobs_overview')
+        ? sitepulse_prepare_async_jobs_overview(null, ['include_logs' => true, 'limit' => 4])
+        : [];
+
+    $async_jobs_state = 'idle';
+
+    foreach ($async_jobs_overview as $overview_entry) {
+        if (!empty($overview_entry['is_active'])) {
+            $async_jobs_state = 'busy';
+            break;
+        }
+    }
+
+    $async_jobs_initial_json = '';
+
+    $encoded_async_jobs = function_exists('wp_json_encode')
+        ? wp_json_encode($async_jobs_overview)
+        : json_encode($async_jobs_overview);
+
+    if (is_string($encoded_async_jobs)) {
+        $async_jobs_initial_json = $encoded_async_jobs;
+    }
+
     $debug_mode_option = get_option(SITEPULSE_OPTION_DEBUG_MODE);
     $is_debug_mode_enabled = rest_sanitize_boolean($debug_mode_option);
     $uptime_url_option = get_option(SITEPULSE_OPTION_UPTIME_URL, '');
@@ -2204,8 +2302,6 @@ function sitepulse_settings_page() {
             echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('Données stockées effacées.', 'sitepulse') . '</p></div>';
         }
         if (isset($_POST['sitepulse_reset_all'])) {
-            $reset_success = true;
-            $log_deletion_failed = false;
             $options_to_delete = [
                 SITEPULSE_OPTION_ACTIVE_MODULES,
                 SITEPULSE_OPTION_DEBUG_MODE,
@@ -2224,7 +2320,6 @@ function sitepulse_settings_page() {
                 SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD,
                 SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES,
                 SITEPULSE_OPTION_ALERT_INTERVAL,
-                // Clear stored alert recipients so the default (empty) list is restored on activation.
                 SITEPULSE_OPTION_ALERT_RECIPIENTS,
                 SITEPULSE_OPTION_SPEED_WARNING_MS,
                 SITEPULSE_OPTION_SPEED_CRITICAL_MS,
@@ -2234,10 +2329,6 @@ function sitepulse_settings_page() {
                 SITEPULSE_PLUGIN_IMPACT_OPTION,
             ];
 
-            foreach ($options_to_delete as $option_key) {
-                delete_option($option_key);
-            }
-
             $transients_to_delete = [
                 SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS,
                 SITEPULSE_TRANSIENT_AI_INSIGHT,
@@ -2246,70 +2337,107 @@ function sitepulse_settings_page() {
             ];
 
             $transient_prefixes_to_delete = [SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX];
-
-            foreach ($transients_to_delete as $transient_key) {
-                delete_transient($transient_key);
-
-                if (function_exists('delete_site_transient')) {
-                    delete_site_transient($transient_key);
-                }
-            }
-
-            foreach ($transient_prefixes_to_delete as $transient_prefix) {
-                sitepulse_delete_transients_by_prefix($transient_prefix);
-                sitepulse_delete_site_transients_by_prefix($transient_prefix);
-            }
-
-            if (defined('SITEPULSE_DEBUG_LOG') && file_exists(SITEPULSE_DEBUG_LOG)) {
-                $log_deleted = false;
-                $delete_error_message = '';
-
-                if (function_exists('wp_delete_file')) {
-                    $delete_result = wp_delete_file(SITEPULSE_DEBUG_LOG);
-
-                    if (function_exists('is_wp_error') && is_wp_error($delete_result)) {
-                        $delete_error_message = $delete_result->get_error_message();
-                    } elseif ($delete_result === false) {
-                        $delete_error_message = 'wp_delete_file returned false.';
-                    }
-
-                    if (!file_exists(SITEPULSE_DEBUG_LOG)) {
-                        $log_deleted = true;
-                    }
-                }
-
-                if (!$log_deleted) {
-                    if (@unlink(SITEPULSE_DEBUG_LOG)) {
-                        $log_deleted = true;
-                    } elseif ($delete_error_message === '') {
-                        $delete_error_message = 'unlink failed.';
-                    }
-                }
-
-                if (!$log_deleted) {
-                    $reset_success = false;
-                    $log_deletion_failed = true;
-                    $log_message = sprintf('SitePulse: impossible de supprimer le journal de débogage (%s). %s', SITEPULSE_DEBUG_LOG, $delete_error_message);
-
-                    if (function_exists('sitepulse_log')) {
-                        sitepulse_log($log_message, 'ERROR');
-                    } else {
-                        error_log($log_message);
-                    }
-                }
-            }
             $cron_hooks = function_exists('sitepulse_get_cron_hooks') ? sitepulse_get_cron_hooks() : [];
-            foreach ($cron_hooks as $hook) {
-                wp_clear_scheduled_hook($hook);
-            }
-            if ($reset_success && function_exists('sitepulse_activate_site')) {
-                sitepulse_activate_site();
+            $log_path = defined('SITEPULSE_DEBUG_LOG') ? SITEPULSE_DEBUG_LOG : '';
+
+            $job_scheduled = false;
+
+            if (function_exists('sitepulse_enqueue_async_job')) {
+                $job = sitepulse_enqueue_async_job(
+                    'plugin_reset',
+                    [
+                        'options'    => $options_to_delete,
+                        'transients' => $transients_to_delete,
+                        'prefixes'   => $transient_prefixes_to_delete,
+                        'cron_hooks' => $cron_hooks,
+                        'log_path'   => $log_path,
+                    ],
+                    [
+                        'label'        => __('Réinitialisation de SitePulse', 'sitepulse'),
+                        'requested_by' => function_exists('get_current_user_id') ? (int) get_current_user_id() : 0,
+                    ]
+                );
+
+                if (is_array($job)) {
+                    $job_scheduled = true;
+                }
             }
 
-            if ($reset_success) {
-                echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('SitePulse a été réinitialisé.', 'sitepulse') . '</p></div>';
-            } elseif ($log_deletion_failed) {
-                echo '<div class="notice notice-error is-dismissible"><p>' . esc_html__('Impossible de supprimer le journal de débogage. Vérifiez les permissions du fichier.', 'sitepulse') . '</p></div>';
+            if ($job_scheduled) {
+                echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('Réinitialisation planifiée. Le nettoyage complet s’exécute en tâche de fond et restaurera la configuration par défaut.', 'sitepulse') . '</p></div>';
+            } else {
+                $reset_success = true;
+                $log_deletion_failed = false;
+
+                foreach ($options_to_delete as $option_key) {
+                    delete_option($option_key);
+                }
+
+                foreach ($transients_to_delete as $transient_key) {
+                    delete_transient($transient_key);
+
+                    if (function_exists('delete_site_transient')) {
+                        delete_site_transient($transient_key);
+                    }
+                }
+
+                foreach ($transient_prefixes_to_delete as $transient_prefix) {
+                    sitepulse_delete_transients_by_prefix($transient_prefix);
+                    sitepulse_delete_site_transients_by_prefix($transient_prefix);
+                }
+
+                if ($log_path !== '' && file_exists($log_path)) {
+                    $log_deleted = false;
+                    $delete_error_message = '';
+
+                    if (function_exists('wp_delete_file')) {
+                        $delete_result = wp_delete_file($log_path);
+
+                        if (function_exists('is_wp_error') && is_wp_error($delete_result)) {
+                            $delete_error_message = $delete_result->get_error_message();
+                        } elseif ($delete_result === false) {
+                            $delete_error_message = 'wp_delete_file returned false.';
+                        }
+
+                        if (!file_exists($log_path)) {
+                            $log_deleted = true;
+                        }
+                    }
+
+                    if (!$log_deleted) {
+                        if (@unlink($log_path)) {
+                            $log_deleted = true;
+                        } elseif ($delete_error_message === '') {
+                            $delete_error_message = 'unlink failed.';
+                        }
+                    }
+
+                    if (!$log_deleted) {
+                        $reset_success = false;
+                        $log_deletion_failed = true;
+                        $log_message = sprintf('SitePulse: impossible de supprimer le journal de débogage (%s). %s', $log_path, $delete_error_message);
+
+                        if (function_exists('sitepulse_log')) {
+                            sitepulse_log($log_message, 'ERROR');
+                        } else {
+                            error_log($log_message);
+                        }
+                    }
+                }
+
+                foreach ($cron_hooks as $hook) {
+                    wp_clear_scheduled_hook($hook);
+                }
+
+                if ($reset_success && function_exists('sitepulse_activate_site')) {
+                    sitepulse_activate_site();
+                }
+
+                if ($reset_success) {
+                    echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('SitePulse a été réinitialisé.', 'sitepulse') . '</p></div>';
+                } elseif ($log_deletion_failed) {
+                    echo '<div class="notice notice-error is-dismissible"><p>' . esc_html__('Impossible de supprimer le journal de débogage. Vérifiez les permissions du fichier.', 'sitepulse') . '</p></div>';
+                }
             }
         }
     }
@@ -3317,6 +3445,72 @@ function sitepulse_settings_page() {
                             <form method="post" action="" class="sitepulse-settings-form sitepulse-settings-form--secondary">
                                 <?php wp_nonce_field(SITEPULSE_NONCE_ACTION_CLEANUP, SITEPULSE_NONCE_FIELD_CLEANUP); ?>
                                 <div class="sitepulse-settings-grid">
+                                    <div class="sitepulse-module-card sitepulse-module-card--setting sitepulse-module-card--async" data-sitepulse-async-card data-sitepulse-async-state="<?php echo esc_attr($async_jobs_state); ?>">
+                                        <div class="sitepulse-card-header">
+                                            <h3 class="sitepulse-card-title"><?php esc_html_e('Traitements en arrière-plan', 'sitepulse'); ?></h3>
+                                        </div>
+                                        <div class="sitepulse-card-body">
+                                            <p class="sitepulse-card-description" id="sitepulse-async-jobs-description"><?php esc_html_e('Ces opérations se poursuivent même si vous quittez la page. Leur état est mis à jour automatiquement lors de l’actualisation.', 'sitepulse'); ?></p>
+                                            <ul
+                                                class="sitepulse-async-job-list"
+                                                role="status"
+                                                aria-live="polite"
+                                                aria-describedby="sitepulse-async-jobs-description"
+                                                data-sitepulse-async-jobs-list
+                                                data-sitepulse-async-initial="<?php echo esc_attr($async_jobs_initial_json); ?>"
+                                                data-sitepulse-async-empty-message="<?php echo esc_attr__('Aucun traitement en arrière-plan pour le moment.', 'sitepulse'); ?>"
+                                            >
+                                                <?php if (!empty($async_jobs_overview)) : ?>
+                                                    <?php foreach ($async_jobs_overview as $async_job) : ?>
+                                                        <li class="sitepulse-async-job sitepulse-async-job--<?php echo esc_attr($async_job['container_class']); ?>" data-sitepulse-async-id="<?php echo esc_attr($async_job['id']); ?>">
+                                                            <div class="sitepulse-async-job__header">
+                                                                <span class="sitepulse-status <?php echo esc_attr($async_job['badge_class']); ?>"><?php echo esc_html($async_job['status_label']); ?></span>
+                                                                <span class="sitepulse-async-job__label"><?php echo esc_html($async_job['label']); ?></span>
+                                                            </div>
+                                                            <?php if (!empty($async_job['message'])) : ?>
+                                                                <p class="sitepulse-async-job__message"><?php echo esc_html($async_job['message']); ?></p>
+                                                            <?php endif; ?>
+                                                            <?php if (!empty($async_job['progress_label']) || !empty($async_job['relative']) || ($async_job['progress_percent'] > 0 && $async_job['progress_percent'] < 100)) : ?>
+                                                                <p class="sitepulse-async-job__meta">
+                                                                    <?php if (!empty($async_job['progress_label'])) : ?>
+                                                                        <span><?php echo esc_html($async_job['progress_label']); ?></span>
+                                                                    <?php elseif ($async_job['progress_percent'] > 0 && $async_job['progress_percent'] < 100) : ?>
+                                                                        <span><?php printf(esc_html__('Progression : %s%%', 'sitepulse'), esc_html(number_format_i18n($async_job['progress_percent']))); ?></span>
+                                                                    <?php endif; ?>
+                                                                    <?php if (!empty($async_job['relative'])) : ?>
+                                                                        <span><?php echo esc_html($async_job['relative']); ?></span>
+                                                                    <?php endif; ?>
+                                                                </p>
+                                                            <?php endif; ?>
+                                                            <?php if (!empty($async_job['logs'])) : ?>
+                                                                <details class="sitepulse-async-job__logs" <?php if (!empty($async_job['is_active'])) : ?>open<?php endif; ?>>
+                                                                    <summary class="sitepulse-async-job__logs-summary">
+                                                                        <span class="dashicons dashicons-list-view" aria-hidden="true"></span>
+                                                                        <span class="sitepulse-async-job__logs-summary-text"><?php esc_html_e('Journal des opérations', 'sitepulse'); ?></span>
+                                                                        <span class="screen-reader-text"><?php esc_html_e('Afficher ou masquer le journal détaillé', 'sitepulse'); ?></span>
+                                                                    </summary>
+                                                                    <ul class="sitepulse-async-job__log-list">
+                                                                        <?php foreach ($async_job['logs'] as $log_entry) : ?>
+                                                                            <li class="sitepulse-async-job__log sitepulse-async-job__log--<?php echo esc_attr($log_entry['level_class']); ?>">
+                                                                                <span class="sitepulse-async-job__log-label"><?php echo esc_html($log_entry['level_label']); ?></span>
+                                                                                <span class="sitepulse-async-job__log-message"><?php echo esc_html($log_entry['message']); ?></span>
+                                                                                <?php if (!empty($log_entry['relative'])) : ?>
+                                                                                    <time class="sitepulse-async-job__log-time" <?php if (!empty($log_entry['iso'])) : ?>datetime="<?php echo esc_attr($log_entry['iso']); ?>"<?php endif; ?>><?php echo esc_html($log_entry['relative']); ?></time>
+                                                                                <?php endif; ?>
+                                                                            </li>
+                                                                        <?php endforeach; ?>
+                                                                    </ul>
+                                                                </details>
+                                                            <?php endif; ?>
+                                                        </li>
+                                                    <?php endforeach; ?>
+                                                <?php else : ?>
+                                                    <li class="sitepulse-async-job sitepulse-async-job--empty"><?php esc_html_e('Aucun traitement en arrière-plan pour le moment.', 'sitepulse'); ?></li>
+                                                <?php endif; ?>
+                                            </ul>
+                                            <p class="sitepulse-async-job__error" data-sitepulse-async-error hidden></p>
+                                        </div>
+                                    </div>
                                     <div class="sitepulse-module-card sitepulse-module-card--setting">
                                         <div class="sitepulse-card-header">
                                             <h3 class="sitepulse-card-title"><?php esc_html_e('Vider le journal de debug', 'sitepulse'); ?></h3>
