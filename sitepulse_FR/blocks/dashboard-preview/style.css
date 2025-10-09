@@ -137,11 +137,12 @@
     min-height: 180px;
     text-align: center;
     padding: 32px 16px;
-    border: 1px dashed var(--wp-admin-color-gray-200, #c3c4c7);
+    border: 1px dashed var(--sitepulse-color-border, #d0d5dd);
     border-radius: 6px;
-    color: var(--wp-admin-color-gray-700, #50575e);
+    color: var(--sitepulse-color-text-muted, #50575e);
     font-size: 13px;
-    background: rgba(255, 255, 255, 0.7);
+    background: color-mix(in srgb, var(--sitepulse-color-surface-elevated, #ffffff) 70%, transparent);
+    background-color: rgba(255, 255, 255, 0.7);
 }
 
 .wp-block-sitepulse-dashboard-preview .sitepulse-chart-container .sitepulse-preview-summary {
@@ -180,10 +181,10 @@
 .wp-block-sitepulse-dashboard-preview .sitepulse-dashboard-preview__empty {
     text-align: center;
     padding: 24px;
-    border: 1px dashed var(--wp-admin-color-gray-200, #c3c4c7);
+    border: 1px dashed var(--sitepulse-color-border, #d0d5dd);
     border-radius: 6px;
-    color: var(--wp-admin-color-gray-700, #50575e);
-    background: var(--wp-admin-color-gray-0, #ffffff);
+    color: var(--sitepulse-color-text-muted, #50575e);
+    background: var(--sitepulse-color-surface-elevated, #ffffff);
 }
 
 .wp-block-sitepulse-dashboard-preview .sitepulse-preview-list {
@@ -193,7 +194,7 @@
     font-size: 13px;
     max-height: 220px;
     overflow-y: auto;
-    border: 1px solid var(--wp-admin-color-gray-200, #c3c4c7);
+    border: 1px solid var(--sitepulse-color-border, #d0d5dd);
     border-radius: 6px;
 }
 
@@ -205,7 +206,7 @@
     align-items: flex-start;
     row-gap: 6px;
     padding: 8px 12px;
-    border-bottom: 1px solid var(--wp-admin-color-gray-100, #dcdcde);
+    border-bottom: 1px solid var(--sitepulse-color-divider, rgba(60, 67, 74, 0.12));
 }
 
 .wp-block-sitepulse-dashboard-preview .sitepulse-preview-list li:last-child {
@@ -214,11 +215,11 @@
 
 .wp-block-sitepulse-dashboard-preview .sitepulse-preview-list__label {
     font-weight: 600;
-    color: var(--wp-admin-color-gray-700, #50575e);
+    color: var(--sitepulse-color-text-muted, #50575e);
 }
 
 .wp-block-sitepulse-dashboard-preview .sitepulse-preview-list__value {
-    color: var(--wp-admin-color-gray-800, #2c3338);
+    color: var(--sitepulse-color-text, #1d2327);
 }
 
 @media (max-width: 480px) {

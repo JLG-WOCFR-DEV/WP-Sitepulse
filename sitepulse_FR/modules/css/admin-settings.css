@@ -1,21 +1,21 @@
 .sitepulse-settings-wrap {
     max-width: 1100px;
-    --sitepulse-surface: var(--wp-admin-color-gray-0, #ffffff);
-    --sitepulse-surface-subtle: var(--wp-admin-color-gray-50, #f6f7f7);
-    --sitepulse-border: var(--wp-admin-color-gray-200, #c3c4c7);
-    --sitepulse-border-strong: var(--wp-admin-color-gray-300, #b5bcc2);
-    --sitepulse-text: var(--wp-admin-color-gray-900, #1d2327);
-    --sitepulse-text-muted: var(--wp-admin-color-gray-700, #50575e);
-    --sitepulse-text-subtle: var(--wp-admin-color-gray-600, #646970);
-    --sitepulse-accent: var(--wp-admin-theme-color, #2271b1);
-    --sitepulse-accent-strong: var(--wp-admin-theme-color-darker-20, #195c8f);
+    --sitepulse-surface: var(--sitepulse-color-surface, #ffffff);
+    --sitepulse-surface-subtle: var(--sitepulse-color-surface-subtle, #f6f7f7);
+    --sitepulse-border: var(--sitepulse-color-border, #d0d5dd);
+    --sitepulse-border-strong: var(--sitepulse-color-border-strong, #c3c4c7);
+    --sitepulse-text: var(--sitepulse-color-text, #1d2327);
+    --sitepulse-text-muted: var(--sitepulse-color-text-muted, #50575e);
+    --sitepulse-text-subtle: var(--sitepulse-color-text-soft, #6c7680);
+    --sitepulse-accent: var(--sitepulse-color-accent, #2271b1);
+    --sitepulse-accent-strong: var(--sitepulse-color-accent-strong, #135e96);
     --sitepulse-focus-ring: rgba(34, 113, 177, 0.35);
-    --sitepulse-success-text: #047857;
-    --sitepulse-success-bg: #ecfdf5;
-    --sitepulse-warning-text: #b45309;
-    --sitepulse-warning-bg: #fef3c7;
-    --sitepulse-critical-text: #b91c1c;
-    --sitepulse-critical-bg: #fee2e2;
+    --sitepulse-success-text: var(--sitepulse-status-ok-text, #0b3d19);
+    --sitepulse-success-bg: var(--sitepulse-status-ok-background, rgba(11, 109, 42, 0.08));
+    --sitepulse-warning-text: var(--sitepulse-status-warn-text, #6a4700);
+    --sitepulse-warning-bg: var(--sitepulse-status-warn-background, rgba(218, 150, 0, 0.12));
+    --sitepulse-critical-text: var(--sitepulse-status-danger-text, #5c0b12);
+    --sitepulse-critical-bg: var(--sitepulse-status-danger-background, rgba(160, 20, 30, 0.12));
 }
 
 .sitepulse-settings-intro,
@@ -58,16 +58,6 @@
     margin: 0;
     font-size: 12px;
     color: var(--sitepulse-text-subtle);
-}
-
-.is-dark .sitepulse-resource-thresholds__hint {
-    color: var(--sitepulse-text-subtle);
-}
-
-@media (prefers-color-scheme: dark) {
-    .sitepulse-resource-thresholds__hint {
-        color: var(--sitepulse-text-subtle);
-    }
 }
 
 .sitepulse-overview-callout {
@@ -226,7 +216,7 @@
 }
 
 .sitepulse-overview-callout__action.button:focus-visible {
-    box-shadow: 0 0 0 var(--wp-admin-border-width-focus, 2px) var(--sitepulse-focus-ring);
+    box-shadow: 0 0 0 2px var(--sitepulse-focus-ring);
 }
 
 @media (max-width: 782px) {
@@ -728,21 +718,3 @@
     }
 }
 
-@media (prefers-color-scheme: dark) {
-    .sitepulse-settings-wrap {
-        --sitepulse-surface: var(--wp-admin-color-gray-900, #1d2327);
-        --sitepulse-surface-subtle: var(--wp-admin-color-gray-800, #2c3338);
-        --sitepulse-border: rgba(255, 255, 255, 0.12);
-        --sitepulse-border-strong: rgba(255, 255, 255, 0.2);
-        --sitepulse-text: var(--wp-admin-color-gray-0, #ffffff);
-        --sitepulse-text-muted: rgba(255, 255, 255, 0.75);
-        --sitepulse-text-subtle: rgba(255, 255, 255, 0.65);
-        --sitepulse-success-bg: rgba(4, 120, 87, 0.2);
-        --sitepulse-warning-bg: rgba(180, 83, 9, 0.2);
-        --sitepulse-critical-bg: rgba(185, 28, 28, 0.22);
-    }
-
-    .sitepulse-overview-callout {
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-    }
-}

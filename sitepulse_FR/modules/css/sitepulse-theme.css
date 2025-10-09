@@ -1,0 +1,277 @@
+:root {
+    --sitepulse-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --sitepulse-radius-sm: 4px;
+    --sitepulse-radius-md: 8px;
+    --sitepulse-radius-lg: 16px;
+    --sitepulse-shadow-sm: 0 1px 1px rgba(16, 24, 40, 0.04);
+    --sitepulse-shadow-md: 0 16px 24px rgba(15, 23, 42, 0.08);
+    --sitepulse-duration-fast: 150ms;
+    --sitepulse-duration-normal: 220ms;
+    --sitepulse-easing-standard: cubic-bezier(0.4, 0, 0.2, 1);
+
+    --sitepulse-color-surface: #ffffff;
+    --sitepulse-color-surface-subtle: #f6f7f7;
+    --sitepulse-color-surface-elevated: #ffffff;
+    --sitepulse-color-border: #d0d5dd;
+    --sitepulse-color-border-strong: #c3c4c7;
+    --sitepulse-color-divider: rgba(60, 67, 74, 0.12);
+    --sitepulse-color-text: #1d2327;
+    --sitepulse-color-text-muted: #50575e;
+    --sitepulse-color-text-soft: #6c7680;
+    --sitepulse-color-heading: #0f172a;
+    --sitepulse-color-accent: #2271b1;
+    --sitepulse-color-accent-soft: rgba(34, 113, 177, 0.12);
+    --sitepulse-color-accent-strong: #135e96;
+    --sitepulse-color-on-accent: #ffffff;
+
+    --sitepulse-status-ok-background: rgba(11, 109, 42, 0.08);
+    --sitepulse-status-ok-border: rgba(11, 109, 42, 0.4);
+    --sitepulse-status-ok-text: #0b3d19;
+
+    --sitepulse-status-warn-background: rgba(218, 150, 0, 0.12);
+    --sitepulse-status-warn-border: rgba(218, 150, 0, 0.45);
+    --sitepulse-status-warn-text: #6a4700;
+
+    --sitepulse-status-danger-background: rgba(160, 20, 30, 0.12);
+    --sitepulse-status-danger-border: rgba(160, 20, 30, 0.45);
+    --sitepulse-status-danger-text: #5c0b12;
+
+    --sitepulse-status-info-background: rgba(33, 150, 243, 0.12);
+    --sitepulse-status-info-border: rgba(33, 150, 243, 0.4);
+    --sitepulse-status-info-text: #0f3c68;
+
+    --sitepulse-badge-text: #ffffff;
+    --sitepulse-badge-success: #0b6d2a;
+    --sitepulse-badge-warning: #8a6100;
+    --sitepulse-badge-danger: #a0141e;
+
+    --sitepulse-skeleton-base: rgba(15, 23, 42, 0.08);
+    --sitepulse-skeleton-highlight: rgba(15, 23, 42, 0.16);
+    --sitepulse-overlay: rgba(15, 23, 42, 0.08);
+}
+
+body.sitepulse-theme {
+    font-family: var(--sitepulse-font-family);
+    color: var(--sitepulse-color-text);
+}
+
+body.sitepulse-theme .wrap {
+    color: inherit;
+}
+
+body.sitepulse-theme a {
+    color: var(--sitepulse-color-accent);
+}
+
+body.sitepulse-theme--light {
+    --sitepulse-color-surface: #ffffff;
+    --sitepulse-color-surface-subtle: #f6f7f7;
+    --sitepulse-color-surface-elevated: #ffffff;
+    --sitepulse-color-border: #d0d5dd;
+    --sitepulse-color-border-strong: #c3c4c7;
+    --sitepulse-color-divider: rgba(60, 67, 74, 0.12);
+    --sitepulse-color-text: #1d2327;
+    --sitepulse-color-text-muted: #50575e;
+    --sitepulse-color-text-soft: #6c7680;
+    --sitepulse-color-heading: #0f172a;
+    --sitepulse-color-accent: #2271b1;
+    --sitepulse-color-accent-soft: rgba(34, 113, 177, 0.12);
+    --sitepulse-color-accent-strong: #135e96;
+    --sitepulse-color-on-accent: #ffffff;
+
+    --sitepulse-status-ok-background: rgba(11, 109, 42, 0.08);
+    --sitepulse-status-ok-border: rgba(11, 109, 42, 0.4);
+    --sitepulse-status-ok-text: #0b3d19;
+
+    --sitepulse-status-warn-background: rgba(218, 150, 0, 0.12);
+    --sitepulse-status-warn-border: rgba(218, 150, 0, 0.45);
+    --sitepulse-status-warn-text: #6a4700;
+
+    --sitepulse-status-danger-background: rgba(160, 20, 30, 0.12);
+    --sitepulse-status-danger-border: rgba(160, 20, 30, 0.45);
+    --sitepulse-status-danger-text: #5c0b12;
+
+    --sitepulse-status-info-background: rgba(33, 150, 243, 0.12);
+    --sitepulse-status-info-border: rgba(33, 150, 243, 0.4);
+    --sitepulse-status-info-text: #0f3c68;
+
+    --sitepulse-badge-text: #ffffff;
+    --sitepulse-badge-success: #0b6d2a;
+    --sitepulse-badge-warning: #8a6100;
+    --sitepulse-badge-danger: #a0141e;
+
+    --sitepulse-skeleton-base: rgba(15, 23, 42, 0.08);
+    --sitepulse-skeleton-highlight: rgba(15, 23, 42, 0.16);
+    --sitepulse-overlay: rgba(15, 23, 42, 0.08);
+}
+
+body.sitepulse-theme--dark {
+    --sitepulse-color-surface: #1f2937;
+    --sitepulse-color-surface-subtle: #111827;
+    --sitepulse-color-surface-elevated: #273244;
+    --sitepulse-color-border: rgba(148, 163, 184, 0.3);
+    --sitepulse-color-border-strong: rgba(148, 163, 184, 0.5);
+    --sitepulse-color-divider: rgba(148, 163, 184, 0.24);
+    --sitepulse-color-text: #e5ecf5;
+    --sitepulse-color-text-muted: #cbd5f5;
+    --sitepulse-color-text-soft: #a0aec0;
+    --sitepulse-color-heading: #f8fafc;
+    --sitepulse-color-accent: #63a4ff;
+    --sitepulse-color-accent-soft: rgba(99, 164, 255, 0.16);
+    --sitepulse-color-accent-strong: #3c82f6;
+    --sitepulse-color-on-accent: #0f172a;
+
+    --sitepulse-status-ok-background: rgba(46, 204, 113, 0.16);
+    --sitepulse-status-ok-border: rgba(46, 204, 113, 0.6);
+    --sitepulse-status-ok-text: #c3f9d8;
+
+    --sitepulse-status-warn-background: rgba(249, 180, 0, 0.18);
+    --sitepulse-status-warn-border: rgba(249, 180, 0, 0.6);
+    --sitepulse-status-warn-text: #ffe3a3;
+
+    --sitepulse-status-danger-background: rgba(239, 68, 68, 0.18);
+    --sitepulse-status-danger-border: rgba(239, 68, 68, 0.6);
+    --sitepulse-status-danger-text: #fecdd3;
+
+    --sitepulse-status-info-background: rgba(56, 189, 248, 0.18);
+    --sitepulse-status-info-border: rgba(56, 189, 248, 0.55);
+    --sitepulse-status-info-text: #bae6fd;
+
+    --sitepulse-badge-text: #0f172a;
+    --sitepulse-badge-success: #34d399;
+    --sitepulse-badge-warning: #fbbf24;
+    --sitepulse-badge-danger: #f87171;
+
+    --sitepulse-skeleton-base: rgba(148, 163, 184, 0.12);
+    --sitepulse-skeleton-highlight: rgba(148, 163, 184, 0.24);
+    --sitepulse-overlay: rgba(148, 163, 184, 0.18);
+}
+
+body.sitepulse-theme--auto {
+    --sitepulse-color-surface: #ffffff;
+    --sitepulse-color-surface-subtle: #f6f7f7;
+    --sitepulse-color-surface-elevated: #ffffff;
+    --sitepulse-color-border: #d0d5dd;
+    --sitepulse-color-border-strong: #c3c4c7;
+    --sitepulse-color-divider: rgba(60, 67, 74, 0.12);
+    --sitepulse-color-text: #1d2327;
+    --sitepulse-color-text-muted: #50575e;
+    --sitepulse-color-text-soft: #6c7680;
+    --sitepulse-color-heading: #0f172a;
+    --sitepulse-color-accent: #2271b1;
+    --sitepulse-color-accent-soft: rgba(34, 113, 177, 0.12);
+    --sitepulse-color-accent-strong: #135e96;
+    --sitepulse-color-on-accent: #ffffff;
+
+    --sitepulse-status-ok-background: rgba(11, 109, 42, 0.08);
+    --sitepulse-status-ok-border: rgba(11, 109, 42, 0.4);
+    --sitepulse-status-ok-text: #0b3d19;
+
+    --sitepulse-status-warn-background: rgba(218, 150, 0, 0.12);
+    --sitepulse-status-warn-border: rgba(218, 150, 0, 0.45);
+    --sitepulse-status-warn-text: #6a4700;
+
+    --sitepulse-status-danger-background: rgba(160, 20, 30, 0.12);
+    --sitepulse-status-danger-border: rgba(160, 20, 30, 0.45);
+    --sitepulse-status-danger-text: #5c0b12;
+
+    --sitepulse-status-info-background: rgba(33, 150, 243, 0.12);
+    --sitepulse-status-info-border: rgba(33, 150, 243, 0.4);
+    --sitepulse-status-info-text: #0f3c68;
+
+    --sitepulse-badge-text: #ffffff;
+    --sitepulse-badge-success: #0b6d2a;
+    --sitepulse-badge-warning: #8a6100;
+    --sitepulse-badge-danger: #a0141e;
+
+    --sitepulse-skeleton-base: rgba(15, 23, 42, 0.08);
+    --sitepulse-skeleton-highlight: rgba(15, 23, 42, 0.16);
+    --sitepulse-overlay: rgba(15, 23, 42, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+    body.sitepulse-theme--auto {
+        --sitepulse-color-surface: #1f2937;
+        --sitepulse-color-surface-subtle: #111827;
+        --sitepulse-color-surface-elevated: #273244;
+        --sitepulse-color-border: rgba(148, 163, 184, 0.3);
+        --sitepulse-color-border-strong: rgba(148, 163, 184, 0.5);
+        --sitepulse-color-divider: rgba(148, 163, 184, 0.24);
+        --sitepulse-color-text: #e5ecf5;
+        --sitepulse-color-text-muted: #cbd5f5;
+        --sitepulse-color-text-soft: #a0aec0;
+        --sitepulse-color-heading: #f8fafc;
+        --sitepulse-color-accent: #63a4ff;
+        --sitepulse-color-accent-soft: rgba(99, 164, 255, 0.16);
+        --sitepulse-color-accent-strong: #3c82f6;
+        --sitepulse-color-on-accent: #0f172a;
+
+        --sitepulse-status-ok-background: rgba(46, 204, 113, 0.16);
+        --sitepulse-status-ok-border: rgba(46, 204, 113, 0.6);
+        --sitepulse-status-ok-text: #c3f9d8;
+
+        --sitepulse-status-warn-background: rgba(249, 180, 0, 0.18);
+        --sitepulse-status-warn-border: rgba(249, 180, 0, 0.6);
+        --sitepulse-status-warn-text: #ffe3a3;
+
+        --sitepulse-status-danger-background: rgba(239, 68, 68, 0.18);
+        --sitepulse-status-danger-border: rgba(239, 68, 68, 0.6);
+        --sitepulse-status-danger-text: #fecdd3;
+
+        --sitepulse-status-info-background: rgba(56, 189, 248, 0.18);
+        --sitepulse-status-info-border: rgba(56, 189, 248, 0.55);
+        --sitepulse-status-info-text: #bae6fd;
+
+        --sitepulse-badge-text: #0f172a;
+        --sitepulse-badge-success: #34d399;
+        --sitepulse-badge-warning: #fbbf24;
+        --sitepulse-badge-danger: #f87171;
+
+        --sitepulse-skeleton-base: rgba(148, 163, 184, 0.12);
+        --sitepulse-skeleton-highlight: rgba(148, 163, 184, 0.24);
+        --sitepulse-overlay: rgba(148, 163, 184, 0.18);
+    }
+}
+
+.sitepulse-theme ::selection {
+    background-color: var(--sitepulse-color-accent-soft);
+}
+
+.sitepulse-theme .button-primary {
+    background-color: var(--sitepulse-color-accent);
+    border-color: var(--sitepulse-color-accent);
+    transition: background-color var(--sitepulse-duration-fast) var(--sitepulse-easing-standard),
+        border-color var(--sitepulse-duration-fast) var(--sitepulse-easing-standard);
+}
+
+.sitepulse-theme .button-primary:hover,
+.sitepulse-theme .button-primary:focus {
+    background-color: var(--sitepulse-color-accent-strong);
+    border-color: var(--sitepulse-color-accent-strong);
+}
+
+.status-badge {
+    color: var(--sitepulse-badge-text);
+}
+
+.status-badge.status-ok {
+    background-color: var(--sitepulse-badge-success);
+}
+
+.status-badge.status-warn {
+    background-color: var(--sitepulse-badge-warning);
+}
+
+.status-badge.status-bad {
+    background-color: var(--sitepulse-badge-danger);
+}
+
+@keyframes sitepulse-skeleton-shimmer {
+    0% {
+        background-position: -200px 0;
+    }
+
+    100% {
+        background-position: 200px 0;
+    }
+}

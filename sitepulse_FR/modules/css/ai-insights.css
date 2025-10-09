@@ -29,8 +29,8 @@
 
 .sitepulse-ai-result {
     display: none;
-    background-color: var(--wp-admin-color-gray-0, #ffffff);
-    border: 1px solid var(--wp-admin-color-gray-200, #c3c4c7);
+    background-color: var(--sitepulse-color-surface-elevated, #ffffff);
+    border: 1px solid var(--sitepulse-color-border, #d0d5dd);
     padding: 15px;
     margin-top: 20px;
 }
@@ -46,8 +46,8 @@
 
 .sitepulse-ai-history {
     margin-top: 20px;
-    background-color: var(--wp-admin-color-gray-0, #ffffff);
-    border: 1px solid var(--wp-admin-color-gray-200, #c3c4c7);
+    background-color: var(--sitepulse-color-surface-elevated, #ffffff);
+    border: 1px solid var(--sitepulse-color-border, #d0d5dd);
     padding: 15px;
 }
 
@@ -75,7 +75,7 @@
 
 .sitepulse-ai-history-empty {
     margin: 0 0 10px;
-    color: var(--wp-admin-color-gray-700, #50575e);
+    color: var(--sitepulse-color-text-muted, #50575e);
 }
 
 .sitepulse-ai-history-list {
@@ -85,7 +85,7 @@
 }
 
 .sitepulse-ai-history-item {
-    border-top: 1px solid var(--wp-admin-color-gray-100, #dcdcde);
+    border-top: 1px solid var(--sitepulse-color-border, #d0d5dd);
     padding: 12px 0;
 }
 
@@ -96,7 +96,7 @@
 
 .sitepulse-ai-history-meta {
     margin: 0 0 6px;
-    color: var(--wp-admin-color-gray-700, #50575e);
+    color: var(--sitepulse-color-text-muted, #50575e);
     font-size: 13px;
 }
 
@@ -104,31 +104,7 @@
     margin: 0;
     white-space: pre-line;
 }
-.is-dark .sitepulse-ai-result,
-.is-dark .sitepulse-ai-history {
-    background-color: var(--wp-admin-color-gray-900, #1d2327);
-    border-color: var(--wp-admin-color-gray-700, #50575e);
-}
 
-.is-dark .sitepulse-ai-history-empty,
-.is-dark .sitepulse-ai-history-meta,
-.is-dark .sitepulse-ai-history-text {
-    color: var(--wp-admin-color-gray-0, #ffffff);
-}
-
-@media (prefers-color-scheme: dark) {
-    .sitepulse-ai-result,
-    .sitepulse-ai-history {
-        background-color: var(--wp-admin-color-gray-900, #1d2327);
-        border-color: var(--wp-admin-color-gray-700, #50575e);
-    }
-
-    .sitepulse-ai-history-empty,
-    .sitepulse-ai-history-meta,
-    .sitepulse-ai-history-text {
-        color: var(--wp-admin-color-gray-0, #ffffff);
-    }
-}
 
 @media (prefers-contrast: more) {
     .sitepulse-ai-result,

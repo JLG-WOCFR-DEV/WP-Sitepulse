@@ -13,14 +13,17 @@
 }
 
 .speed-card {
-    background: var(--wp-admin-color-gray-0, #ffffff);
+    background: var(--sitepulse-color-surface-elevated, #ffffff);
     padding: 20px;
-    border: 1px solid var(--wp-admin-color-gray-200, #c3c4c7);
+    border: 1px solid var(--sitepulse-color-border, #d0d5dd);
+    border-radius: var(--sitepulse-radius-md, 8px);
+    box-shadow: var(--sitepulse-shadow-sm, 0 1px 1px rgba(16, 24, 40, 0.04));
+    color: var(--sitepulse-color-text, #1d2327);
 }
 
 .speed-card h3 {
     margin-top: 0;
-    border-bottom: 1px solid var(--wp-admin-color-gray-100, #dcdcde);
+    border-bottom: 1px solid var(--sitepulse-color-divider, rgba(60, 67, 74, 0.12));
     padding-bottom: 10px;
     font-size: 16px;
     display: flex;
@@ -35,7 +38,7 @@
 
 .health-list li {
     padding: 10px 0;
-    border-bottom: 1px solid var(--wp-admin-color-gray-50, #f0f0f1);
+    border-bottom: 1px solid var(--sitepulse-color-divider, rgba(60, 67, 74, 0.12));
     display: flex;
     justify-content: space-between;
     flex-wrap: wrap;
@@ -65,7 +68,7 @@
     border-radius: 999px;
     font-weight: 600;
     line-height: 1.4;
-    color: var(--wp-admin-color-gray-0, #ffffff);
+    color: var(--sitepulse-color-on-accent, #ffffff);
 }
 
 .status-icon {
@@ -83,15 +86,18 @@
 }
 
 .status-badge.status-ok {
-    background-color: var(--wp-admin-color-success, #0b6d2a);
+    background-color: var(--sitepulse-status-ok-background, rgba(11, 109, 42, 0.08));
+    color: var(--sitepulse-status-ok-text, #0b3d19);
 }
 
 .status-badge.status-warn {
-    background-color: var(--wp-admin-color-warning, #8a6100);
+    background-color: var(--sitepulse-status-warn-background, rgba(218, 150, 0, 0.12));
+    color: var(--sitepulse-status-warn-text, #6a4700);
 }
 
 .status-badge.status-bad {
-    background-color: var(--wp-admin-color-error, #a0141e);
+    background-color: var(--sitepulse-status-danger-background, rgba(160, 20, 30, 0.12));
+    color: var(--sitepulse-status-danger-text, #5c0b12);
 }
 
 .screen-reader-text {
@@ -113,48 +119,13 @@
     }
 }
 
-.is-dark .speed-card {
-    background: var(--wp-admin-color-gray-900, #1d2327);
-    border-color: var(--wp-admin-color-gray-700, #50575e);
+.health-list .metric-name,
+.health-list .metric-value {
+    color: var(--sitepulse-color-text, #1d2327);
 }
 
-.is-dark .speed-card h3 {
-    border-color: var(--wp-admin-color-gray-700, #50575e);
-}
-
-.is-dark .health-list li {
-    border-color: var(--wp-admin-color-gray-700, #50575e);
-}
-
-.is-dark .status-badge {
-    color: var(--wp-admin-color-gray-0, #ffffff);
-}
-
-.is-dark .health-list .description,
-.is-dark .health-list .metric-name,
-.is-dark .health-list .metric-value {
-    color: var(--wp-admin-color-gray-0, #ffffff);
-}
-
-@media (prefers-color-scheme: dark) {
-    .speed-card {
-        background: var(--wp-admin-color-gray-900, #1d2327);
-        border-color: var(--wp-admin-color-gray-700, #50575e);
-    }
-
-    .speed-card h3 {
-        border-color: var(--wp-admin-color-gray-700, #50575e);
-    }
-
-    .health-list li {
-        border-color: var(--wp-admin-color-gray-700, #50575e);
-    }
-
-    .health-list .description,
-    .health-list .metric-name,
-    .health-list .metric-value {
-        color: var(--wp-admin-color-gray-0, #ffffff);
-    }
+.health-list .description {
+    color: var(--sitepulse-color-text-muted, #50575e);
 }
 
 @media (prefers-contrast: more) {
@@ -192,16 +163,6 @@
 }
 
 .speed-history-profile .profile-description {
-    color: var(--wp-admin-color-gray-700, #50575e);
-}
-
-.is-dark .speed-history-profile .profile-description {
-    color: var(--wp-admin-color-gray-0, #ffffff);
-}
-
-@media (prefers-color-scheme: dark) {
-    .speed-history-profile .profile-description {
-        color: var(--wp-admin-color-gray-0, #ffffff);
-    }
+    color: var(--sitepulse-color-text-muted, #50575e);
 }
 
