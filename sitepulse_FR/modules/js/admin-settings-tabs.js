@@ -53,7 +53,63 @@
             });
         });
 
+        const enhanceToggle = (input) => {
+            if (!input || input.dataset.sitepulseToggleEnhanced) {
+                return;
+            }
+
+            input.dataset.sitepulseToggleEnhanced = 'true';
+
+            const statusTargetId = input.getAttribute('data-sitepulse-toggle-status-target');
+            const statusTarget = statusTargetId ? document.getElementById(statusTargetId) : null;
+            const statusOn = (statusTarget && statusTarget.getAttribute('data-sitepulse-status-on')) || input.getAttribute('data-sitepulse-toggle-on') || '';
+            const statusOff = (statusTarget && statusTarget.getAttribute('data-sitepulse-status-off')) || input.getAttribute('data-sitepulse-toggle-off') || '';
+            const toggleLabel = input.getAttribute('data-sitepulse-toggle-label') || '';
+
+            const formatStatus = (raw) => {
+                if (!raw) {
+                    return '';
+                }
+
+                return raw.charAt(0).toUpperCase() + raw.slice(1);
+            };
+
+            const updateStatus = (announce) => {
+                const isChecked = input.checked;
+                const statusText = isChecked ? statusOn : statusOff;
+
+                if (statusTarget && statusText) {
+                    statusTarget.textContent = formatStatus(statusText);
+                    statusTarget.classList.toggle('is-active', isChecked);
+                    statusTarget.classList.toggle('is-inactive', !isChecked);
+                }
+
+                if (announce) {
+                    const messageParts = [];
+
+                    if (toggleLabel) {
+                        messageParts.push(toggleLabel);
+                    }
+
+                    if (statusText) {
+                        messageParts.push(statusText);
+                    }
+
+                    if (messageParts.length) {
+                        speak(messageParts.join(' : '));
+                    }
+                }
+            };
+
+            input.addEventListener('change', () => updateStatus(true));
+            updateStatus(false);
+        };
+
         const container = document.querySelector('.sitepulse-settings-tabs-container');
+
+        document.querySelectorAll('input[type="checkbox"][data-sitepulse-toggle]').forEach((input) => {
+            enhanceToggle(input);
+        });
 
         if (!container) {
             return;

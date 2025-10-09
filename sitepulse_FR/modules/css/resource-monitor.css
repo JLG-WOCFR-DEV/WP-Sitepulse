@@ -29,6 +29,7 @@
 .sitepulse-resource-monitor .sitepulse-resource-subvalue {
     margin: 0;
     color: var(--wp-admin-color-gray-700, #50575e);
+    line-height: 1.4;
 }
 
 .sitepulse-resource-monitor .sitepulse-resource-meta {

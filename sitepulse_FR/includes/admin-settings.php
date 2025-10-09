@@ -1999,6 +1999,103 @@ function sitepulse_settings_page() {
             'top_prefixes' => [],
         ];
 
+    $async_jobs_raw = function_exists('sitepulse_get_async_jobs')
+        ? sitepulse_get_async_jobs()
+        : [];
+
+    $async_jobs_overview = [];
+
+    if (!empty($async_jobs_raw)) {
+        foreach ($async_jobs_raw as $async_job) {
+            if (!is_array($async_job) || empty($async_job['type'])) {
+                continue;
+            }
+
+            $job_type = (string) $async_job['type'];
+
+            if (!in_array($job_type, ['transient_cleanup', 'plugin_reset'], true)) {
+                continue;
+            }
+
+            $status = isset($async_job['status']) ? (string) $async_job['status'] : 'queued';
+            $updated_at = isset($async_job['updated_at']) ? (int) $async_job['updated_at'] : 0;
+            $progress = isset($async_job['progress']) ? (float) $async_job['progress'] : 0.0;
+            $progress = max(0.0, min(1.0, $progress));
+
+            switch ($job_type) {
+                case 'plugin_reset':
+                    $label = __('Réinitialisation de SitePulse', 'sitepulse');
+                    break;
+                case 'transient_cleanup':
+                default:
+                    $label = __('Purge des transients expirés', 'sitepulse');
+                    break;
+            }
+
+            switch ($status) {
+                case 'completed':
+                    $status_label = __('Terminé', 'sitepulse');
+                    $badge_class = 'is-success';
+                    $container_class = 'is-success';
+                    break;
+                case 'failed':
+                    $status_label = __('Échec', 'sitepulse');
+                    $badge_class = 'is-critical';
+                    $container_class = 'is-error';
+                    break;
+                case 'running':
+                    $status_label = __('En cours', 'sitepulse');
+                    $badge_class = 'is-active';
+                    $container_class = 'is-running';
+                    break;
+                case 'queued':
+                default:
+                    $status_label = __('En attente', 'sitepulse');
+                    $badge_class = 'is-warning';
+                    $container_class = 'is-pending';
+                    break;
+            }
+
+            $message = isset($async_job['message']) ? trim((string) $async_job['message']) : '';
+            $message = $message !== '' ? wp_strip_all_tags($message) : '';
+
+            $relative = '';
+
+            if ($updated_at > 0 && function_exists('human_time_diff')) {
+                $reference = function_exists('current_time') ? current_time('timestamp') : time();
+                $relative_diff = human_time_diff($updated_at, $reference);
+
+                if (!empty($relative_diff)) {
+                    $relative = sprintf(esc_html__('Mis à jour il y a %s', 'sitepulse'), $relative_diff);
+                }
+            }
+
+            $async_jobs_overview[] = [
+                'id'               => isset($async_job['id']) ? (string) $async_job['id'] : uniqid('job_', true),
+                'label'            => $label,
+                'status_label'     => $status_label,
+                'badge_class'      => $badge_class,
+                'container_class'  => $container_class,
+                'message'          => $message,
+                'relative'         => $relative,
+                'progress'         => $progress,
+                'progress_percent' => (int) round($progress * 100),
+                'updated_at'       => $updated_at,
+            ];
+        }
+
+        if (!empty($async_jobs_overview)) {
+            usort(
+                $async_jobs_overview,
+                static function ($a, $b) {
+                    return ($b['updated_at'] <=> $a['updated_at']);
+                }
+            );
+
+            $async_jobs_overview = array_slice($async_jobs_overview, 0, 4);
+        }
+    }
+
     $debug_mode_option = get_option(SITEPULSE_OPTION_DEBUG_MODE);
     $is_debug_mode_enabled = rest_sanitize_boolean($debug_mode_option);
     $uptime_url_option = get_option(SITEPULSE_OPTION_UPTIME_URL, '');
@@ -2204,8 +2301,6 @@ function sitepulse_settings_page() {
             echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('Données stockées effacées.', 'sitepulse') . '</p></div>';
         }
         if (isset($_POST['sitepulse_reset_all'])) {
-            $reset_success = true;
-            $log_deletion_failed = false;
             $options_to_delete = [
                 SITEPULSE_OPTION_ACTIVE_MODULES,
                 SITEPULSE_OPTION_DEBUG_MODE,
@@ -2224,7 +2319,6 @@ function sitepulse_settings_page() {
                 SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD,
                 SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES,
                 SITEPULSE_OPTION_ALERT_INTERVAL,
-                // Clear stored alert recipients so the default (empty) list is restored on activation.
                 SITEPULSE_OPTION_ALERT_RECIPIENTS,
                 SITEPULSE_OPTION_SPEED_WARNING_MS,
                 SITEPULSE_OPTION_SPEED_CRITICAL_MS,
@@ -2234,10 +2328,6 @@ function sitepulse_settings_page() {
                 SITEPULSE_PLUGIN_IMPACT_OPTION,
             ];
 
-            foreach ($options_to_delete as $option_key) {
-                delete_option($option_key);
-            }
-
             $transients_to_delete = [
                 SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS,
                 SITEPULSE_TRANSIENT_AI_INSIGHT,
@@ -2246,70 +2336,107 @@ function sitepulse_settings_page() {
             ];
 
             $transient_prefixes_to_delete = [SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX];
-
-            foreach ($transients_to_delete as $transient_key) {
-                delete_transient($transient_key);
-
-                if (function_exists('delete_site_transient')) {
-                    delete_site_transient($transient_key);
-                }
-            }
-
-            foreach ($transient_prefixes_to_delete as $transient_prefix) {
-                sitepulse_delete_transients_by_prefix($transient_prefix);
-                sitepulse_delete_site_transients_by_prefix($transient_prefix);
-            }
-
-            if (defined('SITEPULSE_DEBUG_LOG') && file_exists(SITEPULSE_DEBUG_LOG)) {
-                $log_deleted = false;
-                $delete_error_message = '';
-
-                if (function_exists('wp_delete_file')) {
-                    $delete_result = wp_delete_file(SITEPULSE_DEBUG_LOG);
-
-                    if (function_exists('is_wp_error') && is_wp_error($delete_result)) {
-                        $delete_error_message = $delete_result->get_error_message();
-                    } elseif ($delete_result === false) {
-                        $delete_error_message = 'wp_delete_file returned false.';
-                    }
-
-                    if (!file_exists(SITEPULSE_DEBUG_LOG)) {
-                        $log_deleted = true;
-                    }
-                }
-
-                if (!$log_deleted) {
-                    if (@unlink(SITEPULSE_DEBUG_LOG)) {
-                        $log_deleted = true;
-                    } elseif ($delete_error_message === '') {
-                        $delete_error_message = 'unlink failed.';
-                    }
-                }
-
-                if (!$log_deleted) {
-                    $reset_success = false;
-                    $log_deletion_failed = true;
-                    $log_message = sprintf('SitePulse: impossible de supprimer le journal de débogage (%s). %s', SITEPULSE_DEBUG_LOG, $delete_error_message);
-
-                    if (function_exists('sitepulse_log')) {
-                        sitepulse_log($log_message, 'ERROR');
-                    } else {
-                        error_log($log_message);
-                    }
-                }
-            }
             $cron_hooks = function_exists('sitepulse_get_cron_hooks') ? sitepulse_get_cron_hooks() : [];
-            foreach ($cron_hooks as $hook) {
-                wp_clear_scheduled_hook($hook);
-            }
-            if ($reset_success && function_exists('sitepulse_activate_site')) {
-                sitepulse_activate_site();
+            $log_path = defined('SITEPULSE_DEBUG_LOG') ? SITEPULSE_DEBUG_LOG : '';
+
+            $job_scheduled = false;
+
+            if (function_exists('sitepulse_enqueue_async_job')) {
+                $job = sitepulse_enqueue_async_job(
+                    'plugin_reset',
+                    [
+                        'options'    => $options_to_delete,
+                        'transients' => $transients_to_delete,
+                        'prefixes'   => $transient_prefixes_to_delete,
+                        'cron_hooks' => $cron_hooks,
+                        'log_path'   => $log_path,
+                    ],
+                    [
+                        'label'        => __('Réinitialisation de SitePulse', 'sitepulse'),
+                        'requested_by' => function_exists('get_current_user_id') ? (int) get_current_user_id() : 0,
+                    ]
+                );
+
+                if (is_array($job)) {
+                    $job_scheduled = true;
+                }
             }
 
-            if ($reset_success) {
-                echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('SitePulse a été réinitialisé.', 'sitepulse') . '</p></div>';
-            } elseif ($log_deletion_failed) {
-                echo '<div class="notice notice-error is-dismissible"><p>' . esc_html__('Impossible de supprimer le journal de débogage. Vérifiez les permissions du fichier.', 'sitepulse') . '</p></div>';
+            if ($job_scheduled) {
+                echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('Réinitialisation planifiée. Le nettoyage complet s’exécute en tâche de fond et restaurera la configuration par défaut.', 'sitepulse') . '</p></div>';
+            } else {
+                $reset_success = true;
+                $log_deletion_failed = false;
+
+                foreach ($options_to_delete as $option_key) {
+                    delete_option($option_key);
+                }
+
+                foreach ($transients_to_delete as $transient_key) {
+                    delete_transient($transient_key);
+
+                    if (function_exists('delete_site_transient')) {
+                        delete_site_transient($transient_key);
+                    }
+                }
+
+                foreach ($transient_prefixes_to_delete as $transient_prefix) {
+                    sitepulse_delete_transients_by_prefix($transient_prefix);
+                    sitepulse_delete_site_transients_by_prefix($transient_prefix);
+                }
+
+                if ($log_path !== '' && file_exists($log_path)) {
+                    $log_deleted = false;
+                    $delete_error_message = '';
+
+                    if (function_exists('wp_delete_file')) {
+                        $delete_result = wp_delete_file($log_path);
+
+                        if (function_exists('is_wp_error') && is_wp_error($delete_result)) {
+                            $delete_error_message = $delete_result->get_error_message();
+                        } elseif ($delete_result === false) {
+                            $delete_error_message = 'wp_delete_file returned false.';
+                        }
+
+                        if (!file_exists($log_path)) {
+                            $log_deleted = true;
+                        }
+                    }
+
+                    if (!$log_deleted) {
+                        if (@unlink($log_path)) {
+                            $log_deleted = true;
+                        } elseif ($delete_error_message === '') {
+                            $delete_error_message = 'unlink failed.';
+                        }
+                    }
+
+                    if (!$log_deleted) {
+                        $reset_success = false;
+                        $log_deletion_failed = true;
+                        $log_message = sprintf('SitePulse: impossible de supprimer le journal de débogage (%s). %s', $log_path, $delete_error_message);
+
+                        if (function_exists('sitepulse_log')) {
+                            sitepulse_log($log_message, 'ERROR');
+                        } else {
+                            error_log($log_message);
+                        }
+                    }
+                }
+
+                foreach ($cron_hooks as $hook) {
+                    wp_clear_scheduled_hook($hook);
+                }
+
+                if ($reset_success && function_exists('sitepulse_activate_site')) {
+                    sitepulse_activate_site();
+                }
+
+                if ($reset_success) {
+                    echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('SitePulse a été réinitialisé.', 'sitepulse') . '</p></div>';
+                } elseif ($log_deletion_failed) {
+                    echo '<div class="notice notice-error is-dismissible"><p>' . esc_html__('Impossible de supprimer le journal de débogage. Vérifiez les permissions du fichier.', 'sitepulse') . '</p></div>';
+                }
             }
         }
     }
@@ -2740,14 +2867,24 @@ function sitepulse_settings_page() {
 
                         $checkbox_id = 'sitepulse-module-' . $module_key;
                         $description_id = $checkbox_id . '-description';
+                        $status_id = $checkbox_id . '-status';
+                        $toggle_label_id = $checkbox_id . '-toggle-label';
                         $is_active = in_array($module_key, (array) $active_modules, true);
                         $status_class = $is_active ? 'is-active' : 'is-inactive';
                         $status_label = $is_active ? esc_html__('Activé', 'sitepulse') : esc_html__('Désactivé', 'sitepulse');
                     ?>
                     <div class="sitepulse-module-card" data-module="<?php echo esc_attr($module_key); ?>">
                         <div class="sitepulse-card-header">
-                            <h3 class="sitepulse-card-title"><?php echo esc_html($module_label); ?></h3>
-                            <span class="sitepulse-status <?php echo esc_attr($status_class); ?>"><?php echo $status_label; ?></span>
+                            <h3 class="sitepulse-card-title" id="<?php echo esc_attr($checkbox_id); ?>-title"><?php echo esc_html($module_label); ?></h3>
+                            <span
+                                class="sitepulse-status <?php echo esc_attr($status_class); ?>"
+                                id="<?php echo esc_attr($status_id); ?>"
+                                role="status"
+                                aria-live="polite"
+                                aria-atomic="true"
+                                data-sitepulse-status-on="<?php esc_attr_e('Activé', 'sitepulse'); ?>"
+                                data-sitepulse-status-off="<?php esc_attr_e('Désactivé', 'sitepulse'); ?>"
+                            ><?php echo $status_label; ?></span>
                         </div>
                         <div class="sitepulse-card-body">
                             <?php
@@ -2803,8 +2940,20 @@ function sitepulse_settings_page() {
                             <?php endif; ?>
                             <div class="sitepulse-card-footer">
                                 <label class="sitepulse-toggle" for="<?php echo esc_attr($checkbox_id); ?>">
-                                    <input type="checkbox" id="<?php echo esc_attr($checkbox_id); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ACTIVE_MODULES); ?>[]" value="<?php echo esc_attr($module_key); ?>" <?php checked($is_active); ?><?php if ($module_description !== '') : ?> aria-describedby="<?php echo esc_attr($description_id); ?>"<?php endif; ?>>
-                                    <span><?php esc_html_e('Activer ce module', 'sitepulse'); ?></span>
+                                    <input
+                                        type="checkbox"
+                                        id="<?php echo esc_attr($checkbox_id); ?>"
+                                        name="<?php echo esc_attr(SITEPULSE_OPTION_ACTIVE_MODULES); ?>[]"
+                                        value="<?php echo esc_attr($module_key); ?>"
+                                        <?php checked($is_active); ?>
+                                        <?php if ($module_description !== '') : ?>aria-describedby="<?php echo esc_attr($description_id); ?>"<?php endif; ?>
+                                        data-sitepulse-toggle="module"
+                                        data-sitepulse-toggle-label="<?php echo esc_attr($module_label); ?>"
+                                        data-sitepulse-toggle-status-target="<?php echo esc_attr($status_id); ?>"
+                                        data-sitepulse-toggle-on="<?php echo esc_attr_x('activé', 'toggle state', 'sitepulse'); ?>"
+                                        data-sitepulse-toggle-off="<?php echo esc_attr_x('désactivé', 'toggle state', 'sitepulse'); ?>"
+                                    >
+                                    <span id="<?php echo esc_attr($toggle_label_id); ?>"><?php printf(esc_html__('Activer le module %s', 'sitepulse'), esc_html($module_label)); ?></span>
                                 </label>
                                 <?php if ($module_url !== '') : ?>
                                     <a class="sitepulse-card-link" href="<?php echo esc_url($module_url); ?>">
@@ -2820,19 +2969,41 @@ function sitepulse_settings_page() {
                             <h3 class="sitepulse-card-title"><?php esc_html_e('Seuils du moniteur de ressources', 'sitepulse'); ?></h3>
                         </div>
                         <div class="sitepulse-card-body">
-                            <p class="sitepulse-card-description"><?php esc_html_e('Définissez les seuils d’utilisation maximum tolérés. Les alertes sont déclenchées lorsque plusieurs relevés automatiques dépassent ces valeurs.', 'sitepulse'); ?></p>
+                            <p class="sitepulse-card-description sitepulse-card-description--compact"><?php esc_html_e('Définissez les pourcentages maximum autorisés avant d’envoyer des alertes automatiques.', 'sitepulse'); ?></p>
                             <?php
                             $resource_cpu_threshold = (int) get_option(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT, SITEPULSE_DEFAULT_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT);
                             $resource_memory_threshold = (int) get_option(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT, SITEPULSE_DEFAULT_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT);
                             $resource_disk_threshold = (int) get_option(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT, SITEPULSE_DEFAULT_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT);
                             ?>
-                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT); ?>"><?php esc_html_e('CPU – pourcentage d’utilisation', 'sitepulse'); ?></label>
-                            <input type="number" min="0" max="100" id="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT); ?>" value="<?php echo esc_attr($resource_cpu_threshold); ?>" class="small-text">
-                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT); ?>"><?php esc_html_e('Mémoire – pourcentage utilisé', 'sitepulse'); ?></label>
-                            <input type="number" min="0" max="100" id="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT); ?>" value="<?php echo esc_attr($resource_memory_threshold); ?>" class="small-text">
-                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT); ?>"><?php esc_html_e('Stockage – pourcentage utilisé', 'sitepulse'); ?></label>
-                            <input type="number" min="0" max="100" id="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT); ?>" value="<?php echo esc_attr($resource_disk_threshold); ?>" class="small-text">
-                            <p class="sitepulse-card-description"><?php esc_html_e('Pour le stockage, le pourcentage correspond à l’espace occupé (100 % = disque plein).', 'sitepulse'); ?></p>
+                            <div class="sitepulse-resource-thresholds" role="group" aria-label="<?php esc_attr_e('Seuils d’alerte automatiques', 'sitepulse'); ?>">
+                                <?php $cpu_description_id = SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT . '-help'; ?>
+                                <div class="sitepulse-resource-thresholds__field">
+                                    <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT); ?>"><?php esc_html_e('CPU (1 min)', 'sitepulse'); ?></label>
+                                    <div class="sitepulse-resource-thresholds__input">
+                                        <input type="number" min="0" max="100" id="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT); ?>" value="<?php echo esc_attr($resource_cpu_threshold); ?>" class="small-text" aria-describedby="<?php echo esc_attr($cpu_description_id); ?>">
+                                        <span aria-hidden="true">%</span>
+                                    </div>
+                                    <p class="sitepulse-resource-thresholds__hint" id="<?php echo esc_attr($cpu_description_id); ?>"><?php esc_html_e('Alerte lorsque la moyenne dépasse ce seuil sur plusieurs relevés.', 'sitepulse'); ?></p>
+                                </div>
+                                <?php $memory_description_id = SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT . '-help'; ?>
+                                <div class="sitepulse-resource-thresholds__field">
+                                    <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT); ?>"><?php esc_html_e('Mémoire utilisée', 'sitepulse'); ?></label>
+                                    <div class="sitepulse-resource-thresholds__input">
+                                        <input type="number" min="0" max="100" id="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT); ?>" value="<?php echo esc_attr($resource_memory_threshold); ?>" class="small-text" aria-describedby="<?php echo esc_attr($memory_description_id); ?>">
+                                        <span aria-hidden="true">%</span>
+                                    </div>
+                                    <p class="sitepulse-resource-thresholds__hint" id="<?php echo esc_attr($memory_description_id); ?>"><?php esc_html_e('Pourcentage de mémoire occupée avant notification.', 'sitepulse'); ?></p>
+                                </div>
+                                <?php $disk_description_id = SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT . '-help'; ?>
+                                <div class="sitepulse-resource-thresholds__field">
+                                    <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT); ?>"><?php esc_html_e('Stockage utilisé', 'sitepulse'); ?></label>
+                                    <div class="sitepulse-resource-thresholds__input">
+                                        <input type="number" min="0" max="100" id="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT); ?>" value="<?php echo esc_attr($resource_disk_threshold); ?>" class="small-text" aria-describedby="<?php echo esc_attr($disk_description_id); ?>">
+                                        <span aria-hidden="true">%</span>
+                                    </div>
+                                    <p class="sitepulse-resource-thresholds__hint" id="<?php echo esc_attr($disk_description_id); ?>"><?php esc_html_e('100 % correspond à un disque plein. Harmonisé avec le tableau de bord.', 'sitepulse'); ?></p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div class="sitepulse-module-card sitepulse-module-card--setting" id="sitepulse-debug-card">
@@ -2844,7 +3015,18 @@ function sitepulse_settings_page() {
                             <input type="hidden" name="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>" value="0">
                             <div class="sitepulse-card-footer">
                                 <label class="sitepulse-toggle" for="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>">
-                                    <input type="checkbox" id="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>" value="1" <?php checked($is_debug_mode_enabled); ?>>
+                                    <input
+                                        type="checkbox"
+                                        id="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>"
+                                        name="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>"
+                                        value="1"
+                                        <?php checked($is_debug_mode_enabled); ?>
+                                        aria-describedby="sitepulse-debug-card"
+                                        data-sitepulse-toggle="setting"
+                                        data-sitepulse-toggle-label="<?php esc_attr_e('Mode Debug', 'sitepulse'); ?>"
+                                        data-sitepulse-toggle-on="<?php echo esc_attr_x('activé', 'toggle state', 'sitepulse'); ?>"
+                                        data-sitepulse-toggle-off="<?php echo esc_attr_x('désactivé', 'toggle state', 'sitepulse'); ?>"
+                                    >
                                     <span><?php esc_html_e('Activer le Mode Debug', 'sitepulse'); ?></span>
                                 </label>
                             </div>
@@ -2880,7 +3062,17 @@ function sitepulse_settings_page() {
                                 $is_checked = in_array($channel_key, $configured_delivery_channels, true);
                             ?>
                                 <label class="sitepulse-toggle" for="<?php echo esc_attr($channel_id); ?>">
-                                    <input type="checkbox" id="<?php echo esc_attr($channel_id); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS); ?>[]" value="<?php echo esc_attr($channel_key); ?>" <?php checked($is_checked); ?>>
+                                    <input
+                                        type="checkbox"
+                                        id="<?php echo esc_attr($channel_id); ?>"
+                                        name="<?php echo esc_attr(SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS); ?>[]"
+                                        value="<?php echo esc_attr($channel_key); ?>"
+                                        <?php checked($is_checked); ?>
+                                        data-sitepulse-toggle="setting"
+                                        data-sitepulse-toggle-label="<?php echo esc_attr(sprintf(esc_html__('Canal %s', 'sitepulse'), $channel_label)); ?>"
+                                        data-sitepulse-toggle-on="<?php echo esc_attr_x('activé', 'toggle state', 'sitepulse'); ?>"
+                                        data-sitepulse-toggle-off="<?php echo esc_attr_x('désactivé', 'toggle state', 'sitepulse'); ?>"
+                                    >
                                     <span><?php echo esc_html($channel_label); ?></span>
                                 </label>
                             <?php endforeach; ?>
@@ -2908,7 +3100,17 @@ function sitepulse_settings_page() {
                                 $is_selected = in_array($severity_key, $enabled_severities, true);
                             ?>
                                 <label class="sitepulse-toggle" for="<?php echo esc_attr($severity_id); ?>">
-                                    <input type="checkbox" id="<?php echo esc_attr($severity_id); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES); ?>[]" value="<?php echo esc_attr($severity_key); ?>" <?php checked($is_selected); ?>>
+                                    <input
+                                        type="checkbox"
+                                        id="<?php echo esc_attr($severity_id); ?>"
+                                        name="<?php echo esc_attr(SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES); ?>[]"
+                                        value="<?php echo esc_attr($severity_key); ?>"
+                                        <?php checked($is_selected); ?>
+                                        data-sitepulse-toggle="setting"
+                                        data-sitepulse-toggle-label="<?php echo esc_attr(sprintf(esc_html__('Niveau %s', 'sitepulse'), $severity_label)); ?>"
+                                        data-sitepulse-toggle-on="<?php echo esc_attr_x('activé', 'toggle state', 'sitepulse'); ?>"
+                                        data-sitepulse-toggle-off="<?php echo esc_attr_x('désactivé', 'toggle state', 'sitepulse'); ?>"
+                                    >
                                     <span><?php echo esc_html($severity_label); ?></span>
                                 </label>
                             <?php endforeach; ?>
@@ -2926,7 +3128,17 @@ function sitepulse_settings_page() {
                         <div class="sitepulse-card-body">
                             <input type="hidden" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS); ?>[]" value="">
                             <label class="sitepulse-toggle" for="sitepulse-alert-channel-cpu">
-                                <input type="checkbox" id="sitepulse-alert-channel-cpu" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS); ?>[]" value="cpu" <?php checked($cpu_enabled); ?>>
+                                <input
+                                    type="checkbox"
+                                    id="sitepulse-alert-channel-cpu"
+                                    name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS); ?>[]"
+                                    value="cpu"
+                                    <?php checked($cpu_enabled); ?>
+                                    data-sitepulse-toggle="setting"
+                                    data-sitepulse-toggle-label="<?php esc_attr_e('Alertes de charge CPU', 'sitepulse'); ?>"
+                                    data-sitepulse-toggle-on="<?php echo esc_attr_x('activées', 'toggle state feminine', 'sitepulse'); ?>"
+                                    data-sitepulse-toggle-off="<?php echo esc_attr_x('désactivées', 'toggle state feminine', 'sitepulse'); ?>"
+                                >
                                 <span><?php esc_html_e('Activer les alertes de charge CPU', 'sitepulse'); ?></span>
                             </label>
                             <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>"><?php esc_html_e('Valeur déclenchant une alerte', 'sitepulse'); ?></label>
@@ -2940,7 +3152,17 @@ function sitepulse_settings_page() {
                         </div>
                         <div class="sitepulse-card-body">
                             <label class="sitepulse-toggle" for="sitepulse-alert-channel-php">
-                                <input type="checkbox" id="sitepulse-alert-channel-php" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS); ?>[]" value="php_fatal" <?php checked($php_enabled); ?>>
+                                <input
+                                    type="checkbox"
+                                    id="sitepulse-alert-channel-php"
+                                    name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS); ?>[]"
+                                    value="php_fatal"
+                                    <?php checked($php_enabled); ?>
+                                    data-sitepulse-toggle="setting"
+                                    data-sitepulse-toggle-label="<?php esc_attr_e('Alertes sur les erreurs fatales PHP', 'sitepulse'); ?>"
+                                    data-sitepulse-toggle-on="<?php echo esc_attr_x('activées', 'toggle state feminine', 'sitepulse'); ?>"
+                                    data-sitepulse-toggle-off="<?php echo esc_attr_x('désactivées', 'toggle state feminine', 'sitepulse'); ?>"
+                                >
                                 <span><?php esc_html_e('Activer les alertes sur les erreurs fatales', 'sitepulse'); ?></span>
                             </label>
                             <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD); ?>"><?php esc_html_e('Nombre de lignes fatales avant alerte', 'sitepulse'); ?></label>
@@ -3222,6 +3444,37 @@ function sitepulse_settings_page() {
                             <form method="post" action="" class="sitepulse-settings-form sitepulse-settings-form--secondary">
                                 <?php wp_nonce_field(SITEPULSE_NONCE_ACTION_CLEANUP, SITEPULSE_NONCE_FIELD_CLEANUP); ?>
                                 <div class="sitepulse-settings-grid">
+                                    <?php if (!empty($async_jobs_overview)) : ?>
+                                        <div class="sitepulse-module-card sitepulse-module-card--setting sitepulse-module-card--async">
+                                            <div class="sitepulse-card-header">
+                                                <h3 class="sitepulse-card-title"><?php esc_html_e('Traitements en arrière-plan', 'sitepulse'); ?></h3>
+                                            </div>
+                                            <div class="sitepulse-card-body">
+                                                <p class="sitepulse-card-description" id="sitepulse-async-jobs-description"><?php esc_html_e('Ces opérations se poursuivent même si vous quittez la page. Leur état est mis à jour automatiquement lors de l’actualisation.', 'sitepulse'); ?></p>
+                                                <ul class="sitepulse-async-job-list" role="status" aria-live="polite" aria-describedby="sitepulse-async-jobs-description">
+                                                    <?php foreach ($async_jobs_overview as $async_job) : ?>
+                                                        <li class="sitepulse-async-job sitepulse-async-job--<?php echo esc_attr($async_job['container_class']); ?>">
+                                                            <div class="sitepulse-async-job__header">
+                                                                <span class="sitepulse-status <?php echo esc_attr($async_job['badge_class']); ?>"><?php echo esc_html($async_job['status_label']); ?></span>
+                                                                <span class="sitepulse-async-job__label"><?php echo esc_html($async_job['label']); ?></span>
+                                                            </div>
+                                                            <?php if ($async_job['message'] !== '') : ?>
+                                                                <p class="sitepulse-async-job__message"><?php echo esc_html($async_job['message']); ?></p>
+                                                            <?php endif; ?>
+                                                            <p class="sitepulse-async-job__meta">
+                                                                <?php if ($async_job['progress_percent'] > 0 && $async_job['progress_percent'] < 100) : ?>
+                                                                    <span><?php printf(esc_html__('Progression : %s%%', 'sitepulse'), esc_html(number_format_i18n($async_job['progress_percent']))); ?></span>
+                                                                <?php endif; ?>
+                                                                <?php if ($async_job['relative'] !== '') : ?>
+                                                                    <span><?php echo esc_html($async_job['relative']); ?></span>
+                                                                <?php endif; ?>
+                                                            </p>
+                                                        </li>
+                                                    <?php endforeach; ?>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    <?php endif; ?>
                                     <div class="sitepulse-module-card sitepulse-module-card--setting">
                                         <div class="sitepulse-card-header">
                                             <h3 class="sitepulse-card-title"><?php esc_html_e('Vider le journal de debug', 'sitepulse'); ?></h3>

@@ -30,6 +30,46 @@
     margin-top: 24px;
 }
 
+.sitepulse-card-description--compact {
+    margin-bottom: 16px;
+    color: var(--sitepulse-text-subtle);
+}
+
+.sitepulse-resource-thresholds {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    margin-top: 16px;
+}
+
+.sitepulse-resource-thresholds__field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.sitepulse-resource-thresholds__input {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.sitepulse-resource-thresholds__hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--sitepulse-text-subtle);
+}
+
+.is-dark .sitepulse-resource-thresholds__hint {
+    color: var(--sitepulse-text-subtle);
+}
+
+@media (prefers-color-scheme: dark) {
+    .sitepulse-resource-thresholds__hint {
+        color: var(--sitepulse-text-subtle);
+    }
+}
+
 .sitepulse-overview-callout {
     display: flex;
     gap: 24px;
@@ -478,6 +518,64 @@
     align-items: center;
     gap: 12px;
     flex-wrap: wrap;
+}
+
+.sitepulse-module-card--async .sitepulse-async-job-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 12px;
+}
+
+.sitepulse-async-job {
+    border: 1px solid var(--sitepulse-border, #dcdcde);
+    border-left: 4px solid #ccd0d4;
+    border-radius: 6px;
+    padding: 12px 14px;
+    background: var(--sitepulse-surface, #ffffff);
+}
+
+.sitepulse-async-job__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.sitepulse-async-job__label {
+    font-weight: 600;
+    color: var(--sitepulse-text, #1d2327);
+}
+
+.sitepulse-async-job__message {
+    margin: 0 0 6px;
+    color: var(--sitepulse-text, #1d2327);
+}
+
+.sitepulse-async-job__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 0;
+    color: var(--sitepulse-text-subtle, #50575e);
+    font-size: 12px;
+}
+
+.sitepulse-async-job--is-running {
+    border-left-color: #2271b1;
+}
+
+.sitepulse-async-job--is-success {
+    border-left-color: #1e8c45;
+}
+
+.sitepulse-async-job--is-error {
+    border-left-color: #d63638;
+}
+
+.sitepulse-async-job--is-pending {
+    border-left-color: #8c8f94;
 }
 
 .sitepulse-settings-actions__buttons .button.button-primary {

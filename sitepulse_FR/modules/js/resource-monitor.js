@@ -107,9 +107,15 @@
         var memoryPercent = entry.memory && typeof entry.memory.percentUsage === 'number'
             ? entry.memory.percentUsage
             : null;
-        var diskPercent = entry.disk && typeof entry.disk.percentFree === 'number'
-            ? entry.disk.percentFree
-            : null;
+        var diskPercent = null;
+
+        if (entry.disk) {
+            if (typeof entry.disk.percentUsed === 'number') {
+                diskPercent = entry.disk.percentUsed;
+            } else if (typeof entry.disk.percentFree === 'number') {
+                diskPercent = Math.max(0, Math.min(100, 100 - entry.disk.percentFree));
+            }
+        }
 
         memoryPercentDataset.push(memoryPercent !== null ? memoryPercent : null);
         diskPercentDataset.push(diskPercent !== null ? diskPercent : null);
