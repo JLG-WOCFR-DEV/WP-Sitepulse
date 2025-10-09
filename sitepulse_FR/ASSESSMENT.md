@@ -80,3 +80,14 @@
 - Ajouter une **file de traitement asynchrone** (Action Scheduler, queues Redis, priorités) pour les modules lourds (IA, scans de vitesse) avec journalisation de l’état et des reprises.
 - Supporter la **redondance multi-agents** (régions, providers) et une politique de quorum pour les alertes uptime, à l’image des plateformes pro.
 - Étendre les historiques et proposer des **rétentions paramétrables** (30/90/365 jours) avec agrégations horaires afin de mieux documenter les SLA et MTTR.
+
+## 8. Reporting, partage et pilotage d’équipe
+### État actuel
+- Les réglages affichent un tableau de bord synthétique (statut uptime, progression des purges, prochaines étapes) mais sans consolidation multi-site ni indicateurs SLA exportables, ce qui limite le reporting transverse par rapport aux suites pro qui livrent des vues globales et des rapports périodiques.【F:sitepulse_FR/includes/admin-settings.php†L1704-L2099】
+- L’historique des recommandations IA propose un export CSV manuel et une copie presse-papiers avec métadonnées, mais aucun connecteur natif vers des outils de ticketing ou d’automatisation marketing.【F:sitepulse_FR/modules/ai_insights.php†L2260-L2330】
+- La normalisation des jobs asynchrones expose uniquement deux types d’opérations (purge de transients, reset) et n’affiche que les cinq derniers logs, empêchant la supervision d’un pipeline complet comme on le trouve dans les consoles d’orchestration professionnelles.【F:sitepulse_FR/includes/functions.php†L1120-L1279】
+
+### Leviers d’alignement « pro »
+- Ajouter des **rapports programmés** (e-mail/CSV/PDF) et un export API couvrant uptime, IA et opérations de nettoyage afin de rapprocher SitePulse des portails Pingdom, Better Stack ou ManageWP.
+- Offrir des **connecteurs collaboratifs** (webhooks Jira/Linear, synchronisation Slack/Teams) pour transformer les recommandations IA et alertes en tâches actionnables au même titre que les solutions SaaS premium.
+- Étendre l’**orchestrateur de jobs** avec des files dédiées par module, un suivi temps réel et des audits persistants (timestamps, opérateur, succès/échec) pour égaler les consoles d’automatisation MSP.
