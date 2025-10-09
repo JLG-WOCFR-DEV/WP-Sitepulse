@@ -9,6 +9,10 @@
 
 if (!defined('ABSPATH')) exit; // Exit if accessed directly.
 
+if (!defined('SITEPULSE_TRANSIENT_DEBUG_LOG_SUMMARY')) {
+    define('SITEPULSE_TRANSIENT_DEBUG_LOG_SUMMARY', 'sitepulse_dashboard_log_summary');
+}
+
 add_action('admin_enqueue_scripts', 'sitepulse_custom_dashboard_enqueue_assets');
 add_action('wp_ajax_sitepulse_save_dashboard_preferences', 'sitepulse_save_dashboard_preferences');
 add_action('rest_api_init', 'sitepulse_custom_dashboard_register_rest_routes');
@@ -1763,6 +1767,52 @@ function sitepulse_custom_dashboard_analyze_debug_log($force_refresh = false) {
         return $cached;
     }
 
+    $transient_key = defined('SITEPULSE_TRANSIENT_DEBUG_LOG_SUMMARY')
+        ? SITEPULSE_TRANSIENT_DEBUG_LOG_SUMMARY
+        : 'sitepulse_dashboard_log_summary';
+
+    if ($force_refresh && function_exists('delete_transient')) {
+        delete_transient($transient_key);
+    }
+
+    $log_file = function_exists('sitepulse_get_wp_debug_log_path')
+        ? sitepulse_get_wp_debug_log_path()
+        : null;
+
+    $cache_signature = 'unavailable:' . md5((string) $log_file);
+
+    if ($log_file !== null && file_exists($log_file)) {
+        $mtime = @filemtime($log_file);
+        $size  = @filesize($log_file);
+
+        if ($mtime !== false || $size !== false) {
+            $cache_signature = sprintf(
+                '%s:%s:%s',
+                md5($log_file),
+                $mtime !== false ? (int) $mtime : 0,
+                $size !== false ? (int) $size : 0
+            );
+        } else {
+            $cache_signature = 'stat:' . md5((string) $log_file);
+        }
+    }
+
+    if (!$force_refresh && function_exists('get_transient')) {
+        $transient_value = get_transient($transient_key);
+
+        if (
+            is_array($transient_value)
+            && isset($transient_value['signature'], $transient_value['data'])
+            && $transient_value['signature'] === $cache_signature
+        ) {
+            $cached = $transient_value['data'];
+
+            if (is_array($cached)) {
+                return $cached;
+            }
+        }
+    }
+
     $counts = [
         'fatal'      => 0,
         'warning'    => 0,
@@ -1774,12 +1824,7 @@ function sitepulse_custom_dashboard_analyze_debug_log($force_refresh = false) {
     $summary  = __('Log is clean.', 'sitepulse');
     $metadata = null;
     $truncated = false;
-
-    $log_file = function_exists('sitepulse_get_wp_debug_log_path')
-        ? sitepulse_get_wp_debug_log_path()
-        : null;
-
-    $readable = false;
+    $readable  = false;
 
     if ($log_file === null) {
         $status  = 'status-warn';
@@ -1892,6 +1937,17 @@ function sitepulse_custom_dashboard_analyze_debug_log($force_refresh = false) {
         'chart'     => $chart,
         'metadata'  => $detailed_metadata,
     ];
+
+    if (function_exists('set_transient')) {
+        $ttl = (int) apply_filters('sitepulse_dashboard_debug_log_cache_ttl', 5 * MINUTE_IN_SECONDS, $cached, $cache_signature);
+
+        if ($ttl > 0) {
+            set_transient($transient_key, [
+                'signature' => $cache_signature,
+                'data'      => $cached,
+            ], $ttl);
+        }
+    }
 
     return $cached;
 }

@@ -134,14 +134,43 @@
     flex: 1 1 auto;
 }
 
+
 .sitepulse-module-nav__list {
     display: flex;
     flex-wrap: nowrap;
-    gap: 8px;
+    gap: 16px;
     list-style: none;
     margin: 0;
     padding: 0;
     padding-bottom: 6px;
+}
+
+.sitepulse-module-nav__group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 220px;
+}
+
+.sitepulse-module-nav__group[hidden] {
+    display: none !important;
+}
+
+.sitepulse-module-nav__group-label {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--wp-admin-color-gray-600, #3c434a);
+}
+
+.sitepulse-module-nav__group-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 
 .sitepulse-module-nav__item {

@@ -11,6 +11,23 @@
         return;
     }
 
+    var refreshFeedback = typeof settings.refreshFeedback === 'string' ? settings.refreshFeedback : '';
+    var refreshStatusId = typeof settings.refreshStatusId === 'string' ? settings.refreshStatusId : '';
+
+    if (refreshFeedback) {
+        if (refreshStatusId) {
+            var statusRegion = document.getElementById(refreshStatusId);
+
+            if (statusRegion) {
+                statusRegion.textContent = refreshFeedback;
+            }
+        }
+
+        if (window.wp && window.wp.a11y && typeof window.wp.a11y.speak === 'function') {
+            window.wp.a11y.speak(refreshFeedback, 'polite');
+        }
+    }
+
     var history = Array.isArray(settings.history) ? settings.history : [];
     var container = document.getElementById('sitepulse-resource-history');
     var emptyMessage = container ? container.querySelector('[data-empty]') : null;
