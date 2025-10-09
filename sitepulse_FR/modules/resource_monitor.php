@@ -495,6 +495,7 @@ function sitepulse_resource_monitor_get_snapshot($context = 'manual') {
     $memory_limit_ini = ini_get('memory_limit');
     $memory_limit = $memory_limit_ini;
     $memory_limit_bytes = sitepulse_resource_monitor_normalize_memory_limit_bytes($memory_limit_ini);
+    $memory_usage_percent = sitepulse_resource_monitor_calculate_percentage($memory_usage_bytes, $memory_limit_bytes);
 
     if ($memory_limit_ini !== false) {
         $memory_limit_value = trim((string) $memory_limit_ini);
@@ -533,6 +534,20 @@ function sitepulse_resource_monitor_get_snapshot($context = 'manual') {
         $notices = array_merge($notices, $disk_total_result['notices']);
     }
 
+    $disk_free_percent = sitepulse_resource_monitor_calculate_percentage($disk_free_bytes, $disk_total_bytes);
+    $disk_used_bytes = null;
+    $disk_used = $not_available_label;
+    $disk_used_percent = null;
+
+    if ($disk_total_bytes !== null && $disk_free_bytes !== null && $disk_total_bytes > 0) {
+        $disk_used_bytes = max(0, $disk_total_bytes - $disk_free_bytes);
+        $disk_used = size_format($disk_used_bytes);
+    }
+
+    if ($disk_free_percent !== null) {
+        $disk_used_percent = max(0.0, min(100.0, 100.0 - $disk_free_percent));
+    }
+
     $snapshot = [
         'load'         => $load,
         'load_display' => $load_display,
@@ -540,8 +555,13 @@ function sitepulse_resource_monitor_get_snapshot($context = 'manual') {
         'memory_usage_bytes' => $memory_usage_bytes,
         'memory_limit' => $memory_limit,
         'memory_limit_bytes' => $memory_limit_bytes,
+        'memory_usage_percent' => $memory_usage_percent,
         'disk_free'    => $disk_free,
         'disk_free_bytes' => $disk_free_bytes,
+        'disk_free_percent' => $disk_free_percent,
+        'disk_used'    => $disk_used,
+        'disk_used_bytes' => $disk_used_bytes,
+        'disk_used_percent' => $disk_used_percent,
         'disk_total'   => $disk_total,
         'disk_total_bytes' => $disk_total_bytes,
         'notices'      => $notices,
@@ -615,8 +635,8 @@ function sitepulse_resource_monitor_page() {
                 'latestLoad'            => $history_summary['latest_load'],
                 'averageMemoryPercent'  => $history_summary['average_memory_percent'],
                 'latestMemoryPercent'   => $history_summary['latest_memory_percent'],
-                'averageDiskFreePercent'=> $history_summary['average_disk_free_percent'],
-                'latestDiskFreePercent' => $history_summary['latest_disk_free_percent'],
+                'averageDiskUsedPercent'=> $history_summary['average_disk_used_percent'],
+                'latestDiskUsedPercent' => $history_summary['latest_disk_used_percent'],
             ],
             'snapshot' => [
                 'generatedAt' => isset($snapshot['generated_at']) ? (int) $snapshot['generated_at'] : null,
@@ -629,12 +649,13 @@ function sitepulse_resource_monitor_page() {
             'i18n' => [
                 'loadLabel'         => esc_html__('Charge CPU (1 min)', 'sitepulse'),
                 'memoryLabel'       => esc_html__('Mémoire utilisée (%)', 'sitepulse'),
-                'diskLabel'         => esc_html__('Stockage libre (%)', 'sitepulse'),
+                'diskLabel'         => esc_html__('Stockage utilisé (%)', 'sitepulse'),
                 'percentAxisLabel'  => esc_html__('% d’utilisation', 'sitepulse'),
                 'noHistory'         => esc_html__("Aucun historique disponible pour le moment.", 'sitepulse'),
                 'timestamp'         => esc_html__('Horodatage', 'sitepulse'),
                 'unavailable'       => esc_html__('N/A', 'sitepulse'),
                 'memoryUsage'       => esc_html__('Mémoire utilisée', 'sitepulse'),
+                'diskUsage'         => esc_html__('Stockage utilisé', 'sitepulse'),
                 'diskFree'          => esc_html__('Stockage libre', 'sitepulse'),
                 'cronPoint'         => esc_html__('Collecte automatique', 'sitepulse'),
                 'manualPoint'       => esc_html__('Collecte manuelle', 'sitepulse'),
@@ -715,19 +736,66 @@ function sitepulse_resource_monitor_page() {
             </div>
             <div class="sitepulse-resource-card">
                 <h2><?php esc_html_e('Mémoire', 'sitepulse'); ?></h2>
-                <p class="sitepulse-resource-value"><?php echo wp_kses_post($snapshot['memory_usage']); ?></p>
-                <p class="sitepulse-resource-subvalue"><?php
-                /* translators: %s: PHP memory limit value. */
-                printf(esc_html__('Limite PHP : %s', 'sitepulse'), esc_html((string) $snapshot['memory_limit']));
-                ?></p>
+                <p class="sitepulse-resource-value">
+                    <?php
+                    $memory_percent_display = isset($snapshot['memory_usage_percent']) && is_numeric($snapshot['memory_usage_percent'])
+                        ? number_format_i18n((float) $snapshot['memory_usage_percent'], 1)
+                        : null;
+
+                    if ($memory_percent_display !== null) {
+                        printf(esc_html__('%s %% utilisés', 'sitepulse'), esc_html($memory_percent_display));
+                    } else {
+                        echo esc_html((string) $snapshot['memory_usage']);
+                    }
+                    ?>
+                </p>
+                <p class="sitepulse-resource-subvalue">
+                    <?php
+                    $memory_limit_label = isset($snapshot['memory_limit']) ? (string) $snapshot['memory_limit'] : '';
+
+                    if ($memory_limit_label !== '') {
+                        printf(
+                            /* translators: 1: memory used, 2: memory limit. */
+                            esc_html__('Utilisation : %1$s / Limite : %2$s', 'sitepulse'),
+                            esc_html((string) $snapshot['memory_usage']),
+                            esc_html($memory_limit_label)
+                        );
+                    } else {
+                        printf(
+                            /* translators: %s: memory used. */
+                            esc_html__('Utilisation : %s', 'sitepulse'),
+                            esc_html((string) $snapshot['memory_usage'])
+                        );
+                    }
+                    ?>
+                </p>
             </div>
             <div class="sitepulse-resource-card">
                 <h2><?php esc_html_e('Stockage disque', 'sitepulse'); ?></h2>
-                <p class="sitepulse-resource-value"><?php echo wp_kses_post($snapshot['disk_free']); ?></p>
-                <p class="sitepulse-resource-subvalue"><?php
-                /* translators: %s: total disk space. */
-                printf(esc_html__('Total : %s', 'sitepulse'), esc_html((string) $snapshot['disk_total']));
-                ?></p>
+                <p class="sitepulse-resource-value">
+                    <?php
+                    $disk_used_percent_display = isset($snapshot['disk_used_percent']) && is_numeric($snapshot['disk_used_percent'])
+                        ? number_format_i18n((float) $snapshot['disk_used_percent'], 1)
+                        : null;
+
+                    if ($disk_used_percent_display !== null) {
+                        printf(esc_html__('%s %% utilisés', 'sitepulse'), esc_html($disk_used_percent_display));
+                    } else {
+                        echo esc_html((string) $snapshot['disk_used']);
+                    }
+                    ?>
+                </p>
+                <p class="sitepulse-resource-subvalue">
+                    <?php
+                    printf(
+                        /* translators: 1: used disk, 2: free disk, 3: total disk. */
+                        esc_html__('Utilisé : %1$s — Libre : %2$s (Total : %3$s)', 'sitepulse'),
+                        esc_html((string) $snapshot['disk_used']),
+                        esc_html((string) $snapshot['disk_free']),
+                        esc_html((string) $snapshot['disk_total'])
+                    );
+                    ?>
+                </p>
             </div>
         </div>
         <div class="sitepulse-resource-meta">
@@ -1207,8 +1275,8 @@ function sitepulse_resource_monitor_calculate_history_summary(array $history_ent
             'latest_load' => null,
             'average_memory_percent' => null,
             'latest_memory_percent' => null,
-            'average_disk_free_percent' => null,
-            'latest_disk_free_percent' => null,
+            'average_disk_used_percent' => null,
+            'latest_disk_used_percent' => null,
         ];
     }
 
@@ -1230,13 +1298,15 @@ function sitepulse_resource_monitor_calculate_history_summary(array $history_ent
             $memory_percentages[] = $memory_percent;
         }
 
-        $disk_percent = sitepulse_resource_monitor_calculate_percentage($entry['disk']['free'] ?? null, $entry['disk']['total'] ?? null);
-        if ($disk_percent !== null) {
-            $disk_percentages[] = $disk_percent;
+        $disk_percent_free = sitepulse_resource_monitor_calculate_percentage($entry['disk']['free'] ?? null, $entry['disk']['total'] ?? null);
+        if ($disk_percent_free !== null) {
+            $disk_percentages[] = max(0.0, min(100.0, 100.0 - $disk_percent_free));
         }
     }
 
     $latest_entry = $history_entries[$count - 1];
+    $latest_disk_free_percent = sitepulse_resource_monitor_calculate_percentage($latest_entry['disk']['free'] ?? null, $latest_entry['disk']['total'] ?? null);
+    $latest_disk_used_percent = $latest_disk_free_percent !== null ? max(0.0, min(100.0, 100.0 - $latest_disk_free_percent)) : null;
 
     return [
         'count' => $count,
@@ -1247,8 +1317,8 @@ function sitepulse_resource_monitor_calculate_history_summary(array $history_ent
         'latest_load' => isset($latest_entry['load'][0]) && is_numeric($latest_entry['load'][0]) ? (float) $latest_entry['load'][0] : null,
         'average_memory_percent' => sitepulse_resource_monitor_calculate_average($memory_percentages),
         'latest_memory_percent' => sitepulse_resource_monitor_calculate_percentage($latest_entry['memory']['usage'] ?? null, $latest_entry['memory']['limit'] ?? null),
-        'average_disk_free_percent' => sitepulse_resource_monitor_calculate_average($disk_percentages),
-        'latest_disk_free_percent' => sitepulse_resource_monitor_calculate_percentage($latest_entry['disk']['free'] ?? null, $latest_entry['disk']['total'] ?? null),
+        'average_disk_used_percent' => sitepulse_resource_monitor_calculate_average($disk_percentages),
+        'latest_disk_used_percent' => $latest_disk_used_percent,
     ];
 }
 
@@ -1298,11 +1368,11 @@ function sitepulse_resource_monitor_format_history_summary(array $summary) {
         );
     }
 
-    if ($summary['average_disk_free_percent'] !== null) {
+    if ($summary['average_disk_used_percent'] !== null) {
         $sentences[] = sprintf(
-            /* translators: %s: average disk free percentage. */
-            __('Stockage libre : %s %%', 'sitepulse'),
-            number_format_i18n($summary['average_disk_free_percent'], 1)
+            /* translators: %s: average disk usage percentage. */
+            __('Stockage utilisé : %s %%', 'sitepulse'),
+            number_format_i18n($summary['average_disk_used_percent'], 1)
         );
     }
 
