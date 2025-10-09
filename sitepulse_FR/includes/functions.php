@@ -1065,17 +1065,263 @@ if (!function_exists('sitepulse_async_job_add_log')) {
             $job['logs'] = [];
         }
 
+        $allowed_levels = ['info', 'success', 'warning', 'error'];
+        $normalized_level = is_string($level) ? strtolower(trim($level)) : 'info';
+
+        if (!in_array($normalized_level, $allowed_levels, true)) {
+            $normalized_level = 'info';
+        }
+
         $timestamp = function_exists('current_time') ? current_time('timestamp') : time();
 
         $job['logs'][] = [
             'timestamp' => $timestamp,
             'message'   => is_string($message) ? $message : (string) $message,
-            'level'     => is_string($level) ? $level : 'info',
+            'level'     => $normalized_level,
         ];
 
-        if (count($job['logs']) > 20) {
-            $job['logs'] = array_slice($job['logs'], -20);
+        if (count($job['logs']) > 25) {
+            $job['logs'] = array_slice($job['logs'], -25);
         }
+    }
+}
+
+if (!function_exists('sitepulse_async_build_relative_label')) {
+    /**
+     * Formats a relative timestamp for async job summaries.
+     *
+     * @param int    $timestamp Unix timestamp.
+     * @param string $context   Either "updated" or "log".
+     *
+     * @return string
+     */
+    function sitepulse_async_build_relative_label($timestamp, $context = 'updated') {
+        $timestamp = (int) $timestamp;
+
+        if ($timestamp <= 0 || !function_exists('human_time_diff')) {
+            return '';
+        }
+
+        $reference = function_exists('current_time') ? current_time('timestamp') : time();
+        $diff = human_time_diff($timestamp, $reference);
+
+        if ($diff === '') {
+            return '';
+        }
+
+        if ($context === 'log') {
+            return sprintf(__('Il y a %s', 'sitepulse'), $diff);
+        }
+
+        return sprintf(__('Mis à jour il y a %s', 'sitepulse'), $diff);
+    }
+}
+
+if (!function_exists('sitepulse_prepare_async_jobs_overview')) {
+    /**
+     * Normalizes async job payloads for UI consumption.
+     *
+     * @param array<string,array<string,mixed>>|null $jobs Optional raw jobs payload.
+     * @param array<string,mixed>|null               $args Optional arguments (limit, include_logs).
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    function sitepulse_prepare_async_jobs_overview($jobs = null, $args = null) {
+        if ($jobs === null) {
+            $jobs = sitepulse_get_async_jobs();
+        }
+
+        if (!is_array($jobs)) {
+            $jobs = [];
+        }
+
+        $defaults = [
+            'limit'        => 4,
+            'include_logs' => true,
+        ];
+
+        $args = is_array($args) ? array_merge($defaults, $args) : $defaults;
+
+        $limit = isset($args['limit']) ? (int) $args['limit'] : 4;
+        $include_logs = !empty($args['include_logs']);
+
+        if (function_exists('apply_filters')) {
+            $limit = (int) apply_filters('sitepulse_async_overview_limit', $limit, $jobs, $args);
+        }
+
+        if ($limit < 0) {
+            $limit = 0;
+        }
+
+        $prepared = [];
+
+        foreach ($jobs as $job) {
+            if (!is_array($job) || empty($job['type'])) {
+                continue;
+            }
+
+            $job_type = (string) $job['type'];
+
+            if (!in_array($job_type, ['transient_cleanup', 'plugin_reset'], true)) {
+                continue;
+            }
+
+            $status = isset($job['status']) ? (string) $job['status'] : 'queued';
+            $updated_at = isset($job['updated_at']) ? (int) $job['updated_at'] : 0;
+            $progress = isset($job['progress']) ? (float) $job['progress'] : 0.0;
+            $progress = max(0.0, min(1.0, $progress));
+            $progress_percent = (int) round($progress * 100);
+
+            switch ($job_type) {
+                case 'plugin_reset':
+                    $label = __('Réinitialisation de SitePulse', 'sitepulse');
+                    break;
+                case 'transient_cleanup':
+                default:
+                    $label = __('Purge des transients expirés', 'sitepulse');
+                    break;
+            }
+
+            switch ($status) {
+                case 'completed':
+                    $status_label = __('Terminé', 'sitepulse');
+                    $badge_class = 'is-success';
+                    $container_class = 'is-success';
+                    break;
+                case 'failed':
+                    $status_label = __('Échec', 'sitepulse');
+                    $badge_class = 'is-critical';
+                    $container_class = 'is-error';
+                    break;
+                case 'running':
+                    $status_label = __('En cours', 'sitepulse');
+                    $badge_class = 'is-active';
+                    $container_class = 'is-running';
+                    break;
+                case 'queued':
+                default:
+                    $status_label = __('En attente', 'sitepulse');
+                    $badge_class = 'is-warning';
+                    $container_class = 'is-pending';
+                    break;
+            }
+
+            $message = isset($job['message']) ? (string) $job['message'] : '';
+
+            if ($message !== '') {
+                $message = function_exists('wp_strip_all_tags')
+                    ? wp_strip_all_tags($message)
+                    : strip_tags($message);
+            }
+
+            $progress_label = '';
+
+            if ($progress_percent > 0 && $progress_percent < 100) {
+                $display_percent = function_exists('number_format_i18n')
+                    ? number_format_i18n($progress_percent)
+                    : number_format($progress_percent);
+
+                $progress_label = sprintf(__('Progression : %s%%', 'sitepulse'), $display_percent);
+            }
+
+            $logs = [];
+
+            if ($include_logs && isset($job['logs']) && is_array($job['logs'])) {
+                $log_entries = array_slice($job['logs'], -5);
+
+                usort(
+                    $log_entries,
+                    static function ($a, $b) {
+                        $a_time = isset($a['timestamp']) ? (int) $a['timestamp'] : 0;
+                        $b_time = isset($b['timestamp']) ? (int) $b['timestamp'] : 0;
+
+                        return $b_time <=> $a_time;
+                    }
+                );
+
+                foreach ($log_entries as $log_entry) {
+                    if (!is_array($log_entry)) {
+                        continue;
+                    }
+
+                    $log_message = isset($log_entry['message']) ? (string) $log_entry['message'] : '';
+
+                    if ($log_message === '') {
+                        continue;
+                    }
+
+                    $log_message = function_exists('wp_strip_all_tags')
+                        ? wp_strip_all_tags($log_message)
+                        : strip_tags($log_message);
+
+                    $log_timestamp = isset($log_entry['timestamp']) ? (int) $log_entry['timestamp'] : 0;
+                    $log_level = isset($log_entry['level']) ? (string) $log_entry['level'] : 'info';
+
+                    switch ($log_level) {
+                        case 'success':
+                            $log_label = __('Succès', 'sitepulse');
+                            $log_class = 'is-success';
+                            break;
+                        case 'warning':
+                            $log_label = __('Avertissement', 'sitepulse');
+                            $log_class = 'is-warning';
+                            break;
+                        case 'error':
+                            $log_label = __('Erreur', 'sitepulse');
+                            $log_class = 'is-error';
+                            break;
+                        case 'info':
+                        default:
+                            $log_label = __('Information', 'sitepulse');
+                            $log_class = 'is-info';
+                            break;
+                    }
+
+                    $logs[] = [
+                        'message'     => $log_message,
+                        'level'       => $log_level,
+                        'level_label' => $log_label,
+                        'level_class' => $log_class,
+                        'timestamp'   => $log_timestamp,
+                        'relative'    => sitepulse_async_build_relative_label($log_timestamp, 'log'),
+                        'iso'         => $log_timestamp > 0 && function_exists('date_i18n') ? date_i18n('c', $log_timestamp) : '',
+                    ];
+                }
+            }
+
+            $prepared[] = [
+                'id'               => isset($job['id']) ? (string) $job['id'] : uniqid('job_', true),
+                'type'             => $job_type,
+                'label'            => $label,
+                'status'           => $status,
+                'status_label'     => $status_label,
+                'badge_class'      => $badge_class,
+                'container_class'  => $container_class,
+                'message'          => $message,
+                'relative'         => sitepulse_async_build_relative_label($updated_at, 'updated'),
+                'updated_at'       => $updated_at,
+                'progress'         => $progress,
+                'progress_percent' => $progress_percent,
+                'progress_label'   => $progress_label,
+                'logs'             => $logs,
+                'is_active'        => in_array($status, ['queued', 'running'], true),
+            ];
+        }
+
+        if (!empty($prepared)) {
+            usort(
+                $prepared,
+                static function ($a, $b) {
+                    return ($b['updated_at'] <=> $a['updated_at']);
+                }
+            );
+        }
+
+        if ($limit > 0 && count($prepared) > $limit) {
+            $prepared = array_slice($prepared, 0, $limit);
+        }
+
+        return $prepared;
     }
 }
 
@@ -1099,7 +1345,11 @@ if (!function_exists('sitepulse_schedule_async_runner')) {
             return;
         }
 
-        wp_schedule_single_event($timestamp, $hook);
+        $scheduled = wp_schedule_single_event($timestamp, $hook);
+
+        if ($scheduled && function_exists('spawn_cron')) {
+            spawn_cron($timestamp);
+        }
     }
 }
 
@@ -1130,7 +1380,7 @@ if (!function_exists('sitepulse_enqueue_async_job')) {
             'created_at' => $timestamp,
             'updated_at' => $timestamp,
             'progress'   => 0,
-            'message'    => '',
+            'message'    => __('En file d’attente pour exécution.', 'sitepulse'),
             'payload'    => is_array($payload) ? $payload : [],
             'logs'       => [],
             'meta'       => [
@@ -1138,6 +1388,12 @@ if (!function_exists('sitepulse_enqueue_async_job')) {
                 'requested_by' => isset($metadata['requested_by']) ? (int) $metadata['requested_by'] : 0,
             ],
         ];
+
+        sitepulse_async_job_add_log(
+            $job,
+            __('Tâche planifiée et en attente d’exécution.', 'sitepulse'),
+            'info'
+        );
 
         $jobs[$job['id']] = $job;
 
@@ -1183,6 +1439,14 @@ if (!function_exists('sitepulse_process_async_jobs')) {
             $job['status'] = 'running';
             $job['updated_at'] = $current_time;
 
+            if ($status === 'queued') {
+                sitepulse_async_job_add_log(
+                    $job,
+                    __('Tâche en cours d’exécution.', 'sitepulse'),
+                    'info'
+                );
+            }
+
             $result = sitepulse_run_async_job($job);
 
             if (is_array($result)) {
@@ -1221,6 +1485,70 @@ if (!function_exists('sitepulse_process_async_jobs')) {
     if (function_exists('add_action')) {
         $hook = defined('SITEPULSE_CRON_ASYNC_JOB_RUNNER') ? SITEPULSE_CRON_ASYNC_JOB_RUNNER : 'sitepulse_run_async_jobs';
         add_action($hook, 'sitepulse_process_async_jobs');
+    }
+}
+
+if (!function_exists('sitepulse_bootstrap_async_runner')) {
+    /**
+     * Ensures async jobs progress when WP-Cron is disabled.
+     *
+     * @return void
+     */
+    function sitepulse_bootstrap_async_runner() {
+        static $processing = false;
+
+        if ($processing) {
+            return;
+        }
+
+        if (!function_exists('sitepulse_get_async_jobs')) {
+            return;
+        }
+
+        $jobs = sitepulse_get_async_jobs();
+
+        if (empty($jobs)) {
+            return;
+        }
+
+        $has_pending = false;
+
+        foreach ($jobs as $job) {
+            if (!is_array($job)) {
+                continue;
+            }
+
+            $status = isset($job['status']) ? (string) $job['status'] : '';
+
+            if ($status === 'queued' || $status === 'running') {
+                $has_pending = true;
+                break;
+            }
+        }
+
+        if (!$has_pending) {
+            return;
+        }
+
+        if (function_exists('wp_next_scheduled')) {
+            $hook = defined('SITEPULSE_CRON_ASYNC_JOB_RUNNER') ? SITEPULSE_CRON_ASYNC_JOB_RUNNER : 'sitepulse_run_async_jobs';
+
+            if (wp_next_scheduled($hook)) {
+                return;
+            }
+        }
+
+        if (!function_exists('sitepulse_process_async_jobs')) {
+            return;
+        }
+
+        $processing = true;
+        sitepulse_process_async_jobs();
+        $processing = false;
+    }
+
+    if (function_exists('add_action')) {
+        add_action('admin_init', 'sitepulse_bootstrap_async_runner', 5);
     }
 }
 

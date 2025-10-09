@@ -147,8 +147,83 @@ function sitepulse_admin_settings_enqueue_assets($hook_suffix) {
     }
 
     wp_enqueue_script($script_handle);
+
+    if (function_exists('admin_url')) {
+        $poll_interval = 45000;
+
+        if (function_exists('apply_filters')) {
+            $poll_interval = (int) apply_filters('sitepulse_async_status_poll_interval', $poll_interval);
+        }
+
+        if ($poll_interval < 15000) {
+            $poll_interval = 15000;
+        }
+
+        $ajax_nonce = function_exists('wp_create_nonce') ? wp_create_nonce('sitepulse_async_jobs') : '';
+
+        $localization = [
+            'ajaxUrl'           => admin_url('admin-ajax.php'),
+            'asyncJobsNonce'    => $ajax_nonce,
+            'asyncPollInterval' => $poll_interval,
+            'i18n'              => [
+                'asyncEmpty'      => __('Aucun traitement en arrière-plan pour le moment.', 'sitepulse'),
+                'asyncError'      => __('Impossible de rafraîchir le statut des traitements. Réessayez plus tard.', 'sitepulse'),
+                'asyncUpdated'    => __('Statut des traitements en arrière-plan mis à jour.', 'sitepulse'),
+                'asyncLogSummary' => __('Journal des opérations', 'sitepulse'),
+                'asyncLogToggle'  => __('Afficher ou masquer le journal détaillé', 'sitepulse'),
+            ],
+        ];
+
+        wp_localize_script($script_handle, 'sitepulseAdminSettingsData', $localization);
+    }
 }
 add_action('admin_enqueue_scripts', 'sitepulse_admin_settings_enqueue_assets');
+
+if (!function_exists('sitepulse_ajax_async_jobs_overview')) {
+    /**
+     * Ajax handler returning the latest async job summaries.
+     *
+     * @return void
+     */
+    function sitepulse_ajax_async_jobs_overview() {
+        if (!current_user_can(sitepulse_get_capability())) {
+            wp_send_json_error(
+                ['message' => __('Permission refusée pour cette action.', 'sitepulse')],
+                403
+            );
+        }
+
+        $nonce = isset($_POST['nonce']) ? sanitize_text_field(wp_unslash($_POST['nonce'])) : '';
+
+        if (!wp_verify_nonce($nonce, 'sitepulse_async_jobs')) {
+            wp_send_json_error(
+                ['message' => __('Nonce invalide : impossible de mettre à jour le statut.', 'sitepulse')],
+                400
+            );
+        }
+
+        $jobs = function_exists('sitepulse_prepare_async_jobs_overview')
+            ? sitepulse_prepare_async_jobs_overview(null, ['include_logs' => true])
+            : [];
+
+        $state = 'idle';
+
+        foreach ($jobs as $job) {
+            if (!empty($job['is_active'])) {
+                $state = 'busy';
+                break;
+            }
+        }
+
+        wp_send_json_success([
+            'jobs'        => $jobs,
+            'state'       => $state,
+            'generated_at'=> function_exists('current_time') ? current_time('timestamp') : time(),
+        ]);
+    }
+
+    add_action('wp_ajax_sitepulse_async_jobs_overview', 'sitepulse_ajax_async_jobs_overview');
+}
 
 /**
  * Registers the settings fields.
@@ -1999,101 +2074,27 @@ function sitepulse_settings_page() {
             'top_prefixes' => [],
         ];
 
-    $async_jobs_raw = function_exists('sitepulse_get_async_jobs')
-        ? sitepulse_get_async_jobs()
+    $async_jobs_overview = function_exists('sitepulse_prepare_async_jobs_overview')
+        ? sitepulse_prepare_async_jobs_overview(null, ['include_logs' => true, 'limit' => 4])
         : [];
 
-    $async_jobs_overview = [];
+    $async_jobs_state = 'idle';
 
-    if (!empty($async_jobs_raw)) {
-        foreach ($async_jobs_raw as $async_job) {
-            if (!is_array($async_job) || empty($async_job['type'])) {
-                continue;
-            }
-
-            $job_type = (string) $async_job['type'];
-
-            if (!in_array($job_type, ['transient_cleanup', 'plugin_reset'], true)) {
-                continue;
-            }
-
-            $status = isset($async_job['status']) ? (string) $async_job['status'] : 'queued';
-            $updated_at = isset($async_job['updated_at']) ? (int) $async_job['updated_at'] : 0;
-            $progress = isset($async_job['progress']) ? (float) $async_job['progress'] : 0.0;
-            $progress = max(0.0, min(1.0, $progress));
-
-            switch ($job_type) {
-                case 'plugin_reset':
-                    $label = __('Réinitialisation de SitePulse', 'sitepulse');
-                    break;
-                case 'transient_cleanup':
-                default:
-                    $label = __('Purge des transients expirés', 'sitepulse');
-                    break;
-            }
-
-            switch ($status) {
-                case 'completed':
-                    $status_label = __('Terminé', 'sitepulse');
-                    $badge_class = 'is-success';
-                    $container_class = 'is-success';
-                    break;
-                case 'failed':
-                    $status_label = __('Échec', 'sitepulse');
-                    $badge_class = 'is-critical';
-                    $container_class = 'is-error';
-                    break;
-                case 'running':
-                    $status_label = __('En cours', 'sitepulse');
-                    $badge_class = 'is-active';
-                    $container_class = 'is-running';
-                    break;
-                case 'queued':
-                default:
-                    $status_label = __('En attente', 'sitepulse');
-                    $badge_class = 'is-warning';
-                    $container_class = 'is-pending';
-                    break;
-            }
-
-            $message = isset($async_job['message']) ? trim((string) $async_job['message']) : '';
-            $message = $message !== '' ? wp_strip_all_tags($message) : '';
-
-            $relative = '';
-
-            if ($updated_at > 0 && function_exists('human_time_diff')) {
-                $reference = function_exists('current_time') ? current_time('timestamp') : time();
-                $relative_diff = human_time_diff($updated_at, $reference);
-
-                if (!empty($relative_diff)) {
-                    $relative = sprintf(esc_html__('Mis à jour il y a %s', 'sitepulse'), $relative_diff);
-                }
-            }
-
-            $async_jobs_overview[] = [
-                'id'               => isset($async_job['id']) ? (string) $async_job['id'] : uniqid('job_', true),
-                'label'            => $label,
-                'status_label'     => $status_label,
-                'badge_class'      => $badge_class,
-                'container_class'  => $container_class,
-                'message'          => $message,
-                'relative'         => $relative,
-                'progress'         => $progress,
-                'progress_percent' => (int) round($progress * 100),
-                'updated_at'       => $updated_at,
-            ];
+    foreach ($async_jobs_overview as $overview_entry) {
+        if (!empty($overview_entry['is_active'])) {
+            $async_jobs_state = 'busy';
+            break;
         }
+    }
 
-        if (!empty($async_jobs_overview)) {
-            usort(
-                $async_jobs_overview,
-                static function ($a, $b) {
-                    return ($b['updated_at'] <=> $a['updated_at']);
-                }
-            );
+    $async_jobs_initial_json = '';
 
-            $async_jobs_overview = array_slice($async_jobs_overview, 0, 4);
-        }
+    $encoded_async_jobs = function_exists('wp_json_encode')
+        ? wp_json_encode($async_jobs_overview)
+        : json_encode($async_jobs_overview);
+
+    if (is_string($encoded_async_jobs)) {
+        $async_jobs_initial_json = $encoded_async_jobs;
     }
 
     $debug_mode_option = get_option(SITEPULSE_OPTION_DEBUG_MODE);
@@ -3444,37 +3445,72 @@ function sitepulse_settings_page() {
                             <form method="post" action="" class="sitepulse-settings-form sitepulse-settings-form--secondary">
                                 <?php wp_nonce_field(SITEPULSE_NONCE_ACTION_CLEANUP, SITEPULSE_NONCE_FIELD_CLEANUP); ?>
                                 <div class="sitepulse-settings-grid">
-                                    <?php if (!empty($async_jobs_overview)) : ?>
-                                        <div class="sitepulse-module-card sitepulse-module-card--setting sitepulse-module-card--async">
-                                            <div class="sitepulse-card-header">
-                                                <h3 class="sitepulse-card-title"><?php esc_html_e('Traitements en arrière-plan', 'sitepulse'); ?></h3>
-                                            </div>
-                                            <div class="sitepulse-card-body">
-                                                <p class="sitepulse-card-description" id="sitepulse-async-jobs-description"><?php esc_html_e('Ces opérations se poursuivent même si vous quittez la page. Leur état est mis à jour automatiquement lors de l’actualisation.', 'sitepulse'); ?></p>
-                                                <ul class="sitepulse-async-job-list" role="status" aria-live="polite" aria-describedby="sitepulse-async-jobs-description">
+                                    <div class="sitepulse-module-card sitepulse-module-card--setting sitepulse-module-card--async" data-sitepulse-async-card data-sitepulse-async-state="<?php echo esc_attr($async_jobs_state); ?>">
+                                        <div class="sitepulse-card-header">
+                                            <h3 class="sitepulse-card-title"><?php esc_html_e('Traitements en arrière-plan', 'sitepulse'); ?></h3>
+                                        </div>
+                                        <div class="sitepulse-card-body">
+                                            <p class="sitepulse-card-description" id="sitepulse-async-jobs-description"><?php esc_html_e('Ces opérations se poursuivent même si vous quittez la page. Leur état est mis à jour automatiquement lors de l’actualisation.', 'sitepulse'); ?></p>
+                                            <ul
+                                                class="sitepulse-async-job-list"
+                                                role="status"
+                                                aria-live="polite"
+                                                aria-describedby="sitepulse-async-jobs-description"
+                                                data-sitepulse-async-jobs-list
+                                                data-sitepulse-async-initial="<?php echo esc_attr($async_jobs_initial_json); ?>"
+                                                data-sitepulse-async-empty-message="<?php echo esc_attr__('Aucun traitement en arrière-plan pour le moment.', 'sitepulse'); ?>"
+                                            >
+                                                <?php if (!empty($async_jobs_overview)) : ?>
                                                     <?php foreach ($async_jobs_overview as $async_job) : ?>
-                                                        <li class="sitepulse-async-job sitepulse-async-job--<?php echo esc_attr($async_job['container_class']); ?>">
+                                                        <li class="sitepulse-async-job sitepulse-async-job--<?php echo esc_attr($async_job['container_class']); ?>" data-sitepulse-async-id="<?php echo esc_attr($async_job['id']); ?>">
                                                             <div class="sitepulse-async-job__header">
                                                                 <span class="sitepulse-status <?php echo esc_attr($async_job['badge_class']); ?>"><?php echo esc_html($async_job['status_label']); ?></span>
                                                                 <span class="sitepulse-async-job__label"><?php echo esc_html($async_job['label']); ?></span>
                                                             </div>
-                                                            <?php if ($async_job['message'] !== '') : ?>
+                                                            <?php if (!empty($async_job['message'])) : ?>
                                                                 <p class="sitepulse-async-job__message"><?php echo esc_html($async_job['message']); ?></p>
                                                             <?php endif; ?>
-                                                            <p class="sitepulse-async-job__meta">
-                                                                <?php if ($async_job['progress_percent'] > 0 && $async_job['progress_percent'] < 100) : ?>
-                                                                    <span><?php printf(esc_html__('Progression : %s%%', 'sitepulse'), esc_html(number_format_i18n($async_job['progress_percent']))); ?></span>
-                                                                <?php endif; ?>
-                                                                <?php if ($async_job['relative'] !== '') : ?>
-                                                                    <span><?php echo esc_html($async_job['relative']); ?></span>
-                                                                <?php endif; ?>
-                                                            </p>
+                                                            <?php if (!empty($async_job['progress_label']) || !empty($async_job['relative']) || ($async_job['progress_percent'] > 0 && $async_job['progress_percent'] < 100)) : ?>
+                                                                <p class="sitepulse-async-job__meta">
+                                                                    <?php if (!empty($async_job['progress_label'])) : ?>
+                                                                        <span><?php echo esc_html($async_job['progress_label']); ?></span>
+                                                                    <?php elseif ($async_job['progress_percent'] > 0 && $async_job['progress_percent'] < 100) : ?>
+                                                                        <span><?php printf(esc_html__('Progression : %s%%', 'sitepulse'), esc_html(number_format_i18n($async_job['progress_percent']))); ?></span>
+                                                                    <?php endif; ?>
+                                                                    <?php if (!empty($async_job['relative'])) : ?>
+                                                                        <span><?php echo esc_html($async_job['relative']); ?></span>
+                                                                    <?php endif; ?>
+                                                                </p>
+                                                            <?php endif; ?>
+                                                            <?php if (!empty($async_job['logs'])) : ?>
+                                                                <details class="sitepulse-async-job__logs" <?php if (!empty($async_job['is_active'])) : ?>open<?php endif; ?>>
+                                                                    <summary class="sitepulse-async-job__logs-summary">
+                                                                        <span class="dashicons dashicons-list-view" aria-hidden="true"></span>
+                                                                        <span class="sitepulse-async-job__logs-summary-text"><?php esc_html_e('Journal des opérations', 'sitepulse'); ?></span>
+                                                                        <span class="screen-reader-text"><?php esc_html_e('Afficher ou masquer le journal détaillé', 'sitepulse'); ?></span>
+                                                                    </summary>
+                                                                    <ul class="sitepulse-async-job__log-list">
+                                                                        <?php foreach ($async_job['logs'] as $log_entry) : ?>
+                                                                            <li class="sitepulse-async-job__log sitepulse-async-job__log--<?php echo esc_attr($log_entry['level_class']); ?>">
+                                                                                <span class="sitepulse-async-job__log-label"><?php echo esc_html($log_entry['level_label']); ?></span>
+                                                                                <span class="sitepulse-async-job__log-message"><?php echo esc_html($log_entry['message']); ?></span>
+                                                                                <?php if (!empty($log_entry['relative'])) : ?>
+                                                                                    <time class="sitepulse-async-job__log-time" <?php if (!empty($log_entry['iso'])) : ?>datetime="<?php echo esc_attr($log_entry['iso']); ?>"<?php endif; ?>><?php echo esc_html($log_entry['relative']); ?></time>
+                                                                                <?php endif; ?>
+                                                                            </li>
+                                                                        <?php endforeach; ?>
+                                                                    </ul>
+                                                                </details>
+                                                            <?php endif; ?>
                                                         </li>
                                                     <?php endforeach; ?>
-                                                </ul>
-                                            </div>
+                                                <?php else : ?>
+                                                    <li class="sitepulse-async-job sitepulse-async-job--empty"><?php esc_html_e('Aucun traitement en arrière-plan pour le moment.', 'sitepulse'); ?></li>
+                                                <?php endif; ?>
+                                            </ul>
+                                            <p class="sitepulse-async-job__error" data-sitepulse-async-error hidden></p>
                                         </div>
-                                    <?php endif; ?>
+                                    </div>
                                     <div class="sitepulse-module-card sitepulse-module-card--setting">
                                         <div class="sitepulse-card-header">
                                             <h3 class="sitepulse-card-title"><?php esc_html_e('Vider le journal de debug', 'sitepulse'); ?></h3>
