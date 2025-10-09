@@ -198,6 +198,130 @@
     font-weight: 500;
 }
 
+.sitepulse-uptime-remote-metrics {
+    margin: 32px 0;
+    background: var(--sitepulse-uptime-surface);
+    border: 1px solid var(--sitepulse-uptime-border);
+    border-radius: 8px;
+    padding: 20px;
+}
+
+.sitepulse-uptime-remote-metrics__header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.sitepulse-uptime-remote-metrics__meta {
+    margin: 0;
+    color: var(--sitepulse-uptime-text-subtle);
+    font-size: 0.9em;
+}
+
+.sitepulse-uptime-remote-metrics__status {
+    margin-top: 16px;
+    margin-bottom: 20px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 16px;
+    border-radius: 8px;
+    border: 1px solid var(--sitepulse-uptime-border);
+    border-left-width: 4px;
+    background: var(--sitepulse-uptime-surface);
+    --sitepulse-uptime-status-color: var(--sitepulse-uptime-text-subtle);
+}
+
+.sitepulse-uptime-remote-metrics__status--ok {
+    --sitepulse-uptime-status-color: var(--sitepulse-uptime-up);
+}
+
+.sitepulse-uptime-remote-metrics__status--warning {
+    --sitepulse-uptime-status-color: var(--sitepulse-uptime-medium);
+}
+
+.sitepulse-uptime-remote-metrics__status--critical {
+    --sitepulse-uptime-status-color: var(--sitepulse-uptime-low);
+}
+
+.sitepulse-uptime-remote-metrics__status {
+    border-left-color: var(--sitepulse-uptime-status-color);
+}
+
+.sitepulse-uptime-remote-metrics__status::before {
+    content: '';
+    display: none;
+}
+
+.sitepulse-uptime-remote-metrics__status .dashicons {
+    font-size: 22px;
+    line-height: 1;
+    margin-top: 2px;
+    color: var(--sitepulse-uptime-status-color);
+}
+
+.sitepulse-uptime-remote-metrics__status-headline {
+    margin: 0;
+    font-weight: 600;
+}
+
+.sitepulse-uptime-remote-metrics__status-text {
+    margin: 6px 0 0;
+    color: var(--sitepulse-uptime-text-subtle);
+}
+
+.sitepulse-uptime-remote-metrics__status-list {
+    margin: 8px 0 0;
+    padding-left: 18px;
+    color: var(--sitepulse-uptime-text-subtle);
+}
+
+.sitepulse-uptime-remote-metrics__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+}
+
+.sitepulse-uptime-remote-metrics__card {
+    background: var(--sitepulse-uptime-surface);
+    border: 1px solid var(--sitepulse-uptime-border);
+    border-radius: 8px;
+    padding: 16px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.sitepulse-uptime-remote-metrics__card h3 {
+    margin-top: 0;
+    margin-bottom: 8px;
+    font-size: 1.05em;
+}
+
+.sitepulse-uptime-remote-metrics__value {
+    font-size: 1.6em;
+    font-weight: 600;
+    margin: 0 0 6px;
+    color: var(--sitepulse-uptime-text);
+    word-break: break-word;
+}
+
+.sitepulse-uptime-remote-metrics__meta + .sitepulse-uptime-remote-metrics__meta {
+    margin-top: 6px;
+}
+
+@media (max-width: 782px) {
+    .sitepulse-uptime-remote-metrics {
+        padding: 16px;
+    }
+
+    .sitepulse-uptime-remote-metrics__status {
+        flex-direction: column;
+    }
+
+    .sitepulse-uptime-remote-metrics__status .dashicons {
+        margin-bottom: 6px;
+    }
+}
+
 .sitepulse-uptime-metric--neutral {
     color: var(--sitepulse-uptime-text-subtle);
     font-weight: 400;
