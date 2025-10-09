@@ -15,6 +15,7 @@ function sitepulse_get_module_selector_definitions() {
             'label'            => __('Dashboard', 'sitepulse'),
             'icon'             => 'dashicons-dashboard',
             'tags'             => ['overview', 'summary', 'executive'],
+            'category'         => 'overview',
             'always_available' => true,
         ],
         'speed_analyzer' => [
@@ -22,48 +23,56 @@ function sitepulse_get_module_selector_definitions() {
             'label' => __('Speed', 'sitepulse'),
             'icon'  => 'dashicons-performance',
             'tags'  => ['performance', 'web vitals', 'ttfb', 'lcp'],
+            'category' => 'performance',
         ],
         'uptime_tracker' => [
             'page'  => 'sitepulse-uptime',
             'label' => __('Uptime', 'sitepulse'),
             'icon'  => 'dashicons-chart-bar',
             'tags'  => ['availability', 'incidents', 'sla'],
+            'category' => 'observability',
         ],
         'database_optimizer' => [
             'page'  => 'sitepulse-db',
             'label' => __('Database', 'sitepulse'),
             'icon'  => 'dashicons-database',
             'tags'  => ['sql', 'cleanup', 'optimization'],
+            'category' => 'maintenance',
         ],
         'log_analyzer' => [
             'page'  => 'sitepulse-logs',
             'label' => __('Logs', 'sitepulse'),
             'icon'  => 'dashicons-hammer',
             'tags'  => ['errors', 'debug', 'php'],
+            'category' => 'observability',
         ],
         'resource_monitor' => [
             'page'  => 'sitepulse-resources',
             'label' => __('Resources', 'sitepulse'),
             'icon'  => 'dashicons-chart-area',
             'tags'  => ['infrastructure', 'cpu', 'memory'],
+            'category' => 'observability',
         ],
         'plugin_impact_scanner' => [
             'page'  => 'sitepulse-plugins',
             'label' => __('Plugins', 'sitepulse'),
             'icon'  => 'dashicons-admin-plugins',
             'tags'  => ['extensions', 'weight', 'load'],
+            'category' => 'performance',
         ],
         'maintenance_advisor' => [
             'page'  => 'sitepulse-maintenance',
             'label' => __('Maintenance', 'sitepulse'),
             'icon'  => 'dashicons-admin-tools',
             'tags'  => ['updates', 'security', 'housekeeping'],
+            'category' => 'maintenance',
         ],
         'ai_insights' => [
             'page'  => 'sitepulse-ai',
             'label' => __('AI Insights', 'sitepulse'),
             'icon'  => 'dashicons-lightbulb',
             'tags'  => ['automation', 'recommendations', 'content'],
+            'category' => 'automation',
         ],
     ];
 
@@ -76,9 +85,131 @@ function sitepulse_get_module_selector_definitions() {
 }
 
 /**
+ * Returns the available module categories mapped to their translated labels.
+ *
+ * @return array<string,string>
+ */
+function sitepulse_get_module_selector_categories() {
+    $categories = [
+        'overview'      => __('Vue d’ensemble', 'sitepulse'),
+        'performance'   => __('Performance', 'sitepulse'),
+        'observability' => __('Observabilité', 'sitepulse'),
+        'maintenance'   => __('Maintenance', 'sitepulse'),
+        'automation'    => __('Automatisation', 'sitepulse'),
+        'other'         => __('Autres modules', 'sitepulse'),
+    ];
+
+    /**
+     * Filters the module selector categories.
+     *
+     * @param array $categories Associative array of category slugs to labels.
+     */
+    return apply_filters('sitepulse_module_selector_categories', $categories);
+}
+
+/**
+ * Returns the preferred order of module categories.
+ *
+ * @return array<int,string>
+ */
+function sitepulse_get_module_selector_category_order() {
+    $order = ['favorites', 'overview', 'performance', 'observability', 'maintenance', 'automation', 'other'];
+
+    /**
+     * Filters the module selector category order.
+     *
+     * @param array $order Ordered list of category slugs.
+     */
+    return apply_filters('sitepulse_module_selector_category_order', $order);
+}
+
+/**
+ * Returns the user meta key used to persist module usage counts.
+ *
+ * @return string
+ */
+function sitepulse_get_module_selector_usage_meta_key() {
+    return 'sitepulse_module_usage_counts';
+}
+
+/**
+ * Fetches the module usage counts for the current user.
+ *
+ * @return array<string,int>
+ */
+function sitepulse_get_module_selector_usage_counts() {
+    if (!function_exists('get_current_user_id') || !function_exists('get_user_meta')) {
+        return [];
+    }
+
+    $user_id = get_current_user_id();
+
+    if (!$user_id) {
+        return [];
+    }
+
+    $raw = get_user_meta($user_id, sitepulse_get_module_selector_usage_meta_key(), true);
+
+    if (!is_array($raw)) {
+        return [];
+    }
+
+    $counts = [];
+
+    foreach ($raw as $slug => $value) {
+        if (!is_scalar($slug) || !is_numeric($value)) {
+            continue;
+        }
+
+        $counts[(string) $slug] = max(0, (int) $value);
+    }
+
+    return $counts;
+}
+
+/**
+ * Records the visit of a module page for the current user.
+ *
+ * @param string $page_slug Current module page slug.
+ * @return void
+ */
+function sitepulse_module_selector_record_visit($page_slug) {
+    if (!function_exists('get_current_user_id') || !function_exists('get_user_meta') || !function_exists('update_user_meta')) {
+        return;
+    }
+
+    $user_id = get_current_user_id();
+
+    if (!$user_id) {
+        return;
+    }
+
+    if (function_exists('sanitize_key')) {
+        $slug = sanitize_key($page_slug);
+    } else {
+        $slug = strtolower(preg_replace('/[^a-z0-9_-]+/', '-', (string) $page_slug));
+        $slug = trim($slug, '-');
+    }
+
+    if ($slug === '') {
+        return;
+    }
+
+    $meta_key = sitepulse_get_module_selector_usage_meta_key();
+    $counts   = sitepulse_get_module_selector_usage_counts();
+
+    $counts[$slug] = isset($counts[$slug]) ? $counts[$slug] + 1 : 1;
+
+    arsort($counts, SORT_NUMERIC);
+    $counts = array_slice($counts, 0, 12, true);
+
+    update_user_meta($user_id, $meta_key, $counts);
+}
+
+/**
  * Builds the list of enabled module selector items including URLs.
  *
- * @return array<int, array{slug:string,label:string,url:string,icon:string,tags:array<int, string> }>
+ * @return array<int, array{slug:string,label:string,url:string,icon:string,tags:array<int, string>,category:string }>
  */
 function sitepulse_get_module_selector_items() {
     $active_modules = array_map('strval', (array) get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []));
@@ -106,12 +237,19 @@ function sitepulse_get_module_selector_items() {
             $tags = array_filter(array_map('strval', (array) $definition['tags']));
         }
 
+        $category = isset($definition['category']) ? (string) $definition['category'] : '';
+
+        if ($category === '') {
+            $category = 'other';
+        }
+
         $items[] = [
             'slug'  => $page_slug,
             'label' => $label,
             'url'   => admin_url('admin.php?page=' . $page_slug),
             'icon'  => $icon,
             'tags'  => $tags,
+            'category' => $category,
         ];
     }
 
@@ -194,7 +332,7 @@ add_action('admin_enqueue_scripts', 'sitepulse_module_selector_enqueue_style');
  * Builds the navigation items for the module selector, marking the current page.
  *
  * @param string $current_page Current module page slug (e.g. "sitepulse-speed").
- * @return array<int, array{slug:string,label:string,url:string,icon:string,tags:array<int, string>,current:bool}>
+ * @return array<int, array{slug:string,label:string,items:array<int,array<string,mixed>>}>
  */
 function sitepulse_get_module_navigation_items($current_page = '') {
     $sanitizer = function_exists('sanitize_title')
@@ -217,20 +355,136 @@ function sitepulse_get_module_navigation_items($current_page = '') {
         }
     }
 
+    if ($current_page !== '') {
+        sitepulse_module_selector_record_visit($current_page);
+    }
+
     $items = sitepulse_get_module_selector_items();
+    $usage_counts = sitepulse_get_module_selector_usage_counts();
+
+    $categories = sitepulse_get_module_selector_categories();
+    $category_order = sitepulse_get_module_selector_category_order();
 
     foreach ($items as $index => $item) {
         $slug = isset($item['slug']) ? $sanitizer($item['slug']) : '';
         $items[$index]['current'] = ($slug !== '' && $slug === $current_page);
+
+        $category_slug = isset($item['category']) ? (string) $item['category'] : 'other';
+
+        if (!isset($categories[$category_slug])) {
+            $category_slug = 'other';
+        }
+
+        $items[$index]['category'] = $category_slug;
+        $items[$index]['category_label'] = $categories[$category_slug];
+        $items[$index]['usage_count'] = isset($usage_counts[$slug]) ? (int) $usage_counts[$slug] : 0;
+        $items[$index]['favorite'] = $items[$index]['usage_count'] > 0;
+    }
+
+    usort(
+        $items,
+        static function ($a, $b) use ($category_order) {
+            $a_count = $a['usage_count'] ?? 0;
+            $b_count = $b['usage_count'] ?? 0;
+
+            if ($a_count !== $b_count) {
+                return $a_count > $b_count ? -1 : 1;
+            }
+
+            $a_category = $a['category'] ?? 'other';
+            $b_category = $b['category'] ?? 'other';
+            $a_category_position = array_search($a_category, $category_order, true);
+            $b_category_position = array_search($b_category, $category_order, true);
+
+            if ($a_category_position === false) {
+                $a_category_position = PHP_INT_MAX;
+            }
+
+            if ($b_category_position === false) {
+                $b_category_position = PHP_INT_MAX;
+            }
+
+            if ($a_category_position !== $b_category_position) {
+                return $a_category_position < $b_category_position ? -1 : 1;
+            }
+
+            $a_label = isset($a['label']) ? (string) $a['label'] : '';
+            $b_label = isset($b['label']) ? (string) $b['label'] : '';
+
+            return strcasecmp($a_label, $b_label);
+        }
+    );
+
+    $max_favorites = (int) apply_filters('sitepulse_module_selector_max_favorites', 4);
+    $favorites = [];
+    $remaining = [];
+
+    foreach ($items as $item) {
+        if ($item['favorite'] && count($favorites) < $max_favorites) {
+            $favorites[] = $item;
+        } else {
+            $remaining[] = $item;
+        }
+    }
+
+    $grouped = [];
+
+    if (!empty($favorites)) {
+        $grouped[] = [
+            'slug'  => 'favorites',
+            'label' => __('Favoris', 'sitepulse'),
+            'items' => $favorites,
+        ];
+    }
+
+    $buckets = [];
+
+    foreach ($remaining as $item) {
+        $category_slug = $item['category'] ?? 'other';
+        $bucket_key = isset($categories[$category_slug]) ? $category_slug : 'other';
+
+        if (!isset($buckets[$bucket_key])) {
+            $buckets[$bucket_key] = [
+                'slug'  => $bucket_key,
+                'label' => $categories[$bucket_key],
+                'items' => [],
+            ];
+        }
+
+        $buckets[$bucket_key]['items'][] = $item;
+    }
+
+    $order_map = array_flip($category_order);
+
+    uasort(
+        $buckets,
+        static function ($a, $b) use ($order_map) {
+            $a_pos = isset($order_map[$a['slug']]) ? $order_map[$a['slug']] : PHP_INT_MAX;
+            $b_pos = isset($order_map[$b['slug']]) ? $order_map[$b['slug']] : PHP_INT_MAX;
+
+            if ($a_pos !== $b_pos) {
+                return $a_pos < $b_pos ? -1 : 1;
+            }
+
+            return strcasecmp($a['label'], $b['label']);
+        }
+    );
+
+    foreach ($buckets as $bucket) {
+        if (empty($bucket['items'])) {
+            continue;
+        }
+
+        $grouped[] = $bucket;
     }
 
     /**
-     * Filters the prepared module navigation items.
+     * Filters the prepared module navigation groups.
      *
-     * @param array  $items        Navigation entries with current flags.
+     * @param array  $grouped      Grouped navigation entries.
      * @param string $current_page Current page slug.
      */
-    return apply_filters('sitepulse_module_navigation_items', $items, $current_page);
+    return apply_filters('sitepulse_module_navigation_items', $grouped, $current_page);
 }
 
 /**
@@ -263,7 +517,19 @@ function sitepulse_render_module_navigation($current_page = '', $items = null) {
         ? wp_unique_id('sitepulse-module-nav-search-')
         : 'sitepulse-module-nav-search-' . uniqid('', true);
 
-    $total_items = count($items);
+    $flat_items = [];
+
+    foreach ($items as $group) {
+        if (!isset($group['items']) || !is_array($group['items'])) {
+            continue;
+        }
+
+        foreach ($group['items'] as $item) {
+            $flat_items[] = $item;
+        }
+    }
+
+    $total_items = count($flat_items);
 
     ?>
     <nav class="sitepulse-module-nav" aria-label="<?php esc_attr_e('SitePulse sections', 'sitepulse'); ?>">
@@ -322,8 +588,18 @@ function sitepulse_render_module_navigation($current_page = '', $items = null) {
                     name="page"
                     data-sitepulse-nav-select
                 >
-                    <?php foreach ($items as $item) : ?>
-                        <option value="<?php echo esc_attr($item['slug']); ?>"<?php selected(!empty($item['current'])); ?>><?php echo esc_html($item['label']); ?></option>
+                    <?php foreach ($items as $group) :
+                        if (empty($group['items']) || !is_array($group['items'])) {
+                            continue;
+                        }
+
+                        $group_label = isset($group['label']) ? (string) $group['label'] : '';
+                    ?>
+                        <optgroup label="<?php echo esc_attr($group_label); ?>">
+                            <?php foreach ($group['items'] as $item) : ?>
+                                <option value="<?php echo esc_attr($item['slug']); ?>"<?php selected(!empty($item['current'])); ?>><?php echo esc_html($item['label']); ?></option>
+                            <?php endforeach; ?>
+                        </optgroup>
                     <?php endforeach; ?>
                 </select>
                 <button type="submit" class="button sitepulse-module-nav__select-submit"><?php esc_html_e('View', 'sitepulse'); ?></button>
@@ -342,48 +618,66 @@ function sitepulse_render_module_navigation($current_page = '', $items = null) {
             </button>
             <div class="sitepulse-module-nav__scroll-viewport" data-sitepulse-nav-viewport>
                 <ul class="sitepulse-module-nav__list" id="<?php echo esc_attr($nav_list_id); ?>">
-                    <?php foreach ($items as $item) :
-                        $link_classes = ['sitepulse-module-nav__link'];
-
-                        if (!empty($item['current'])) {
-                            $link_classes[] = 'is-current';
+                    <?php foreach ($items as $group) :
+                        if (empty($group['items']) || !is_array($group['items'])) {
+                            continue;
                         }
 
-                        $filter_terms = [];
-
-                        if (!empty($item['label'])) {
-                            $filter_terms[] = $item['label'];
-                        }
-
-                        if (!empty($item['tags']) && is_array($item['tags'])) {
-                            foreach ($item['tags'] as $tag) {
-                                if (!is_scalar($tag)) {
-                                    continue;
-                                }
-
-                                $filter_terms[] = (string) $tag;
-                            }
-                        }
-
-                        $filter_text = trim(implode(' ', array_filter($filter_terms)));
-
-                        if (function_exists('remove_accents')) {
-                            $filter_text = remove_accents($filter_text);
-                        }
-
-                        $filter_text = strtolower($filter_text);
+                        $group_label = isset($group['label']) ? (string) $group['label'] : '';
                     ?>
-                        <li
-                            class="sitepulse-module-nav__item"
-                            data-sitepulse-nav-item
-                            data-filter-text="<?php echo esc_attr($filter_text); ?>"
-                        >
-                            <a class="<?php echo esc_attr(implode(' ', $link_classes)); ?>" href="<?php echo esc_url($item['url']); ?>"<?php echo !empty($item['current']) ? ' aria-current="page"' : ''; ?>>
-                                <?php if (!empty($item['icon'])) : ?>
-                                    <span class="sitepulse-module-nav__icon dashicons <?php echo esc_attr($item['icon']); ?>" aria-hidden="true"></span>
-                                <?php endif; ?>
-                                <span class="sitepulse-module-nav__label"><?php echo esc_html($item['label']); ?></span>
-                            </a>
+                        <li class="sitepulse-module-nav__group" role="presentation">
+                            <span class="sitepulse-module-nav__group-label"><?php echo esc_html($group_label); ?></span>
+                            <ul class="sitepulse-module-nav__group-list">
+                                <?php foreach ($group['items'] as $item) :
+                                    $link_classes = ['sitepulse-module-nav__link'];
+
+                                    if (!empty($item['current'])) {
+                                        $link_classes[] = 'is-current';
+                                    }
+
+                                    $filter_terms = [];
+
+                                    if (!empty($item['label'])) {
+                                        $filter_terms[] = $item['label'];
+                                    }
+
+                                    if (!empty($item['category_label'])) {
+                                        $filter_terms[] = $item['category_label'];
+                                    }
+
+                                    if (!empty($item['tags']) && is_array($item['tags'])) {
+                                        foreach ($item['tags'] as $tag) {
+                                            if (!is_scalar($tag)) {
+                                                continue;
+                                            }
+
+                                            $filter_terms[] = (string) $tag;
+                                        }
+                                    }
+
+                                    $filter_text = trim(implode(' ', array_filter($filter_terms)));
+
+                                    if (function_exists('remove_accents')) {
+                                        $filter_text = remove_accents($filter_text);
+                                    }
+
+                                    $filter_text = strtolower($filter_text);
+                                ?>
+                                    <li
+                                        class="sitepulse-module-nav__item"
+                                        data-sitepulse-nav-item
+                                        data-category="<?php echo esc_attr($group['slug']); ?>"
+                                        data-filter-text="<?php echo esc_attr($filter_text); ?>"
+                                    >
+                                        <a class="<?php echo esc_attr(implode(' ', $link_classes)); ?>" href="<?php echo esc_url($item['url']); ?>"<?php echo !empty($item['current']) ? ' aria-current="page"' : ''; ?>>
+                                            <?php if (!empty($item['icon'])) : ?>
+                                                <span class="sitepulse-module-nav__icon dashicons <?php echo esc_attr($item['icon']); ?>" aria-hidden="true"></span>
+                                            <?php endif; ?>
+                                            <span class="sitepulse-module-nav__label"><?php echo esc_html($item['label']); ?></span>
+                                        </a>
+                                    </li>
+                                <?php endforeach; ?>
+                            </ul>
                         </li>
                     <?php endforeach; ?>
                 </ul>

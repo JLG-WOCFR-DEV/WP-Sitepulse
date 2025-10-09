@@ -520,7 +520,7 @@ function sitepulse_ai_prune_history_notes(array $history_entries) {
     $cleaned_notes = array_intersect_key($notes, $valid_ids);
 
     if ($cleaned_notes !== $notes) {
-        update_option(SITEPULSE_OPTION_AI_HISTORY_NOTES, $cleaned_notes, false);
+    update_option(SITEPULSE_OPTION_AI_HISTORY_NOTES, $cleaned_notes, false);
     }
 }
 
@@ -715,7 +715,7 @@ function sitepulse_ai_record_history_entry(array $entry) {
 
     $history = array_values($history);
 
-    update_option(SITEPULSE_OPTION_AI_HISTORY, $history);
+    update_option(SITEPULSE_OPTION_AI_HISTORY, $history, false);
 
     sitepulse_ai_prune_history_notes($history);
 }
@@ -891,7 +891,7 @@ function sitepulse_ai_record_critical_error($message, $status_code = null) {
             $stored = array_slice($stored, -10, 10, true);
         }
 
-        update_option(SITEPULSE_OPTION_AI_INSIGHT_ERRORS, $stored);
+        update_option(SITEPULSE_OPTION_AI_INSIGHT_ERRORS, $stored, false);
     }
 }
 

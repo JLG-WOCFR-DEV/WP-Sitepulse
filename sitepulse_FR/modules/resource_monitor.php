@@ -5,6 +5,10 @@ if (!defined('SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY')) {
     define('SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY', 'sitepulse_resource_monitor_history');
 }
 
+if (!defined('SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY_LOCK')) {
+    define('SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY_LOCK', 'sitepulse_resource_monitor_history_lock');
+}
+
 add_action('admin_menu', function() {
     add_submenu_page(
         'sitepulse-dashboard',
@@ -65,7 +69,7 @@ function sitepulse_resource_monitor_enqueue_assets($hook_suffix) {
     wp_register_script(
         'sitepulse-resource-monitor',
         SITEPULSE_URL . 'modules/js/resource-monitor.js',
-        ['sitepulse-chartjs'],
+        ['sitepulse-chartjs', 'wp-a11y'],
         SITEPULSE_VERSION,
         true
     );
@@ -564,6 +568,7 @@ function sitepulse_resource_monitor_page() {
     }
 
     $resource_monitor_notices = [];
+    $refresh_feedback = '';
 
     if (isset($_POST['sitepulse_resource_monitor_refresh'])) {
         check_admin_referer('sitepulse_refresh_resource_snapshot');
@@ -574,6 +579,8 @@ function sitepulse_resource_monitor_page() {
             'type'    => 'success',
             'message' => esc_html__('Les mesures et l’historique ont été actualisés.', 'sitepulse'),
         ];
+
+        $refresh_feedback = esc_html__('Les mesures et l’historique ont été actualisés.', 'sitepulse');
     }
 
     $snapshot = sitepulse_resource_monitor_get_snapshot();
@@ -632,6 +639,8 @@ function sitepulse_resource_monitor_page() {
                 'cronPoint'         => esc_html__('Collecte automatique', 'sitepulse'),
                 'manualPoint'       => esc_html__('Collecte manuelle', 'sitepulse'),
             ],
+            'refreshFeedback' => $refresh_feedback,
+            'refreshStatusId' => 'sitepulse-resource-refresh-status',
         ]
     );
 
@@ -745,6 +754,7 @@ function sitepulse_resource_monitor_page() {
                 ?>
             </p>
             <p><?php echo $last_automatic_notice; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></p>
+            <div id="sitepulse-resource-refresh-status" class="screen-reader-text" role="status" aria-live="polite"></div>
             <form method="post">
                 <?php wp_nonce_field('sitepulse_refresh_resource_snapshot'); ?>
                 <button type="submit" name="sitepulse_resource_monitor_refresh" class="button button-secondary">
@@ -832,16 +842,75 @@ function sitepulse_resource_monitor_append_history(array $snapshot) {
     }
 
     $option_name = SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY;
-    $history = get_option($option_name, []);
+    $lock_token = sitepulse_resource_monitor_acquire_history_lock();
 
-    if (!is_array($history)) {
-        $history = [];
+    try {
+        $history = get_option($option_name, []);
+
+        if (!is_array($history)) {
+            $history = [];
+        }
+
+        $history[] = $entry;
+        $history = sitepulse_resource_monitor_normalize_history($history);
+
+        update_option($option_name, $history, false);
+    } finally {
+        if (is_string($lock_token) && $lock_token !== '') {
+            sitepulse_resource_monitor_release_history_lock($lock_token);
+        }
+    }
+}
+
+/**
+ * Attempts to acquire a short-lived lock around the resource history option.
+ *
+ * @param int $timeout_seconds Maximum number of seconds to wait for the lock.
+ * @return string|false Lock token on success, false otherwise.
+ */
+function sitepulse_resource_monitor_acquire_history_lock($timeout_seconds = 5) {
+    if (!function_exists('add_option') || !function_exists('get_option') || !function_exists('delete_option')) {
+        return false;
     }
 
-    $history[] = $entry;
-    $history = sitepulse_resource_monitor_normalize_history($history);
+    $lock_key = SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY_LOCK;
+    $timeout_seconds = max(1, (int) $timeout_seconds);
+    $wait_microseconds = (int) apply_filters('sitepulse_resource_monitor_lock_wait_interval', 200000);
+    $expiry_seconds = (int) apply_filters('sitepulse_resource_monitor_lock_expiry', 10);
+    $start = microtime(true);
 
-    update_option($option_name, $history, false);
+    do {
+        if (add_option($lock_key, time(), '', 'no')) {
+            return $lock_key;
+        }
+
+        $lock_timestamp = get_option($lock_key);
+
+        if (is_numeric($lock_timestamp) && (time() - (int) $lock_timestamp) > $expiry_seconds) {
+            delete_option($lock_key);
+            continue;
+        }
+
+        if ($wait_microseconds > 0) {
+            usleep($wait_microseconds);
+        }
+    } while ((microtime(true) - $start) < $timeout_seconds);
+
+    return false;
+}
+
+/**
+ * Releases the lock obtained for the resource history option.
+ *
+ * @param string|false $lock_token Lock token to release.
+ * @return void
+ */
+function sitepulse_resource_monitor_release_history_lock($lock_token) {
+    if (!is_string($lock_token) || $lock_token === '' || !function_exists('delete_option')) {
+        return;
+    }
+
+    delete_option($lock_token);
 }
 
 /**

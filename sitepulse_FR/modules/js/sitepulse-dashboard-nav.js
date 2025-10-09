@@ -199,6 +199,21 @@
                 }
             });
 
+            var groups = nav.querySelectorAll('.sitepulse-module-nav__group');
+
+            Array.prototype.forEach.call(groups, function (group) {
+                var groupItems = group.querySelectorAll('[data-sitepulse-nav-item]');
+                var hasVisible = false;
+
+                Array.prototype.forEach.call(groupItems, function (groupItem) {
+                    if (!groupItem.hasAttribute('hidden')) {
+                        hasVisible = true;
+                    }
+                });
+
+                group.hidden = !hasVisible;
+            });
+
             if (emptyMessage) {
                 var hasMatches = matches > 0;
                 emptyMessage.hidden = hasMatches;
