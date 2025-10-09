@@ -437,11 +437,56 @@
 }
 
 .sitepulse-settings-actions {
-    margin-top: 24px;
+    position: sticky;
+    bottom: 0;
+    z-index: 20;
+    margin-top: 32px;
+    padding: 16px 0;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, var(--sitepulse-surface) 36%);
+    border-top: 1px solid var(--sitepulse-border);
+    box-shadow: 0 -6px 12px rgba(0, 0, 0, 0.04);
 }
 
-.sitepulse-settings-actions .button.button-primary {
-    padding: 6px 20px;
+.sitepulse-settings-actions.is-floating {
+    box-shadow: 0 -12px 24px rgba(0, 0, 0, 0.12);
+}
+
+.sitepulse-settings-actions__inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+.sitepulse-settings-actions__meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--sitepulse-text-subtle);
+    font-size: 13px;
+}
+
+.sitepulse-settings-actions__meta .dashicons {
+    font-size: 20px;
+    line-height: 1;
+    color: var(--sitepulse-accent);
+}
+
+.sitepulse-settings-actions__buttons {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.sitepulse-settings-actions__buttons .button.button-primary {
+    padding: 6px 22px;
+}
+
+.sitepulse-settings-actions__buttons .button.button-secondary {
+    color: var(--sitepulse-text-subtle);
+    border-color: var(--sitepulse-border);
 }
 
 .sitepulse-settings-separator {
@@ -453,6 +498,19 @@
 @media (max-width: 782px) {
     .sitepulse-settings-grid {
         grid-template-columns: 1fr;
+    }
+
+    .sitepulse-settings-actions {
+        padding: 16px 0 20px;
+    }
+
+    .sitepulse-settings-actions__inner {
+        align-items: flex-start;
+    }
+
+    .sitepulse-settings-actions__buttons {
+        width: 100%;
+        justify-content: flex-start;
     }
 
     .sitepulse-card-footer {

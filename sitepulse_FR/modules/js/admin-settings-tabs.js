@@ -28,6 +28,31 @@
     };
 
     onReady(() => {
+        const stickyActions = document.querySelector('[data-sitepulse-sticky-actions]');
+
+        if (stickyActions) {
+            const updateFloatingState = () => {
+                const threshold = 160;
+                window.requestAnimationFrame(() => {
+                    stickyActions.classList.toggle('is-floating', window.scrollY > threshold);
+                });
+            };
+
+            updateFloatingState();
+            window.addEventListener('scroll', updateFloatingState, { passive: true });
+            window.addEventListener('resize', updateFloatingState);
+        }
+
+        const scrollButtons = document.querySelectorAll('[data-sitepulse-scroll-top]');
+
+        scrollButtons.forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+        });
+
         const container = document.querySelector('.sitepulse-settings-tabs-container');
 
         if (!container) {

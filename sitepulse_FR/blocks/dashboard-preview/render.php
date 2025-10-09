@@ -126,12 +126,15 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
 
         if ($has_chart) {
             $chart_data = wp_json_encode($chart);
-            $chart_attribute = is_string($chart_data) ? $chart_data : '';
+            $chart_json = is_string($chart_data) ? $chart_data : '';
+            $script_id = $canvas_id . '-data';
 
             $canvas_attributes = [
-                'id'                   => esc_attr($canvas_id),
-                'data-sitepulse-chart' => esc_attr($chart_attribute),
-                'role'                 => 'img',
+                'id'                            => esc_attr($canvas_id),
+                'data-sitepulse-chart'          => esc_attr('#' . $script_id),
+                'data-sitepulse-chart-source'   => esc_attr($script_id),
+                'data-sitepulse-chart-format'   => 'application/json',
+                'role'                          => 'img',
             ];
 
             if (!empty($summary_id)) {
@@ -165,10 +168,21 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
                 )
             );
 
+            $script_markup = '';
+
+            if ($chart_json !== '') {
+                $script_markup = sprintf(
+                    '<script type="application/json" id="%1$s" class="sitepulse-chart-data">%2$s</script>',
+                    esc_attr($script_id),
+                    $chart_json
+                );
+            }
+
             return sprintf(
-                '<div class="sitepulse-chart-container"><canvas%1$s>%2$s</canvas>%3$s</div>',
+                '<div class="sitepulse-chart-container"><canvas%1$s>%2$s</canvas>%3$s%4$s</div>',
                 $canvas_attribute_string,
                 $fallback_markup,
+                $script_markup,
                 $summary_html
             );
         }
@@ -207,108 +221,19 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
     }
 
     /**
-     * Renders a dashboard preview card from a normalized definition.
+     * Generates the card definitions consumed by the block on both server and client side.
      *
-     * @param array $definition    Card definition (classes, title, subtitle, metric value, etc.).
-     * @param array $status_labels Status labels map coming from the block context.
+     * @param array $attributes Block attributes.
+     * @param array $options    Additional options. When 'respect_attributes' is truthy the generated
+     *                          cards honour the visibility toggles coming from the block attributes.
      *
-     * @return string
+     * @return array{
+     *     cards: array<int,array<string,mixed>>,
+     *     status_labels: array<string,array<string,string>>,
+     *     strings: array<string,string>,
+     * }
      */
-    function sitepulse_dashboard_preview_render_card_section($definition, $status_labels) {
-        if (!is_array($definition)) {
-            return '';
-        }
-
-        $classes = [];
-
-        if (isset($definition['classes'])) {
-            if (is_array($definition['classes'])) {
-                $classes = $definition['classes'];
-            } else {
-                $classes = preg_split('/\s+/', (string) $definition['classes']);
-            }
-        }
-
-        if (empty($classes)) {
-            $classes = ['sitepulse-card'];
-        }
-
-        $classes = array_filter(array_map('sanitize_html_class', $classes));
-
-        if (!in_array('sitepulse-card', $classes, true)) {
-            $classes[] = 'sitepulse-card';
-        }
-
-        $class_attribute = implode(' ', array_unique($classes));
-
-        $title = isset($definition['title']) ? (string) $definition['title'] : '';
-        $subtitle = isset($definition['subtitle']) ? (string) $definition['subtitle'] : '';
-        $description = isset($definition['description']) ? (string) $definition['description'] : '';
-        $raw_status = isset($definition['status']) ? (string) $definition['status'] : '';
-        $status_key = trim($raw_status);
-
-        $metric_value_html = isset($definition['metric_value_html']) && $definition['metric_value_html'] !== ''
-            ? (string) $definition['metric_value_html']
-            : sprintf(
-                '<span class="sitepulse-metric-value">%s</span>',
-                esc_html__('N/A', 'sitepulse')
-            );
-
-        $after_metric_html = isset($definition['after_metric_html']) ? (string) $definition['after_metric_html'] : '';
-
-        $chart_id = isset($definition['chart_id']) ? (string) $definition['chart_id'] : '';
-
-        if ($chart_id === '') {
-            $chart_id = function_exists('wp_unique_id')
-                ? wp_unique_id('sitepulse-preview-chart-')
-                : uniqid('sitepulse-preview-chart-');
-        }
-
-        $chart_payload = isset($definition['chart']) ? $definition['chart'] : null;
-        $chart_html = sitepulse_dashboard_preview_render_chart_area($chart_id, $chart_payload);
-
-        $status_meta = sitepulse_dashboard_preview_get_status_meta($status_key, $status_labels);
-
-        $has_known_status = $status_key !== ''
-            && is_array($status_labels)
-            && isset($status_labels[$status_key]);
-
-        $status_badge_class = $has_known_status
-            ? sanitize_html_class($status_key)
-            : 'status-warn';
-
-        if ($status_badge_class === '') {
-            $status_badge_class = 'status-warn';
-        }
-
-        return sprintf(
-            '<section class="%1$s"><div class="sitepulse-card-header"><h3>%2$s</h3></div><p class="sitepulse-card-subtitle">%3$s</p>%4$s<p class="sitepulse-metric"><span class="status-badge %5$s" aria-hidden="true"><span class="status-icon">%6$s</span><span class="status-text">%7$s</span></span><span class="screen-reader-text">%8$s</span>%9$s</p>%10$s<p class="description">%11$s</p></section>',
-            esc_attr($class_attribute),
-            esc_html($title),
-            esc_html($subtitle),
-            $chart_html,
-            esc_attr($status_badge_class),
-            esc_html($status_meta['icon']),
-            esc_html($status_meta['label']),
-            esc_html($status_meta['sr']),
-            $metric_value_html,
-            $after_metric_html,
-            esc_html($description)
-        );
-    }
-
-    /**
-     * Server-side render callback for the dashboard preview block.
-     *
-     * @param array  $attributes Block attributes.
-     * @param string $content    Saved content (unused).
-     * @param object $block      Block instance (unused).
-     *
-     * @return string
-     */
-    function sitepulse_render_dashboard_preview_block($attributes, $content = '', $block = null) {
-        unset($content, $block);
-
+    function sitepulse_dashboard_preview_generate_card_definitions($attributes, $options = []) {
         $defaults = [
             'showSpeed'     => true,
             'showUptime'    => true,
@@ -323,77 +248,34 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
         $attributes = is_array($attributes) ? $attributes : [];
         $attributes = wp_parse_args($attributes, $defaults);
 
-        $show_speed = !empty($attributes['showSpeed']);
-        $show_uptime = !empty($attributes['showUptime']);
-        $show_database = !empty($attributes['showDatabase']);
-        $show_logs = !empty($attributes['showLogs']);
+        $respect_attributes = !empty($options['respect_attributes']);
 
-        $allowed_layouts = ['grid', 'list'];
-        $layout_variant = isset($attributes['layoutVariant']) && is_string($attributes['layoutVariant'])
-            ? $attributes['layoutVariant']
-            : 'grid';
-        $layout_variant = in_array($layout_variant, $allowed_layouts, true) ? $layout_variant : 'grid';
-        $layout_variant_slug = sanitize_html_class($layout_variant ?: 'grid');
-
-        $allowed_densities = ['compact', 'comfortable', 'spacious'];
-        $grid_density = isset($attributes['gridDensity']) && is_string($attributes['gridDensity'])
-            ? $attributes['gridDensity']
-            : 'comfortable';
-        $grid_density = in_array($grid_density, $allowed_densities, true) ? $grid_density : 'comfortable';
-        $grid_density_slug = sanitize_html_class($grid_density ?: 'comfortable');
-
-        $columns = isset($attributes['columns']) ? (int) $attributes['columns'] : 2;
-        if ($columns < 1) {
-            $columns = 1;
-        } elseif ($columns > 4) {
-            $columns = 4;
-        }
-
-        $show_header = !empty($attributes['showHeader']);
-
-        $base_wrapper_classes = [
-            'sitepulse-dashboard-preview',
-            'sitepulse-dashboard-preview--layout-' . $layout_variant_slug,
-            'sitepulse-dashboard-preview--density-' . $grid_density_slug,
-            'sitepulse-dashboard-preview--columns-' . $columns,
+        $strings = [
+            'header_title'     => __('Aperçu SitePulse', 'sitepulse'),
+            'header_subtitle'  => __('Dernières mesures agrégées par vos modules actifs.', 'sitepulse'),
+            'empty_state'      => __('Aucune carte à afficher pour le moment. Activez les modules souhaités ou collectez davantage de données.', 'sitepulse'),
+            'no_data'          => __('Pas encore de mesures disponibles pour ce graphique.', 'sitepulse'),
+            'canvas_fallback'  => __('Votre navigateur ne prend pas en charge les graphiques. Consultez le résumé textuel ci-dessous.', 'sitepulse'),
+            'canvas_sr_fallback' => __('Les données du graphique sont détaillées dans le résumé textuel qui suit.', 'sitepulse'),
+            'chart_aria_label' => __('Aperçu du graphique des données SitePulse.', 'sitepulse'),
         ];
-
-        $base_wrapper_classes[] = $show_header
-            ? 'sitepulse-dashboard-preview--has-header'
-            : 'sitepulse-dashboard-preview--no-header';
-
-        $grid_classes = [
-            'sitepulse-grid',
-            'sitepulse-grid--cols-' . $columns,
-            'sitepulse-grid--density-' . $grid_density_slug,
-            'sitepulse-grid--variant-' . $layout_variant_slug,
-        ];
-
-        $wrapper_class_attribute = function ($additional_classes = []) use ($base_wrapper_classes) {
-            $classes = array_merge($base_wrapper_classes, $additional_classes);
-            $classes = array_map('sanitize_html_class', array_unique(array_filter($classes)));
-
-            return implode(' ', $classes);
-        };
 
         if (!function_exists('sitepulse_get_dashboard_preview_context')) {
-            $wrapper_attributes = get_block_wrapper_attributes([
-                'class' => $wrapper_class_attribute(['sitepulse-dashboard-preview--is-empty']),
-            ]);
-
-            return sprintf(
-                '<div %1$s><div class="sitepulse-dashboard-preview__empty">%2$s</div></div>',
-                $wrapper_attributes,
-                esc_html__('Activez le module « Tableaux de bord personnalisés » pour utiliser ce bloc.', 'sitepulse')
-            );
+            return [
+                'cards'         => [],
+                'status_labels' => [],
+                'strings'       => $strings,
+            ];
         }
 
         $context = sitepulse_get_dashboard_preview_context();
         $modules = isset($context['modules']) && is_array($context['modules']) ? $context['modules'] : [];
-        $status_labels = isset($context['status_labels']) ? $context['status_labels'] : [];
+        $status_labels = isset($context['status_labels']) && is_array($context['status_labels']) ? $context['status_labels'] : [];
 
-        $cards = [];
-        $unique_prefix = sanitize_html_class('sitepulse-preview-' . uniqid());
+        $show_speed = !empty($attributes['showSpeed']);
+        $show_uptime = !empty($attributes['showUptime']);
+        $show_database = !empty($attributes['showDatabase']);
+        $show_logs = !empty($attributes['showLogs']);
 
         $card_configs = [
             'speed' => [
@@ -530,8 +412,16 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
             ],
         ];
 
+        $cards = [];
+
         foreach ($card_configs as $config) {
-            if (empty($config['enabled'])) {
+            $attribute_enabled = !empty($config['enabled']);
+
+            if (!$respect_attributes) {
+                $attribute_enabled = true;
+            }
+
+            if (!$attribute_enabled) {
                 continue;
             }
 
@@ -553,25 +443,201 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
             $description_text = $description_callback ? (string) $description_callback($card_data, $module_data) : '';
             $after_metric_html = $after_metric_callback ? (string) $after_metric_callback($card_data, $module_data) : '';
 
-            $chart_suffix = isset($config['chart_suffix']) ? (string) $config['chart_suffix'] : $module_key;
-            $chart_id = $unique_prefix . '-' . sanitize_key($chart_suffix) . '-chart';
+            $classes = isset($config['classes']) ? (array) $config['classes'] : ['sitepulse-card'];
+            $classes = array_map('sanitize_html_class', array_unique(array_filter($classes)));
 
-            $definition = [
-                'classes'           => isset($config['classes']) ? $config['classes'] : ['sitepulse-card'],
-                'title'             => isset($config['title']) ? $config['title'] : '',
-                'subtitle'          => isset($config['subtitle']) ? $config['subtitle'] : '',
+            if (empty($classes)) {
+                $classes = ['sitepulse-card'];
+            }
+
+            $cards[] = [
+                'module_key'        => $module_key,
+                'chart_suffix'      => isset($config['chart_suffix']) ? (string) $config['chart_suffix'] : $module_key,
+                'classes'           => $classes,
+                'title'             => isset($config['title']) ? (string) $config['title'] : '',
+                'subtitle'          => isset($config['subtitle']) ? (string) $config['subtitle'] : '',
                 'chart'             => $chart_data,
-                'chart_id'          => $chart_id,
                 'status'            => isset($card_data['status']) ? (string) $card_data['status'] : '',
-                'metric_value_html' => $metric_value_html,
+                'metric_html'       => $metric_value_html,
                 'after_metric_html' => $after_metric_html,
                 'description'       => $description_text,
+                'module_enabled'    => !empty($module_data['enabled']),
             ];
-
-            $cards[] = sitepulse_dashboard_preview_render_card_section($definition, $status_labels);
         }
 
-        if (empty($cards)) {
+        return [
+            'cards'         => $cards,
+            'status_labels' => $status_labels,
+            'strings'       => $strings,
+        ];
+    }
+
+    /**
+     * Renders a dashboard preview card from a normalized definition.
+     *
+     * @param array $definition    Card definition (classes, title, subtitle, metric value, etc.).
+     * @param array $status_labels Status labels map coming from the block context.
+     *
+     * @return string
+     */
+    function sitepulse_dashboard_preview_render_card_section($definition, $status_labels) {
+        if (!is_array($definition)) {
+            return '';
+        }
+
+        $classes = [];
+
+        if (isset($definition['classes'])) {
+            if (is_array($definition['classes'])) {
+                $classes = $definition['classes'];
+            } else {
+                $classes = preg_split('/\s+/', (string) $definition['classes']);
+            }
+        }
+
+        if (empty($classes)) {
+            $classes = ['sitepulse-card'];
+        }
+
+        $classes = array_filter(array_map('sanitize_html_class', $classes));
+
+        if (!in_array('sitepulse-card', $classes, true)) {
+            $classes[] = 'sitepulse-card';
+        }
+
+        $class_attribute = implode(' ', array_unique($classes));
+
+        $title = isset($definition['title']) ? (string) $definition['title'] : '';
+        $subtitle = isset($definition['subtitle']) ? (string) $definition['subtitle'] : '';
+        $description = isset($definition['description']) ? (string) $definition['description'] : '';
+        $raw_status = isset($definition['status']) ? (string) $definition['status'] : '';
+        $status_key = trim($raw_status);
+
+        $metric_value_html = isset($definition['metric_value_html']) && $definition['metric_value_html'] !== ''
+            ? (string) $definition['metric_value_html']
+            : sprintf(
+                '<span class="sitepulse-metric-value">%s</span>',
+                esc_html__('N/A', 'sitepulse')
+            );
+
+        $after_metric_html = isset($definition['after_metric_html']) ? (string) $definition['after_metric_html'] : '';
+
+        $chart_id = isset($definition['chart_id']) ? (string) $definition['chart_id'] : '';
+
+        if ($chart_id === '') {
+            $chart_id = function_exists('wp_unique_id')
+                ? wp_unique_id('sitepulse-preview-chart-')
+                : uniqid('sitepulse-preview-chart-');
+        }
+
+        $chart_payload = isset($definition['chart']) ? $definition['chart'] : null;
+        $chart_html = sitepulse_dashboard_preview_render_chart_area($chart_id, $chart_payload);
+
+        $status_meta = sitepulse_dashboard_preview_get_status_meta($status_key, $status_labels);
+
+        $has_known_status = $status_key !== ''
+            && is_array($status_labels)
+            && isset($status_labels[$status_key]);
+
+        $status_badge_class = $has_known_status
+            ? sanitize_html_class($status_key)
+            : 'status-warn';
+
+        if ($status_badge_class === '') {
+            $status_badge_class = 'status-warn';
+        }
+
+        return sprintf(
+            '<section class="%1$s"><div class="sitepulse-card-header"><h3>%2$s</h3></div><p class="sitepulse-card-subtitle">%3$s</p>%4$s<p class="sitepulse-metric"><span class="status-badge %5$s" aria-hidden="true"><span class="status-icon">%6$s</span><span class="status-text">%7$s</span></span><span class="screen-reader-text">%8$s</span>%9$s</p>%10$s<p class="description">%11$s</p></section>',
+            esc_attr($class_attribute),
+            esc_html($title),
+            esc_html($subtitle),
+            $chart_html,
+            esc_attr($status_badge_class),
+            esc_html($status_meta['icon']),
+            esc_html($status_meta['label']),
+            esc_html($status_meta['sr']),
+            $metric_value_html,
+            $after_metric_html,
+            esc_html($description)
+        );
+    }
+
+    /**
+     * Server-side render callback for the dashboard preview block.
+     *
+     * @param array  $attributes Block attributes.
+     * @param string $content    Saved content (unused).
+     * @param object $block      Block instance (unused).
+     *
+     * @return string
+     */
+    function sitepulse_render_dashboard_preview_block($attributes, $content = '', $block = null) {
+        unset($content, $block);
+
+        $defaults = [
+            'showSpeed'     => true,
+            'showUptime'    => true,
+            'showDatabase'  => true,
+            'showLogs'      => true,
+            'layoutVariant' => 'grid',
+            'columns'       => 2,
+            'gridDensity'   => 'comfortable',
+            'showHeader'    => true,
+        ];
+
+        $attributes = is_array($attributes) ? $attributes : [];
+        $attributes = wp_parse_args($attributes, $defaults);
+
+        $allowed_layouts = ['grid', 'list'];
+        $layout_variant = isset($attributes['layoutVariant']) && is_string($attributes['layoutVariant'])
+            ? $attributes['layoutVariant']
+            : 'grid';
+        $layout_variant = in_array($layout_variant, $allowed_layouts, true) ? $layout_variant : 'grid';
+        $layout_variant_slug = sanitize_html_class($layout_variant ?: 'grid');
+
+        $allowed_densities = ['compact', 'comfortable', 'spacious'];
+        $grid_density = isset($attributes['gridDensity']) && is_string($attributes['gridDensity'])
+            ? $attributes['gridDensity']
+            : 'comfortable';
+        $grid_density = in_array($grid_density, $allowed_densities, true) ? $grid_density : 'comfortable';
+        $grid_density_slug = sanitize_html_class($grid_density ?: 'comfortable');
+
+        $columns = isset($attributes['columns']) ? (int) $attributes['columns'] : 2;
+        if ($columns < 1) {
+            $columns = 1;
+        } elseif ($columns > 4) {
+            $columns = 4;
+        }
+
+        $show_header = !empty($attributes['showHeader']);
+
+        $base_wrapper_classes = [
+            'sitepulse-dashboard-preview',
+            'sitepulse-dashboard-preview--layout-' . $layout_variant_slug,
+            'sitepulse-dashboard-preview--density-' . $grid_density_slug,
+            'sitepulse-dashboard-preview--columns-' . $columns,
+        ];
+
+        $base_wrapper_classes[] = $show_header
+            ? 'sitepulse-dashboard-preview--has-header'
+            : 'sitepulse-dashboard-preview--no-header';
+
+        $grid_classes = [
+            'sitepulse-grid',
+            'sitepulse-grid--cols-' . $columns,
+            'sitepulse-grid--density-' . $grid_density_slug,
+            'sitepulse-grid--variant-' . $layout_variant_slug,
+        ];
+
+        $wrapper_class_attribute = function ($additional_classes = []) use ($base_wrapper_classes) {
+            $classes = array_merge($base_wrapper_classes, $additional_classes);
+            $classes = array_map('sanitize_html_class', array_unique(array_filter($classes)));
+
+            return implode(' ', $classes);
+        };
+
+        if (!function_exists('sitepulse_get_dashboard_preview_context')) {
             $wrapper_attributes = get_block_wrapper_attributes([
                 'class' => $wrapper_class_attribute(['sitepulse-dashboard-preview--is-empty']),
             ]);
@@ -579,17 +645,98 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
             return sprintf(
                 '<div %1$s><div class="sitepulse-dashboard-preview__empty">%2$s</div></div>',
                 $wrapper_attributes,
-                esc_html__('Aucune carte à afficher pour le moment. Activez les modules souhaités ou collectez davantage de données.', 'sitepulse')
+                esc_html__('Activez le module « Tableaux de bord personnalisés » pour utiliser ce bloc.', 'sitepulse')
+            );
+        }
+
+        $cards_payload = sitepulse_dashboard_preview_generate_card_definitions($attributes, ['respect_attributes' => true]);
+        $card_definitions = isset($cards_payload['cards']) && is_array($cards_payload['cards']) ? $cards_payload['cards'] : [];
+        $status_labels = isset($cards_payload['status_labels']) && is_array($cards_payload['status_labels']) ? $cards_payload['status_labels'] : [];
+        $strings = isset($cards_payload['strings']) && is_array($cards_payload['strings']) ? $cards_payload['strings'] : [];
+
+        if (empty($card_definitions)) {
+            $wrapper_attributes = get_block_wrapper_attributes([
+                'class' => $wrapper_class_attribute(['sitepulse-dashboard-preview--is-empty']),
+            ]);
+
+            $empty_message = isset($strings['empty_state'])
+                ? $strings['empty_state']
+                : __('Aucune carte à afficher pour le moment. Activez les modules souhaités ou collectez davantage de données.', 'sitepulse');
+
+            return sprintf(
+                '<div %1$s><div class="sitepulse-dashboard-preview__empty">%2$s</div></div>',
+                $wrapper_attributes,
+                esc_html($empty_message)
+            );
+        }
+
+        $unique_prefix = sanitize_html_class('sitepulse-preview-' . uniqid());
+        $cards_markup = [];
+
+        foreach ($card_definitions as $card_definition) {
+            if (!is_array($card_definition)) {
+                continue;
+            }
+
+            $chart_suffix = isset($card_definition['chart_suffix']) ? (string) $card_definition['chart_suffix'] : '';
+
+            if ($chart_suffix === '' && isset($card_definition['module_key'])) {
+                $chart_suffix = (string) $card_definition['module_key'];
+            }
+
+            $chart_slug = sanitize_key($chart_suffix !== '' ? $chart_suffix : 'chart');
+
+            if ($chart_slug === '') {
+                $chart_slug = 'chart';
+            }
+
+            $chart_id = $unique_prefix . '-' . $chart_slug . '-chart';
+
+            $definition = [
+                'classes'           => isset($card_definition['classes']) ? (array) $card_definition['classes'] : ['sitepulse-card'],
+                'title'             => isset($card_definition['title']) ? $card_definition['title'] : '',
+                'subtitle'          => isset($card_definition['subtitle']) ? $card_definition['subtitle'] : '',
+                'chart'             => isset($card_definition['chart']) ? $card_definition['chart'] : null,
+                'chart_id'          => $chart_id,
+                'status'            => isset($card_definition['status']) ? $card_definition['status'] : '',
+                'metric_value_html' => isset($card_definition['metric_html']) ? $card_definition['metric_html'] : '',
+                'after_metric_html' => isset($card_definition['after_metric_html']) ? $card_definition['after_metric_html'] : '',
+                'description'       => isset($card_definition['description']) ? $card_definition['description'] : '',
+            ];
+
+            $cards_markup[] = sitepulse_dashboard_preview_render_card_section($definition, $status_labels);
+        }
+
+        if (empty($cards_markup)) {
+            $wrapper_attributes = get_block_wrapper_attributes([
+                'class' => $wrapper_class_attribute(['sitepulse-dashboard-preview--is-empty']),
+            ]);
+
+            $empty_message = isset($strings['empty_state'])
+                ? $strings['empty_state']
+                : __('Aucune carte à afficher pour le moment. Activez les modules souhaités ou collectez davantage de données.', 'sitepulse');
+
+            return sprintf(
+                '<div %1$s><div class="sitepulse-dashboard-preview__empty">%2$s</div></div>',
+                $wrapper_attributes,
+                esc_html($empty_message)
             );
         }
 
         $header = '';
 
         if ($show_header) {
+            $header_title = isset($strings['header_title'])
+                ? $strings['header_title']
+                : __('Aperçu SitePulse', 'sitepulse');
+            $header_subtitle = isset($strings['header_subtitle'])
+                ? $strings['header_subtitle']
+                : __('Dernières mesures agrégées par vos modules actifs.', 'sitepulse');
+
             $header = sprintf(
                 '<div class="sitepulse-dashboard-preview__header"><h3>%1$s</h3><p>%2$s</p></div>',
-                esc_html__('Aperçu SitePulse', 'sitepulse'),
-                esc_html__('Dernières mesures agrégées par vos modules actifs.', 'sitepulse')
+                esc_html($header_title),
+                esc_html($header_subtitle)
             );
         }
 
@@ -597,12 +744,14 @@ if (!function_exists('sitepulse_render_dashboard_preview_block')) {
             'class' => $wrapper_class_attribute(),
         ]);
 
+        $grid_class_attribute = implode(' ', array_map('sanitize_html_class', array_unique($grid_classes)));
+
         return sprintf(
             '<div %1$s>%2$s<div class="%3$s">%4$s</div></div>',
             $wrapper_attributes,
             $header,
-            esc_attr(implode(' ', array_map('sanitize_html_class', array_unique($grid_classes)))),
-            implode('', $cards)
+            esc_attr($grid_class_attribute),
+            implode('', $cards_markup)
         );
     }
 }

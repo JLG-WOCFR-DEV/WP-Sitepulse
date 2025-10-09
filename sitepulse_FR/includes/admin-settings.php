@@ -3191,8 +3191,28 @@ function sitepulse_settings_page() {
                 </div>
                 </div>
             </div>
-            <div class="sitepulse-settings-actions">
-                <?php submit_button(esc_html__('Enregistrer les modifications', 'sitepulse')); ?>
+            <div class="sitepulse-settings-actions" data-sitepulse-sticky-actions>
+                <div class="sitepulse-settings-actions__inner">
+                    <div class="sitepulse-settings-actions__meta">
+                        <span class="dashicons dashicons-saved" aria-hidden="true"></span>
+                        <span><?php esc_html_e('Les modifications ne sont appliquées qu’après enregistrement.', 'sitepulse'); ?></span>
+                    </div>
+                    <div class="sitepulse-settings-actions__buttons">
+                        <?php
+                        submit_button(
+                            esc_html__('Enregistrer les modifications', 'sitepulse'),
+                            'primary sitepulse-settings-actions__submit',
+                            'submit',
+                            false
+                        );
+                        ?>
+                        <button type="button" class="button button-secondary" data-sitepulse-scroll-top>
+                            <span class="dashicons dashicons-arrow-up-alt2" aria-hidden="true"></span>
+                            <span class="screen-reader-text"><?php esc_html_e('Remonter en haut de la page', 'sitepulse'); ?></span>
+                            <?php esc_html_e('Haut de page', 'sitepulse'); ?>
+                        </button>
+                    </div>
+                </div>
             </div>
         </form>
                         <div class="sitepulse-tab-panel" id="sitepulse-tab-maintenance" role="tabpanel" aria-labelledby="sitepulse-tab-maintenance-label" tabindex="0">
