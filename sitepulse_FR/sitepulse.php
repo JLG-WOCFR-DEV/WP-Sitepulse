@@ -1305,7 +1305,7 @@ function sitepulse_register_dashboard_preview_block() {
     wp_register_script(
         $editor_handle,
         SITEPULSE_URL . 'blocks/dashboard-preview/editor.js',
-        ['wp-blocks', 'wp-element', 'wp-components', 'wp-i18n', 'wp-block-editor', 'wp-editor', 'wp-server-side-render'],
+        ['wp-blocks', 'wp-element', 'wp-components', 'wp-i18n', 'wp-block-editor', 'wp-editor'],
         SITEPULSE_VERSION,
         true
     );
@@ -1361,6 +1361,80 @@ function sitepulse_localize_dashboard_preview_block() {
         ];
     }
 
+    $cards_payload = function_exists('sitepulse_dashboard_preview_generate_card_definitions')
+        ? sitepulse_dashboard_preview_generate_card_definitions([], ['respect_attributes' => false])
+        : ['cards' => [], 'status_labels' => [], 'strings' => []];
+
+    $preview_cards = [];
+
+    if (isset($cards_payload['cards']) && is_array($cards_payload['cards'])) {
+        foreach ($cards_payload['cards'] as $card_definition) {
+            if (!is_array($card_definition)) {
+                continue;
+            }
+
+            $classes = [];
+
+            if (isset($card_definition['classes']) && is_array($card_definition['classes'])) {
+                $classes = array_map('sanitize_html_class', array_filter($card_definition['classes']));
+            }
+
+            if (empty($classes)) {
+                $classes = ['sitepulse-card'];
+            }
+
+            $preview_cards[] = [
+                'moduleKey'       => isset($card_definition['module_key']) ? (string) $card_definition['module_key'] : '',
+                'chartSuffix'     => isset($card_definition['chart_suffix']) ? (string) $card_definition['chart_suffix'] : '',
+                'classes'         => array_values(array_unique($classes)),
+                'title'           => isset($card_definition['title']) ? (string) $card_definition['title'] : '',
+                'subtitle'        => isset($card_definition['subtitle']) ? (string) $card_definition['subtitle'] : '',
+                'status'          => isset($card_definition['status']) ? (string) $card_definition['status'] : '',
+                'metricHtml'      => isset($card_definition['metric_html']) ? (string) $card_definition['metric_html'] : '',
+                'afterMetricHtml' => isset($card_definition['after_metric_html']) ? (string) $card_definition['after_metric_html'] : '',
+                'description'     => isset($card_definition['description']) ? (string) $card_definition['description'] : '',
+                'chart'           => isset($card_definition['chart']) && is_array($card_definition['chart']) ? $card_definition['chart'] : null,
+                'moduleEnabled'   => !empty($card_definition['module_enabled']),
+            ];
+        }
+    }
+
+    $preview_status_labels = [];
+
+    if (isset($cards_payload['status_labels']) && is_array($cards_payload['status_labels'])) {
+        foreach ($cards_payload['status_labels'] as $status_key => $status_data) {
+            if (!is_array($status_data)) {
+                continue;
+            }
+
+            $normalized_key = sanitize_key((string) $status_key);
+
+            if ($normalized_key === '') {
+                $normalized_key = 'status-warn';
+            }
+
+            $preview_status_labels[$normalized_key] = [
+                'label' => isset($status_data['label']) ? (string) $status_data['label'] : '',
+                'sr'    => isset($status_data['sr']) ? (string) $status_data['sr'] : '',
+                'icon'  => isset($status_data['icon']) ? (string) $status_data['icon'] : '',
+            ];
+        }
+    }
+
+    $strings_payload = isset($cards_payload['strings']) && is_array($cards_payload['strings'])
+        ? $cards_payload['strings']
+        : [];
+
+    $preview_strings = [
+        'headerTitle'     => isset($strings_payload['header_title']) ? (string) $strings_payload['header_title'] : __('Aperçu SitePulse', 'sitepulse'),
+        'headerSubtitle'  => isset($strings_payload['header_subtitle']) ? (string) $strings_payload['header_subtitle'] : __('Dernières mesures agrégées par vos modules actifs.', 'sitepulse'),
+        'emptyState'      => isset($strings_payload['empty_state']) ? (string) $strings_payload['empty_state'] : __('Aucune carte à afficher pour le moment. Activez les modules souhaités ou collectez davantage de données.', 'sitepulse'),
+        'noData'          => isset($strings_payload['no_data']) ? (string) $strings_payload['no_data'] : __('Pas encore de mesures disponibles pour ce graphique.', 'sitepulse'),
+        'canvasFallback'  => isset($strings_payload['canvas_fallback']) ? (string) $strings_payload['canvas_fallback'] : __('Votre navigateur ne prend pas en charge les graphiques. Consultez le résumé textuel ci-dessous.', 'sitepulse'),
+        'canvasSrFallback'=> isset($strings_payload['canvas_sr_fallback']) ? (string) $strings_payload['canvas_sr_fallback'] : __('Les données du graphique sont détaillées dans le résumé textuel qui suit.', 'sitepulse'),
+        'chartAriaLabel'  => isset($strings_payload['chart_aria_label']) ? (string) $strings_payload['chart_aria_label'] : __('Aperçu du graphique des données SitePulse.', 'sitepulse'),
+    ];
+
     $data = [
         'modules' => $modules_payload,
         'settings' => [
@@ -1376,6 +1450,11 @@ function sitepulse_localize_dashboard_preview_block() {
             'moduleDisabledHelpMore' => __('Activez ce module pour l’afficher dans le bloc Aperçu du tableau de bord.', 'sitepulse'),
             'moduleDisabledHelpCta' => __('Accéder aux réglages des modules', 'sitepulse'),
             'moduleSettingsHelp'    => __('Vous pouvez activer les modules depuis l’écran de réglages de SitePulse.', 'sitepulse'),
+        ],
+        'preview' => [
+            'cards'        => $preview_cards,
+            'statusLabels' => $preview_status_labels,
+            'strings'      => $preview_strings,
         ],
     ];
 
