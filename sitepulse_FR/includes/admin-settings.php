@@ -2740,14 +2740,24 @@ function sitepulse_settings_page() {
 
                         $checkbox_id = 'sitepulse-module-' . $module_key;
                         $description_id = $checkbox_id . '-description';
+                        $status_id = $checkbox_id . '-status';
+                        $toggle_label_id = $checkbox_id . '-toggle-label';
                         $is_active = in_array($module_key, (array) $active_modules, true);
                         $status_class = $is_active ? 'is-active' : 'is-inactive';
                         $status_label = $is_active ? esc_html__('Activé', 'sitepulse') : esc_html__('Désactivé', 'sitepulse');
                     ?>
                     <div class="sitepulse-module-card" data-module="<?php echo esc_attr($module_key); ?>">
                         <div class="sitepulse-card-header">
-                            <h3 class="sitepulse-card-title"><?php echo esc_html($module_label); ?></h3>
-                            <span class="sitepulse-status <?php echo esc_attr($status_class); ?>"><?php echo $status_label; ?></span>
+                            <h3 class="sitepulse-card-title" id="<?php echo esc_attr($checkbox_id); ?>-title"><?php echo esc_html($module_label); ?></h3>
+                            <span
+                                class="sitepulse-status <?php echo esc_attr($status_class); ?>"
+                                id="<?php echo esc_attr($status_id); ?>"
+                                role="status"
+                                aria-live="polite"
+                                aria-atomic="true"
+                                data-sitepulse-status-on="<?php esc_attr_e('Activé', 'sitepulse'); ?>"
+                                data-sitepulse-status-off="<?php esc_attr_e('Désactivé', 'sitepulse'); ?>"
+                            ><?php echo $status_label; ?></span>
                         </div>
                         <div class="sitepulse-card-body">
                             <?php
@@ -2803,8 +2813,20 @@ function sitepulse_settings_page() {
                             <?php endif; ?>
                             <div class="sitepulse-card-footer">
                                 <label class="sitepulse-toggle" for="<?php echo esc_attr($checkbox_id); ?>">
-                                    <input type="checkbox" id="<?php echo esc_attr($checkbox_id); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ACTIVE_MODULES); ?>[]" value="<?php echo esc_attr($module_key); ?>" <?php checked($is_active); ?><?php if ($module_description !== '') : ?> aria-describedby="<?php echo esc_attr($description_id); ?>"<?php endif; ?>>
-                                    <span><?php esc_html_e('Activer ce module', 'sitepulse'); ?></span>
+                                    <input
+                                        type="checkbox"
+                                        id="<?php echo esc_attr($checkbox_id); ?>"
+                                        name="<?php echo esc_attr(SITEPULSE_OPTION_ACTIVE_MODULES); ?>[]"
+                                        value="<?php echo esc_attr($module_key); ?>"
+                                        <?php checked($is_active); ?>
+                                        <?php if ($module_description !== '') : ?>aria-describedby="<?php echo esc_attr($description_id); ?>"<?php endif; ?>
+                                        data-sitepulse-toggle="module"
+                                        data-sitepulse-toggle-label="<?php echo esc_attr($module_label); ?>"
+                                        data-sitepulse-toggle-status-target="<?php echo esc_attr($status_id); ?>"
+                                        data-sitepulse-toggle-on="<?php echo esc_attr_x('activé', 'toggle state', 'sitepulse'); ?>"
+                                        data-sitepulse-toggle-off="<?php echo esc_attr_x('désactivé', 'toggle state', 'sitepulse'); ?>"
+                                    >
+                                    <span id="<?php echo esc_attr($toggle_label_id); ?>"><?php printf(esc_html__('Activer le module %s', 'sitepulse'), esc_html($module_label)); ?></span>
                                 </label>
                                 <?php if ($module_url !== '') : ?>
                                     <a class="sitepulse-card-link" href="<?php echo esc_url($module_url); ?>">
@@ -2820,19 +2842,41 @@ function sitepulse_settings_page() {
                             <h3 class="sitepulse-card-title"><?php esc_html_e('Seuils du moniteur de ressources', 'sitepulse'); ?></h3>
                         </div>
                         <div class="sitepulse-card-body">
-                            <p class="sitepulse-card-description"><?php esc_html_e('Définissez les seuils d’utilisation maximum tolérés. Les alertes sont déclenchées lorsque plusieurs relevés automatiques dépassent ces valeurs.', 'sitepulse'); ?></p>
+                            <p class="sitepulse-card-description sitepulse-card-description--compact"><?php esc_html_e('Définissez les pourcentages maximum autorisés avant d’envoyer des alertes automatiques.', 'sitepulse'); ?></p>
                             <?php
                             $resource_cpu_threshold = (int) get_option(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT, SITEPULSE_DEFAULT_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT);
                             $resource_memory_threshold = (int) get_option(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT, SITEPULSE_DEFAULT_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT);
                             $resource_disk_threshold = (int) get_option(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT, SITEPULSE_DEFAULT_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT);
                             ?>
-                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT); ?>"><?php esc_html_e('CPU – pourcentage d’utilisation', 'sitepulse'); ?></label>
-                            <input type="number" min="0" max="100" id="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT); ?>" value="<?php echo esc_attr($resource_cpu_threshold); ?>" class="small-text">
-                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT); ?>"><?php esc_html_e('Mémoire – pourcentage utilisé', 'sitepulse'); ?></label>
-                            <input type="number" min="0" max="100" id="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT); ?>" value="<?php echo esc_attr($resource_memory_threshold); ?>" class="small-text">
-                            <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT); ?>"><?php esc_html_e('Stockage – pourcentage utilisé', 'sitepulse'); ?></label>
-                            <input type="number" min="0" max="100" id="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT); ?>" value="<?php echo esc_attr($resource_disk_threshold); ?>" class="small-text">
-                            <p class="sitepulse-card-description"><?php esc_html_e('Pour le stockage, le pourcentage correspond à l’espace occupé (100 % = disque plein).', 'sitepulse'); ?></p>
+                            <div class="sitepulse-resource-thresholds" role="group" aria-label="<?php esc_attr_e('Seuils d’alerte automatiques', 'sitepulse'); ?>">
+                                <?php $cpu_description_id = SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT . '-help'; ?>
+                                <div class="sitepulse-resource-thresholds__field">
+                                    <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT); ?>"><?php esc_html_e('CPU (1 min)', 'sitepulse'); ?></label>
+                                    <div class="sitepulse-resource-thresholds__input">
+                                        <input type="number" min="0" max="100" id="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_CPU_THRESHOLD_PERCENT); ?>" value="<?php echo esc_attr($resource_cpu_threshold); ?>" class="small-text" aria-describedby="<?php echo esc_attr($cpu_description_id); ?>">
+                                        <span aria-hidden="true">%</span>
+                                    </div>
+                                    <p class="sitepulse-resource-thresholds__hint" id="<?php echo esc_attr($cpu_description_id); ?>"><?php esc_html_e('Alerte lorsque la moyenne dépasse ce seuil sur plusieurs relevés.', 'sitepulse'); ?></p>
+                                </div>
+                                <?php $memory_description_id = SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT . '-help'; ?>
+                                <div class="sitepulse-resource-thresholds__field">
+                                    <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT); ?>"><?php esc_html_e('Mémoire utilisée', 'sitepulse'); ?></label>
+                                    <div class="sitepulse-resource-thresholds__input">
+                                        <input type="number" min="0" max="100" id="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_MEMORY_THRESHOLD_PERCENT); ?>" value="<?php echo esc_attr($resource_memory_threshold); ?>" class="small-text" aria-describedby="<?php echo esc_attr($memory_description_id); ?>">
+                                        <span aria-hidden="true">%</span>
+                                    </div>
+                                    <p class="sitepulse-resource-thresholds__hint" id="<?php echo esc_attr($memory_description_id); ?>"><?php esc_html_e('Pourcentage de mémoire occupée avant notification.', 'sitepulse'); ?></p>
+                                </div>
+                                <?php $disk_description_id = SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT . '-help'; ?>
+                                <div class="sitepulse-resource-thresholds__field">
+                                    <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT); ?>"><?php esc_html_e('Stockage utilisé', 'sitepulse'); ?></label>
+                                    <div class="sitepulse-resource-thresholds__input">
+                                        <input type="number" min="0" max="100" id="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT); ?>" value="<?php echo esc_attr($resource_disk_threshold); ?>" class="small-text" aria-describedby="<?php echo esc_attr($disk_description_id); ?>">
+                                        <span aria-hidden="true">%</span>
+                                    </div>
+                                    <p class="sitepulse-resource-thresholds__hint" id="<?php echo esc_attr($disk_description_id); ?>"><?php esc_html_e('100 % correspond à un disque plein. Harmonisé avec le tableau de bord.', 'sitepulse'); ?></p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div class="sitepulse-module-card sitepulse-module-card--setting" id="sitepulse-debug-card">
@@ -2844,7 +2888,18 @@ function sitepulse_settings_page() {
                             <input type="hidden" name="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>" value="0">
                             <div class="sitepulse-card-footer">
                                 <label class="sitepulse-toggle" for="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>">
-                                    <input type="checkbox" id="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>" value="1" <?php checked($is_debug_mode_enabled); ?>>
+                                    <input
+                                        type="checkbox"
+                                        id="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>"
+                                        name="<?php echo esc_attr(SITEPULSE_OPTION_DEBUG_MODE); ?>"
+                                        value="1"
+                                        <?php checked($is_debug_mode_enabled); ?>
+                                        aria-describedby="sitepulse-debug-card"
+                                        data-sitepulse-toggle="setting"
+                                        data-sitepulse-toggle-label="<?php esc_attr_e('Mode Debug', 'sitepulse'); ?>"
+                                        data-sitepulse-toggle-on="<?php echo esc_attr_x('activé', 'toggle state', 'sitepulse'); ?>"
+                                        data-sitepulse-toggle-off="<?php echo esc_attr_x('désactivé', 'toggle state', 'sitepulse'); ?>"
+                                    >
                                     <span><?php esc_html_e('Activer le Mode Debug', 'sitepulse'); ?></span>
                                 </label>
                             </div>
@@ -2880,7 +2935,17 @@ function sitepulse_settings_page() {
                                 $is_checked = in_array($channel_key, $configured_delivery_channels, true);
                             ?>
                                 <label class="sitepulse-toggle" for="<?php echo esc_attr($channel_id); ?>">
-                                    <input type="checkbox" id="<?php echo esc_attr($channel_id); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS); ?>[]" value="<?php echo esc_attr($channel_key); ?>" <?php checked($is_checked); ?>>
+                                    <input
+                                        type="checkbox"
+                                        id="<?php echo esc_attr($channel_id); ?>"
+                                        name="<?php echo esc_attr(SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS); ?>[]"
+                                        value="<?php echo esc_attr($channel_key); ?>"
+                                        <?php checked($is_checked); ?>
+                                        data-sitepulse-toggle="setting"
+                                        data-sitepulse-toggle-label="<?php echo esc_attr(sprintf(esc_html__('Canal %s', 'sitepulse'), $channel_label)); ?>"
+                                        data-sitepulse-toggle-on="<?php echo esc_attr_x('activé', 'toggle state', 'sitepulse'); ?>"
+                                        data-sitepulse-toggle-off="<?php echo esc_attr_x('désactivé', 'toggle state', 'sitepulse'); ?>"
+                                    >
                                     <span><?php echo esc_html($channel_label); ?></span>
                                 </label>
                             <?php endforeach; ?>
@@ -2908,7 +2973,17 @@ function sitepulse_settings_page() {
                                 $is_selected = in_array($severity_key, $enabled_severities, true);
                             ?>
                                 <label class="sitepulse-toggle" for="<?php echo esc_attr($severity_id); ?>">
-                                    <input type="checkbox" id="<?php echo esc_attr($severity_id); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES); ?>[]" value="<?php echo esc_attr($severity_key); ?>" <?php checked($is_selected); ?>>
+                                    <input
+                                        type="checkbox"
+                                        id="<?php echo esc_attr($severity_id); ?>"
+                                        name="<?php echo esc_attr(SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES); ?>[]"
+                                        value="<?php echo esc_attr($severity_key); ?>"
+                                        <?php checked($is_selected); ?>
+                                        data-sitepulse-toggle="setting"
+                                        data-sitepulse-toggle-label="<?php echo esc_attr(sprintf(esc_html__('Niveau %s', 'sitepulse'), $severity_label)); ?>"
+                                        data-sitepulse-toggle-on="<?php echo esc_attr_x('activé', 'toggle state', 'sitepulse'); ?>"
+                                        data-sitepulse-toggle-off="<?php echo esc_attr_x('désactivé', 'toggle state', 'sitepulse'); ?>"
+                                    >
                                     <span><?php echo esc_html($severity_label); ?></span>
                                 </label>
                             <?php endforeach; ?>
@@ -2926,7 +3001,17 @@ function sitepulse_settings_page() {
                         <div class="sitepulse-card-body">
                             <input type="hidden" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS); ?>[]" value="">
                             <label class="sitepulse-toggle" for="sitepulse-alert-channel-cpu">
-                                <input type="checkbox" id="sitepulse-alert-channel-cpu" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS); ?>[]" value="cpu" <?php checked($cpu_enabled); ?>>
+                                <input
+                                    type="checkbox"
+                                    id="sitepulse-alert-channel-cpu"
+                                    name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS); ?>[]"
+                                    value="cpu"
+                                    <?php checked($cpu_enabled); ?>
+                                    data-sitepulse-toggle="setting"
+                                    data-sitepulse-toggle-label="<?php esc_attr_e('Alertes de charge CPU', 'sitepulse'); ?>"
+                                    data-sitepulse-toggle-on="<?php echo esc_attr_x('activées', 'toggle state feminine', 'sitepulse'); ?>"
+                                    data-sitepulse-toggle-off="<?php echo esc_attr_x('désactivées', 'toggle state feminine', 'sitepulse'); ?>"
+                                >
                                 <span><?php esc_html_e('Activer les alertes de charge CPU', 'sitepulse'); ?></span>
                             </label>
                             <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_CPU_ALERT_THRESHOLD); ?>"><?php esc_html_e('Valeur déclenchant une alerte', 'sitepulse'); ?></label>
@@ -2940,7 +3025,17 @@ function sitepulse_settings_page() {
                         </div>
                         <div class="sitepulse-card-body">
                             <label class="sitepulse-toggle" for="sitepulse-alert-channel-php">
-                                <input type="checkbox" id="sitepulse-alert-channel-php" name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS); ?>[]" value="php_fatal" <?php checked($php_enabled); ?>>
+                                <input
+                                    type="checkbox"
+                                    id="sitepulse-alert-channel-php"
+                                    name="<?php echo esc_attr(SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS); ?>[]"
+                                    value="php_fatal"
+                                    <?php checked($php_enabled); ?>
+                                    data-sitepulse-toggle="setting"
+                                    data-sitepulse-toggle-label="<?php esc_attr_e('Alertes sur les erreurs fatales PHP', 'sitepulse'); ?>"
+                                    data-sitepulse-toggle-on="<?php echo esc_attr_x('activées', 'toggle state feminine', 'sitepulse'); ?>"
+                                    data-sitepulse-toggle-off="<?php echo esc_attr_x('désactivées', 'toggle state feminine', 'sitepulse'); ?>"
+                                >
                                 <span><?php esc_html_e('Activer les alertes sur les erreurs fatales', 'sitepulse'); ?></span>
                             </label>
                             <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD); ?>"><?php esc_html_e('Nombre de lignes fatales avant alerte', 'sitepulse'); ?></label>
