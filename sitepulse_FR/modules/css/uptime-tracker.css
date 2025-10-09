@@ -2,66 +2,14 @@
 .uptime-summary-card,
 .uptime-trend,
 .uptime-trend__legend {
-    --sitepulse-uptime-up: var(--wp-admin-color-success, #0b6d2a);
-    --sitepulse-uptime-medium: var(--wp-admin-color-warning, #8a6100);
-    --sitepulse-uptime-low: var(--wp-admin-color-error, #a0141e);
-    --sitepulse-uptime-unknown: var(--wp-admin-color-gray-400, #8c8f94);
-    --sitepulse-uptime-surface: var(--wp-admin-color-gray-0, #ffffff);
-    --sitepulse-uptime-border: var(--wp-admin-color-gray-200, #c3c4c7);
-    --sitepulse-uptime-text: var(--wp-admin-color-gray-900, #1d2327);
-    --sitepulse-uptime-text-subtle: var(--wp-admin-color-gray-700, #50575e);
-}
-
-.is-dark .uptime-chart,
-.is-dark .uptime-summary-card,
-.is-dark .uptime-trend,
-.is-dark .uptime-trend__legend {
-    --sitepulse-uptime-surface: var(--wp-admin-color-gray-900, #1d2327);
-    --sitepulse-uptime-border: var(--wp-admin-color-gray-700, #50575e);
-    --sitepulse-uptime-text: var(--wp-admin-color-gray-0, #ffffff);
-    --sitepulse-uptime-text-subtle: var(--wp-admin-color-gray-0, #ffffff);
-    --sitepulse-uptime-unknown: var(--wp-admin-color-gray-500, #8c8f94);
-    --sitepulse-uptime-up: color-mix(in srgb, var(--wp-admin-color-success, #0b6d2a) 65%, var(--wp-admin-color-gray-0, #ffffff));
-    --sitepulse-uptime-medium: color-mix(in srgb, var(--wp-admin-color-warning, #8a6100) 65%, var(--wp-admin-color-gray-0, #ffffff));
-    --sitepulse-uptime-low: color-mix(in srgb, var(--wp-admin-color-error, #a0141e) 70%, var(--wp-admin-color-gray-0, #ffffff));
-}
-
-@media (prefers-color-scheme: dark) {
-    .uptime-chart,
-    .uptime-summary-card,
-    .uptime-trend,
-    .uptime-trend__legend {
-        --sitepulse-uptime-surface: var(--wp-admin-color-gray-900, #1d2327);
-        --sitepulse-uptime-border: var(--wp-admin-color-gray-700, #50575e);
-        --sitepulse-uptime-text: var(--wp-admin-color-gray-0, #ffffff);
-        --sitepulse-uptime-text-subtle: var(--wp-admin-color-gray-0, #ffffff);
-        --sitepulse-uptime-unknown: var(--wp-admin-color-gray-500, #8c8f94);
-        --sitepulse-uptime-up: color-mix(in srgb, var(--wp-admin-color-success, #0b6d2a) 65%, var(--wp-admin-color-gray-0, #ffffff));
-        --sitepulse-uptime-medium: color-mix(in srgb, var(--wp-admin-color-warning, #8a6100) 65%, var(--wp-admin-color-gray-0, #ffffff));
-        --sitepulse-uptime-low: color-mix(in srgb, var(--wp-admin-color-error, #a0141e) 70%, var(--wp-admin-color-gray-0, #ffffff));
-    }
-}
-
-@supports not (color: color-mix(in srgb, black 0%, white 0%)) {
-    .is-dark .uptime-chart,
-    .is-dark .uptime-summary-card,
-    .is-dark .uptime-trend,
-    .is-dark .uptime-trend__legend {
-        --sitepulse-uptime-up: #4caf50;
-        --sitepulse-uptime-medium: #ffc107;
-        --sitepulse-uptime-low: #f44336;
-    }
-
-    @media (prefers-color-scheme: dark) {
-        .uptime-chart,
-        .uptime-summary-card,
-        .uptime-trend,
-        .uptime-trend__legend {
-            --sitepulse-uptime-up: #4caf50;
-            --sitepulse-uptime-medium: #ffc107;
-            --sitepulse-uptime-low: #f44336;
-        }
-    }
+    --sitepulse-uptime-up: var(--sitepulse-status-ok-border, rgba(11, 109, 42, 0.4));
+    --sitepulse-uptime-medium: var(--sitepulse-status-warn-border, rgba(218, 150, 0, 0.45));
+    --sitepulse-uptime-low: var(--sitepulse-status-danger-border, rgba(160, 20, 30, 0.45));
+    --sitepulse-uptime-unknown: var(--sitepulse-color-text-soft, #6c7680);
+    --sitepulse-uptime-surface: var(--sitepulse-color-surface-elevated, #ffffff);
+    --sitepulse-uptime-border: var(--sitepulse-color-border, #d0d5dd);
+    --sitepulse-uptime-text: var(--sitepulse-color-text, #1d2327);
+    --sitepulse-uptime-text-subtle: var(--sitepulse-color-text-muted, #50575e);
 }
 
 .uptime-chart {
@@ -97,9 +45,9 @@
 .uptime-summary-card {
     background: var(--sitepulse-uptime-surface);
     border: 1px solid var(--sitepulse-uptime-border);
-    border-radius: 6px;
+    border-radius: var(--sitepulse-radius-md, 8px);
     padding: 16px;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    box-shadow: var(--sitepulse-shadow-sm, 0 1px 1px rgba(16, 24, 40, 0.04));
 }
 
 .uptime-summary-card h3 {

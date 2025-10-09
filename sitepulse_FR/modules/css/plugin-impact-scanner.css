@@ -1,47 +1,18 @@
 .sitepulse-impact-scanner,
 .sitepulse-impact-controls,
 .sitepulse-impact-table-wrapper {
-    --sitepulse-impact-warning-border: var(--wp-admin-color-warning, #8a6100);
-    --sitepulse-impact-critical-border: var(--wp-admin-color-error, #a0141e);
-    --sitepulse-impact-warning-bg: color-mix(in srgb, var(--sitepulse-impact-warning-border) 18%, var(--wp-admin-color-gray-0, #ffffff));
-    --sitepulse-impact-critical-bg: color-mix(in srgb, var(--sitepulse-impact-critical-border) 16%, var(--wp-admin-color-gray-0, #ffffff));
-    --sitepulse-impact-neutral-bg: var(--wp-admin-color-gray-0, #ffffff);
-    --sitepulse-impact-neutral-border: var(--wp-admin-color-gray-100, #dcdcde);
-    --sitepulse-impact-text-subtle: var(--wp-admin-color-gray-700, #50575e);
-    --sitepulse-impact-text-strong: var(--wp-admin-color-gray-900, #1d2327);
-}
-
-@supports not (color: color-mix(in srgb, black 0%, white 0%)) {
-    .sitepulse-impact-scanner,
-    .sitepulse-impact-controls,
-    .sitepulse-impact-table-wrapper {
-        --sitepulse-impact-warning-bg: #fff8e1;
-        --sitepulse-impact-critical-bg: #fbe9e7;
-    }
-}
-
-.is-dark .sitepulse-impact-scanner,
-.is-dark .sitepulse-impact-controls,
-.is-dark .sitepulse-impact-table-wrapper {
-    --sitepulse-impact-neutral-bg: var(--wp-admin-color-gray-900, #1d2327);
-    --sitepulse-impact-neutral-border: var(--wp-admin-color-gray-700, #50575e);
-    --sitepulse-impact-text-subtle: var(--wp-admin-color-gray-0, #ffffff);
-    --sitepulse-impact-text-strong: var(--wp-admin-color-gray-0, #ffffff);
-    --sitepulse-impact-warning-bg: color-mix(in srgb, var(--sitepulse-impact-warning-border) 32%, var(--wp-admin-color-gray-900, #1d2327));
-    --sitepulse-impact-critical-bg: color-mix(in srgb, var(--sitepulse-impact-critical-border) 28%, var(--wp-admin-color-gray-900, #1d2327));
-}
-
-@media (prefers-color-scheme: dark) {
-    .sitepulse-impact-scanner,
-    .sitepulse-impact-controls,
-    .sitepulse-impact-table-wrapper {
-        --sitepulse-impact-neutral-bg: var(--wp-admin-color-gray-900, #1d2327);
-        --sitepulse-impact-neutral-border: var(--wp-admin-color-gray-700, #50575e);
-        --sitepulse-impact-text-subtle: var(--wp-admin-color-gray-0, #ffffff);
-        --sitepulse-impact-text-strong: var(--wp-admin-color-gray-0, #ffffff);
-        --sitepulse-impact-warning-bg: color-mix(in srgb, var(--sitepulse-impact-warning-border) 32%, var(--wp-admin-color-gray-900, #1d2327));
-        --sitepulse-impact-critical-bg: color-mix(in srgb, var(--sitepulse-impact-critical-border) 28%, var(--wp-admin-color-gray-900, #1d2327));
-    }
+    --sitepulse-impact-neutral-bg: var(--sitepulse-color-surface, #ffffff);
+    --sitepulse-impact-neutral-border: var(--sitepulse-color-border, #d0d5dd);
+    --sitepulse-impact-text-subtle: var(--sitepulse-color-text-muted, #50575e);
+    --sitepulse-impact-text-strong: var(--sitepulse-color-text, #1d2327);
+    --sitepulse-impact-warning-bg: var(--sitepulse-status-warn-background, rgba(218, 150, 0, 0.12));
+    --sitepulse-impact-warning-border: var(--sitepulse-status-warn-border, rgba(218, 150, 0, 0.45));
+    --sitepulse-impact-warning-text: var(--sitepulse-status-warn-text, #6a4700);
+    --sitepulse-impact-critical-bg: var(--sitepulse-status-danger-background, rgba(160, 20, 30, 0.12));
+    --sitepulse-impact-critical-border: var(--sitepulse-status-danger-border, rgba(160, 20, 30, 0.45));
+    --sitepulse-impact-critical-text: var(--sitepulse-status-danger-text, #5c0b12);
+    --sitepulse-impact-info-bg: var(--sitepulse-status-info-background, rgba(33, 150, 243, 0.12));
+    --sitepulse-impact-info-border: var(--sitepulse-status-info-border, rgba(33, 150, 243, 0.4));
 }
 
 @media (prefers-contrast: more) {
@@ -100,11 +71,13 @@
 .sitepulse-impact-row--warning {
     border-left: 4px solid var(--sitepulse-impact-warning-border);
     background-color: var(--sitepulse-impact-warning-bg);
+    color: var(--sitepulse-impact-warning-text);
 }
 
 .sitepulse-impact-row--critical {
     border-left: 4px solid var(--sitepulse-impact-critical-border);
     background-color: var(--sitepulse-impact-critical-bg);
+    color: var(--sitepulse-impact-critical-text);
 }
 
 .sitepulse-impact-empty {
@@ -114,7 +87,7 @@
 }
 
 .impact-bar-bg {
-    background: var(--wp-admin-color-gray-50, #f0f0f1);
+    background: var(--sitepulse-color-surface-subtle, #f6f7f7);
     border-radius: 3px;
     overflow: hidden;
     width: 100%;
@@ -125,7 +98,7 @@
     border-radius: 3px;
     background-color: var(--sitepulse-impact-warning-border);
     text-align: right;
-    color: var(--sitepulse-impact-text-strong);
+    color: var(--sitepulse-color-on-accent, #ffffff);
     padding-right: 5px;
     white-space: nowrap;
     font-size: 12px;
@@ -136,6 +109,10 @@
 .sitepulse-impact-meta {
     margin-bottom: 1em;
     color: var(--sitepulse-impact-text-subtle);
+}
+
+.sitepulse-impact-meta a {
+    color: var(--sitepulse-color-accent, #2271b1);
 }
 
 .sitepulse-impact-meta p {
@@ -208,15 +185,5 @@
     .sitepulse-impact-row--critical {
         border-left-width: 0;
         border-top: 4px solid currentColor;
-    }
-
-    .sitepulse-impact-row--warning {
-        background: var(--sitepulse-impact-warning-bg);
-        color: var(--sitepulse-impact-text-strong);
-    }
-
-    .sitepulse-impact-row--critical {
-        background: var(--sitepulse-impact-critical-bg);
-        color: var(--sitepulse-impact-text-strong);
     }
 }

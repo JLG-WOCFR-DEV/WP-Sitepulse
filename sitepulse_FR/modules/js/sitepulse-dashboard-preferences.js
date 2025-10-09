@@ -18,6 +18,14 @@
     const cardKeys = Object.keys(data.cards || {});
     const sizeKeys = Object.keys(data.sizes || {});
     const $list = list ? $(list) : null;
+    const themeToggle = document.querySelector('[data-sitepulse-theme-toggle]');
+    const themeOptionInputs = themeToggle ? Array.from(themeToggle.querySelectorAll('[data-sitepulse-theme-option]')) : [];
+    const themeAnnouncer = themeToggle ? themeToggle.querySelector('[data-sitepulse-theme-announcer]') : null;
+    const themeChoices = Array.isArray(data.themeOptions) && data.themeOptions.length ? data.themeOptions.slice() : ['auto', 'light', 'dark'];
+    const fallbackTheme = themeChoices.length ? themeChoices[0] : 'auto';
+    const defaultTheme = normaliseThemeValue(typeof data.defaultTheme === 'string' ? data.defaultTheme : fallbackTheme);
+    const themeLabels = (data.themeLabels && typeof data.themeLabels === 'object') ? data.themeLabels : {};
+    const THEME_STORAGE_KEY = 'sitepulseDashboardTheme';
 
     if (!panel || !toggleButton || !list) {
         return;
@@ -26,6 +34,14 @@
     let savedState = normaliseState(data.preferences || {});
     let currentState = deepClone(savedState);
     let lastActiveElement = null;
+
+    const storedThemeRaw = readStoredTheme();
+    const storedTheme = storedThemeRaw ? normaliseThemeValue(storedThemeRaw) : '';
+
+    if (storedTheme && storedTheme !== savedState.theme) {
+        savedState.theme = storedTheme;
+        currentState = deepClone(savedState);
+    }
 
     initialise();
 
@@ -86,6 +102,20 @@
                 }
             });
         }
+
+        if (themeToggle) {
+            themeToggle.addEventListener('change', (event) => {
+                const target = event.target;
+
+                if (!target || !target.matches('[data-sitepulse-theme-option]')) {
+                    return;
+                }
+
+                currentState = buildStateFromUI();
+                applyTheme(currentState.theme, true);
+                persistState(currentState);
+            });
+        }
     }
 
     function openPanel() {
@@ -128,6 +158,7 @@
             order: Array.isArray(prefs.order) ? prefs.order.slice() : [],
             visibility: typeof prefs.visibility === 'object' && prefs.visibility !== null ? { ...prefs.visibility } : {},
             sizes: typeof prefs.sizes === 'object' && prefs.sizes !== null ? { ...prefs.sizes } : {},
+            theme: normaliseThemeValue(prefs.theme),
         };
 
         const order = [];
@@ -150,6 +181,7 @@
         });
 
         state.order = order;
+        state.theme = normaliseThemeValue(state.theme);
 
         return state;
     }
@@ -191,6 +223,9 @@
         if ($list && typeof $list.sortable === 'function' && $list.hasClass('ui-sortable')) {
             $list.sortable('refresh');
         }
+
+        updateThemeControls(state.theme);
+        applyTheme(state.theme, false);
     }
 
     function buildStateFromUI() {
@@ -218,7 +253,136 @@
             sizes[key] = select && typeof select.value === 'string' && select.value ? select.value : ((data.cards[key] && data.cards[key].defaultSize) || 'medium');
         });
 
-        return normaliseState({ order, visibility, sizes });
+        const theme = getThemeFromUI();
+
+        return normaliseState({ order, visibility, sizes, theme });
+    }
+
+    function normaliseThemeValue(value) {
+        const candidate = typeof value === 'string' ? value.toLowerCase() : '';
+
+        if (themeChoices.indexOf(candidate) !== -1) {
+            return candidate;
+        }
+
+        if (themeChoices.indexOf('auto') !== -1) {
+            return 'auto';
+        }
+
+        return themeChoices.length ? themeChoices[0] : 'auto';
+    }
+
+    function getThemeFromUI() {
+        if (!themeOptionInputs.length) {
+            return savedState.theme || defaultTheme;
+        }
+
+        const checked = themeOptionInputs.find((input) => input.checked);
+
+        if (checked) {
+            return normaliseThemeValue(checked.value);
+        }
+
+        return defaultTheme;
+    }
+
+    function updateThemeControls(theme) {
+        const activeTheme = normaliseThemeValue(theme);
+
+        themeOptionInputs.forEach((input) => {
+            const optionValue = normaliseThemeValue(input.value);
+            const isSelected = optionValue === activeTheme;
+
+            input.checked = isSelected;
+
+            const container = input.closest('.sitepulse-theme-toggle__option');
+
+            if (container) {
+                container.classList.toggle('is-selected', isSelected);
+            }
+        });
+    }
+
+    function applyTheme(theme, announce) {
+        const activeTheme = normaliseThemeValue(theme || savedState.theme || defaultTheme);
+        const body = document.body;
+
+        if (body) {
+            body.classList.add('sitepulse-theme');
+
+            themeChoices.forEach((choice) => {
+                const className = 'sitepulse-theme--' + choice;
+
+                if (choice !== activeTheme) {
+                    body.classList.remove(className);
+                }
+            });
+
+            body.classList.add('sitepulse-theme--' + activeTheme);
+        }
+
+        if (document.documentElement) {
+            if (activeTheme === 'auto') {
+                document.documentElement.style.colorScheme = 'light dark';
+            } else if (activeTheme === 'dark') {
+                document.documentElement.style.colorScheme = 'dark';
+            } else {
+                document.documentElement.style.colorScheme = 'light';
+            }
+
+            document.documentElement.setAttribute('data-sitepulse-theme', activeTheme);
+        }
+
+        writeStoredTheme(activeTheme);
+
+        if (announce) {
+            announceTheme(activeTheme);
+        } else if (themeAnnouncer) {
+            const label = themeLabels[activeTheme] || activeTheme;
+            const template = data.strings && data.strings.themeAnnouncement ? data.strings.themeAnnouncement : '';
+            const message = template ? template.replace('%s', label) : label;
+            themeAnnouncer.textContent = message;
+        }
+    }
+
+    function announceTheme(theme) {
+        const label = themeLabels[theme] || theme;
+        const spokenTemplate = data.strings && data.strings.themeSpoken ? data.strings.themeSpoken : '';
+        const announcementTemplate = data.strings && data.strings.themeAnnouncement ? data.strings.themeAnnouncement : '';
+        const announcement = announcementTemplate ? announcementTemplate.replace('%s', label) : label;
+        const spoken = spokenTemplate ? spokenTemplate.replace('%s', label) : announcement;
+
+        if (themeAnnouncer) {
+            themeAnnouncer.textContent = announcement;
+        }
+
+        speak(spoken, 'polite');
+    }
+
+    function readStoredTheme() {
+        if (!('localStorage' in window)) {
+            return '';
+        }
+
+        try {
+            const storedValue = window.localStorage.getItem(THEME_STORAGE_KEY);
+
+            return typeof storedValue === 'string' ? storedValue : '';
+        } catch (error) {
+            return '';
+        }
+    }
+
+    function writeStoredTheme(theme) {
+        if (!('localStorage' in window)) {
+            return;
+        }
+
+        try {
+            window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+        } catch (error) {
+            // Ignore storage issues (quota exceeded, private mode, etc.).
+        }
     }
 
     function applyStateToGrid(state) {
@@ -288,13 +452,17 @@
             order: state.order,
             visibility: state.visibility,
             sizes: state.sizes,
+            theme: state.theme,
         }).done((response) => {
             if (response && response.success && response.data && response.data.preferences) {
                 savedState = normaliseState(response.data.preferences);
                 currentState = deepClone(savedState);
                 showNotice((data.strings && data.strings.saveSuccess) || '', false);
-                speak((data.strings && data.strings.changesSaved) || '');
-                closePanel(toggleButton);
+                speak((data.strings && data.strings.changesSaved) || '', 'assertive');
+
+                if (panel && !panel.hasAttribute('hidden')) {
+                    closePanel(toggleButton);
+                }
             } else {
                 showNotice(getErrorMessage(response), true);
             }
@@ -304,6 +472,7 @@
             toggleLoading(false);
             applyStateToGrid(savedState);
             setControlsFromState(savedState);
+            applyTheme(savedState.theme, false);
         });
     }
 
@@ -380,13 +549,14 @@
         return (data.strings && data.strings.saveError) || '';
     }
 
-    function speak(message) {
+    function speak(message, politeness) {
         if (!message) {
             return;
         }
 
         if (window.wp && wp.a11y && typeof wp.a11y.speak === 'function') {
-            wp.a11y.speak(message, 'assertive');
+            const politenessLevel = typeof politeness === 'string' && politeness ? politeness : 'assertive';
+            wp.a11y.speak(message, politenessLevel);
         }
     }
 })(jQuery);

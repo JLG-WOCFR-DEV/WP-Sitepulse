@@ -16,6 +16,7 @@ if (!defined('SITEPULSE_TRANSIENT_DEBUG_LOG_SUMMARY')) {
 add_action('admin_enqueue_scripts', 'sitepulse_custom_dashboard_enqueue_assets');
 add_action('wp_ajax_sitepulse_save_dashboard_preferences', 'sitepulse_save_dashboard_preferences');
 add_action('rest_api_init', 'sitepulse_custom_dashboard_register_rest_routes');
+add_filter('admin_body_class', 'sitepulse_custom_dashboard_body_class');
 
 /**
  * Registers the assets used by the SitePulse dashboard when the page is loaded.
@@ -96,9 +97,18 @@ function sitepulse_custom_dashboard_enqueue_assets($hook_suffix) {
     }
 
     wp_register_style(
+        'sitepulse-dashboard-theme',
+        SITEPULSE_URL . 'modules/css/sitepulse-theme.css',
+        [],
+        SITEPULSE_VERSION
+    );
+
+    wp_enqueue_style('sitepulse-dashboard-theme');
+
+    wp_register_style(
         'sitepulse-module-navigation',
         SITEPULSE_URL . 'modules/css/module-navigation.css',
-        [],
+        ['sitepulse-dashboard-theme'],
         SITEPULSE_VERSION
     );
 
@@ -207,6 +217,191 @@ function sitepulse_custom_dashboard_get_default_status_labels() {
             'icon'  => '⛔',
         ],
     ];
+}
+
+/**
+ * Returns the theme options available for the dashboard interface.
+ *
+ * @return array<string,array{label:string,description:string}>
+ */
+function sitepulse_get_dashboard_theme_options() {
+    $options = [
+        'auto'  => [
+            'label'       => __('Automatique', 'sitepulse'),
+            'description' => __('Suit le thème défini par votre système.', 'sitepulse'),
+        ],
+        'light' => [
+            'label'       => __('Clair', 'sitepulse'),
+            'description' => __('Palette lumineuse optimisée pour la lisibilité diurne.', 'sitepulse'),
+        ],
+        'dark'  => [
+            'label'       => __('Sombre', 'sitepulse'),
+            'description' => __('Palette sombre pour réduire la fatigue visuelle.', 'sitepulse'),
+        ],
+    ];
+
+    /**
+     * Filters the available dashboard theme options.
+     *
+     * @param array<string,array{label:string,description:string}> $options Theme definitions.
+     */
+    return apply_filters('sitepulse_dashboard_theme_options', $options);
+}
+
+/**
+ * Returns the default dashboard theme identifier.
+ *
+ * @return string
+ */
+function sitepulse_get_dashboard_default_theme() {
+    $default = 'auto';
+
+    /**
+     * Filters the default dashboard theme.
+     *
+     * @param string $default Default theme slug.
+     */
+    $filtered = apply_filters('sitepulse_dashboard_default_theme', $default);
+
+    return sitepulse_normalize_dashboard_theme($filtered);
+}
+
+/**
+ * Normalizes an incoming theme value against the allowed options.
+ *
+ * @param string $theme Theme identifier.
+ *
+ * @return string
+ */
+function sitepulse_normalize_dashboard_theme($theme) {
+    $theme = sanitize_key((string) $theme);
+    $options = sitepulse_get_dashboard_theme_options();
+
+    if ($theme === '' || !array_key_exists($theme, $options)) {
+        return 'auto';
+    }
+
+    return $theme;
+}
+
+/**
+ * Retrieves the current user theme preference for the dashboard.
+ *
+ * @param int $user_id Optional user identifier.
+ *
+ * @return string
+ */
+function sitepulse_get_dashboard_theme_preference($user_id = 0) {
+    if ($user_id <= 0) {
+        $user_id = get_current_user_id();
+    }
+
+    $preferences = sitepulse_get_dashboard_preferences($user_id);
+
+    if (isset($preferences['theme'])) {
+        return sitepulse_normalize_dashboard_theme($preferences['theme']);
+    }
+
+    return sitepulse_get_dashboard_default_theme();
+}
+
+/**
+ * Appends SitePulse theme classes to the admin body when needed.
+ *
+ * @param string $classes Existing class list.
+ *
+ * @return string
+ */
+function sitepulse_custom_dashboard_body_class($classes) {
+    $classes = is_string($classes) ? $classes : '';
+
+    if (!function_exists('get_current_screen')) {
+        return $classes;
+    }
+
+    $screen    = get_current_screen();
+    $screen_id = $screen && isset($screen->id) ? (string) $screen->id : '';
+
+    if ($screen_id === '') {
+        return $classes;
+    }
+
+    $is_dashboard_root   = $screen_id === 'toplevel_page_sitepulse-dashboard';
+    $is_module_screen    = strpos($screen_id, 'sitepulse-dashboard_page_sitepulse-') === 0;
+    $is_embedded_screen  = strpos($screen_id, 'dashboard_page_sitepulse-') === 0;
+
+    if (!$is_dashboard_root && !$is_module_screen && !$is_embedded_screen) {
+        return $classes;
+    }
+
+    $theme = sitepulse_get_dashboard_theme_preference(get_current_user_id());
+    $theme = sitepulse_normalize_dashboard_theme($theme);
+    $theme_class = sanitize_html_class('sitepulse-theme--' . $theme);
+
+    if ($theme_class === '') {
+        return $classes;
+    }
+
+    return trim($classes . ' sitepulse-theme ' . $theme_class);
+}
+
+/**
+ * Renders the theme toggle control for the dashboard.
+ *
+ * @param string                                   $current_theme Active theme identifier.
+ * @param array<string,array<string,string>>       $options       Available theme options.
+ *
+ * @return string
+ */
+function sitepulse_render_dashboard_theme_toggle($current_theme, $options) {
+    if (!is_array($options) || empty($options)) {
+        return '';
+    }
+
+    $current_theme = sitepulse_normalize_dashboard_theme($current_theme);
+
+    ob_start();
+    ?>
+    <fieldset class="sitepulse-theme-toggle" data-sitepulse-theme-toggle>
+        <legend><?php esc_html_e('Apparence', 'sitepulse'); ?></legend>
+        <p class="sitepulse-theme-toggle__hint"><?php esc_html_e('Choisissez la palette appliquée à SitePulse.', 'sitepulse'); ?></p>
+        <div class="sitepulse-theme-toggle__options" role="presentation">
+            <?php foreach ($options as $theme_key => $theme_definition) :
+                $theme_slug = sanitize_key($theme_key);
+
+                if ($theme_slug === '') {
+                    continue;
+                }
+
+                $label = isset($theme_definition['label']) ? (string) $theme_definition['label'] : ucfirst($theme_slug);
+                $description = isset($theme_definition['description']) ? (string) $theme_definition['description'] : '';
+                $input_id = 'sitepulse-theme-' . $theme_slug;
+                $description_id = $description !== '' ? $input_id . '-description' : '';
+                $is_selected = ($theme_slug === $current_theme);
+                $description_attr = $description_id !== '' ? ' aria-describedby="' . esc_attr($description_id) . '"' : '';
+            ?>
+                <label class="sitepulse-theme-toggle__option<?php echo $is_selected ? ' is-selected' : ''; ?>" for="<?php echo esc_attr($input_id); ?>" data-theme="<?php echo esc_attr($theme_slug); ?>">
+                    <?php
+                    printf(
+                        '<input type="radio" id="%1$s" name="sitepulse-theme" value="%2$s"%3$s%4$s data-sitepulse-theme-option />',
+                        esc_attr($input_id),
+                        esc_attr($theme_slug),
+                        checked($is_selected, true, false),
+                        $description_attr
+                    );
+                    ?>
+                    <span class="sitepulse-theme-toggle__label"><?php echo esc_html($label); ?></span>
+                    <?php if ($description !== '') : ?>
+                        <span class="sitepulse-theme-toggle__description" id="<?php echo esc_attr($description_id); ?>"><?php echo esc_html($description); ?></span>
+                    <?php endif; ?>
+                </label>
+            <?php endforeach; ?>
+        </div>
+        <span class="screen-reader-text" aria-live="polite" data-sitepulse-theme-announcer></span>
+    </fieldset>
+    <?php
+
+    return (string) ob_get_clean();
 }
 
 /**
@@ -349,9 +544,10 @@ function sitepulse_get_dashboard_card_keys() {
  * @return array{
  *     order: string[],
  *     visibility: array<string,bool>,
- *     sizes: array<string,string>
+ *     sizes: array<string,string>,
+ *     theme: string
  * }
- */
+*/
 function sitepulse_get_dashboard_default_preferences($allowed_cards = null) {
     $card_keys = sitepulse_get_dashboard_card_keys();
 
@@ -379,6 +575,7 @@ function sitepulse_get_dashboard_default_preferences($allowed_cards = null) {
         'order'      => $order,
         'visibility' => $visibility,
         'sizes'      => $sizes,
+        'theme'      => sitepulse_get_dashboard_default_theme(),
     ];
 }
 
@@ -391,13 +588,15 @@ function sitepulse_get_dashboard_default_preferences($allowed_cards = null) {
  * @return array{
  *     order: string[],
  *     visibility: array<string,bool>,
- *     sizes: array<string,string>
+ *     sizes: array<string,string>,
+ *     theme: string
  * }
  */
 function sitepulse_sanitize_dashboard_preferences($raw_preferences, $allowed_cards = null) {
     $defaults = sitepulse_get_dashboard_default_preferences($allowed_cards);
     $allowed_cards = $defaults['order'];
     $allowed_sizes = ['small', 'medium', 'large'];
+    $allowed_themes = array_keys(sitepulse_get_dashboard_theme_options());
 
     $order = [];
 
@@ -462,10 +661,21 @@ function sitepulse_sanitize_dashboard_preferences($raw_preferences, $allowed_car
         $sizes = $defaults['sizes'];
     }
 
+    $theme = $defaults['theme'];
+
+    if (isset($raw_preferences['theme'])) {
+        $candidate = sanitize_key((string) $raw_preferences['theme']);
+
+        if (in_array($candidate, $allowed_themes, true)) {
+            $theme = $candidate;
+        }
+    }
+
     return [
         'order'      => $order,
         'visibility' => $visibility,
         'sizes'      => $sizes,
+        'theme'      => $theme,
     ];
 }
 
@@ -2247,6 +2457,7 @@ function sitepulse_save_dashboard_preferences() {
         'order'      => isset($_POST['order']) ? (array) wp_unslash($_POST['order']) : [],
         'visibility' => isset($_POST['visibility']) ? (array) wp_unslash($_POST['visibility']) : [],
         'sizes'      => isset($_POST['sizes']) ? (array) wp_unslash($_POST['sizes']) : [],
+        'theme'      => isset($_POST['theme']) ? (string) wp_unslash($_POST['theme']) : '',
     ];
 
     $allowed_cards = sitepulse_get_dashboard_card_keys();
@@ -4227,6 +4438,20 @@ function sitepulse_custom_dashboards_page() {
         ];
     }
 
+    $theme_options = sitepulse_get_dashboard_theme_options();
+    $theme_labels = [];
+    $theme_choices = [];
+    $current_theme = isset($dashboard_preferences['theme'])
+        ? sitepulse_normalize_dashboard_theme($dashboard_preferences['theme'])
+        : sitepulse_get_dashboard_default_theme();
+
+    foreach ($theme_options as $theme_key => $theme_definition) {
+        $theme_choices[] = $theme_key;
+        $theme_labels[$theme_key] = isset($theme_definition['label'])
+            ? wp_strip_all_tags((string) $theme_definition['label'])
+            : $theme_key;
+    }
+
     if (wp_script_is('sitepulse-dashboard-preferences', 'registered')) {
         wp_localize_script('sitepulse-dashboard-preferences', 'SitePulsePreferencesData', [
             'ajaxUrl'      => admin_url('admin-ajax.php'),
@@ -4238,6 +4463,9 @@ function sitepulse_custom_dashboards_page() {
                 'medium' => __('Standard', 'sitepulse'),
                 'large'  => __('Étendue', 'sitepulse'),
             ],
+            'themeOptions' => $theme_choices,
+            'themeLabels'  => $theme_labels,
+            'defaultTheme' => sitepulse_get_dashboard_default_theme(),
             'strings'      => [
                 'panelDescription' => __('Réorganisez les cartes en les faisant glisser et choisissez celles à afficher.', 'sitepulse'),
                 'toggleLabel'      => __('Afficher', 'sitepulse'),
@@ -4246,6 +4474,8 @@ function sitepulse_custom_dashboards_page() {
                 'saveError'        => __('Impossible d’enregistrer les préférences.', 'sitepulse'),
                 'moduleDisabled'   => __('Module requis pour afficher cette carte.', 'sitepulse'),
                 'changesSaved'     => __('Les préférences du tableau de bord ont été mises à jour.', 'sitepulse'),
+                'themeAnnouncement'=> __('Apparence définie sur %s.', 'sitepulse'),
+                'themeSpoken'      => __('Thème mis à jour sur %s.', 'sitepulse'),
             ],
         ]);
         wp_enqueue_script('sitepulse-dashboard-preferences');
@@ -4300,12 +4530,15 @@ function sitepulse_custom_dashboards_page() {
                         </select>
                     </label>
                 </fieldset>
-                <div class="sitepulse-overview__meta">
-                    <p class="sitepulse-overview__range">
-                        <span class="sitepulse-overview__meta-label"><?php esc_html_e('Active window:', 'sitepulse'); ?></span>
-                        <span data-sitepulse-range-label><?php echo esc_html($range_label); ?></span>
-                    </p>
-                    <p class="sitepulse-overview__generated" data-sitepulse-generated><?php echo esc_html($generated_text); ?></p>
+                <div class="sitepulse-overview__info">
+                    <div class="sitepulse-overview__meta">
+                        <p class="sitepulse-overview__range">
+                            <span class="sitepulse-overview__meta-label"><?php esc_html_e('Active window:', 'sitepulse'); ?></span>
+                            <span data-sitepulse-range-label><?php echo esc_html($range_label); ?></span>
+                        </p>
+                        <p class="sitepulse-overview__generated" data-sitepulse-generated><?php echo esc_html($generated_text); ?></p>
+                    </div>
+                    <?php echo sitepulse_render_dashboard_theme_toggle($current_theme, $theme_options); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
                 </div>
             </div>
 

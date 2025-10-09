@@ -272,11 +272,22 @@ function sitepulse_enqueue_module_navigation_assets() {
     $style_handle  = 'sitepulse-module-navigation';
     $script_handle = 'sitepulse-dashboard-nav';
 
+    if (!wp_style_is('sitepulse-dashboard-theme', 'registered')) {
+        wp_register_style(
+            'sitepulse-dashboard-theme',
+            SITEPULSE_URL . 'modules/css/sitepulse-theme.css',
+            [],
+            SITEPULSE_VERSION
+        );
+    }
+
+    wp_enqueue_style('sitepulse-dashboard-theme');
+
     if (!wp_style_is($style_handle, 'registered')) {
         wp_register_style(
             $style_handle,
             SITEPULSE_URL . 'modules/css/module-navigation.css',
-            [],
+            ['sitepulse-dashboard-theme'],
             SITEPULSE_VERSION
         );
     }
