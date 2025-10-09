@@ -80,3 +80,19 @@
 - Ajouter une **file de traitement asynchrone** (Action Scheduler, queues Redis, priorités) pour les modules lourds (IA, scans de vitesse) avec journalisation de l’état et des reprises.
 - Supporter la **redondance multi-agents** (régions, providers) et une politique de quorum pour les alertes uptime, à l’image des plateformes pro.
 - Étendre les historiques et proposer des **rétentions paramétrables** (30/90/365 jours) avec agrégations horaires afin de mieux documenter les SLA et MTTR.
+
+## 8. Reporting, partage et pilotage d’équipe
+### État actuel
+- Les réglages affichent un tableau de bord synthétique (statut uptime, progression des purges, prochaines étapes) mais ne proposent ni consolidation multi-site ni exports SLA planifiés, là où les suites pro livrent des vues unifiées par portefeuille et des rapports périodiques prêts à envoyer aux clients.【F:sitepulse_FR/includes/admin-settings.php†L1704-L2099】
+- L’historique des recommandations IA permet un export ponctuel (CSV et presse-papiers) mais ne propose aucun connecteur vers Jira, Slack ou les outils CRM pour transformer automatiquement ces suggestions en tickets suivis, contrairement aux plateformes MSP qui synchronisent chaque alerte dans un flux de travail partagé.【F:sitepulse_FR/modules/ai_insights.php†L2260-L2330】
+- La normalisation des jobs asynchrones ne gère que deux types d’opérations (purge de transients, reset) et n’affiche que les cinq derniers logs, empêchant les revues complètes et la traçabilité multi-équipes observées dans les consoles d’orchestration professionnelles.【F:sitepulse_FR/includes/functions.php†L1120-L1279】
+
+### Écarts face aux suites professionnelles
+- **Rapports automatisés** : Pingdom, Better Stack ou ManageWP envoient des PDF/CSV brandés, programmables par client et par fuseau horaire. SitePulse nécessite encore une extraction manuelle module par module.
+- **Collaboration & ticketing** : les suites pro proposent des intégrations Slack/Teams, des connecteurs Jira/Asana et des workflows d’approbation. SitePulse reste centré sur la consultation individuelle au sein de l’admin WordPress.
+- **Pilotage d’orchestration** : des solutions comme New Relic ou Datadog exposent timelines, runbooks et audit trail des jobs. Le journal SitePulse se limite à un extrait de cinq entrées sans notions de propriétaire ni de statut agrégé.
+
+### Leviers d’alignement « pro »
+- Implémenter des **rapports programmés** (e-mail, PDF/CSV, librairie de modèles) avec branding client, plages horaires et filtres multi-sites, ainsi qu’une API REST/GraphQL pour extraire ces données vers des tableaux de bord externes.
+- Proposer des **connecteurs collaboratifs** prêts à l’emploi (webhooks configurables, intégrations Slack/Teams, synchronisation Jira/Linear) capables de convertir recommandations IA, incidents uptime ou alertes ressources en tâches actionnables avec suivi bidirectionnel.
+- Étendre l’**orchestrateur de jobs** avec des files dédiées par module, un suivi temps réel (statut, durée, opérateur), la conservation historique et des webhooks post-exécution afin d’aligner la gouvernance sur les consoles MSP/APM.
