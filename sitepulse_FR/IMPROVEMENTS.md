@@ -12,8 +12,8 @@ Ce document répertorie les fonctions de SitePulse qui gagneraient à être alig
 
 - **Statut :** ✅ Ajout d’un verrouillage partagé, d’un mode métadonnées (`lines`, `bytes_read`, `truncated`, `last_modified`) et d’un indicateur de troncature exploité dans l’UI pour informer les utilisateurs.【F:sitepulse_FR/includes/functions.php†L320-L520】【F:sitepulse_FR/modules/log_analyzer.php†L1-L200】
 - **Pistes pro :**
+  - ✅ Ajouter une API REST pour exposer ces métadonnées aux outils externes (Grafana Loki, Datadog Live Tail) via l’endpoint sécurisé `sitepulse/v1/logs/recent` (filtrage par niveaux, statut dominant, méta enrichies).【F:sitepulse_FR/modules/log_analyzer.php†L1-L360】
   - 🔭 Déporter la lecture sur `SplFileObject` en streaming pour lire des fichiers >100 Mo sans concaténation mémoire.
-  - 🔭 Ajouter une API REST pour exposer ces métadonnées aux outils externes (Grafana Loki, Datadog Live Tail).
 
 ## `sitepulse_get_ai_models()`
 
