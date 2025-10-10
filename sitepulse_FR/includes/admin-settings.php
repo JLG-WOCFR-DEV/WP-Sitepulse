@@ -13,6 +13,14 @@ if (!defined('SITEPULSE_OPTION_UPTIME_HISTORY_RETENTION_DAYS')) {
     define('SITEPULSE_OPTION_UPTIME_HISTORY_RETENTION_DAYS', 'sitepulse_uptime_history_retention_days');
 }
 
+if (!defined('SITEPULSE_OPTION_SETTINGS_VIEW_MODE')) {
+    define('SITEPULSE_OPTION_SETTINGS_VIEW_MODE', 'sitepulse_settings_view_mode');
+}
+
+if (!defined('SITEPULSE_DEFAULT_SETTINGS_VIEW_MODE')) {
+    define('SITEPULSE_DEFAULT_SETTINGS_VIEW_MODE', 'simple');
+}
+
 if (!defined('SITEPULSE_DEFAULT_UPTIME_HISTORY_RETENTION_DAYS')) {
     define('SITEPULSE_DEFAULT_UPTIME_HISTORY_RETENTION_DAYS', 90);
 }
@@ -231,6 +239,11 @@ if (!function_exists('sitepulse_ajax_async_jobs_overview')) {
 function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_ACTIVE_MODULES, [
         'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_modules', 'default' => []
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_SETTINGS_VIEW_MODE, [
+        'type' => 'string',
+        'sanitize_callback' => 'sitepulse_sanitize_settings_view_mode',
+        'default' => SITEPULSE_DEFAULT_SETTINGS_VIEW_MODE,
     ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_DEBUG_MODE, [
         'type' => 'boolean', 'sanitize_callback' => 'rest_sanitize_boolean', 'default' => false
@@ -455,6 +468,22 @@ function sitepulse_sanitize_ai_rate_limit($value) {
 /**
  * Sanitizes the module selection.
  */
+function sitepulse_sanitize_settings_view_mode($value) {
+    $default = defined('SITEPULSE_DEFAULT_SETTINGS_VIEW_MODE') ? SITEPULSE_DEFAULT_SETTINGS_VIEW_MODE : 'simple';
+
+    if (!is_string($value)) {
+        return $default;
+    }
+
+    $normalized = strtolower(trim($value));
+
+    if ($normalized !== 'simple' && $normalized !== 'expert') {
+        return $default;
+    }
+
+    return $normalized;
+}
+
 function sitepulse_sanitize_modules($input) {
     $valid_keys = ['log_analyzer', 'resource_monitor', 'plugin_impact_scanner', 'speed_analyzer', 'database_optimizer', 'maintenance_advisor', 'uptime_tracker', 'ai_insights', 'custom_dashboards', 'error_alerts'];
     $sanitized = [];
@@ -1955,6 +1984,11 @@ function sitepulse_settings_page() {
             'page'        => '#sitepulse-section-alerts',
         ],
     ];
+    $stored_view_mode_option = get_option(
+        SITEPULSE_OPTION_SETTINGS_VIEW_MODE,
+        SITEPULSE_DEFAULT_SETTINGS_VIEW_MODE
+    );
+    $settings_view_mode = sitepulse_sanitize_settings_view_mode($stored_view_mode_option);
     $module_summaries = sitepulse_get_module_status_summaries();
     $active_modules_option = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
     $active_modules = array_values(array_filter(array_map('strval', (array) $active_modules_option), static function ($module) {
@@ -2446,21 +2480,71 @@ function sitepulse_settings_page() {
         printf('<div class="notice notice-%1$s is-dismissible"><p>%2$s</p></div>', esc_attr($test_notice_class), $test_notice);
     }
     ?>
-    <div class="wrap sitepulse-settings-wrap">
+    <div
+        class="wrap sitepulse-settings-wrap"
+        data-sitepulse-settings-wrap
+        data-sitepulse-view-mode="<?php echo esc_attr($settings_view_mode); ?>"
+    >
         <h1><?php esc_html_e('Réglages de SitePulse', 'sitepulse'); ?></h1>
         <p class="sitepulse-settings-intro"><?php esc_html_e('Activez les modules qui vous intéressent et ajustez les seuils clés pour votre surveillance.', 'sitepulse'); ?></p>
+        <div class="sitepulse-settings-live-region" aria-live="polite" aria-atomic="true" data-sitepulse-live-region="polite"></div>
+        <div class="sitepulse-settings-live-region sitepulse-settings-live-region--assertive" aria-live="assertive" aria-atomic="true" data-sitepulse-live-region="assertive"></div>
+        <section
+            class="sitepulse-settings-mode-toggle"
+            aria-label="<?php esc_attr_e('Choisir le mode d’affichage des réglages', 'sitepulse'); ?>"
+            data-sitepulse-view-announce-simple="<?php esc_attr_e('Mode guidé activé : seules les options essentielles sont visibles.', 'sitepulse'); ?>"
+            data-sitepulse-view-announce-expert="<?php esc_attr_e('Mode expert activé : toutes les options sont affichées.', 'sitepulse'); ?>"
+        >
+            <div class="sitepulse-settings-mode-toggle__content">
+                <div class="sitepulse-settings-mode-toggle__intro">
+                    <h2 class="sitepulse-settings-mode-toggle__title"><?php esc_html_e('Mode d’affichage', 'sitepulse'); ?></h2>
+                    <p class="sitepulse-settings-mode-toggle__description">
+                        <?php esc_html_e('Passez du mode guidé au mode expert pour révéler l’ensemble des réglages disponibles.', 'sitepulse'); ?>
+                    </p>
+                </div>
+                <fieldset class="sitepulse-view-mode-fieldset" data-sitepulse-view-controls>
+                    <legend class="sitepulse-view-mode-fieldset__legend"><?php esc_html_e('Afficher', 'sitepulse'); ?></legend>
+                    <div class="sitepulse-view-mode-fieldset__options">
+                        <label class="sitepulse-view-mode-option">
+                            <input
+                                type="radio"
+                                name="<?php echo esc_attr(SITEPULSE_OPTION_SETTINGS_VIEW_MODE); ?>"
+                                value="simple"
+                                <?php checked('simple' === $settings_view_mode); ?>
+                                class="screen-reader-text sitepulse-view-mode-option__input"
+                                data-sitepulse-view-control
+                            >
+                            <span class="sitepulse-view-mode-option__label"><?php esc_html_e('Mode guidé', 'sitepulse'); ?></span>
+                            <span class="sitepulse-view-mode-option__hint"><?php esc_html_e('Idéal pour activer l’essentiel en quelques clics.', 'sitepulse'); ?></span>
+                        </label>
+                        <label class="sitepulse-view-mode-option">
+                            <input
+                                type="radio"
+                                name="<?php echo esc_attr(SITEPULSE_OPTION_SETTINGS_VIEW_MODE); ?>"
+                                value="expert"
+                                <?php checked('expert' === $settings_view_mode); ?>
+                                class="screen-reader-text sitepulse-view-mode-option__input"
+                                data-sitepulse-view-control
+                            >
+                            <span class="sitepulse-view-mode-option__label"><?php esc_html_e('Mode expert', 'sitepulse'); ?></span>
+                            <span class="sitepulse-view-mode-option__hint"><?php esc_html_e('Affiche tous les paramètres avancés et les réglages fins.', 'sitepulse'); ?></span>
+                        </label>
+                    </div>
+                </fieldset>
+            </div>
+        </section>
         <div class="sitepulse-settings-layout">
             <nav class="sitepulse-settings-toc" aria-label="<?php esc_attr_e('Sommaire des réglages', 'sitepulse'); ?>">
                 <h2 class="screen-reader-text"><?php esc_html_e('Sommaire des réglages', 'sitepulse'); ?></h2>
-                <ul>
-                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-overview" href="#sitepulse-section-overview"><?php esc_html_e('Vue d’ensemble', 'sitepulse'); ?></a></li>
-                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-ai" href="#sitepulse-section-api"><?php esc_html_e('Connexion IA', 'sitepulse'); ?></a></li>
-                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-ai" href="#sitepulse-section-ai"><?php esc_html_e('Réglages IA', 'sitepulse'); ?></a></li>
-                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-performance" href="#sitepulse-section-performance"><?php esc_html_e('Performances', 'sitepulse'); ?></a></li>
-                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-modules" href="#sitepulse-section-modules"><?php esc_html_e('Modules', 'sitepulse'); ?></a></li>
-                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-alerts" href="#sitepulse-section-alerts"><?php esc_html_e('Alertes', 'sitepulse'); ?></a></li>
-                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-uptime" href="#sitepulse-section-uptime"><?php esc_html_e('Disponibilité', 'sitepulse'); ?></a></li>
-                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-maintenance" href="#sitepulse-section-maintenance"><?php esc_html_e('Maintenance', 'sitepulse'); ?></a></li>
+                <ul role="tablist">
+                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-overview" href="#sitepulse-section-overview" aria-current="page" tabindex="0"><?php esc_html_e('Vue d’ensemble', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-ai" href="#sitepulse-section-api" aria-current="false" tabindex="-1"><?php esc_html_e('Connexion IA', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-ai" href="#sitepulse-section-ai" aria-current="false" tabindex="-1"><?php esc_html_e('Réglages IA', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-performance" href="#sitepulse-section-performance" aria-current="false" tabindex="-1"><?php esc_html_e('Performances', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-modules" href="#sitepulse-section-modules" aria-current="false" tabindex="-1"><?php esc_html_e('Modules', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-alerts" href="#sitepulse-section-alerts" aria-current="false" tabindex="-1"><?php esc_html_e('Alertes', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-uptime" href="#sitepulse-section-uptime" aria-current="false" tabindex="-1"><?php esc_html_e('Disponibilité', 'sitepulse'); ?></a></li>
+                    <li><a class="sitepulse-toc-link sitepulse-tab-trigger" data-tab-target="sitepulse-tab-maintenance" href="#sitepulse-section-maintenance" aria-current="false" tabindex="-1"><?php esc_html_e('Maintenance', 'sitepulse'); ?></a></li>
                 </ul>
             </nav>
             <div class="sitepulse-settings-content">
@@ -2517,6 +2601,44 @@ function sitepulse_settings_page() {
                             <?php endforeach; ?>
                         </footer>
                     </div>
+                </section>
+                <section class="sitepulse-guided-checklist" data-sitepulse-view="simple">
+                    <h2 class="sitepulse-guided-checklist__title"><?php esc_html_e('Configuration guidée', 'sitepulse'); ?></h2>
+                    <p class="sitepulse-guided-checklist__intro"><?php esc_html_e('Suivez ces étapes prioritaires pour activer la supervision de base avant d’affiner les réglages.', 'sitepulse'); ?></p>
+                    <ol class="sitepulse-guided-checklist__list">
+                        <?php foreach ($next_steps_overview as $step) :
+                            $item_status      = $step['is_complete'] ? 'done' : 'todo';
+                            $status_label     = $step['is_complete'] ? esc_html__('Terminé', 'sitepulse') : esc_html__('À faire', 'sitepulse');
+                            $action_label     = $step['is_complete'] ? esc_html__('Revoir', 'sitepulse') : esc_html__('Configurer', 'sitepulse');
+                            $item_classes     = ['sitepulse-guided-checklist__item', 'sitepulse-guided-checklist__item--' . $item_status];
+                            $status_classes   = ['sitepulse-guided-checklist__status', 'sitepulse-guided-checklist__status--' . $item_status];
+                        ?>
+                            <li class="<?php echo esc_attr(implode(' ', $item_classes)); ?>">
+                                <div class="sitepulse-guided-checklist__item-header">
+                                    <span class="<?php echo esc_attr(implode(' ', $status_classes)); ?>"><?php echo esc_html($status_label); ?></span>
+                                    <span class="sitepulse-guided-checklist__label"><?php echo esc_html($step['label']); ?></span>
+                                </div>
+                                <p class="sitepulse-guided-checklist__description"><?php echo esc_html($step['description']); ?></p>
+                                <div class="sitepulse-guided-checklist__actions">
+                                    <?php
+                                    $action_classes = ['button', 'sitepulse-guided-checklist__action', 'sitepulse-tab-trigger'];
+
+                                    if ($step['is_complete']) {
+                                        $action_classes[] = 'button-secondary';
+                                    } else {
+                                        $action_classes[] = 'button-primary';
+                                    }
+                                    ?>
+                                    <a
+                                        class="<?php echo esc_attr(implode(' ', $action_classes)); ?>"
+                                        data-tab-target="<?php echo esc_attr($step['target']); ?>"
+                                        href="<?php echo esc_url($step['href']); ?>"
+                                        data-sitepulse-guided-link
+                                    ><?php echo esc_html($action_label); ?></a>
+                                </div>
+                            </li>
+                        <?php endforeach; ?>
+                    </ol>
                 </section>
                 <div class="sitepulse-settings-tabs-container">
                     <h2 class="nav-tab-wrapper sitepulse-settings-tabs" role="tablist">
@@ -2583,7 +2705,7 @@ function sitepulse_settings_page() {
                 <div class="sitepulse-settings-section" id="sitepulse-section-api">
                 <h2><?php esc_html_e("Paramètres de l'API", 'sitepulse'); ?></h2>
                 <div class="sitepulse-settings-grid">
-                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                    <div class="sitepulse-module-card sitepulse-module-card--setting" data-sitepulse-view="expert">
                         <div class="sitepulse-card-header">
                             <h3 class="sitepulse-card-title"><?php esc_html_e('Connexion à Google Gemini', 'sitepulse'); ?></h3>
                         </div>
@@ -2616,7 +2738,7 @@ function sitepulse_settings_page() {
                 <div class="sitepulse-settings-section" id="sitepulse-section-ai">
                 <h2><?php esc_html_e('IA', 'sitepulse'); ?></h2>
                 <div class="sitepulse-settings-grid">
-                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                    <div class="sitepulse-module-card sitepulse-module-card--setting" data-sitepulse-view="expert">
                         <div class="sitepulse-card-header">
                             <h3 class="sitepulse-card-title"><?php esc_html_e('Modèle IA', 'sitepulse'); ?></h3>
                         </div>
@@ -3445,7 +3567,7 @@ function sitepulse_settings_page() {
                             <form method="post" action="" class="sitepulse-settings-form sitepulse-settings-form--secondary">
                                 <?php wp_nonce_field(SITEPULSE_NONCE_ACTION_CLEANUP, SITEPULSE_NONCE_FIELD_CLEANUP); ?>
                                 <div class="sitepulse-settings-grid">
-                                    <div class="sitepulse-module-card sitepulse-module-card--setting sitepulse-module-card--async" data-sitepulse-async-card data-sitepulse-async-state="<?php echo esc_attr($async_jobs_state); ?>">
+                                    <div class="sitepulse-module-card sitepulse-module-card--setting sitepulse-module-card--async" data-sitepulse-async-card data-sitepulse-async-state="<?php echo esc_attr($async_jobs_state); ?>" data-sitepulse-view="expert">
                                         <div class="sitepulse-card-header">
                                             <h3 class="sitepulse-card-title"><?php esc_html_e('Traitements en arrière-plan', 'sitepulse'); ?></h3>
                                         </div>
