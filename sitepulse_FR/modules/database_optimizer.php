@@ -213,6 +213,7 @@ function sitepulse_database_optimizer_page() {
         );
         $transients += $network_transients;
     }
+    $index_suggestions = sitepulse_get_missing_index_suggestions($wpdb);
     ?>
     <?php
     if (function_exists('sitepulse_render_module_selector')) {
@@ -281,6 +282,33 @@ function sitepulse_database_optimizer_page() {
                         <?php esc_html_e('Clean expired transients', 'sitepulse'); ?>
                     </button>
                 </p>
+            </div>
+            <div class="card" style="background:#fff; padding:1px 20px 20px; margin-top:20px;">
+                <h2><?php esc_html_e('Index suggestions', 'sitepulse'); ?></h2>
+                <p>
+                    <?php
+                    echo wp_kses_post(
+                        __('These recommendations are based on detected usage patterns in WordPress tables. Adding the missing indexes can drastically speed up lookups executed by the admin and by your themes/plugins.', 'sitepulse')
+                    );
+                    ?>
+                </p>
+                <?php if (isset($index_suggestions['error'])) : ?>
+                    <p><?php echo esc_html($index_suggestions['error']); ?></p>
+                <?php elseif (empty($index_suggestions)) : ?>
+                    <p><?php esc_html_e('All monitored tables already expose the recommended indexes.', 'sitepulse'); ?></p>
+                <?php else : ?>
+                    <ul class="ul-disc">
+                        <?php foreach ($index_suggestions as $suggestion) : ?>
+                            <li>
+                                <strong><?php echo esc_html($suggestion['table']); ?></strong>:<br />
+                                <?php echo esc_html($suggestion['message']); ?>
+                                <?php if (!empty($suggestion['sql'])) : ?>
+                                    <pre style="overflow:auto;"><?php echo esc_html($suggestion['sql']); ?></pre>
+                                <?php endif; ?>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
+                <?php endif; ?>
             </div>
         </form>
       </div>
@@ -534,4 +562,177 @@ function sitepulse_get_transients_cleanup_message($count) {
         ),
         number_format_i18n($count)
     );
+}
+
+function sitepulse_get_missing_index_suggestions($wpdb) {
+    if (!isset($wpdb->dbname) || !is_string($wpdb->dbname) || $wpdb->dbname === '') {
+        return array(
+            'error' => __('Unable to read the database schema name. Index checks cannot run.', 'sitepulse'),
+        );
+    }
+
+    $schema = $wpdb->dbname;
+    $tables = array(
+        $wpdb->postmeta => array(
+            array(
+                'columns' => array('post_id', 'meta_key'),
+                'type'    => 'INDEX',
+                'message' => __('Missing composite index on (post_id, meta_key). It is used for post meta queries and speeds up editing screens.', 'sitepulse'),
+                'sql'     => sprintf('CREATE INDEX %1$s ON %2$s (post_id, meta_key(191));', 'sitepulse_postmeta_post_id_meta_key', $wpdb->postmeta),
+            ),
+            array(
+                'columns' => array('meta_key'),
+                'type'    => 'INDEX',
+                'message' => __('Missing index on meta_key. WordPress core relies on it when filtering posts by custom fields.', 'sitepulse'),
+                'sql'     => sprintf('CREATE INDEX %1$s ON %2$s (meta_key(191));', 'sitepulse_postmeta_meta_key', $wpdb->postmeta),
+            ),
+        ),
+        $wpdb->commentmeta => array(
+            array(
+                'columns' => array('comment_id', 'meta_key'),
+                'type'    => 'INDEX',
+                'message' => __('Missing composite index on (comment_id, meta_key). It keeps discussions fast when comments store metadata.', 'sitepulse'),
+                'sql'     => sprintf('CREATE INDEX %1$s ON %2$s (comment_id, meta_key(191));', 'sitepulse_commentmeta_comment_id_meta_key', $wpdb->commentmeta),
+            ),
+            array(
+                'columns' => array('meta_key'),
+                'type'    => 'INDEX',
+                'message' => __('Missing index on meta_key. It is required for efficient lookups when plugins use comment meta.', 'sitepulse'),
+                'sql'     => sprintf('CREATE INDEX %1$s ON %2$s (meta_key(191));', 'sitepulse_commentmeta_meta_key', $wpdb->commentmeta),
+            ),
+        ),
+        $wpdb->termmeta => array(
+            array(
+                'columns' => array('term_id', 'meta_key'),
+                'type'    => 'INDEX',
+                'message' => __('Missing composite index on (term_id, meta_key). It avoids slow taxonomy screens when term metadata grows.', 'sitepulse'),
+                'sql'     => sprintf('CREATE INDEX %1$s ON %2$s (term_id, meta_key(191));', 'sitepulse_termmeta_term_id_meta_key', $wpdb->termmeta),
+            ),
+            array(
+                'columns' => array('meta_key'),
+                'type'    => 'INDEX',
+                'message' => __('Missing index on meta_key. This is heavily used when plugins filter taxonomy meta.', 'sitepulse'),
+                'sql'     => sprintf('CREATE INDEX %1$s ON %2$s (meta_key(191));', 'sitepulse_termmeta_meta_key', $wpdb->termmeta),
+            ),
+        ),
+        $wpdb->usermeta => array(
+            array(
+                'columns' => array('user_id', 'meta_key'),
+                'type'    => 'INDEX',
+                'message' => __('Missing composite index on (user_id, meta_key). It is essential for sites with many users and plugins storing profile data.', 'sitepulse'),
+                'sql'     => sprintf('CREATE INDEX %1$s ON %2$s (user_id, meta_key(191));', 'sitepulse_usermeta_user_id_meta_key', $wpdb->usermeta),
+            ),
+            array(
+                'columns' => array('meta_key'),
+                'type'    => 'INDEX',
+                'message' => __('Missing index on meta_key. It accelerates queries filtering users by metadata.', 'sitepulse'),
+                'sql'     => sprintf('CREATE INDEX %1$s ON %2$s (meta_key(191));', 'sitepulse_usermeta_meta_key', $wpdb->usermeta),
+            ),
+        ),
+    );
+
+    $suggestions = array();
+
+    foreach ($tables as $table => $checks) {
+        if (empty($table)) {
+            continue;
+        }
+
+        $existing_indexes = sitepulse_get_table_indexes($wpdb, $schema, $table);
+
+        if ($existing_indexes === null) {
+            return array(
+                'error' => __('Unable to inspect database indexes. Your MySQL user might be missing the SELECT privilege on INFORMATION_SCHEMA.', 'sitepulse'),
+            );
+        }
+
+        foreach ($checks as $check) {
+            if (!sitepulse_index_exists($existing_indexes, $check['columns'], $check['type'])) {
+                $suggestions[] = array(
+                    'table'   => $table,
+                    'message' => $check['message'],
+                    'sql'     => $check['sql'],
+                );
+            }
+        }
+    }
+
+    return $suggestions;
+}
+
+function sitepulse_get_table_indexes($wpdb, $schema, $table) {
+    $sql = $wpdb->prepare(
+        "SELECT INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME"
+        . " FROM INFORMATION_SCHEMA.STATISTICS"
+        . " WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s"
+        . " ORDER BY INDEX_NAME, SEQ_IN_INDEX",
+        $schema,
+        $table
+    );
+
+    if ($sql === false) {
+        return null;
+    }
+
+    $rows = $wpdb->get_results($sql, ARRAY_A);
+
+    if (!is_array($rows)) {
+        return null;
+    }
+
+    $indexes = array();
+
+    foreach ($rows as $row) {
+        if (!isset($row['INDEX_NAME'], $row['COLUMN_NAME'])) {
+            continue;
+        }
+
+        $index_name = $row['INDEX_NAME'];
+
+        if (!isset($indexes[$index_name])) {
+            $indexes[$index_name] = array(
+                'columns'    => array(),
+                'type'       => ((int) $row['NON_UNIQUE']) === 0 ? 'UNIQUE' : 'INDEX',
+                'is_primary' => $index_name === 'PRIMARY',
+            );
+        }
+
+        $indexes[$index_name]['columns'][] = $row['COLUMN_NAME'];
+    }
+
+    return $indexes;
+}
+
+function sitepulse_index_exists($indexes, $columns, $type) {
+    foreach ($indexes as $index) {
+        if (!isset($index['columns'], $index['type'])) {
+            continue;
+        }
+
+        if ($index['type'] !== $type && empty($index['is_primary'])) {
+            continue;
+        }
+
+        $normalized_existing = array_values($index['columns']);
+        $normalized_requested = array_values($columns);
+
+        if (count($normalized_existing) !== count($normalized_requested)) {
+            continue;
+        }
+
+        $matched = true;
+
+        foreach ($normalized_existing as $i => $column) {
+            if (!isset($normalized_requested[$i]) || $normalized_requested[$i] !== $column) {
+                $matched = false;
+                break;
+            }
+        }
+
+        if ($matched) {
+            return true;
+        }
+    }
+
+    return false;
 }
