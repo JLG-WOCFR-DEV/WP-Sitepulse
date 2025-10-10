@@ -109,6 +109,42 @@ class Sitepulse_Pro_Functions_Test extends WP_UnitTestCase {
         remove_filter('sitepulse_alert_interval_allowed_values', $allowed_filter);
     }
 
+    public function test_smart_alert_interval_uses_activity_snapshot() {
+        delete_option(SITEPULSE_OPTION_ALERT_ACTIVITY);
+
+        $allowed_filter = static function () {
+            return [1, 5, 15, 30];
+        };
+
+        add_filter('sitepulse_alert_interval_allowed_values', $allowed_filter);
+
+        $this->assertSame(5, sitepulse_sanitize_alert_interval('smart'));
+
+        sitepulse_register_alert_activity_event([
+            'timestamp' => time(),
+            'type'      => 'php_fatal',
+            'severity'  => 'critical',
+            'success'   => true,
+            'channels'  => ['email'],
+        ]);
+
+        $this->assertSame(1, sitepulse_sanitize_alert_interval('smart'));
+
+        sitepulse_save_alert_activity_state([
+            'events'         => [],
+            'window_seconds' => 86400,
+            'last_check'     => time(),
+            'updated_at'     => time(),
+            'last_event'     => time() - 86400,
+            'quiet_checks'   => 72,
+        ]);
+
+        $this->assertSame(30, sitepulse_sanitize_alert_interval('smart'));
+
+        remove_filter('sitepulse_alert_interval_allowed_values', $allowed_filter);
+        delete_option(SITEPULSE_OPTION_ALERT_ACTIVITY);
+    }
+
     public function test_speed_threshold_profiles_trigger_corrections() {
         update_option('sitepulse_speed_profiles', [
             'mobile' => [

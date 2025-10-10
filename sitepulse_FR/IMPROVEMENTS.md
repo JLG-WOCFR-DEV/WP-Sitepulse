@@ -24,9 +24,9 @@ Ce document répertorie les fonctions de SitePulse qui gagneraient à être alig
 
 ## `sitepulse_sanitize_alert_interval()`
 
-- **Statut :** ✅ Ouverture à des paliers 1-120 min, mode « smart » piloté par filtre et harmonisation avec le cron dynamique du module d’alertes.【F:sitepulse_FR/includes/functions.php†L520-L640】【F:sitepulse_FR/modules/error_alerts.php†L940-L1000】
+- **Statut :** ✅ Ouverture à des paliers 1-120 min, mode « smart » piloté par filtre et harmonisation avec le cron dynamique du module d’alertes.【F:sitepulse_FR/includes/functions.php†L2799-L2855】【F:sitepulse_FR/modules/error_alerts.php†L1277-L1335】
 - **Pistes pro :**
-  - 🔭 Implémenter un calcul « smart » natif basé sur les occurrences d’erreurs (délai raccourci après un fatal, augmenté après période calme).
+  - ✅ Implémentation d’un calcul « smart » natif qui raccourcit l’intervalle après des erreurs critiques/fatales et l’étire automatiquement après une période calme, avec télémétrie persistée sur les exécutions et alertes envoyées.【F:sitepulse_FR/includes/functions.php†L2297-L2795】【F:sitepulse_FR/modules/error_alerts.php†L1310-L1716】
   - 🔭 Permettre des intervalles différenciés par canal (webhook vs e-mail) ou par type de signalement.
 
 ## `sitepulse_get_speed_thresholds()`

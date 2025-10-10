@@ -1310,6 +1310,10 @@ function sitepulse_error_alerts_register_cron_schedule($schedules) {
 function sitepulse_error_alerts_run_checks() {
     sitepulse_error_alerts_check_cpu_load();
     sitepulse_error_alerts_check_debug_log();
+
+    if (function_exists('sitepulse_register_alert_activity_check')) {
+        sitepulse_register_alert_activity_check();
+    }
 }
 
 /**
@@ -1656,6 +1660,60 @@ if (!empty($sitepulse_error_alerts_cron_hook)) {
     add_action($sitepulse_error_alerts_cron_hook, 'sitepulse_error_alerts_run_checks');
     add_action('update_option_' . SITEPULSE_OPTION_ALERT_INTERVAL, 'sitepulse_error_alerts_on_interval_update', 10, 3);
 }
+
+/**
+ * Records alert dispatches for the smart interval heuristics.
+ *
+ * @param array<string, mixed> $payload  Normalized payload data.
+ * @param array<string, bool>  $results  Channel dispatch results.
+ * @param string               $type     Alert type identifier.
+ * @param string               $severity Alert severity.
+ * @return void
+ */
+function sitepulse_error_alerts_record_activity($payload, $results, $type, $severity) {
+    if (!function_exists('sitepulse_register_alert_activity_event')) {
+        return;
+    }
+
+    $timestamp = isset($payload['timestamp']) ? strtotime((string) $payload['timestamp']) : 0;
+
+    if ($timestamp <= 0) {
+        $timestamp = time();
+    }
+
+    $channels = [];
+
+    if (is_array($results)) {
+        foreach ($results as $channel => $success) {
+            if (!is_string($channel)) {
+                continue;
+            }
+
+            if ($success) {
+                $channels[] = $channel;
+            }
+        }
+    }
+
+    $event = [
+        'timestamp' => $timestamp,
+        'type'      => sanitize_key((string) $type),
+        'severity'  => sitepulse_error_alert_normalize_severity($severity),
+        'success'   => !empty($channels),
+    ];
+
+    if (!empty($channels)) {
+        $event['channels'] = $channels;
+    }
+
+    if (isset($payload['fatal_count'])) {
+        $event['meta']['fatal_count'] = (int) $payload['fatal_count'];
+    }
+
+    sitepulse_register_alert_activity_event($event);
+}
+
+add_action('sitepulse_error_alert_dispatched', 'sitepulse_error_alerts_record_activity', 15, 4);
 
 /**
  * Handles the admin-post request triggered from the settings screen.

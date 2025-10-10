@@ -46,6 +46,9 @@ return [
     SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER => [
         'value' => [],
     ],
+    SITEPULSE_OPTION_ALERT_ACTIVITY => [
+        'value' => [],
+    ],
     SITEPULSE_OPTION_CRON_WARNINGS => [
         'value' => [],
     ],

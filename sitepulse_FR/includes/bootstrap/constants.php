@@ -32,6 +32,7 @@ return [
     'SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS' => 'sitepulse_error_alert_delivery_channels',
     'SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS' => 'sitepulse_error_alert_webhooks',
     'SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES' => 'sitepulse_error_alert_severities',
+    'SITEPULSE_OPTION_ALERT_ACTIVITY' => 'sitepulse_alert_activity',
     'SITEPULSE_OPTION_CPU_ALERT_THRESHOLD' => 'sitepulse_cpu_alert_threshold',
     'SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD' => 'sitepulse_php_fatal_alert_threshold',
     'SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES' => 'sitepulse_alert_cooldown_minutes',
