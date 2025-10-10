@@ -186,6 +186,22 @@ function sitepulse_uptime_register_rest_routes() {
             ],
         ]
     );
+
+    register_rest_route(
+        'sitepulse/v1',
+        '/uptime/remote-queue',
+        [
+            'methods'             => defined('WP_REST_Server::READABLE') ? WP_REST_Server::READABLE : 'GET',
+            'permission_callback' => 'sitepulse_uptime_rest_remote_queue_permission_check',
+            'callback'            => 'sitepulse_uptime_rest_remote_queue_callback',
+            'args'                => [
+                'context' => [
+                    'type'    => 'string',
+                    'default' => 'view',
+                ],
+            ],
+        ]
+    );
 }
 
 /**
@@ -310,6 +326,144 @@ function sitepulse_uptime_rest_schedule_callback($request) {
         'scheduled_at'  => $scheduled_timestamp,
         'payload'       => empty($payload) ? new stdClass() : $payload,
     ]);
+}
+
+/**
+ * Determines whether the current request is allowed to read remote queue metrics.
+ *
+ * @param WP_REST_Request $request Request instance.
+ * @return bool|WP_Error|WP_HTTP_Response|WP_REST_Response
+ */
+function sitepulse_uptime_rest_remote_queue_permission_check($request) {
+    $required_capability = function_exists('sitepulse_get_capability') ? sitepulse_get_capability() : 'manage_options';
+
+    if (current_user_can($required_capability)) {
+        return true;
+    }
+
+    /**
+     * Filters the permission evaluation for the remote queue metrics REST endpoint.
+     *
+     * This allows alternative authentication strategies to expose queue health to
+     * observability stacks without granting full SitePulse capabilities.
+     *
+     * @param bool|WP_Error|WP_HTTP_Response|WP_REST_Response|array $allowed Whether the request is authorised.
+     * @param WP_REST_Request                                       $request REST request instance.
+     */
+    $permission = apply_filters('sitepulse_uptime_rest_remote_queue_permission', false, $request);
+
+    if ($permission instanceof WP_REST_Response || $permission instanceof WP_HTTP_Response) {
+        return $permission;
+    }
+
+    if (is_wp_error($permission)) {
+        return $permission;
+    }
+
+    if (is_array($permission) && array_key_exists('allowed', $permission)) {
+        $allowed = $permission['allowed'];
+        $error   = isset($permission['error']) && is_wp_error($permission['error']) ? $permission['error'] : null;
+
+        if ($error instanceof WP_Error) {
+            return $error;
+        }
+
+        $permission = (bool) $allowed;
+    }
+
+    if (true === $permission) {
+        return true;
+    }
+
+    $error_code = function_exists('rest_authorization_required_code')
+        ? rest_authorization_required_code()
+        : 401;
+
+    $error_message = __('Vous n’avez pas l’autorisation de consulter les métriques de file via l’API REST.', 'sitepulse');
+
+    if (false === $permission || null === $permission) {
+        return new WP_Error(
+            'sitepulse_uptime_forbidden',
+            $error_message,
+            [
+                'status' => $error_code,
+            ]
+        );
+    }
+
+    if (is_bool($permission)) {
+        return $permission
+            ? true
+            : new WP_Error(
+                'sitepulse_uptime_forbidden',
+                $error_message,
+                [
+                    'status' => $error_code,
+                ]
+            );
+    }
+
+    if (is_scalar($permission)) {
+        return (bool) $permission
+            ? true
+            : new WP_Error(
+                'sitepulse_uptime_forbidden',
+                $error_message,
+                [
+                    'status' => $error_code,
+                ]
+            );
+    }
+
+    return new WP_Error(
+        'sitepulse_uptime_forbidden',
+        $error_message,
+        [
+            'status' => $error_code,
+        ]
+    );
+}
+
+/**
+ * Returns the latest remote queue metrics and health indicators.
+ *
+ * @param WP_REST_Request $request Request instance.
+ * @return array|WP_REST_Response
+ */
+function sitepulse_uptime_rest_remote_queue_callback($request) {
+    $analysis = sitepulse_uptime_analyze_remote_queue();
+
+    $payload = [
+        'timestamp'  => isset($analysis['timestamp']) ? (int) $analysis['timestamp'] : (int) current_time('timestamp'),
+        'updated_at' => isset($analysis['updated_at']) ? (int) $analysis['updated_at'] : 0,
+        'metrics'    => isset($analysis['metrics']) && is_array($analysis['metrics']) ? $analysis['metrics'] : [],
+        'status'     => isset($analysis['status']) && is_array($analysis['status']) ? $analysis['status'] : [],
+        'schedule'   => isset($analysis['schedule']) && is_array($analysis['schedule']) ? $analysis['schedule'] : [],
+        'metadata'   => isset($analysis['metadata']) && is_array($analysis['metadata']) ? $analysis['metadata'] : [],
+        'thresholds' => isset($analysis['thresholds']) && is_array($analysis['thresholds']) ? $analysis['thresholds'] : [],
+    ];
+
+    if (!isset($payload['status']['alerts']) || !is_array($payload['status']['alerts'])) {
+        $payload['status']['alerts'] = [];
+    } else {
+        $payload['status']['alerts'] = array_values(array_map(static function ($alert) {
+            return [
+                'code'    => isset($alert['code']) ? (string) $alert['code'] : '',
+                'level'   => isset($alert['level']) ? (string) $alert['level'] : '',
+                'message' => isset($alert['message']) ? (string) $alert['message'] : '',
+            ];
+        }, array_filter($payload['status']['alerts'], 'is_array')));
+    }
+
+    if (!isset($payload['status']['notes']) || !is_array($payload['status']['notes'])) {
+        $payload['status']['notes'] = [];
+    } else {
+        $payload['status']['notes'] = array_values(array_map('strval', $payload['status']['notes']));
+    }
+
+    return function_exists('rest_ensure_response')
+        ? rest_ensure_response($payload)
+        : $payload;
 }
 
 /**
@@ -874,6 +1028,375 @@ function sitepulse_uptime_get_remote_queue_metrics() {
     return [
         'updated_at' => isset($payload['updated_at']) ? (int) $payload['updated_at'] : 0,
         'metrics'    => $metrics,
+    ];
+}
+
+/**
+ * Formats a duration into a translated, human friendly string.
+ *
+ * @param float|int|null $seconds Duration in seconds.
+ * @return string
+ */
+function sitepulse_uptime_format_duration_i18n($seconds) {
+    if (null === $seconds || !is_numeric($seconds) || $seconds < 0) {
+        return '—';
+    }
+
+    $seconds = (float) $seconds;
+
+    if ($seconds < 1) {
+        return __('moins d’une seconde', 'sitepulse');
+    }
+
+    if ($seconds < 60) {
+        $count = max(1, (int) round($seconds));
+
+        return sprintf(
+            _n('%s seconde', '%s secondes', $count, 'sitepulse'),
+            number_format_i18n($count)
+        );
+    }
+
+    $minutes = floor($seconds / 60);
+
+    if ($minutes < 60) {
+        return sprintf(
+            _n('%s minute', '%s minutes', $minutes, 'sitepulse'),
+            number_format_i18n($minutes)
+        );
+    }
+
+    $hours = floor($minutes / 60);
+
+    if ($hours < 48) {
+        return sprintf(
+            _n('%s heure', '%s heures', $hours, 'sitepulse'),
+            number_format_i18n($hours)
+        );
+    }
+
+    $days = floor($hours / 24);
+
+    return sprintf(
+        _n('%s jour', '%s jours', $days, 'sitepulse'),
+        number_format_i18n($days)
+    );
+}
+
+/**
+ * Formats a timestamp relative to another reference timestamp.
+ *
+ * @param int|null $timestamp         Timestamp to format.
+ * @param int      $current_timestamp Reference timestamp.
+ * @return string
+ */
+function sitepulse_uptime_format_relative_time($timestamp, $current_timestamp) {
+    if (!is_numeric($timestamp) || (int) $timestamp <= 0) {
+        return '';
+    }
+
+    $timestamp = (int) $timestamp;
+    $current_timestamp = (int) $current_timestamp;
+
+    if ($timestamp >= $current_timestamp) {
+        $difference = human_time_diff($current_timestamp, $timestamp);
+
+        return sprintf(
+            __('dans %s', 'sitepulse'),
+            $difference
+        );
+    }
+
+    $difference = human_time_diff($timestamp, $current_timestamp);
+
+    return sprintf(
+        __('il y a %s', 'sitepulse'),
+        $difference
+    );
+}
+
+/**
+ * Aggregates remote queue metrics into a health summary and formatted labels.
+ *
+ * @param array<string,mixed>|null $payload           Optional metrics payload returned by
+ *                                                    sitepulse_uptime_get_remote_queue_metrics().
+ * @param int|null                 $current_timestamp Reference timestamp for relative calculations.
+ * @return array<string,mixed>
+ */
+function sitepulse_uptime_analyze_remote_queue($payload = null, $current_timestamp = null) {
+    if (null === $current_timestamp) {
+        $current_timestamp = (int) current_time('timestamp');
+    } else {
+        $current_timestamp = (int) $current_timestamp;
+    }
+
+    if (null === $payload) {
+        $payload = sitepulse_uptime_get_remote_queue_metrics();
+    }
+
+    $default_metrics = sitepulse_uptime_get_default_queue_metrics(
+        $current_timestamp,
+        sitepulse_uptime_get_remote_queue_item_ttl(),
+        sitepulse_uptime_get_remote_queue_max_size()
+    );
+
+    $raw_metrics = [];
+
+    if (is_array($payload) && isset($payload['metrics']) && is_array($payload['metrics'])) {
+        $raw_metrics = $payload['metrics'];
+    }
+
+    $metrics = array_merge($default_metrics, $raw_metrics);
+
+    $sanitized = [
+        'requested'          => max(0, (int) ($metrics['requested'] ?? 0)),
+        'retained'           => max(0, (int) ($metrics['retained'] ?? 0)),
+        'dropped_invalid'    => max(0, (int) ($metrics['dropped_invalid'] ?? 0)),
+        'dropped_expired'    => max(0, (int) ($metrics['dropped_expired'] ?? 0)),
+        'dropped_duplicates' => max(0, (int) ($metrics['dropped_duplicates'] ?? 0)),
+        'dropped_overflow'   => max(0, (int) ($metrics['dropped_overflow'] ?? 0)),
+        'queue_length'       => max(0, (int) ($metrics['queue_length'] ?? 0)),
+        'delayed_jobs'       => max(0, (int) ($metrics['delayed_jobs'] ?? 0)),
+        'max_wait_seconds'   => max(0, (int) ($metrics['max_wait_seconds'] ?? 0)),
+        'avg_wait_seconds'   => max(0, (int) ($metrics['avg_wait_seconds'] ?? 0)),
+        'next_scheduled_at'  => isset($metrics['next_scheduled_at']) && (int) $metrics['next_scheduled_at'] > 0
+            ? (int) $metrics['next_scheduled_at']
+            : null,
+        'oldest_created_at'  => isset($metrics['oldest_created_at']) && (int) $metrics['oldest_created_at'] > 0
+            ? (int) $metrics['oldest_created_at']
+            : null,
+        'limit_ttl'          => max(0, (int) ($metrics['limit_ttl'] ?? 0)),
+        'limit_size'         => max(0, (int) ($metrics['limit_size'] ?? 0)),
+    ];
+
+    $sanitized['dropped_total'] = $sanitized['dropped_invalid']
+        + $sanitized['dropped_expired']
+        + $sanitized['dropped_duplicates']
+        + $sanitized['dropped_overflow'];
+
+    $updated_at = 0;
+
+    if (is_array($payload) && isset($payload['updated_at'])) {
+        $updated_at = (int) $payload['updated_at'];
+    }
+
+    $usage_ratio = null;
+
+    if ($sanitized['limit_size'] > 0) {
+        $usage_ratio = $sanitized['queue_length'] / $sanitized['limit_size'];
+    }
+
+    $queue_status_priorities = [
+        'ok'       => 0,
+        'warning'  => 1,
+        'critical' => 2,
+    ];
+
+    $queue_status = 'ok';
+    $alerts = [];
+
+    $queue_status_promote = static function ($level) use (&$queue_status, $queue_status_priorities) {
+        if (!isset($queue_status_priorities[$level])) {
+            return;
+        }
+
+        if ($queue_status_priorities[$level] > $queue_status_priorities[$queue_status]) {
+            $queue_status = $level;
+        }
+    };
+
+    $register_alert = static function ($code, $level, $message) use (&$alerts, $queue_status_promote) {
+        $alerts[] = [
+            'code'    => $code,
+            'level'   => $level,
+            'message' => $message,
+        ];
+
+        $queue_status_promote($level);
+    };
+
+    if (null !== $usage_ratio) {
+        if ($usage_ratio >= 1) {
+            $register_alert(
+                'queue_capacity_exceeded',
+                'critical',
+                __('La file a atteint sa capacité maximale.', 'sitepulse')
+            );
+        } elseif ($usage_ratio >= 0.8) {
+            $register_alert(
+                'queue_capacity_pressure',
+                'warning',
+                __('La file approche de sa capacité maximale.', 'sitepulse')
+            );
+        }
+    }
+
+    if ($sanitized['delayed_jobs'] > 0) {
+        $register_alert(
+            'queue_delayed_jobs',
+            'warning',
+            sprintf(
+                _n('%s requête est en retard.', '%s requêtes sont en retard.', $sanitized['delayed_jobs'], 'sitepulse'),
+                number_format_i18n($sanitized['delayed_jobs'])
+            )
+        );
+    }
+
+    if ($sanitized['dropped_total'] > 0) {
+        $register_alert(
+            'queue_rejections_detected',
+            'warning',
+            sprintf(
+                _n(
+                    '%s requête a été rejetée (TTL, doublon ou validation).',
+                    '%s requêtes ont été rejetées (TTL, doublon ou validation).',
+                    $sanitized['dropped_total'],
+                    'sitepulse'
+                ),
+                number_format_i18n($sanitized['dropped_total'])
+            )
+        );
+    }
+
+    if ($sanitized['limit_ttl'] > 0) {
+        $wait_warning_threshold = max(60, min((int) round($sanitized['limit_ttl'] * 0.25), 3600));
+        $wait_critical_threshold = max($wait_warning_threshold + 60, min((int) round($sanitized['limit_ttl'] * 0.5), 7200));
+    } else {
+        $wait_warning_threshold = 900;
+        $wait_critical_threshold = 1800;
+    }
+
+    if ($sanitized['max_wait_seconds'] >= $wait_critical_threshold) {
+        $register_alert(
+            'queue_wait_time_critical',
+            'critical',
+            sprintf(
+                __('Attente maximale détectée : %s.', 'sitepulse'),
+                sitepulse_uptime_format_duration_i18n($sanitized['max_wait_seconds'])
+            )
+        );
+    } elseif ($sanitized['max_wait_seconds'] >= $wait_warning_threshold) {
+        $register_alert(
+            'queue_wait_time_warning',
+            'warning',
+            sprintf(
+                __('La file enregistre des attentes longues : %s.', 'sitepulse'),
+                sitepulse_uptime_format_duration_i18n($sanitized['max_wait_seconds'])
+            )
+        );
+    }
+
+    $day_in_seconds = defined('DAY_IN_SECONDS') ? DAY_IN_SECONDS : 86400;
+    $stale_threshold = $sanitized['limit_ttl'] > 0
+        ? max(300, min($sanitized['limit_ttl'], $day_in_seconds))
+        : 900;
+
+    $metrics_age = null;
+
+    if ($updated_at > 0) {
+        $metrics_age = max(0, $current_timestamp - $updated_at);
+
+        if ($metrics_age > (2 * $stale_threshold)) {
+            $register_alert(
+                'queue_metrics_expired',
+                'critical',
+                sprintf(
+                    __('Les métriques n’ont pas été actualisées depuis %s.', 'sitepulse'),
+                    sitepulse_uptime_format_duration_i18n($metrics_age)
+                )
+            );
+        } elseif ($metrics_age > $stale_threshold) {
+            $register_alert(
+                'queue_metrics_stale',
+                'warning',
+                sprintf(
+                    __('Dernière actualisation il y a %s.', 'sitepulse'),
+                    sitepulse_uptime_format_duration_i18n($metrics_age)
+                )
+            );
+        }
+    }
+
+    $queue_status_headlines = [
+        'ok'       => __('File d’orchestration nominale', 'sitepulse'),
+        'warning'  => __('Points de vigilance détectés', 'sitepulse'),
+        'critical' => __('Intervention requise', 'sitepulse'),
+    ];
+
+    $queue_status_icons = [
+        'ok'       => 'yes-alt',
+        'warning'  => 'warning',
+        'critical' => 'dismiss',
+    ];
+
+    $date_format = (string) get_option('date_format', 'Y-m-d');
+    $time_format = (string) get_option('time_format', 'H:i');
+
+    if ($date_format === '') {
+        $date_format = 'Y-m-d';
+    }
+
+    if ($time_format === '') {
+        $time_format = 'H:i';
+    }
+
+    $describe_timestamp = static function ($timestamp) use ($current_timestamp, $date_format, $time_format) {
+        if (null === $timestamp) {
+            return [
+                'timestamp' => null,
+                'formatted' => null,
+                'relative'  => null,
+                'label'     => '—',
+            ];
+        }
+
+        $formatted = date_i18n($date_format . ' ' . $time_format, $timestamp);
+        $relative = sitepulse_uptime_format_relative_time($timestamp, $current_timestamp);
+
+        $label = $formatted;
+
+        if ($relative !== '') {
+            $label = sprintf('%s (%s)', $formatted, $relative);
+        }
+
+        return [
+            'timestamp' => (int) $timestamp,
+            'formatted' => $formatted,
+            'relative'  => $relative,
+            'label'     => $label,
+        ];
+    };
+
+    $schedule_next = $describe_timestamp($sanitized['next_scheduled_at']);
+    $schedule_oldest = $describe_timestamp($sanitized['oldest_created_at']);
+    $updated_descriptor = $describe_timestamp($updated_at > 0 ? $updated_at : null);
+
+    return [
+        'timestamp'  => $current_timestamp,
+        'updated_at' => $updated_at,
+        'metrics'    => $sanitized,
+        'status'     => [
+            'level'               => $queue_status,
+            'headline'            => $queue_status_headlines[$queue_status],
+            'icon'                => $queue_status_icons[$queue_status],
+            'alerts'              => $alerts,
+            'notes'               => array_column($alerts, 'message'),
+            'usage_ratio'         => null === $usage_ratio ? null : (float) $usage_ratio,
+            'metrics_age_seconds' => $metrics_age,
+        ],
+        'schedule'   => [
+            'next'   => $schedule_next,
+            'oldest' => $schedule_oldest,
+        ],
+        'metadata'   => [
+            'updated' => $updated_descriptor,
+        ],
+        'thresholds' => [
+            'usage_warning_ratio' => 0.8,
+            'wait_warning'        => $wait_warning_threshold,
+            'wait_critical'       => $wait_critical_threshold,
+            'stale_threshold'     => $stale_threshold,
+        ],
     ];
 }
 
@@ -2521,214 +3044,55 @@ function sitepulse_uptime_tracker_page() {
 
     $current_timestamp = (int) current_time('timestamp');
     $remote_queue_payload = sitepulse_uptime_get_remote_queue_metrics();
-    $remote_queue_metrics = isset($remote_queue_payload['metrics']) && is_array($remote_queue_payload['metrics'])
-        ? $remote_queue_payload['metrics']
+    $remote_queue_overview = sitepulse_uptime_analyze_remote_queue($remote_queue_payload, $current_timestamp);
+    $remote_queue_metrics = isset($remote_queue_overview['metrics']) && is_array($remote_queue_overview['metrics'])
+        ? $remote_queue_overview['metrics']
         : [];
-    $remote_queue_updated_at = isset($remote_queue_payload['updated_at']) ? (int) $remote_queue_payload['updated_at'] : 0;
-    $remote_queue_requested = isset($remote_queue_metrics['requested']) ? max(0, (int) $remote_queue_metrics['requested']) : 0;
-    $remote_queue_retained = isset($remote_queue_metrics['retained']) ? max(0, (int) $remote_queue_metrics['retained']) : 0;
-    $remote_queue_queue_length = isset($remote_queue_metrics['queue_length']) ? max(0, (int) $remote_queue_metrics['queue_length']) : 0;
-    $remote_queue_delayed_jobs = isset($remote_queue_metrics['delayed_jobs']) ? max(0, (int) $remote_queue_metrics['delayed_jobs']) : 0;
-    $remote_queue_max_wait = isset($remote_queue_metrics['max_wait_seconds']) && is_numeric($remote_queue_metrics['max_wait_seconds'])
-        ? max(0, (float) $remote_queue_metrics['max_wait_seconds'])
-        : 0.0;
-    $remote_queue_avg_wait = isset($remote_queue_metrics['avg_wait_seconds']) && is_numeric($remote_queue_metrics['avg_wait_seconds'])
-        ? max(0, (float) $remote_queue_metrics['avg_wait_seconds'])
-        : 0.0;
-    $remote_queue_next_scheduled_at = isset($remote_queue_metrics['next_scheduled_at'])
-        ? (int) $remote_queue_metrics['next_scheduled_at']
-        : 0;
-    $remote_queue_oldest_created_at = isset($remote_queue_metrics['oldest_created_at'])
-        ? (int) $remote_queue_metrics['oldest_created_at']
-        : 0;
-    $remote_queue_limit_ttl = isset($remote_queue_metrics['limit_ttl']) ? max(0, (int) $remote_queue_metrics['limit_ttl']) : 0;
-    $remote_queue_limit_size = isset($remote_queue_metrics['limit_size']) ? max(0, (int) $remote_queue_metrics['limit_size']) : 0;
-    $remote_queue_dropped_total =
-        (isset($remote_queue_metrics['dropped_invalid']) ? max(0, (int) $remote_queue_metrics['dropped_invalid']) : 0)
-        + (isset($remote_queue_metrics['dropped_expired']) ? max(0, (int) $remote_queue_metrics['dropped_expired']) : 0)
-        + (isset($remote_queue_metrics['dropped_duplicates']) ? max(0, (int) $remote_queue_metrics['dropped_duplicates']) : 0)
-        + (isset($remote_queue_metrics['dropped_overflow']) ? max(0, (int) $remote_queue_metrics['dropped_overflow']) : 0);
+    $remote_queue_status = isset($remote_queue_overview['status']) && is_array($remote_queue_overview['status'])
+        ? $remote_queue_overview['status']
+        : [];
+    $remote_queue_metadata = isset($remote_queue_overview['metadata']) && is_array($remote_queue_overview['metadata'])
+        ? $remote_queue_overview['metadata']
+        : [];
+    $remote_queue_schedule = isset($remote_queue_overview['schedule']) && is_array($remote_queue_overview['schedule'])
+        ? $remote_queue_overview['schedule']
+        : [];
 
-    $format_duration = static function ($seconds) {
-        if (null === $seconds || !is_numeric($seconds) || $seconds < 0) {
-            return '—';
-        }
+    $remote_queue_updated_at = isset($remote_queue_overview['updated_at']) ? (int) $remote_queue_overview['updated_at'] : 0;
+    $remote_queue_requested = isset($remote_queue_metrics['requested']) ? (int) $remote_queue_metrics['requested'] : 0;
+    $remote_queue_retained = isset($remote_queue_metrics['retained']) ? (int) $remote_queue_metrics['retained'] : 0;
+    $remote_queue_queue_length = isset($remote_queue_metrics['queue_length']) ? (int) $remote_queue_metrics['queue_length'] : 0;
+    $remote_queue_delayed_jobs = isset($remote_queue_metrics['delayed_jobs']) ? (int) $remote_queue_metrics['delayed_jobs'] : 0;
+    $remote_queue_max_wait = isset($remote_queue_metrics['max_wait_seconds']) ? (int) $remote_queue_metrics['max_wait_seconds'] : 0;
+    $remote_queue_avg_wait = isset($remote_queue_metrics['avg_wait_seconds']) ? (int) $remote_queue_metrics['avg_wait_seconds'] : 0;
+    $remote_queue_limit_ttl = isset($remote_queue_metrics['limit_ttl']) ? (int) $remote_queue_metrics['limit_ttl'] : 0;
+    $remote_queue_limit_size = isset($remote_queue_metrics['limit_size']) ? (int) $remote_queue_metrics['limit_size'] : 0;
+    $remote_queue_dropped_total = isset($remote_queue_metrics['dropped_total']) ? (int) $remote_queue_metrics['dropped_total'] : 0;
 
-        $seconds = (float) $seconds;
+    $queue_status = isset($remote_queue_status['level']) ? (string) $remote_queue_status['level'] : 'ok';
+    $queue_status_headline = isset($remote_queue_status['headline']) ? (string) $remote_queue_status['headline'] : __('File d’orchestration nominale', 'sitepulse');
+    $queue_status_icon = isset($remote_queue_status['icon']) ? (string) $remote_queue_status['icon'] : 'yes-alt';
+    $queue_status_notes = isset($remote_queue_status['notes']) && is_array($remote_queue_status['notes'])
+        ? array_values(array_filter(array_map('strval', $remote_queue_status['notes'])))
+        : [];
 
-        if ($seconds < 1) {
-            return __('moins d’une seconde', 'sitepulse');
-        }
+    $schedule_next = isset($remote_queue_schedule['next']) && is_array($remote_queue_schedule['next'])
+        ? $remote_queue_schedule['next']
+        : ['label' => '—'];
+    $schedule_oldest = isset($remote_queue_schedule['oldest']) && is_array($remote_queue_schedule['oldest'])
+        ? $remote_queue_schedule['oldest']
+        : ['label' => '—'];
 
-        if ($seconds < 60) {
-            $count = max(1, (int) round($seconds));
-
-            return sprintf(
-                _n('%s seconde', '%s secondes', $count, 'sitepulse'),
-                number_format_i18n($count)
-            );
-        }
-
-        $minutes = floor($seconds / 60);
-
-        if ($minutes < 60) {
-            return sprintf(
-                _n('%s minute', '%s minutes', $minutes, 'sitepulse'),
-                number_format_i18n($minutes)
-            );
-        }
-
-        $hours = floor($minutes / 60);
-
-        if ($hours < 48) {
-            return sprintf(
-                _n('%s heure', '%s heures', $hours, 'sitepulse'),
-                number_format_i18n($hours)
-            );
-        }
-
-        $days = floor($hours / 24);
-
-        return sprintf(
-            _n('%s jour', '%s jours', $days, 'sitepulse'),
-            number_format_i18n($days)
-        );
-    };
-
-    $format_relative_time = static function ($timestamp, $current_timestamp) {
-        if ($timestamp <= 0) {
-            return '';
-        }
-
-        if ($timestamp >= $current_timestamp) {
-            return sprintf(
-                __('dans %s', 'sitepulse'),
-                human_time_diff($current_timestamp, $timestamp)
-            );
-        }
-
-        return sprintf(
-            __('il y a %s', 'sitepulse'),
-            human_time_diff($timestamp, $current_timestamp)
-        );
-    };
-
-    $queue_status_priorities = [
-        'ok'       => 0,
-        'warning'  => 1,
-        'critical' => 2,
-    ];
-    $queue_status = 'ok';
-    $queue_status_notes = [];
-    $queue_status_promote = static function ($level) use (&$queue_status, $queue_status_priorities) {
-        if (!isset($queue_status_priorities[$level])) {
-            return;
-        }
-
-        if ($queue_status_priorities[$level] > $queue_status_priorities[$queue_status]) {
-            $queue_status = $level;
-        }
-    };
-
-    $usage_ratio = $remote_queue_limit_size > 0
-        ? ($remote_queue_queue_length / $remote_queue_limit_size)
-        : 0;
-
-    if ($remote_queue_limit_size > 0) {
-        if ($usage_ratio >= 1) {
-            $queue_status_notes[] = __('La file a atteint sa capacité maximale.', 'sitepulse');
-            $queue_status_promote('critical');
-        } elseif ($usage_ratio >= 0.8) {
-            $queue_status_notes[] = __('La file approche de sa capacité maximale.', 'sitepulse');
-            $queue_status_promote('warning');
-        }
-    }
-
-    if ($remote_queue_delayed_jobs > 0) {
-        $queue_status_notes[] = sprintf(
-            _n('%s requête est en retard.', '%s requêtes sont en retard.', $remote_queue_delayed_jobs, 'sitepulse'),
-            number_format_i18n($remote_queue_delayed_jobs)
-        );
-        $queue_status_promote('warning');
-    }
-
-    if ($remote_queue_dropped_total > 0) {
-        $queue_status_notes[] = sprintf(
-            _n('%s requête a été rejetée (TTL, doublon ou validation).', '%s requêtes ont été rejetées (TTL, doublon ou validation).', $remote_queue_dropped_total, 'sitepulse'),
-            number_format_i18n($remote_queue_dropped_total)
-        );
-        $queue_status_promote('warning');
-    }
-
-    if ($remote_queue_limit_ttl > 0) {
-        $wait_warning_threshold = max(60, min((int) round($remote_queue_limit_ttl * 0.25), 3600));
-        $wait_critical_threshold = max($wait_warning_threshold + 60, min((int) round($remote_queue_limit_ttl * 0.5), 7200));
-    } else {
-        $wait_warning_threshold = 900;
-        $wait_critical_threshold = 1800;
-    }
-
-    if ($remote_queue_max_wait >= $wait_critical_threshold) {
-        $queue_status_notes[] = sprintf(
-            __('Attente maximale détectée : %s.', 'sitepulse'),
-            $format_duration($remote_queue_max_wait)
-        );
-        $queue_status_promote('critical');
-    } elseif ($remote_queue_max_wait >= $wait_warning_threshold) {
-        $queue_status_notes[] = sprintf(
-            __('La file enregistre des attentes longues : %s.', 'sitepulse'),
-            $format_duration($remote_queue_max_wait)
-        );
-        $queue_status_promote('warning');
-    }
-
-    $metrics_age = $remote_queue_updated_at > 0 ? max(0, $current_timestamp - $remote_queue_updated_at) : null;
-
-    if (null !== $metrics_age) {
-        $stale_threshold = $remote_queue_limit_ttl > 0
-            ? max(300, min($remote_queue_limit_ttl, DAY_IN_SECONDS))
-            : 900;
-
-        if ($metrics_age > (2 * $stale_threshold)) {
-            $queue_status_notes[] = sprintf(
-                __('Les métriques n’ont pas été actualisées depuis %s.', 'sitepulse'),
-                $format_duration($metrics_age)
-            );
-            $queue_status_promote('critical');
-        } elseif ($metrics_age > $stale_threshold) {
-            $queue_status_notes[] = sprintf(
-                __('Dernière actualisation il y a %s.', 'sitepulse'),
-                $format_duration($metrics_age)
-            );
-            $queue_status_promote('warning');
-        }
-    }
-
-    $queue_status_headlines = [
-        'ok'       => __('File d’orchestration nominale', 'sitepulse'),
-        'warning'  => __('Points de vigilance détectés', 'sitepulse'),
-        'critical' => __('Intervention requise', 'sitepulse'),
-    ];
-    $queue_status_icons = [
-        'ok'       => 'yes-alt',
-        'warning'  => 'warning',
-        'critical' => 'dismiss',
-    ];
-
-    $next_schedule_label = $remote_queue_next_scheduled_at > 0
-        ? sprintf(
-            '%s (%s)',
-            date_i18n($date_format . ' ' . $time_format, $remote_queue_next_scheduled_at),
-            $format_relative_time($remote_queue_next_scheduled_at, $current_timestamp)
-        )
+    $next_schedule_label = isset($schedule_next['label']) && $schedule_next['label'] !== ''
+        ? (string) $schedule_next['label']
         : '—';
-    $oldest_created_label = $remote_queue_oldest_created_at > 0
-        ? sprintf(
-            '%s (%s)',
-            date_i18n($date_format . ' ' . $time_format, $remote_queue_oldest_created_at),
-            $format_relative_time($remote_queue_oldest_created_at, $current_timestamp)
-        )
+    $oldest_created_label = isset($schedule_oldest['label']) && $schedule_oldest['label'] !== ''
+        ? (string) $schedule_oldest['label']
         : '—';
+
+    $updated_descriptor = isset($remote_queue_metadata['updated']) && is_array($remote_queue_metadata['updated'])
+        ? $remote_queue_metadata['updated']
+        : ['formatted' => null, 'relative' => null];
 
     ?>
     <?php
@@ -2852,23 +3216,35 @@ function sitepulse_uptime_tracker_page() {
             <div class="sitepulse-uptime-remote-metrics__header">
                 <h2 id="sitepulse-uptime-remote-metrics-title"><?php esc_html_e('Orchestration des agents distants', 'sitepulse'); ?></h2>
                 <p class="sitepulse-uptime-remote-metrics__meta">
-                    <?php if ($remote_queue_updated_at > 0) : ?>
-                        <?php
-                        printf(
-                            esc_html__('Dernière mise à jour : %1$s (%2$s).', 'sitepulse'),
-                            esc_html(date_i18n($date_format . ' ' . $time_format, $remote_queue_updated_at)),
-                            esc_html($format_relative_time($remote_queue_updated_at, $current_timestamp))
-                        );
+                    <?php if ($remote_queue_updated_at > 0 && isset($updated_descriptor['formatted']) && null !== $updated_descriptor['formatted']) :
+                        $updated_relative = isset($updated_descriptor['relative']) ? (string) $updated_descriptor['relative'] : '';
+                        $updated_formatted = (string) $updated_descriptor['formatted'];
                         ?>
+                        <?php if ($updated_relative !== '') : ?>
+                            <?php
+                            printf(
+                                esc_html__('Dernière mise à jour : %1$s (%2$s).', 'sitepulse'),
+                                esc_html($updated_formatted),
+                                esc_html($updated_relative)
+                            );
+                            ?>
+                        <?php else : ?>
+                            <?php
+                            printf(
+                                esc_html__('Dernière mise à jour : %s.', 'sitepulse'),
+                                esc_html($updated_formatted)
+                            );
+                            ?>
+                        <?php endif; ?>
                     <?php else : ?>
                         <?php esc_html_e('Aucune métrique historisée pour le moment.', 'sitepulse'); ?>
                     <?php endif; ?>
                 </p>
             </div>
             <div class="sitepulse-uptime-remote-metrics__status sitepulse-uptime-remote-metrics__status--<?php echo esc_attr($queue_status); ?>">
-                <span class="dashicons dashicons-<?php echo esc_attr($queue_status_icons[$queue_status]); ?>" aria-hidden="true"></span>
+                <span class="dashicons dashicons-<?php echo esc_attr($queue_status_icon); ?>" aria-hidden="true"></span>
                 <div class="sitepulse-uptime-remote-metrics__status-content">
-                    <p class="sitepulse-uptime-remote-metrics__status-headline"><?php echo esc_html($queue_status_headlines[$queue_status]); ?></p>
+                    <p class="sitepulse-uptime-remote-metrics__status-headline"><?php echo esc_html($queue_status_headline); ?></p>
                     <?php if (!empty($queue_status_notes)) : ?>
                         <ul class="sitepulse-uptime-remote-metrics__status-list">
                             <?php foreach ($queue_status_notes as $note) : ?>
@@ -2927,12 +3303,12 @@ function sitepulse_uptime_tracker_page() {
                 </div>
                 <div class="sitepulse-uptime-remote-metrics__card">
                     <h3><?php esc_html_e('Attente maximale observée', 'sitepulse'); ?></h3>
-                    <p class="sitepulse-uptime-remote-metrics__value"><?php echo esc_html($format_duration($remote_queue_max_wait)); ?></p>
+                    <p class="sitepulse-uptime-remote-metrics__value"><?php echo esc_html(sitepulse_uptime_format_duration_i18n($remote_queue_max_wait)); ?></p>
                     <p class="sitepulse-uptime-remote-metrics__meta">
                         <?php
                         printf(
                             esc_html__('Attente moyenne : %s', 'sitepulse'),
-                            esc_html($format_duration($remote_queue_avg_wait))
+                            esc_html(sitepulse_uptime_format_duration_i18n($remote_queue_avg_wait))
                         );
                         ?>
                     </p>
@@ -2940,7 +3316,7 @@ function sitepulse_uptime_tracker_page() {
                         <?php
                         printf(
                             esc_html__('Fenêtre de rétention : %s', 'sitepulse'),
-                            esc_html($format_duration($remote_queue_limit_ttl))
+                            esc_html(sitepulse_uptime_format_duration_i18n($remote_queue_limit_ttl))
                         );
                         ?>
                     </p>

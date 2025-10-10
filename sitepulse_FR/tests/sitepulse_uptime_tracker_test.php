@@ -75,6 +75,22 @@ if (!class_exists('WP_Error')) {
     }
 }
 
+if (!class_exists('WP_REST_Request')) {
+    class WP_REST_Request {
+        private $params;
+
+        public function __construct(array $params = [])
+        {
+            $this->params = $params;
+        }
+
+        public function get_param($key)
+        {
+            return $this->params[$key] ?? null;
+        }
+    }
+}
+
 function add_action(...$args) {}
 function add_filter(...$args) {}
 function add_submenu_page(...$args) {}
@@ -90,6 +106,8 @@ function __($text, $domain = null) { return $text; }
 function esc_html__($text, $domain = null) { return $text; }
 function esc_html($text) { return $text; }
 function esc_attr($text) { return $text; }
+function _n($single, $plural, $number, $domain = null) { return $number === 1 ? $single : $plural; }
+function number_format_i18n($number, $decimals = 0) { return number_format((float) $number, (int) $decimals, '.', ','); }
 function sanitize_key($key) { return strtolower(preg_replace('/[^a-z0-9_\-]/', '', (string) $key)); }
 function sanitize_text_field($text) { return is_string($text) ? trim($text) : $text; }
 function wp_parse_args($args, $defaults = []) { return array_merge($defaults, (array) $args); }
@@ -269,6 +287,43 @@ sitepulse_assert($metrics['avg_wait_seconds'] === 205, 'Average wait should be r
 sitepulse_assert($metrics['next_scheduled_at'] === $now - 400, 'Next scheduled timestamp should match the oldest entry.');
 sitepulse_assert($metrics['oldest_created_at'] === $now - 500, 'Oldest created timestamp should track the earliest queue entry.');
 
+// Scenario 4b: queue analysis summarises alerts and exposes formatted labels.
+$analysis_payload = [
+    'updated_at' => $now - 1_800,
+    'metrics'    => [
+        'requested'          => 12,
+        'retained'           => 4,
+        'queue_length'       => 4,
+        'delayed_jobs'       => 3,
+        'max_wait_seconds'   => 2_100,
+        'avg_wait_seconds'   => 650,
+        'next_scheduled_at'  => $now + 120,
+        'oldest_created_at'  => $now - 3_600,
+        'limit_ttl'          => 3_600,
+        'limit_size'         => 4,
+        'dropped_invalid'    => 1,
+        'dropped_expired'    => 1,
+        'dropped_duplicates' => 0,
+        'dropped_overflow'   => 0,
+    ],
+];
+
+$analysis = sitepulse_uptime_analyze_remote_queue($analysis_payload, $now);
+$alerts = $analysis['status']['alerts'];
+$capacity_alert = null;
+
+foreach ($alerts as $alert) {
+    if (isset($alert['code']) && $alert['code'] === 'queue_capacity_exceeded') {
+        $capacity_alert = $alert;
+        break;
+    }
+}
+
+sitepulse_assert($analysis['status']['level'] === 'critical', 'Combined capacity pressure and wait time should escalate to critical.');
+sitepulse_assert($analysis['metrics']['dropped_total'] === 2, 'Dropped total should include invalid and expired entries.');
+sitepulse_assert($capacity_alert !== null, 'Capacity alert should be raised when the queue reaches its maximum size.');
+sitepulse_assert(isset($analysis['schedule']['next']['label']) && $analysis['schedule']['next']['label'] !== '—', 'Next schedule label should provide formatted output.');
+
 // Scenario 5: persistent outage with unknown sample keeps original incident start.
 sitepulse_reset_state();
 $base_time = 1_700_000_000;
@@ -293,5 +348,32 @@ sitepulse_assert($log[1]['status'] === 'unknown', 'Second entry should remain un
 sitepulse_assert(!isset($log[1]['incident_start']), 'Unknown sample should not have incident start.');
 sitepulse_assert($log[2]['status'] === false, 'Third entry should record ongoing downtime.');
 sitepulse_assert($log[2]['incident_start'] === $log[0]['incident_start'], 'Incident start should persist across unknown sample.');
+
+// Scenario 6: REST endpoint exposes sanitised queue health.
+sitepulse_reset_state();
+$now = $GLOBALS['sitepulse_fake_time'];
+
+update_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE_METRICS, [
+    'updated_at' => $now - 900,
+    'metrics'    => [
+        'requested'        => 8,
+        'retained'         => 2,
+        'queue_length'     => 2,
+        'delayed_jobs'     => 1,
+        'max_wait_seconds' => 700,
+        'avg_wait_seconds' => 350,
+        'next_scheduled_at'=> $now + 300,
+        'oldest_created_at'=> $now - 1_200,
+        'limit_ttl'        => 3_600,
+        'limit_size'       => 4,
+    ],
+]);
+
+$rest_payload = sitepulse_uptime_rest_remote_queue_callback(new WP_REST_Request(['context' => 'view']));
+
+sitepulse_assert(is_array($rest_payload), 'REST callback should return an array when rest_ensure_response is unavailable.');
+sitepulse_assert(isset($rest_payload['metrics']['queue_length']) && $rest_payload['metrics']['queue_length'] === 2, 'REST payload should expose queue length.');
+sitepulse_assert(isset($rest_payload['status']['level']) && $rest_payload['status']['level'] === 'warning', 'Delayed job should trigger a warning status over REST.');
+sitepulse_assert(isset($rest_payload['metadata']['updated']['formatted']) && $rest_payload['metadata']['updated']['formatted'] !== null, 'REST metadata must include formatted update labels.');
 
 echo "All uptime tracker assertions passed." . PHP_EOL;
