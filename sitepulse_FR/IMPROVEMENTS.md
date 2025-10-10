@@ -47,7 +47,7 @@ Ce document répertorie les fonctions de SitePulse qui gagneraient à être alig
 - **Constat :** le module calcule un instantané des ressources et des avertissements, mais n'enregistre ni séries temporelles ni corrélations avec les événements, contrairement à New Relic ou Datadog qui stockent des métriques à haute fréquence pour établir des tendances et des alertes adaptatives.【F:sitepulse_FR/modules/resource_monitor.php†L131-L218】【F:sitepulse_FR/modules/resource_monitor.php†L305-L378】
 - **Pistes pro :**
   - Introduire une persistance longue durée (Custom Post Type ou table dédiée) pour suivre l'évolution CPU/RAM/disque, avec export JSON/CSV.
-  - Fournir des dashboards corrélant les seuils personnalisés aux pics (heatmaps, alerting basé sur la dérive) et une API REST pour l'intégration Grafana.
+  - ✅ Fournir des dashboards corrélant les seuils personnalisés aux pics (heatmaps, alerting basé sur la dérive) et une API REST pour l'intégration Grafana via `sitepulse/v1/resources/history` (filtrage temporel, résumés, instantanés, seuils actifs).
 
 ## Module « AI Insights »
 
