@@ -9,13 +9,15 @@
         }
     };
 
-    const speak = (message) => {
+    const speak = (message, politeness = 'polite') => {
         if (!message) {
             return;
         }
 
+        const channel = politeness === 'assertive' ? 'assertive' : 'polite';
+
         if (window.wp && window.wp.a11y && typeof window.wp.a11y.speak === 'function') {
-            window.wp.a11y.speak(message, 'polite');
+            window.wp.a11y.speak(message, channel);
         }
     };
 
@@ -106,10 +108,142 @@
         };
 
         const container = document.querySelector('.sitepulse-settings-tabs-container');
+        const settingsRoot = document.querySelector('[data-sitepulse-settings-wrap]');
+        const viewModeSection = document.querySelector('.sitepulse-settings-mode-toggle');
+        const viewModeControls = settingsRoot
+            ? Array.from(settingsRoot.querySelectorAll('[data-sitepulse-view-control]'))
+            : [];
+        const viewModeOptions = settingsRoot
+            ? Array.from(settingsRoot.querySelectorAll('.sitepulse-view-mode-option'))
+            : [];
+        const liveRegionPolite = settingsRoot
+            ? settingsRoot.querySelector('[data-sitepulse-live-region="polite"]')
+            : null;
+        const liveRegionAssertive = settingsRoot
+            ? settingsRoot.querySelector('[data-sitepulse-live-region="assertive"]')
+            : null;
+        const viewAnnouncements = {
+            simple:
+                (viewModeSection && viewModeSection.getAttribute('data-sitepulse-view-announce-simple')) ||
+                '',
+            expert:
+                (viewModeSection && viewModeSection.getAttribute('data-sitepulse-view-announce-expert')) ||
+                '',
+        };
+        const VIEW_MODE_STORAGE_KEY = 'sitepulseSettingsViewMode';
+        const allowedViewModes = new Set(['simple', 'expert']);
 
         document.querySelectorAll('input[type="checkbox"][data-sitepulse-toggle]').forEach((input) => {
             enhanceToggle(input);
         });
+
+        const updateLiveRegion = (message, politeness = 'polite') => {
+            const region = politeness === 'assertive' ? liveRegionAssertive : liveRegionPolite;
+
+            if (!region) {
+                return;
+            }
+
+            region.textContent = '';
+
+            if (message) {
+                window.requestAnimationFrame(() => {
+                    region.textContent = message;
+                });
+            }
+        };
+
+        const setViewModeSelectionState = (mode) => {
+            viewModeOptions.forEach((option) => {
+                const control = option.querySelector('[data-sitepulse-view-control]');
+                const isSelected = Boolean(control && control.value === mode && control.checked);
+                option.classList.toggle('is-selected', isSelected);
+            });
+        };
+
+        const applyViewMode = (mode, options = {}) => {
+            if (!settingsRoot || !allowedViewModes.has(mode)) {
+                return;
+            }
+
+            const { announce = false, persist = false } = options;
+            const normalizedMode = mode === 'expert' ? 'expert' : 'simple';
+
+            settingsRoot.setAttribute('data-sitepulse-view-mode', normalizedMode);
+
+            viewModeControls.forEach((control) => {
+                if (control.value === normalizedMode) {
+                    control.checked = true;
+                } else if (control.type === 'radio') {
+                    control.checked = false;
+                }
+            });
+
+            setViewModeSelectionState(normalizedMode);
+
+            if (persist) {
+                try {
+                    window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, normalizedMode);
+                } catch (storageError) {
+                    // Storage might be unavailable (private mode, user preferences).
+                }
+            }
+
+            if (announce) {
+                const announcement = normalizedMode === 'expert'
+                    ? viewAnnouncements.expert
+                    : viewAnnouncements.simple;
+
+                if (announcement) {
+                    updateLiveRegion(announcement, 'polite');
+                    speak(announcement);
+                } else {
+                    const fallback = normalizedMode === 'expert'
+                        ? 'Mode expert activé'
+                        : 'Mode guidé activé';
+                    updateLiveRegion(fallback, 'polite');
+                    speak(fallback);
+                }
+            }
+        };
+
+        if (settingsRoot && viewModeControls.length) {
+            let currentMode = settingsRoot.getAttribute('data-sitepulse-view-mode') || 'simple';
+
+            if (!allowedViewModes.has(currentMode)) {
+                currentMode = 'simple';
+            }
+
+            applyViewMode(currentMode, { announce: false, persist: false });
+
+            try {
+                const storedMode = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+
+                if (storedMode && allowedViewModes.has(storedMode) && storedMode !== currentMode) {
+                    currentMode = storedMode;
+                    applyViewMode(currentMode, { announce: false, persist: false });
+                }
+            } catch (storageError) {
+                // Ignore storage access issues.
+            }
+
+            viewModeControls.forEach((control) => {
+                control.addEventListener('change', () => {
+                    if (!control.checked) {
+                        return;
+                    }
+
+                    const nextMode = allowedViewModes.has(control.value) ? control.value : 'simple';
+
+                    if (nextMode === currentMode) {
+                        return;
+                    }
+
+                    currentMode = nextMode;
+                    applyViewMode(nextMode, { announce: true, persist: true });
+                });
+            });
+        }
 
         if (!container) {
             return;
@@ -148,6 +282,12 @@
                 panelElement.toggleAttribute('hidden', !isActive);
                 panelElement.setAttribute('aria-hidden', isActive ? 'false' : 'true');
                 panelElement.setAttribute('tabindex', isActive ? '0' : '-1');
+            });
+
+            tocLinks.forEach((tocLink) => {
+                const isCurrent = tocLink.dataset.tabTarget === targetId;
+                tocLink.setAttribute('aria-current', isCurrent ? 'page' : 'false');
+                tocLink.setAttribute('tabindex', isCurrent ? '0' : '-1');
             });
 
             return {
@@ -201,7 +341,13 @@
 
             if (announce && state.link) {
                 const label = state.link.getAttribute('aria-label') || state.link.textContent;
-                speak(label ? label.trim() : '');
+                const trimmedLabel = label ? label.trim() : '';
+
+                if (trimmedLabel) {
+                    updateLiveRegion(trimmedLabel, 'polite');
+                }
+
+                speak(trimmedLabel);
             }
 
             if (focusLink && typeof focusLink.focus === 'function') {
@@ -322,9 +468,15 @@
                 if (message) {
                     errorRegion.textContent = message;
                     errorRegion.hidden = false;
+                    errorRegion.setAttribute('role', 'alert');
+                    errorRegion.setAttribute('aria-live', 'assertive');
+                    updateLiveRegion(message, 'assertive');
+                    speak(message, 'assertive');
                 } else {
                     errorRegion.textContent = '';
                     errorRegion.hidden = true;
+                    errorRegion.removeAttribute('role');
+                    errorRegion.removeAttribute('aria-live');
                 }
             };
 
