@@ -80,6 +80,7 @@ if (!empty($sitepulse_uptime_cron_hook)) {
 }
 
 add_action('init', 'sitepulse_uptime_register_remote_worker_hooks');
+add_action('admin_post_sitepulse_export_sla', 'sitepulse_uptime_handle_sla_export');
 
 /**
  * Registers custom cron schedules used by the uptime tracker.
@@ -1917,6 +1918,333 @@ function sitepulse_calculate_agent_uptime_metrics($archive, $days) {
 }
 
 /**
+ * Returns the list of archive months available for reporting.
+ *
+ * @param array<string,array<string,mixed>> $archive Archive entries keyed by Y-m-d.
+ * @return array<string,array<string,int|string>>
+ */
+function sitepulse_uptime_get_archive_months($archive) {
+    if (!is_array($archive) || empty($archive)) {
+        return [];
+    }
+
+    $timezone = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('UTC');
+    $months = [];
+
+    foreach ($archive as $day_key => $entry) {
+        if (!is_string($day_key) || $day_key === '') {
+            continue;
+        }
+
+        $day_date = DateTimeImmutable::createFromFormat('Y-m-d', $day_key, $timezone);
+
+        if (!$day_date) {
+            continue;
+        }
+
+        $month_key = $day_date->format('Y-m');
+
+        if (!isset($months[$month_key])) {
+            $month_start = $day_date->setDate((int) $day_date->format('Y'), (int) $day_date->format('m'), 1)->setTime(0, 0, 0);
+            $month_end = $month_start->modify('last day of this month')->setTime(23, 59, 59);
+            $label_timestamp = $month_start->getTimestamp();
+            $label = function_exists('wp_date') ? wp_date('F Y', $label_timestamp) : $month_start->format('F Y');
+
+            $months[$month_key] = [
+                'label' => $label,
+                'start' => $month_start->getTimestamp(),
+                'end'   => $month_end->getTimestamp(),
+                'days'  => 0,
+            ];
+        }
+
+        $months[$month_key]['days']++;
+    }
+
+    if (!empty($months)) {
+        krsort($months, SORT_STRING);
+    }
+
+    return $months;
+}
+
+/**
+ * Aggregates uptime metrics for the provided timestamp range.
+ *
+ * @param array<string,array<string,mixed>> $archive Archive entries keyed by day.
+ * @param int                               $start   Start timestamp (inclusive).
+ * @param int                               $end     End timestamp (inclusive).
+ * @return array<string,mixed>
+ */
+function sitepulse_uptime_collect_metrics_for_period($archive, $start, $end) {
+    if (!is_array($archive) || empty($archive) || $end < $start) {
+        return [
+            'agents' => [],
+            'global' => [
+                'days'               => 0,
+                'total_checks'       => 0,
+                'up_checks'          => 0,
+                'down_checks'        => 0,
+                'unknown_checks'     => 0,
+                'maintenance_checks' => 0,
+                'latency_sum'        => 0.0,
+                'latency_count'      => 0,
+                'ttfb_sum'           => 0.0,
+                'ttfb_count'         => 0,
+                'violations'         => 0,
+            ],
+        ];
+    }
+
+    $timezone = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('UTC');
+    $agents_totals = [];
+    $global = [
+        'days'               => 0,
+        'total_checks'       => 0,
+        'up_checks'          => 0,
+        'down_checks'        => 0,
+        'unknown_checks'     => 0,
+        'maintenance_checks' => 0,
+        'latency_sum'        => 0.0,
+        'latency_count'      => 0,
+        'ttfb_sum'           => 0.0,
+        'ttfb_count'         => 0,
+        'violations'         => 0,
+    ];
+
+    foreach ($archive as $day_key => $entry) {
+        if (!is_string($day_key) || $day_key === '') {
+            continue;
+        }
+
+        $day_date = DateTimeImmutable::createFromFormat('Y-m-d', $day_key, $timezone);
+
+        if (!$day_date) {
+            continue;
+        }
+
+        $day_timestamp = $day_date->getTimestamp();
+
+        if ($day_timestamp < $start || $day_timestamp > $end) {
+            continue;
+        }
+
+        $day_total = isset($entry['total']) ? (int) $entry['total'] : 0;
+        $maintenance = isset($entry['maintenance']) ? (int) $entry['maintenance'] : 0;
+        $effective_total = max(0, $day_total - $maintenance);
+
+        $global['days']++;
+        $global['total_checks'] += $effective_total;
+        $global['up_checks'] += isset($entry['up']) ? (int) $entry['up'] : 0;
+        $global['down_checks'] += isset($entry['down']) ? (int) $entry['down'] : 0;
+        $global['unknown_checks'] += isset($entry['unknown']) ? (int) $entry['unknown'] : 0;
+        $global['maintenance_checks'] += $maintenance;
+        $global['latency_sum'] += isset($entry['latency_sum']) ? (float) $entry['latency_sum'] : 0.0;
+        $global['latency_count'] += isset($entry['latency_count']) ? (int) $entry['latency_count'] : 0;
+        $global['ttfb_sum'] += isset($entry['ttfb_sum']) ? (float) $entry['ttfb_sum'] : 0.0;
+        $global['ttfb_count'] += isset($entry['ttfb_count']) ? (int) $entry['ttfb_count'] : 0;
+        $global['violations'] += isset($entry['violations']) ? (int) $entry['violations'] : 0;
+
+        $agents = isset($entry['agents']) && is_array($entry['agents']) ? $entry['agents'] : [];
+
+        if (empty($agents)) {
+            $agents = [
+                'default' => [
+                    'up'              => isset($entry['up']) ? (int) $entry['up'] : 0,
+                    'down'            => isset($entry['down']) ? (int) $entry['down'] : 0,
+                    'unknown'         => isset($entry['unknown']) ? (int) $entry['unknown'] : 0,
+                    'maintenance'     => $maintenance,
+                    'total'           => $day_total,
+                    'latency_sum'     => isset($entry['latency_sum']) ? (float) $entry['latency_sum'] : 0.0,
+                    'latency_count'   => isset($entry['latency_count']) ? (int) $entry['latency_count'] : 0,
+                    'ttfb_sum'        => isset($entry['ttfb_sum']) ? (float) $entry['ttfb_sum'] : 0.0,
+                    'ttfb_count'      => isset($entry['ttfb_count']) ? (int) $entry['ttfb_count'] : 0,
+                    'violations'      => isset($entry['violations']) ? (int) $entry['violations'] : 0,
+                    'violation_types' => isset($entry['violation_types']) && is_array($entry['violation_types'])
+                        ? $entry['violation_types']
+                        : [],
+                ],
+            ];
+        }
+
+        foreach ($agents as $agent_id => $agent_totals) {
+            $normalized_id = sitepulse_uptime_normalize_agent_id($agent_id);
+
+            if (!isset($agents_totals[$normalized_id])) {
+                $agents_totals[$normalized_id] = [
+                    'up'              => 0,
+                    'down'            => 0,
+                    'unknown'         => 0,
+                    'maintenance'     => 0,
+                    'total'           => 0,
+                    'latency_sum'     => 0.0,
+                    'latency_count'   => 0,
+                    'ttfb_sum'        => 0.0,
+                    'ttfb_count'      => 0,
+                    'violations'      => 0,
+                    'violation_types' => [],
+                ];
+            }
+
+            $agents_totals[$normalized_id]['up'] += isset($agent_totals['up']) ? (int) $agent_totals['up'] : 0;
+            $agents_totals[$normalized_id]['down'] += isset($agent_totals['down']) ? (int) $agent_totals['down'] : 0;
+            $agents_totals[$normalized_id]['unknown'] += isset($agent_totals['unknown']) ? (int) $agent_totals['unknown'] : 0;
+            $agents_totals[$normalized_id]['maintenance'] += isset($agent_totals['maintenance']) ? (int) $agent_totals['maintenance'] : 0;
+            $agents_totals[$normalized_id]['total'] += isset($agent_totals['total']) ? (int) $agent_totals['total'] : 0;
+            $agents_totals[$normalized_id]['latency_sum'] += isset($agent_totals['latency_sum']) ? (float) $agent_totals['latency_sum'] : 0.0;
+            $agents_totals[$normalized_id]['latency_count'] += isset($agent_totals['latency_count']) ? (int) $agent_totals['latency_count'] : 0;
+            $agents_totals[$normalized_id]['ttfb_sum'] += isset($agent_totals['ttfb_sum']) ? (float) $agent_totals['ttfb_sum'] : 0.0;
+            $agents_totals[$normalized_id]['ttfb_count'] += isset($agent_totals['ttfb_count']) ? (int) $agent_totals['ttfb_count'] : 0;
+            $agents_totals[$normalized_id]['violations'] += isset($agent_totals['violations']) ? (int) $agent_totals['violations'] : 0;
+
+            if (isset($agent_totals['violation_types']) && is_array($agent_totals['violation_types'])) {
+                foreach ($agent_totals['violation_types'] as $type => $count) {
+                    $type_key = sanitize_key($type);
+
+                    if ($type_key === '') {
+                        continue;
+                    }
+
+                    if (!isset($agents_totals[$normalized_id]['violation_types'][$type_key])) {
+                        $agents_totals[$normalized_id]['violation_types'][$type_key] = 0;
+                    }
+
+                    $agents_totals[$normalized_id]['violation_types'][$type_key] += (int) $count;
+                }
+            }
+        }
+    }
+
+    return [
+        'agents' => $agents_totals,
+        'global' => $global,
+    ];
+}
+
+/**
+ * Handles the SLA CSV export request.
+ *
+ * @return void
+ */
+function sitepulse_uptime_handle_sla_export() {
+    if (!current_user_can(function_exists('sitepulse_get_capability') ? sitepulse_get_capability() : 'manage_options')) {
+        wp_die(__('Vous n’avez pas l’autorisation d’exporter ce rapport.', 'sitepulse'));
+    }
+
+    check_admin_referer('sitepulse_export_sla');
+
+    $month_raw = isset($_POST['sitepulse_sla_month']) ? wp_unslash($_POST['sitepulse_sla_month']) : '';
+    $month = is_string($month_raw) ? sanitize_text_field($month_raw) : '';
+
+    if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
+        sitepulse_uptime_redirect_with_notice('invalid-month');
+    }
+
+    $archive = sitepulse_get_uptime_archive();
+    $months = sitepulse_uptime_get_archive_months($archive);
+
+    if (!isset($months[$month])) {
+        sitepulse_uptime_redirect_with_notice('missing-data', $month);
+    }
+
+    $selected_month = $months[$month];
+    $metrics = sitepulse_uptime_collect_metrics_for_period($archive, (int) $selected_month['start'], (int) $selected_month['end']);
+
+    if (empty($metrics['agents'])) {
+        sitepulse_uptime_redirect_with_notice('empty-period', $month);
+    }
+
+    $agents = sitepulse_uptime_get_agents();
+    $filename = sprintf('sitepulse-sla-%s.csv', $month);
+
+    nocache_headers();
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+
+    $output = fopen('php://output', 'wb');
+
+    if (false === $output) {
+        wp_die(__('Impossible de générer le flux CSV.', 'sitepulse'));
+    }
+
+    fwrite($output, "\xEF\xBB\xBF");
+
+    $report_period_label = isset($selected_month['label']) ? $selected_month['label'] : $month;
+    $generated_label = function_exists('wp_date') ? wp_date('Y-m-d H:i', current_time('timestamp')) : date('Y-m-d H:i');
+
+    fputcsv($output, ['SitePulse SLA Report', $report_period_label]);
+    fputcsv($output, [__('Généré le', 'sitepulse'), $generated_label]);
+    fputcsv($output, []);
+
+    $header = [
+        __('Agent', 'sitepulse'),
+        __('Région', 'sitepulse'),
+        __('Disponibilité (%)', 'sitepulse'),
+        __('Contrôles évalués', 'sitepulse'),
+        __('Incidents détectés', 'sitepulse'),
+        __('Fenêtres de maintenance (contrôles)', 'sitepulse'),
+        __('TTFB moyen (ms)', 'sitepulse'),
+        __('Latence moyenne (ms)', 'sitepulse'),
+        __('Violations', 'sitepulse'),
+    ];
+    fputcsv($output, $header);
+
+    foreach ($metrics['agents'] as $agent_id => $agent_totals) {
+        $agent = isset($agents[$agent_id]) ? $agents[$agent_id] : sitepulse_uptime_get_agent($agent_id);
+        $total_checks = isset($agent_totals['total']) ? (int) $agent_totals['total'] : 0;
+        $maintenance_checks = isset($agent_totals['maintenance']) ? (int) $agent_totals['maintenance'] : 0;
+        $effective_total = max(0, $total_checks - $maintenance_checks);
+        $up_checks = isset($agent_totals['up']) ? (int) $agent_totals['up'] : 0;
+        $down_checks = isset($agent_totals['down']) ? (int) $agent_totals['down'] : 0;
+        $latency_sum = isset($agent_totals['latency_sum']) ? (float) $agent_totals['latency_sum'] : 0.0;
+        $latency_count = isset($agent_totals['latency_count']) ? (int) $agent_totals['latency_count'] : 0;
+        $ttfb_sum = isset($agent_totals['ttfb_sum']) ? (float) $agent_totals['ttfb_sum'] : 0.0;
+        $ttfb_count = isset($agent_totals['ttfb_count']) ? (int) $agent_totals['ttfb_count'] : 0;
+        $violations = isset($agent_totals['violations']) ? (int) $agent_totals['violations'] : 0;
+
+        $uptime = $effective_total > 0 ? ($up_checks / $effective_total) * 100 : 100.0;
+        $latency_avg_ms = $latency_count > 0 ? ($latency_sum / $latency_count) * 1000 : null;
+        $ttfb_avg_ms = $ttfb_count > 0 ? ($ttfb_sum / $ttfb_count) * 1000 : null;
+
+        fputcsv($output, [
+            isset($agent['label']) ? $agent['label'] : ucfirst(str_replace('_', ' ', $agent_id)),
+            isset($agent['region']) ? $agent['region'] : 'global',
+            number_format((float) $uptime, 3, '.', ''),
+            $effective_total,
+            $down_checks,
+            $maintenance_checks,
+            null === $ttfb_avg_ms ? '' : number_format((float) $ttfb_avg_ms, 1, '.', ''),
+            null === $latency_avg_ms ? '' : number_format((float) $latency_avg_ms, 1, '.', ''),
+            $violations,
+        ]);
+    }
+
+    fclose($output);
+    exit;
+}
+
+/**
+ * Redirects back to the uptime page with a contextual notice.
+ *
+ * @param string $code  Error code identifier.
+ * @param string $month Month identifier.
+ * @return void
+ */
+function sitepulse_uptime_redirect_with_notice($code, $month = '') {
+    $args = [
+        'page'                => 'sitepulse-uptime',
+        'sitepulse_sla_error' => $code,
+    ];
+
+    if ($month !== '') {
+        $args['sitepulse_sla_month'] = $month;
+    }
+
+    wp_safe_redirect(add_query_arg($args, admin_url('admin.php')));
+    exit;
+}
+
+/**
  * Aggregates uptime metrics per region based on agent configuration.
  *
  * @param array<string,array<string,mixed>> $agent_metrics Metrics per agent.
@@ -2002,6 +2330,89 @@ function sitepulse_uptime_tracker_page() {
     $uptime_log = sitepulse_normalize_uptime_log(get_option(SITEPULSE_OPTION_UPTIME_LOG, []));
     $uptime_log = sitepulse_trim_uptime_log($uptime_log);
     $uptime_archive = sitepulse_get_uptime_archive();
+    $available_months = sitepulse_uptime_get_archive_months($uptime_archive);
+    $requested_month = '';
+
+    if (isset($_GET['sitepulse_sla_month'])) {
+        $requested_month_raw = wp_unslash($_GET['sitepulse_sla_month']);
+        $requested_month = is_string($requested_month_raw) ? sanitize_text_field($requested_month_raw) : '';
+    }
+
+    $selected_month_key = '';
+
+    if (!empty($available_months)) {
+        $month_keys = array_keys($available_months);
+        $selected_month_key = isset($month_keys[0]) ? $month_keys[0] : '';
+
+        if ($requested_month !== '' && isset($available_months[$requested_month])) {
+            $selected_month_key = $requested_month;
+        }
+    }
+
+    $sla_error_code = '';
+
+    if (isset($_GET['sitepulse_sla_error'])) {
+        $sla_error_raw = wp_unslash($_GET['sitepulse_sla_error']);
+        $sla_error_code = is_string($sla_error_raw) ? sanitize_key($sla_error_raw) : '';
+    }
+
+    $sla_error_messages = [
+        'invalid-month' => __('La période demandée est invalide.', 'sitepulse'),
+        'missing-data'  => __('Aucune archive ne correspond à cette période.', 'sitepulse'),
+        'empty-period'  => __('Aucune donnée exploitable pour cette période.', 'sitepulse'),
+    ];
+
+    $preview_metrics = [
+        'global' => [
+            'total_checks'       => 0,
+            'up_checks'          => 0,
+            'down_checks'        => 0,
+            'maintenance_checks' => 0,
+            'latency_sum'        => 0.0,
+            'latency_count'      => 0,
+            'ttfb_sum'           => 0.0,
+            'ttfb_count'         => 0,
+        ],
+    ];
+
+    if ($selected_month_key !== '' && isset($available_months[$selected_month_key])) {
+        $period = $available_months[$selected_month_key];
+        $preview_metrics = sitepulse_uptime_collect_metrics_for_period(
+            $uptime_archive,
+            (int) $period['start'],
+            (int) $period['end']
+        );
+    }
+
+    $preview_global = isset($preview_metrics['global']) && is_array($preview_metrics['global'])
+        ? $preview_metrics['global']
+        : [
+            'total_checks'       => 0,
+            'up_checks'          => 0,
+            'down_checks'        => 0,
+            'maintenance_checks' => 0,
+            'latency_sum'        => 0.0,
+            'latency_count'      => 0,
+            'ttfb_sum'           => 0.0,
+            'ttfb_count'         => 0,
+        ];
+    $preview_effective_total = isset($preview_global['total_checks']) ? (int) $preview_global['total_checks'] : 0;
+    $preview_uptime = $preview_effective_total > 0
+        ? ($preview_global['up_checks'] / max(1, $preview_effective_total)) * 100
+        : 100.0;
+    $preview_incidents = isset($preview_global['down_checks']) ? (int) $preview_global['down_checks'] : 0;
+    $preview_maintenance = isset($preview_global['maintenance_checks']) ? (int) $preview_global['maintenance_checks'] : 0;
+    $preview_ttfb_avg = (isset($preview_global['ttfb_sum'], $preview_global['ttfb_count']) && $preview_global['ttfb_count'] > 0)
+        ? ($preview_global['ttfb_sum'] / $preview_global['ttfb_count']) * 1000
+        : null;
+    $preview_latency_avg = (isset($preview_global['latency_sum'], $preview_global['latency_count']) && $preview_global['latency_count'] > 0)
+        ? ($preview_global['latency_sum'] / $preview_global['latency_count']) * 1000
+        : null;
+    $preview_ttfb_count = isset($preview_global['ttfb_count']) ? (int) $preview_global['ttfb_count'] : 0;
+    $preview_latency_count = isset($preview_global['latency_count']) ? (int) $preview_global['latency_count'] : 0;
+    $preview_month_label = ($selected_month_key !== '' && isset($available_months[$selected_month_key]['label']))
+        ? $available_months[$selected_month_key]['label']
+        : '';
     $agents = sitepulse_uptime_get_agents();
     $total_checks = count($uptime_log);
     $boolean_checks = array_values(array_filter($uptime_log, function ($entry) {
@@ -2548,6 +2959,131 @@ function sitepulse_uptime_tracker_page() {
                 </div>
             </div>
         </section>
+        <?php if (!empty($available_months)) : ?>
+        <section class="sitepulse-uptime-sla">
+            <h2><?php esc_html_e('Rapports SLA mensuels', 'sitepulse'); ?></h2>
+            <p class="sitepulse-uptime-sla__description">
+                <?php
+                if ($preview_month_label !== '') {
+                    printf(
+                        /* translators: %s: month label. */
+                        esc_html__('Synthèse de la période %s et export CSV des agents actifs.', 'sitepulse'),
+                        esc_html($preview_month_label)
+                    );
+                } else {
+                    esc_html_e('Générez un rapport CSV consolidé par agent pour documenter vos engagements SLA.', 'sitepulse');
+                }
+                ?>
+            </p>
+            <?php if ($sla_error_code !== '') :
+                $message = isset($sla_error_messages[$sla_error_code]) ? $sla_error_messages[$sla_error_code] : '';
+                if ($message !== '') :
+            ?>
+            <div class="notice notice-error sitepulse-uptime-sla__notice"><p><?php echo esc_html($message); ?></p></div>
+            <?php
+                endif;
+            endif;
+            ?>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="sitepulse-uptime-sla__form">
+                <?php wp_nonce_field('sitepulse_export_sla'); ?>
+                <input type="hidden" name="action" value="sitepulse_export_sla" />
+                <label for="sitepulse-sla-month" class="screen-reader-text"><?php esc_html_e('Sélectionnez le mois à exporter', 'sitepulse'); ?></label>
+                <select id="sitepulse-sla-month" name="sitepulse_sla_month" class="sitepulse-uptime-sla__select">
+                    <?php foreach ($available_months as $month_key => $month_data) : ?>
+                        <option value="<?php echo esc_attr($month_key); ?>" <?php selected($selected_month_key, $month_key); ?>>
+                            <?php echo esc_html($month_data['label']); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+                <button type="submit" class="button button-primary">
+                    <?php esc_html_e('Exporter le rapport CSV', 'sitepulse'); ?>
+                </button>
+            </form>
+            <div class="sitepulse-uptime-sla__insights" role="list">
+                <div class="sitepulse-uptime-sla__card" role="listitem">
+                    <span class="sitepulse-uptime-sla__card-label"><?php esc_html_e('Uptime global', 'sitepulse'); ?></span>
+                    <span class="sitepulse-uptime-sla__card-value"><?php echo esc_html(number_format_i18n($preview_uptime, 3)); ?>%</span>
+                    <?php if ($preview_month_label !== '') : ?>
+                        <span class="sitepulse-uptime-sla__card-meta"><?php echo esc_html($preview_month_label); ?></span>
+                    <?php endif; ?>
+                </div>
+                <div class="sitepulse-uptime-sla__card" role="listitem">
+                    <span class="sitepulse-uptime-sla__card-label"><?php esc_html_e('Incidents détectés', 'sitepulse'); ?></span>
+                    <span class="sitepulse-uptime-sla__card-value"><?php echo esc_html(number_format_i18n($preview_incidents)); ?></span>
+                    <span class="sitepulse-uptime-sla__card-meta">
+                        <?php
+                        $maintenance_text = _n(
+                            'Maintenance programmée : %s contrôle',
+                            'Maintenance programmée : %s contrôles',
+                            $preview_maintenance,
+                            'sitepulse'
+                        );
+                        printf(
+                            esc_html($maintenance_text),
+                            esc_html(number_format_i18n($preview_maintenance))
+                        );
+                        ?>
+                    </span>
+                </div>
+                <div class="sitepulse-uptime-sla__card" role="listitem">
+                    <span class="sitepulse-uptime-sla__card-label"><?php esc_html_e('TTFB moyen', 'sitepulse'); ?></span>
+                    <span class="sitepulse-uptime-sla__card-value">
+                        <?php
+                        if (null === $preview_ttfb_avg) {
+                            echo '—';
+                        } else {
+                            printf(
+                                esc_html(_x('%s ms', 'milliseconds unit', 'sitepulse')),
+                                esc_html(number_format_i18n($preview_ttfb_avg, 1))
+                            );
+                        }
+                        ?>
+                    </span>
+                    <span class="sitepulse-uptime-sla__card-meta">
+                        <?php
+                        $ttfb_text = _n('Basé sur %s mesure.', 'Basé sur %s mesures.', $preview_ttfb_count, 'sitepulse');
+                        printf(
+                            esc_html($ttfb_text),
+                            esc_html(number_format_i18n($preview_ttfb_count))
+                        );
+                        ?>
+                    </span>
+                </div>
+                <div class="sitepulse-uptime-sla__card" role="listitem">
+                    <span class="sitepulse-uptime-sla__card-label"><?php esc_html_e('Latence moyenne', 'sitepulse'); ?></span>
+                    <span class="sitepulse-uptime-sla__card-value">
+                        <?php
+                        if (null === $preview_latency_avg) {
+                            echo '—';
+                        } else {
+                            printf(
+                                esc_html(_x('%s ms', 'milliseconds unit', 'sitepulse')),
+                                esc_html(number_format_i18n($preview_latency_avg, 1))
+                            );
+                        }
+                        ?>
+                    </span>
+                    <span class="sitepulse-uptime-sla__card-meta">
+                        <?php
+                        $latency_text = _n('Mesure de latence : %s.', 'Mesures de latence : %s.', $preview_latency_count, 'sitepulse');
+                        printf(
+                            esc_html($latency_text),
+                            esc_html(number_format_i18n($preview_latency_count))
+                        );
+                        ?>
+                    </span>
+                </div>
+            </div>
+        </section>
+        <?php elseif ($sla_error_code !== '') :
+            $message = isset($sla_error_messages[$sla_error_code]) ? $sla_error_messages[$sla_error_code] : '';
+            if ($message !== '') :
+        ?>
+        <div class="notice notice-error sitepulse-uptime-sla__notice"><p><?php echo esc_html($message); ?></p></div>
+        <?php
+            endif;
+        endif;
+        ?>
         <h2><?php esc_html_e('Disponibilité par localisation', 'sitepulse'); ?></h2>
         <table class="widefat striped">
             <thead>
