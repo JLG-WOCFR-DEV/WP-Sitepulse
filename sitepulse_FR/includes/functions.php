@@ -2323,6 +2323,479 @@ if (!function_exists('sitepulse_get_alert_interval_choices')) {
     }
 }
 
+if (!function_exists('sitepulse_get_alert_activity_state')) {
+    /**
+     * Retrieves the normalized alert activity state used by the smart interval.
+     *
+     * @return array{
+     *     events: array<int, array<string, mixed>>,
+     *     window_seconds: int,
+     *     last_check: int,
+     *     updated_at: int,
+     *     last_event: int,
+     *     quiet_checks?: int
+     * }
+     */
+    function sitepulse_get_alert_activity_state() {
+        $default_window = 86400;
+
+        if (function_exists('apply_filters')) {
+            $filtered_window = apply_filters('sitepulse_alert_interval_activity_window', $default_window);
+
+            if (is_numeric($filtered_window)) {
+                $default_window = max(300, (int) $filtered_window);
+            }
+        }
+
+        $state = get_option(
+            defined('SITEPULSE_OPTION_ALERT_ACTIVITY') ? SITEPULSE_OPTION_ALERT_ACTIVITY : 'sitepulse_alert_activity',
+            []
+        );
+
+        if (!is_array($state)) {
+            $state = [];
+        }
+
+        $window_seconds = isset($state['window_seconds']) ? (int) $state['window_seconds'] : $default_window;
+
+        if ($window_seconds <= 0) {
+            $window_seconds = $default_window;
+        }
+
+        $max_events = 200;
+
+        if (function_exists('apply_filters')) {
+            $filtered_max = apply_filters('sitepulse_alert_interval_activity_max_events', $max_events);
+
+            if (is_numeric($filtered_max)) {
+                $max_events = max(0, (int) $filtered_max);
+            }
+        }
+
+        $now    = time();
+        $cutoff = $window_seconds > 0 ? $now - $window_seconds : null;
+
+        $events = [];
+
+        if (isset($state['events']) && is_array($state['events'])) {
+            foreach ($state['events'] as $event) {
+                if (!is_array($event)) {
+                    continue;
+                }
+
+                $timestamp = isset($event['timestamp']) ? (int) $event['timestamp'] : 0;
+
+                if ($timestamp <= 0) {
+                    continue;
+                }
+
+                if ($cutoff !== null && $timestamp < $cutoff) {
+                    continue;
+                }
+
+                $type = isset($event['type']) ? sanitize_key((string) $event['type']) : '';
+
+                if ($type === '') {
+                    $type = 'general';
+                }
+
+                $severity = isset($event['severity']) ? strtolower((string) $event['severity']) : 'warning';
+
+                if ($severity === '') {
+                    $severity = 'warning';
+                }
+
+                $success = isset($event['success']) ? (bool) $event['success'] : true;
+
+                $channels = [];
+
+                if (isset($event['channels']) && is_array($event['channels'])) {
+                    foreach ($event['channels'] as $channel) {
+                        $channel_key = sanitize_key((string) $channel);
+
+                        if ($channel_key === '') {
+                            continue;
+                        }
+
+                        if (!in_array($channel_key, $channels, true)) {
+                            $channels[] = $channel_key;
+                        }
+                    }
+                }
+
+                $meta = [];
+
+                if (isset($event['meta']) && is_array($event['meta'])) {
+                    foreach ($event['meta'] as $meta_key => $meta_value) {
+                        if (!is_string($meta_key) || $meta_key === '') {
+                            continue;
+                        }
+
+                        if (is_int($meta_value) || is_float($meta_value)) {
+                            $meta[$meta_key] = $meta_value + 0;
+                        } elseif (is_scalar($meta_value)) {
+                            $meta[$meta_key] = sanitize_text_field((string) $meta_value);
+                        }
+                    }
+                }
+
+                $entry = [
+                    'timestamp' => $timestamp,
+                    'type'      => $type,
+                    'severity'  => $severity,
+                    'success'   => $success,
+                ];
+
+                if (!empty($channels)) {
+                    $entry['channels'] = $channels;
+                }
+
+                if (!empty($meta)) {
+                    $entry['meta'] = $meta;
+                }
+
+                $events[] = $entry;
+            }
+        }
+
+        if ($max_events > 0 && count($events) > $max_events) {
+            $events = array_slice($events, -$max_events);
+        }
+
+        $last_event = 0;
+
+        foreach ($events as $event) {
+            if ($event['timestamp'] > $last_event) {
+                $last_event = $event['timestamp'];
+            }
+        }
+
+        $quiet_checks = isset($state['quiet_checks']) ? (int) $state['quiet_checks'] : 0;
+
+        return [
+            'events'         => $events,
+            'window_seconds' => $window_seconds,
+            'last_check'     => isset($state['last_check']) ? (int) $state['last_check'] : 0,
+            'updated_at'     => isset($state['updated_at']) ? (int) $state['updated_at'] : 0,
+            'last_event'     => $last_event,
+            'quiet_checks'   => $quiet_checks,
+        ];
+    }
+}
+
+if (!function_exists('sitepulse_save_alert_activity_state')) {
+    /**
+     * Persists the alert activity state to the database.
+     *
+     * @param array<string, mixed> $state Normalized activity state.
+     * @return void
+     */
+    function sitepulse_save_alert_activity_state(array $state) {
+        if (!function_exists('update_option')) {
+            return;
+        }
+
+        update_option(
+            defined('SITEPULSE_OPTION_ALERT_ACTIVITY') ? SITEPULSE_OPTION_ALERT_ACTIVITY : 'sitepulse_alert_activity',
+            $state,
+            false
+        );
+    }
+}
+
+if (!function_exists('sitepulse_register_alert_activity_event')) {
+    /**
+     * Records an alert dispatch event for the smart interval heuristics.
+     *
+     * @param array<string, mixed> $event Event payload (expects timestamp, type, severity, success, channels, meta).
+     * @return void
+     */
+    function sitepulse_register_alert_activity_event(array $event) {
+        $state = sitepulse_get_alert_activity_state();
+        $now   = time();
+
+        $timestamp = isset($event['timestamp']) ? (int) $event['timestamp'] : $now;
+
+        if ($timestamp <= 0) {
+            $timestamp = $now;
+        }
+
+        $type = isset($event['type']) ? sanitize_key((string) $event['type']) : '';
+
+        if ($type === '') {
+            $type = 'general';
+        }
+
+        $severity = isset($event['severity']) ? strtolower((string) $event['severity']) : 'warning';
+
+        if ($severity === '') {
+            $severity = 'warning';
+        }
+
+        $success = isset($event['success']) ? (bool) $event['success'] : true;
+
+        $channels = [];
+
+        if (isset($event['channels']) && is_array($event['channels'])) {
+            foreach ($event['channels'] as $channel) {
+                $channel_key = sanitize_key((string) $channel);
+
+                if ($channel_key === '') {
+                    continue;
+                }
+
+                if (!in_array($channel_key, $channels, true)) {
+                    $channels[] = $channel_key;
+                }
+            }
+        }
+
+        $meta = [];
+
+        if (isset($event['meta']) && is_array($event['meta'])) {
+            foreach ($event['meta'] as $meta_key => $meta_value) {
+                if (!is_string($meta_key) || $meta_key === '') {
+                    continue;
+                }
+
+                if (is_int($meta_value) || is_float($meta_value)) {
+                    $meta[$meta_key] = $meta_value + 0;
+                } elseif (is_scalar($meta_value)) {
+                    $meta[$meta_key] = sanitize_text_field((string) $meta_value);
+                }
+            }
+        }
+
+        $state['events'][] = [
+            'timestamp' => $timestamp,
+            'type'      => $type,
+            'severity'  => $severity,
+            'success'   => $success,
+        ];
+
+        $index = count($state['events']) - 1;
+
+        if (!empty($channels)) {
+            $state['events'][$index]['channels'] = $channels;
+        }
+
+        if (!empty($meta)) {
+            $state['events'][$index]['meta'] = $meta;
+        }
+
+        $window_seconds = isset($state['window_seconds']) ? (int) $state['window_seconds'] : 0;
+
+        if ($window_seconds > 0) {
+            $cutoff = $now - $window_seconds;
+            $state['events'] = array_values(array_filter($state['events'], static function ($entry) use ($cutoff) {
+                return isset($entry['timestamp']) && (int) $entry['timestamp'] >= $cutoff;
+            }));
+        }
+
+        $max_events = 200;
+
+        if (function_exists('apply_filters')) {
+            $filtered_max = apply_filters('sitepulse_alert_interval_activity_max_events', $max_events);
+
+            if (is_numeric($filtered_max)) {
+                $max_events = max(0, (int) $filtered_max);
+            }
+        }
+
+        if ($max_events > 0 && count($state['events']) > $max_events) {
+            $state['events'] = array_slice($state['events'], -$max_events);
+        }
+
+        $state['last_event']   = $timestamp;
+        $state['updated_at']   = $now;
+        $state['quiet_checks'] = 0;
+
+        sitepulse_save_alert_activity_state($state);
+    }
+}
+
+if (!function_exists('sitepulse_register_alert_activity_check')) {
+    /**
+     * Records the execution of an alert check cycle.
+     *
+     * @param int|null $timestamp Optional timestamp override.
+     * @return void
+     */
+    function sitepulse_register_alert_activity_check($timestamp = null) {
+        $state = sitepulse_get_alert_activity_state();
+        $now   = time();
+
+        $check_time = $timestamp !== null ? (int) $timestamp : $now;
+
+        if ($check_time <= 0) {
+            $check_time = $now;
+        }
+
+        $state['last_check'] = $check_time;
+        $state['updated_at'] = $now;
+
+        $quiet_checks = isset($state['quiet_checks']) ? (int) $state['quiet_checks'] : 0;
+        $last_event   = isset($state['last_event']) ? (int) $state['last_event'] : 0;
+        $tolerance    = 120;
+
+        if (function_exists('apply_filters')) {
+            $filtered_tolerance = apply_filters('sitepulse_alert_interval_activity_fresh_event_tolerance', $tolerance);
+
+            if (is_numeric($filtered_tolerance)) {
+                $tolerance = max(0, (int) $filtered_tolerance);
+            }
+        }
+
+        if ($last_event > 0 && ($last_event >= $check_time || ($check_time - $last_event) <= $tolerance)) {
+            $quiet_checks = 0;
+        } else {
+            $quiet_checks++;
+        }
+
+        $state['quiet_checks'] = $quiet_checks;
+
+        sitepulse_save_alert_activity_state($state);
+    }
+}
+
+if (!function_exists('sitepulse_calculate_default_smart_alert_interval')) {
+    /**
+     * Calculates the default smart alert interval based on recent activity.
+     *
+     * @param int[] $allowed_values Allowed interval values.
+     * @param int   $default_value  Fallback value.
+     * @return int
+     */
+    function sitepulse_calculate_default_smart_alert_interval(array $allowed_values, $default_value) {
+        $state = sitepulse_get_alert_activity_state();
+
+        $now           = time();
+        $events        = isset($state['events']) ? (array) $state['events'] : [];
+        $last_event    = isset($state['last_event']) ? (int) $state['last_event'] : 0;
+        $last_check    = isset($state['last_check']) ? (int) $state['last_check'] : 0;
+        $quiet_checks  = isset($state['quiet_checks']) ? (int) $state['quiet_checks'] : 0;
+
+        $burst_window  = 1800; // 30 minutes.
+        $recent_window = 7200; // 2 hours.
+        $calm_window   = 21600; // 6 hours.
+
+        if (function_exists('apply_filters')) {
+            $burst_window = max(300, (int) apply_filters('sitepulse_alert_interval_smart_burst_window', $burst_window));
+            $recent_window = max(600, (int) apply_filters('sitepulse_alert_interval_smart_recent_window', $recent_window));
+            $calm_window = max($recent_window, (int) apply_filters('sitepulse_alert_interval_smart_calm_window', $calm_window));
+        }
+
+        $burst_cutoff  = $now - $burst_window;
+        $recent_cutoff = $now - $recent_window;
+
+        $min_interval = min($allowed_values);
+        $max_interval = max($allowed_values);
+
+        $burst_target   = $min_interval;
+        $elevated_target = max($min_interval, 2);
+        $steady_target   = 5;
+        $relaxed_target  = 15;
+        $calm_target     = $max_interval;
+
+        if (function_exists('apply_filters')) {
+            $burst_target    = max(1, (int) apply_filters('sitepulse_alert_interval_smart_target_burst', $burst_target, $allowed_values));
+            $elevated_target = max(1, (int) apply_filters('sitepulse_alert_interval_smart_target_elevated', $elevated_target, $allowed_values));
+            $steady_target   = max(1, (int) apply_filters('sitepulse_alert_interval_smart_target_steady', $steady_target, $allowed_values));
+            $relaxed_target  = max(1, (int) apply_filters('sitepulse_alert_interval_smart_target_relaxed', $relaxed_target, $allowed_values));
+            $calm_target     = max(1, (int) apply_filters('sitepulse_alert_interval_smart_target_calm', $calm_target, $allowed_values));
+        }
+
+        $burst_interval    = sitepulse_find_closest_allowed_interval($burst_target, $allowed_values, $default_value);
+        $elevated_interval = sitepulse_find_closest_allowed_interval($elevated_target, $allowed_values, $default_value);
+        $steady_interval   = sitepulse_find_closest_allowed_interval($steady_target, $allowed_values, $default_value);
+        $relaxed_interval  = sitepulse_find_closest_allowed_interval($relaxed_target, $allowed_values, $default_value);
+        $calm_interval     = sitepulse_find_closest_allowed_interval($calm_target, $allowed_values, $default_value);
+
+        $fatal_burst    = 0;
+        $critical_burst = 0;
+        $recent_events  = 0;
+        $recent_critical = 0;
+
+        foreach ($events as $event) {
+            if (!is_array($event)) {
+                continue;
+            }
+
+            $timestamp = isset($event['timestamp']) ? (int) $event['timestamp'] : 0;
+
+            if ($timestamp <= 0) {
+                continue;
+            }
+
+            if ($timestamp >= $burst_cutoff) {
+                if (isset($event['type']) && (string) $event['type'] === 'php_fatal') {
+                    $fatal_burst++;
+                }
+
+                if (isset($event['severity']) && (string) $event['severity'] === 'critical') {
+                    $critical_burst++;
+                }
+            }
+
+            if ($timestamp >= $recent_cutoff) {
+                $recent_events++;
+
+                if (isset($event['severity']) && (string) $event['severity'] === 'critical') {
+                    $recent_critical++;
+                }
+
+                if (isset($event['type']) && (string) $event['type'] === 'php_fatal') {
+                    $recent_critical++;
+                }
+            }
+        }
+
+        if ($fatal_burst >= 1) {
+            return $burst_interval;
+        }
+
+        if ($critical_burst >= 1 || $recent_critical >= 1) {
+            return ($elevated_interval !== $burst_interval) ? $elevated_interval : $burst_interval;
+        }
+
+        if ($recent_events >= 3) {
+            return $elevated_interval;
+        }
+
+        if ($last_event === 0) {
+            return $steady_interval;
+        }
+
+        $time_since_last = $now - $last_event;
+
+        $quiet_threshold_relaxed = 12;
+        $quiet_threshold_calm    = 48;
+
+        if (function_exists('apply_filters')) {
+            $quiet_threshold_relaxed = max(1, (int) apply_filters('sitepulse_alert_interval_smart_quiet_checks_threshold', $quiet_threshold_relaxed));
+            $quiet_threshold_calm = max($quiet_threshold_relaxed, (int) apply_filters('sitepulse_alert_interval_smart_calm_checks_threshold', $quiet_threshold_calm));
+        }
+
+        if (
+            $time_since_last >= $calm_window
+            && $quiet_checks >= $quiet_threshold_calm
+            && $last_check > 0
+            && ($now - $last_check) <= ($calm_window * 2)
+        ) {
+            return $calm_interval;
+        }
+
+        if (
+            $time_since_last >= $recent_window
+            && $quiet_checks >= $quiet_threshold_relaxed
+        ) {
+            return $relaxed_interval;
+        }
+
+        return $steady_interval;
+    }
+}
+
 if (!function_exists('sitepulse_sanitize_alert_interval')) {
     /**
      * Sanitizes the alert interval (in minutes) used to schedule error checks.
@@ -2343,10 +2816,10 @@ if (!function_exists('sitepulse_sanitize_alert_interval')) {
             $candidate = strtolower(trim($value));
 
             if ($candidate === 'smart') {
-                $smart_value = $default_value;
+                $smart_value = sitepulse_calculate_default_smart_alert_interval($allowed_values, $default_value);
 
                 if (function_exists('apply_filters')) {
-                    $smart_value = (int) apply_filters('sitepulse_alert_interval_smart_value', $default_value, $allowed_values, $raw_value);
+                    $smart_value = (int) apply_filters('sitepulse_alert_interval_smart_value', $smart_value, $allowed_values, $raw_value);
                 }
 
                 if (in_array($smart_value, $allowed_values, true)) {
