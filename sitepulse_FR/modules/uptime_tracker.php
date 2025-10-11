@@ -2773,6 +2773,52 @@ function sitepulse_uptime_handle_sla_export() {
     fputcsv($output, [__('Généré le', 'sitepulse'), $generated_label]);
     fputcsv($output, []);
 
+    $impact_rows = [];
+
+    if (function_exists('sitepulse_custom_dashboard_format_impact_export_rows')) {
+        $impact_snapshot = function_exists('sitepulse_custom_dashboard_get_cached_impact_index')
+            ? sitepulse_custom_dashboard_get_cached_impact_index('30d', DAY_IN_SECONDS)
+            : null;
+
+        $range_definitions = sitepulse_custom_dashboard_get_metric_ranges();
+        $range_label = sitepulse_custom_dashboard_resolve_range_label(
+            '30d',
+            array_values($range_definitions)
+        );
+
+        if (null === $impact_snapshot) {
+            $dashboard_payload = sitepulse_custom_dashboard_prepare_metrics_payload('30d');
+
+            if (isset($dashboard_payload['impact']) && is_array($dashboard_payload['impact'])) {
+                $impact_snapshot = $dashboard_payload['impact'];
+            }
+
+            if (isset($dashboard_payload['available_ranges']) && is_array($dashboard_payload['available_ranges'])) {
+                $range_label = sitepulse_custom_dashboard_resolve_range_label(
+                    isset($impact_snapshot['range']) ? $impact_snapshot['range'] : '30d',
+                    $dashboard_payload['available_ranges']
+                );
+            }
+        } elseif (is_array($impact_snapshot)) {
+            $range_label = sitepulse_custom_dashboard_resolve_range_label(
+                isset($impact_snapshot['range']) ? $impact_snapshot['range'] : '30d',
+                array_values($range_definitions)
+            );
+        }
+
+        if (is_array($impact_snapshot)) {
+            $impact_rows = sitepulse_custom_dashboard_format_impact_export_rows($impact_snapshot, $range_label);
+        }
+    }
+
+    if (!empty($impact_rows)) {
+        foreach ($impact_rows as $impact_row) {
+            fputcsv($output, $impact_row);
+        }
+
+        fputcsv($output, []);
+    }
+
     $header = [
         __('Agent', 'sitepulse'),
         __('Région', 'sitepulse'),

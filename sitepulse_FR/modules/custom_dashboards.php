@@ -443,6 +443,91 @@ function sitepulse_custom_dashboard_resolve_status_meta($status, $labels = []) {
 }
 
 /**
+ * Resolves a status key based on a normalized score.
+ *
+ * @param float|int|null $score Severity score in the range 0-100.
+ * @return string
+ */
+function sitepulse_custom_dashboard_resolve_score_status($score) {
+    if (!is_numeric($score)) {
+        return 'status-warn';
+    }
+
+    $normalized = (float) $score;
+
+    if ($normalized >= 70.0) {
+        return 'status-bad';
+    }
+
+    if ($normalized >= 35.0) {
+        return 'status-warn';
+    }
+
+    return 'status-ok';
+}
+
+/**
+ * Normalizes a metric value into a severity ratio between 0 and 1.
+ *
+ * @param float|int|null $value      Raw metric value.
+ * @param float|int      $warning    Threshold where the signal starts to degrade.
+ * @param float|int      $critical   Threshold where the signal is considered critical.
+ * @param string         $direction  Either 'higher-is-worse' or 'higher-is-better'.
+ * @return float Normalized ratio clamped between 0 and 1.
+ */
+function sitepulse_custom_dashboard_calculate_severity_ratio($value, $warning, $critical, $direction = 'higher-is-worse') {
+    if (!is_numeric($value)) {
+        return 0.0;
+    }
+
+    $metric   = (float) $value;
+    $warning  = (float) $warning;
+    $critical = (float) $critical;
+
+    if ('higher-is-better' === $direction) {
+        if ($critical >= $warning) {
+            $critical = $warning - 0.1;
+        }
+
+        if ($metric >= $warning) {
+            return 0.0;
+        }
+
+        if ($metric <= $critical) {
+            return 1.0;
+        }
+
+        $range = $warning - $critical;
+
+        if ($range <= 0) {
+            return $metric <= $warning ? 1.0 : 0.0;
+        }
+
+        return min(1.0, max(0.0, ($warning - $metric) / $range));
+    }
+
+    if ($critical <= $warning) {
+        $critical = $warning + 0.1;
+    }
+
+    if ($metric <= $warning) {
+        return 0.0;
+    }
+
+    if ($metric >= $critical) {
+        return 1.0;
+    }
+
+    $range = $critical - $warning;
+
+    if ($range <= 0) {
+        return $metric >= $warning ? 1.0 : 0.0;
+    }
+
+    return min(1.0, max(0.0, ($metric - $warning) / $range));
+}
+
+/**
  * Builds an accessible summary list for a chart dataset.
  *
  * @param string $chart_id    Base identifier for the chart.
@@ -1563,6 +1648,10 @@ function sitepulse_custom_dashboard_format_metrics_view($payload) {
         : date_i18n($date_format . ' ' . $time_format, $generated_at);
 
     $cards = [
+        'impact' => sitepulse_custom_dashboard_format_impact_card_view(
+            isset($payload['impact']) ? $payload['impact'] : null,
+            $range_label
+        ),
         'uptime' => sitepulse_custom_dashboard_format_uptime_card_view(
             isset($payload['uptime']) ? $payload['uptime'] : null,
             !empty($modules['uptime_tracker']),
@@ -1737,6 +1826,8 @@ function sitepulse_custom_dashboard_prepare_metrics_payload($range) {
     $config           = $ranges[$range];
     $available_ranges = array_values($ranges);
 
+    $current_timestamp = sitepulse_custom_dashboard_get_current_timestamp();
+
     $uptime = sitepulse_custom_dashboard_calculate_uptime_metrics($range, $config);
     $logs   = sitepulse_custom_dashboard_analyze_debug_log();
     $speed  = sitepulse_custom_dashboard_calculate_speed_metrics($range, $config);
@@ -1757,17 +1848,38 @@ function sitepulse_custom_dashboard_prepare_metrics_payload($range) {
         'speed_analyzer' => function_exists('sitepulse_is_module_active')
             ? sitepulse_is_module_active('speed_analyzer')
             : true,
+        'ai_insights'    => function_exists('sitepulse_is_module_active')
+            ? sitepulse_is_module_active('ai_insights')
+            : function_exists('sitepulse_ai_get_history_entries'),
     ];
+
+    $ai_summary = sitepulse_custom_dashboard_collect_ai_window_stats(
+        isset($config['seconds']) ? (int) $config['seconds'] : 0,
+        $current_timestamp
+    );
+
+    $impact = sitepulse_custom_dashboard_calculate_transverse_impact_index(
+        $range,
+        $config,
+        $modules_status,
+        $uptime,
+        $speed,
+        $ai_summary
+    );
 
     $payload = [
         'range'            => $range,
         'available_ranges' => $available_ranges,
-        'generated_at'     => sitepulse_custom_dashboard_get_current_timestamp(),
+        'generated_at'     => $current_timestamp,
         'uptime'           => $uptime,
         'logs'             => $logs,
         'speed'            => $speed,
         'modules'          => $modules_status,
     ];
+
+    if (is_array($impact)) {
+        $payload['impact'] = $impact;
+    }
 
     $payload['view'] = sitepulse_custom_dashboard_format_metrics_view($payload);
 
@@ -1963,6 +2075,787 @@ function sitepulse_custom_dashboard_calculate_trend($current, $previous, $precis
     }
 
     return round($delta, $precision);
+}
+
+/**
+ * Summarises AI insight entries within a time window.
+ *
+ * @param array<int,array<string,mixed>> $entries        History entries.
+ * @param int                            $window_seconds Window size in seconds.
+ * @param int                            $now            Reference timestamp.
+ * @return array<string,int>
+ */
+function sitepulse_custom_dashboard_summarize_ai_entries($entries, $window_seconds, $now) {
+    $summary = [
+        'recent_total'        => 0,
+        'recent_pending'      => 0,
+        'recent_acknowledged' => 0,
+        'stale_pending'       => 0,
+        'latest_timestamp'    => 0,
+    ];
+
+    if (!is_array($entries) || empty($entries)) {
+        return $summary;
+    }
+
+    $window_seconds = max(0, (int) $window_seconds);
+    $now            = (int) $now;
+    $window_start   = $window_seconds > 0 ? $now - $window_seconds : 0;
+
+    foreach ($entries as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+
+        $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+        $note      = isset($entry['note']) ? trim((string) $entry['note']) : '';
+        $has_note  = $note !== '';
+
+        if ($timestamp > $summary['latest_timestamp']) {
+            $summary['latest_timestamp'] = $timestamp;
+        }
+
+        if ($window_seconds > 0 && $timestamp >= $window_start) {
+            $summary['recent_total']++;
+
+            if ($has_note) {
+                $summary['recent_acknowledged']++;
+            } else {
+                $summary['recent_pending']++;
+            }
+
+            continue;
+        }
+
+        if (!$has_note && $timestamp > 0) {
+            $summary['stale_pending']++;
+        }
+    }
+
+    return $summary;
+}
+
+/**
+ * Collects AI insight statistics for the provided window.
+ *
+ * @param int $window_seconds Window length in seconds.
+ * @param int $now            Reference timestamp.
+ * @return array<string,int>
+ */
+function sitepulse_custom_dashboard_collect_ai_window_stats($window_seconds, $now) {
+    $entries = [];
+
+    if (function_exists('sitepulse_ai_get_history_entries')) {
+        $entries = sitepulse_ai_get_history_entries();
+
+        if (!is_array($entries)) {
+            $entries = [];
+        }
+    }
+
+    return sitepulse_custom_dashboard_summarize_ai_entries($entries, $window_seconds, $now);
+}
+
+/**
+ * Normalizes an impact snapshot for persistence.
+ *
+ * @param array<string,mixed> $impact Raw impact snapshot.
+ * @return array<string,mixed>
+ */
+function sitepulse_custom_dashboard_normalize_impact_index($impact) {
+    $now = sitepulse_custom_dashboard_get_current_timestamp();
+
+    $normalized = [
+        'range'           => isset($impact['range']) ? sanitize_key((string) $impact['range']) : '',
+        'updated_at'      => isset($impact['updated_at']) ? (int) $impact['updated_at'] : $now,
+        'overall'         => null,
+        'dominant_module' => isset($impact['dominant_module']) ? sanitize_key((string) $impact['dominant_module']) : '',
+        'modules'         => [],
+    ];
+
+    if (isset($impact['overall']) && is_numeric($impact['overall'])) {
+        $normalized['overall'] = round((float) $impact['overall'], 2);
+    }
+
+    if (isset($impact['modules']) && is_array($impact['modules'])) {
+        foreach ($impact['modules'] as $module_key => $module_data) {
+            $module_id = sanitize_key((string) $module_key);
+
+            if ($module_id === '') {
+                continue;
+            }
+
+            $module_normalized = [
+                'label'  => isset($module_data['label']) ? sanitize_text_field((string) $module_data['label']) : $module_id,
+                'status' => isset($module_data['status']) ? sanitize_key((string) $module_data['status']) : 'status-warn',
+                'active' => !empty($module_data['active']),
+                'score'  => null,
+            ];
+
+            if (isset($module_data['score']) && is_numeric($module_data['score'])) {
+                $module_normalized['score'] = round((float) $module_data['score'], 2);
+            }
+
+            if (isset($module_data['signal'])) {
+                $module_normalized['signal'] = sanitize_text_field((string) $module_data['signal']);
+            }
+
+            if (isset($module_data['details']) && is_array($module_data['details'])) {
+                $module_normalized['details'] = [];
+
+                foreach ($module_data['details'] as $detail) {
+                    if (!is_array($detail)) {
+                        continue;
+                    }
+
+                    $detail_label = isset($detail['label']) ? sanitize_text_field((string) $detail['label']) : '';
+                    $detail_value = isset($detail['value']) ? sanitize_text_field((string) $detail['value']) : '';
+
+                    if ($detail_label === '' && $detail_value === '') {
+                        continue;
+                    }
+
+                    $module_normalized['details'][] = [
+                        'label' => $detail_label,
+                        'value' => $detail_value,
+                    ];
+                }
+            }
+
+            $normalized['modules'][$module_id] = $module_normalized;
+        }
+    }
+
+    return $normalized;
+}
+
+/**
+ * Stores the latest impact snapshot.
+ *
+ * @param array<string,mixed> $impact Impact payload.
+ * @return void
+ */
+function sitepulse_custom_dashboard_store_impact_index($impact) {
+    if (!defined('SITEPULSE_OPTION_DASHBOARD_IMPACT_INDEX') || !function_exists('update_option')) {
+        return;
+    }
+
+    $normalized = sitepulse_custom_dashboard_normalize_impact_index($impact);
+
+    $payload = [
+        'range'      => $normalized['range'],
+        'updated_at' => $normalized['updated_at'],
+        'impact'     => $normalized,
+    ];
+
+    update_option(SITEPULSE_OPTION_DASHBOARD_IMPACT_INDEX, $payload, false);
+}
+
+/**
+ * Retrieves a cached impact snapshot when available.
+ *
+ * @param string $range   Requested range identifier.
+ * @param int    $max_age Maximum age in seconds before the cache is considered stale.
+ * @return array<string,mixed>|null
+ */
+function sitepulse_custom_dashboard_get_cached_impact_index($range, $max_age = 900) {
+    if (!defined('SITEPULSE_OPTION_DASHBOARD_IMPACT_INDEX') || !function_exists('get_option')) {
+        return null;
+    }
+
+    $stored = get_option(SITEPULSE_OPTION_DASHBOARD_IMPACT_INDEX, []);
+
+    if (!is_array($stored) || empty($stored['impact']) || !is_array($stored['impact'])) {
+        return null;
+    }
+
+    $impact = $stored['impact'];
+    $requested_range = sanitize_key((string) $range);
+    $impact_range    = isset($impact['range']) ? sanitize_key((string) $impact['range']) : '';
+
+    if ($requested_range !== '' && $impact_range !== '' && $impact_range !== $requested_range) {
+        return null;
+    }
+
+    $updated_at = isset($impact['updated_at']) ? (int) $impact['updated_at'] : (isset($stored['updated_at']) ? (int) $stored['updated_at'] : 0);
+
+    if ($max_age > 0 && $updated_at > 0) {
+        $now = sitepulse_custom_dashboard_get_current_timestamp();
+
+        if (($now - $updated_at) > $max_age) {
+            return null;
+        }
+    }
+
+    if (!isset($impact['modules']) || !is_array($impact['modules'])) {
+        return null;
+    }
+
+    return $impact;
+}
+
+/**
+ * Calculates the transverse impact index using module metrics.
+ *
+ * @param string               $range          Range identifier.
+ * @param array<string,mixed>  $config         Range configuration.
+ * @param array<string,bool>   $modules_status Module activation map.
+ * @param array<string,mixed>  $uptime         Uptime metrics.
+ * @param array<string,mixed>  $speed          Speed metrics.
+ * @param array<string,int>|null $ai_summary   AI insight summary.
+ * @return array<string,mixed>
+ */
+function sitepulse_custom_dashboard_calculate_transverse_impact_index($range, $config, $modules_status, $uptime, $speed, $ai_summary = null) {
+    $range_id = sanitize_key((string) $range);
+
+    if ($range_id === '') {
+        $range_id = sitepulse_custom_dashboard_get_default_range();
+    }
+
+    $now            = sitepulse_custom_dashboard_get_current_timestamp();
+    $window_seconds = isset($config['seconds']) ? (int) $config['seconds'] : 0;
+
+    if ($window_seconds < 0) {
+        $window_seconds = 0;
+    }
+
+    if (!is_array($modules_status)) {
+        $modules_status = [];
+    }
+
+    if (null === $ai_summary) {
+        $ai_summary = sitepulse_custom_dashboard_collect_ai_window_stats($window_seconds, $now);
+    } elseif (!is_array($ai_summary)) {
+        $ai_summary = [];
+    }
+
+    $module_labels = [
+        'uptime_tracker' => __('Availability', 'sitepulse'),
+        'speed_analyzer' => __('Performance', 'sitepulse'),
+        'ai_insights'    => __('AI backlog', 'sitepulse'),
+    ];
+
+    $weights = [
+        'uptime_tracker' => 0.4,
+        'speed_analyzer' => 0.35,
+        'ai_insights'    => 0.25,
+    ];
+
+    $weights = apply_filters('sitepulse_transverse_impact_weights', $weights, $range_id, $modules_status, $uptime, $speed, $ai_summary);
+
+    if (!is_array($weights)) {
+        $weights = [
+            'uptime_tracker' => 0.4,
+            'speed_analyzer' => 0.35,
+            'ai_insights'    => 0.25,
+        ];
+    }
+
+    $modules_output  = [];
+    $active_weights  = [];
+    $dominant_module = '';
+    $dominant_score  = -1.0;
+
+    // Uptime module scoring.
+    $uptime_entry = [
+        'label'  => $module_labels['uptime_tracker'],
+        'status' => 'status-warn',
+        'score'  => null,
+        'active' => !empty($modules_status['uptime_tracker']),
+        'details'=> [],
+        'signal' => '',
+    ];
+
+    $uptime_value = null;
+
+    if (is_array($uptime) && isset($uptime['uptime']) && is_numeric($uptime['uptime'])) {
+        $uptime_value = (float) $uptime['uptime'];
+    }
+
+    $violations = isset($uptime['violations']) ? (int) $uptime['violations'] : 0;
+
+    if ($uptime_entry['active'] && $uptime_value !== null) {
+        $uptime_warning = apply_filters('sitepulse_transverse_impact_uptime_warning', sitepulse_custom_dashboard_get_uptime_warning_threshold(), $range_id, $uptime);
+
+        if (!is_numeric($uptime_warning)) {
+            $uptime_warning = sitepulse_custom_dashboard_get_uptime_warning_threshold();
+        }
+
+        $uptime_warning  = (float) $uptime_warning;
+        $uptime_critical = apply_filters('sitepulse_transverse_impact_uptime_critical', max(0.0, $uptime_warning - 1.0), $range_id, $uptime);
+
+        if (!is_numeric($uptime_critical)) {
+            $uptime_critical = max(0.0, $uptime_warning - 1.0);
+        }
+
+        $uptime_ratio = sitepulse_custom_dashboard_calculate_severity_ratio($uptime_value, $uptime_warning, $uptime_critical, 'higher-is-better');
+
+        $violations_warning = apply_filters('sitepulse_transverse_impact_uptime_violations_warning', 1, $range_id, $uptime);
+        $violations_warning = is_numeric($violations_warning) ? max(0.0, (float) $violations_warning) : 1.0;
+
+        $violations_critical = apply_filters('sitepulse_transverse_impact_uptime_violations_critical', 3, $range_id, $uptime);
+        $violations_critical = is_numeric($violations_critical) ? max($violations_warning + 1.0, (float) $violations_critical) : ($violations_warning + 2.0);
+
+        $violations_ratio = sitepulse_custom_dashboard_calculate_severity_ratio($violations, $violations_warning, $violations_critical, 'higher-is-worse');
+
+        $uptime_score = (($uptime_ratio * 0.7) + ($violations_ratio * 0.3)) * 100.0;
+        $uptime_entry['score'] = round($uptime_score, 2);
+        $uptime_entry['status'] = sitepulse_custom_dashboard_resolve_score_status($uptime_entry['score']);
+
+        $signal_parts = [];
+        $signal_parts[] = sprintf(__('Uptime %s%%', 'sitepulse'), number_format_i18n($uptime_value, 2));
+
+        if ($violations > 0) {
+            $signal_parts[] = sprintf(
+                _n('%s incident', '%s incidents', $violations, 'sitepulse'),
+                number_format_i18n($violations)
+            );
+        } else {
+            $signal_parts[] = __('No incidents', 'sitepulse');
+        }
+
+        $uptime_entry['signal'] = implode(' • ', $signal_parts);
+
+        $uptime_entry['details'][] = [
+            'label' => __('Uptime', 'sitepulse'),
+            'value' => sprintf('%s%%', number_format_i18n($uptime_value, 2)),
+        ];
+
+        $uptime_entry['details'][] = [
+            'label' => __('Incidents', 'sitepulse'),
+            'value' => number_format_i18n($violations),
+        ];
+
+        if (isset($uptime['totals']) && is_array($uptime['totals']) && isset($uptime['totals']['total'])) {
+            $uptime_entry['details'][] = [
+                'label' => __('Checks', 'sitepulse'),
+                'value' => number_format_i18n((int) $uptime['totals']['total']),
+            ];
+        }
+
+        $weight_value = isset($weights['uptime_tracker']) ? max(0.0, (float) $weights['uptime_tracker']) : 0.0;
+
+        if ($weight_value > 0) {
+            $active_weights['uptime_tracker'] = $weight_value;
+        }
+
+        if ($uptime_entry['score'] > $dominant_score) {
+            $dominant_score  = $uptime_entry['score'];
+            $dominant_module = 'uptime_tracker';
+        }
+    } elseif (!$uptime_entry['active']) {
+        $uptime_entry['signal'] = __('Module inactive', 'sitepulse');
+    } else {
+        $uptime_entry['signal'] = __('Awaiting uptime data', 'sitepulse');
+    }
+
+    $modules_output['uptime_tracker'] = $uptime_entry;
+
+    // Speed module scoring.
+    $speed_entry = [
+        'label'  => $module_labels['speed_analyzer'],
+        'status' => 'status-warn',
+        'score'  => null,
+        'active' => !empty($modules_status['speed_analyzer']),
+        'details'=> [],
+        'signal' => '',
+    ];
+
+    $average = null;
+
+    if (is_array($speed) && isset($speed['average']) && is_numeric($speed['average'])) {
+        $average = (float) $speed['average'];
+    }
+
+    $thresholds = isset($speed['thresholds']) && is_array($speed['thresholds'])
+        ? $speed['thresholds']
+        : sitepulse_custom_dashboard_get_speed_thresholds_for_dashboard();
+
+    $warning_ms  = isset($thresholds['warning']) ? (float) $thresholds['warning'] : 200.0;
+    $critical_ms = isset($thresholds['critical']) ? (float) $thresholds['critical'] : max($warning_ms + 1.0, 500.0);
+
+    if ($speed_entry['active'] && $average !== null) {
+        $speed_ratio = sitepulse_custom_dashboard_calculate_severity_ratio($average, $warning_ms, $critical_ms, 'higher-is-worse');
+
+        $trend_value = isset($speed['trend']) && is_numeric($speed['trend']) ? (float) $speed['trend'] : 0.0;
+
+        $trend_warning = apply_filters('sitepulse_transverse_impact_speed_trend_warning', 10.0, $range_id, $speed);
+        $trend_warning = is_numeric($trend_warning) ? max(0.0, (float) $trend_warning) : 10.0;
+
+        $trend_critical = apply_filters('sitepulse_transverse_impact_speed_trend_critical', 30.0, $range_id, $speed);
+        $trend_critical = is_numeric($trend_critical) ? max($trend_warning + 1.0, (float) $trend_critical) : ($trend_warning + 20.0);
+
+        $trend_ratio = 0.0;
+
+        if ($trend_value > 0) {
+            $trend_ratio = sitepulse_custom_dashboard_calculate_severity_ratio($trend_value, $trend_warning, $trend_critical, 'higher-is-worse');
+        }
+
+        $speed_score = (($speed_ratio * 0.8) + ($trend_ratio * 0.2)) * 100.0;
+        $speed_entry['score'] = round($speed_score, 2);
+        $speed_entry['status'] = sitepulse_custom_dashboard_resolve_score_status($speed_entry['score']);
+
+        $signal_parts = [];
+        $signal_parts[] = sprintf(__('Average %s ms', 'sitepulse'), number_format_i18n($average, 1));
+
+        if ($trend_value > 0) {
+            $signal_parts[] = sprintf(__('Slower +%s ms', 'sitepulse'), number_format_i18n($trend_value, 1));
+        } elseif ($trend_value < 0) {
+            $signal_parts[] = sprintf(__('Faster %s ms', 'sitepulse'), number_format_i18n($trend_value, 1));
+        }
+
+        $speed_entry['signal'] = implode(' • ', $signal_parts);
+
+        $speed_entry['details'][] = [
+            'label' => __('Average', 'sitepulse'),
+            'value' => sprintf('%s ms', number_format_i18n($average, 1)),
+        ];
+
+        if (isset($speed['samples'])) {
+            $speed_entry['details'][] = [
+                'label' => __('Samples', 'sitepulse'),
+                'value' => number_format_i18n((int) $speed['samples']),
+            ];
+        }
+
+        $weight_value = isset($weights['speed_analyzer']) ? max(0.0, (float) $weights['speed_analyzer']) : 0.0;
+
+        if ($weight_value > 0) {
+            $active_weights['speed_analyzer'] = $weight_value;
+        }
+
+        if ($speed_entry['score'] > $dominant_score) {
+            $dominant_score  = $speed_entry['score'];
+            $dominant_module = 'speed_analyzer';
+        }
+    } elseif (!$speed_entry['active']) {
+        $speed_entry['signal'] = __('Module inactive', 'sitepulse');
+    } else {
+        $speed_entry['signal'] = __('Awaiting speed data', 'sitepulse');
+    }
+
+    $modules_output['speed_analyzer'] = $speed_entry;
+
+    // AI insights scoring.
+    $ai_entry = [
+        'label'  => $module_labels['ai_insights'],
+        'status' => 'status-warn',
+        'score'  => null,
+        'active' => !empty($modules_status['ai_insights']),
+        'details'=> [],
+        'signal' => '',
+    ];
+
+    $recent_total   = isset($ai_summary['recent_total']) ? (int) $ai_summary['recent_total'] : 0;
+    $recent_pending = isset($ai_summary['recent_pending']) ? (int) $ai_summary['recent_pending'] : 0;
+    $recent_ack     = isset($ai_summary['recent_acknowledged']) ? (int) $ai_summary['recent_acknowledged'] : 0;
+    $stale_pending  = isset($ai_summary['stale_pending']) ? (int) $ai_summary['stale_pending'] : 0;
+
+    if ($ai_entry['active']) {
+        $pending_warning = apply_filters('sitepulse_transverse_impact_ai_pending_warning', 1, $range_id, $ai_summary);
+        $pending_warning = is_numeric($pending_warning) ? max(0.0, (float) $pending_warning) : 1.0;
+
+        $pending_critical = apply_filters('sitepulse_transverse_impact_ai_pending_critical', 3, $range_id, $ai_summary);
+        $pending_critical = is_numeric($pending_critical) ? max($pending_warning + 1.0, (float) $pending_critical) : ($pending_warning + 2.0);
+
+        $pending_ratio = sitepulse_custom_dashboard_calculate_severity_ratio($recent_pending, $pending_warning, $pending_critical, 'higher-is-worse');
+
+        $backlog_critical = apply_filters('sitepulse_transverse_impact_ai_backlog_critical', 5, $range_id, $ai_summary);
+        $backlog_critical = is_numeric($backlog_critical) ? max(1.0, (float) $backlog_critical) : 5.0;
+
+        $backlog_ratio = sitepulse_custom_dashboard_calculate_severity_ratio($stale_pending, 0.0, $backlog_critical, 'higher-is-worse');
+
+        $ai_score = (($pending_ratio * 0.75) + ($backlog_ratio * 0.25)) * 100.0;
+        $ai_entry['score'] = round($ai_score, 2);
+        $ai_entry['status'] = sitepulse_custom_dashboard_resolve_score_status($ai_entry['score']);
+
+        $signal_parts = [];
+
+        if ($recent_pending > 0) {
+            $signal_parts[] = sprintf(
+                _n('%s pending insight', '%s pending insights', $recent_pending, 'sitepulse'),
+                number_format_i18n($recent_pending)
+            );
+        } elseif ($recent_total > 0) {
+            $signal_parts[] = __('Backlog cleared', 'sitepulse');
+        }
+
+        if ($recent_total > 0) {
+            $signal_parts[] = sprintf(
+                _n('%s insight generated', '%s insights generated', $recent_total, 'sitepulse'),
+                number_format_i18n($recent_total)
+            );
+        }
+
+        if ($stale_pending > 0) {
+            $signal_parts[] = sprintf(
+                _n('%s legacy pending', '%s legacy pending', $stale_pending, 'sitepulse'),
+                number_format_i18n($stale_pending)
+            );
+        }
+
+        $ai_entry['signal'] = implode(' • ', array_filter($signal_parts));
+
+        $ai_entry['details'][] = [
+            'label' => __('New insights', 'sitepulse'),
+            'value' => number_format_i18n($recent_total),
+        ];
+
+        $ai_entry['details'][] = [
+            'label' => __('Pending', 'sitepulse'),
+            'value' => number_format_i18n($recent_pending),
+        ];
+
+        if ($recent_ack > 0) {
+            $ai_entry['details'][] = [
+                'label' => __('Acknowledged', 'sitepulse'),
+                'value' => number_format_i18n($recent_ack),
+            ];
+        }
+
+        if ($stale_pending > 0) {
+            $ai_entry['details'][] = [
+                'label' => __('Legacy backlog', 'sitepulse'),
+                'value' => number_format_i18n($stale_pending),
+            ];
+        }
+
+        $weight_value = isset($weights['ai_insights']) ? max(0.0, (float) $weights['ai_insights']) : 0.0;
+
+        if ($weight_value > 0) {
+            $active_weights['ai_insights'] = $weight_value;
+        }
+
+        if ($ai_entry['score'] > $dominant_score) {
+            $dominant_score  = $ai_entry['score'];
+            $dominant_module = 'ai_insights';
+        }
+    } elseif (!$ai_entry['active']) {
+        $ai_entry['signal'] = __('Module inactive', 'sitepulse');
+    } else {
+        $ai_entry['signal'] = __('Awaiting AI insights', 'sitepulse');
+    }
+
+    $modules_output['ai_insights'] = $ai_entry;
+
+    $impact = [
+        'range'           => $range_id,
+        'updated_at'      => $now,
+        'window_seconds'  => $window_seconds,
+        'modules'         => $modules_output,
+        'dominant_module' => $dominant_module,
+        'overall'         => null,
+        'active_modules'  => 0,
+    ];
+
+    if (!empty($active_weights)) {
+        $total_weight = array_sum($active_weights);
+
+        if ($total_weight > 0) {
+            $weighted_sum = 0.0;
+
+            foreach ($active_weights as $module_key => $weight) {
+                if (!isset($modules_output[$module_key]['score']) || !is_numeric($modules_output[$module_key]['score'])) {
+                    continue;
+                }
+
+                $weighted_sum += (float) $modules_output[$module_key]['score'] * ($weight / $total_weight);
+            }
+
+            $impact['overall'] = round($weighted_sum, 2);
+        }
+    }
+
+    foreach ($modules_output as $module_data) {
+        if (!empty($module_data['active']) && isset($module_data['score']) && is_numeric($module_data['score'])) {
+            $impact['active_modules']++;
+        }
+    }
+
+    sitepulse_custom_dashboard_store_impact_index($impact);
+
+    return $impact;
+}
+
+/**
+ * Formats the impact card view for the dashboard KPI grid.
+ *
+ * @param array<string,mixed>|null $impact      Impact payload.
+ * @param string                   $range_label Human-readable range label.
+ * @return array<string,mixed>
+ */
+function sitepulse_custom_dashboard_format_impact_card_view($impact, $range_label) {
+    $status_meta = sitepulse_custom_dashboard_resolve_status_meta('status-warn');
+
+    $card = [
+        'label'            => __('Impact index', 'sitepulse'),
+        'status'           => array_merge($status_meta, ['class' => 'status-warn']),
+        'value'            => ['text' => __('N/A', 'sitepulse'), 'unit' => ''],
+        'summary'          => __('No impact data available for this window.', 'sitepulse'),
+        'trend'            => sitepulse_custom_dashboard_format_trend(null),
+        'details'          => [],
+        'description'      => '',
+        'inactive'         => false,
+        'inactive_message' => '',
+    ];
+
+    if (!is_array($impact) || empty($impact['modules']) || !is_array($impact['modules'])) {
+        $card['inactive'] = true;
+        $card['inactive_message'] = __('Activate the monitoring modules to compute the impact score.', 'sitepulse');
+        $card['description'] = sprintf(__('No impact score could be generated for %s.', 'sitepulse'), $range_label);
+
+        return $card;
+    }
+
+    $modules = $impact['modules'];
+    $overall = isset($impact['overall']) && is_numeric($impact['overall']) ? (float) $impact['overall'] : null;
+    $dominant = isset($impact['dominant_module']) ? (string) $impact['dominant_module'] : '';
+
+    if ($overall !== null) {
+        $status_key  = sitepulse_custom_dashboard_resolve_score_status($overall);
+        $status_meta = sitepulse_custom_dashboard_resolve_status_meta($status_key);
+
+        $card['status'] = array_merge($status_meta, ['class' => $status_key]);
+        $card['value']  = ['text' => number_format_i18n($overall, 1), 'unit' => ''];
+    }
+
+    $dominant_label = '';
+    $dominant_score = null;
+
+    if ($dominant !== '' && isset($modules[$dominant]) && is_array($modules[$dominant])) {
+        $dominant_label = isset($modules[$dominant]['label']) ? $modules[$dominant]['label'] : $dominant;
+        $dominant_score = isset($modules[$dominant]['score']) && is_numeric($modules[$dominant]['score'])
+            ? (float) $modules[$dominant]['score']
+            : null;
+    }
+
+    if ($dominant_label === '') {
+        foreach ($modules as $module_data) {
+            if (!is_array($module_data)) {
+                continue;
+            }
+
+            if (isset($module_data['score']) && is_numeric($module_data['score'])) {
+                $dominant_label = isset($module_data['label']) ? $module_data['label'] : '';
+                $dominant_score = (float) $module_data['score'];
+                break;
+            }
+        }
+    }
+
+    if ($overall !== null && $overall < 35.0) {
+        $card['summary'] = sprintf(__('Signals nominal across monitored modules for %s.', 'sitepulse'), $range_label);
+    } elseif ($dominant_label !== '' && $dominant_score !== null) {
+        if ($dominant_score >= 70.0) {
+            $card['summary'] = sprintf(__('Critical pressure from %s.', 'sitepulse'), $dominant_label);
+        } else {
+            $card['summary'] = sprintf(__('Attention needed on %s.', 'sitepulse'), $dominant_label);
+        }
+    } else {
+        $card['summary'] = sprintf(__('Impact score partially available for %s.', 'sitepulse'), $range_label);
+    }
+
+    $card['description'] = sprintf(__('Weighted synthesis of uptime, speed and AI insights over %s.', 'sitepulse'), $range_label);
+
+    $has_active_score = false;
+
+    foreach ($modules as $module_key => $module_data) {
+        if (!is_array($module_data)) {
+            continue;
+        }
+
+        $label = isset($module_data['label']) ? $module_data['label'] : ucfirst(str_replace('_', ' ', (string) $module_key));
+        $score_value = isset($module_data['score']) && is_numeric($module_data['score'])
+            ? number_format_i18n((float) $module_data['score'], 1)
+            : __('N/A', 'sitepulse');
+        $status_key  = isset($module_data['status']) ? (string) $module_data['status'] : 'status-warn';
+        $status_meta = sitepulse_custom_dashboard_resolve_status_meta($status_key);
+        $signal      = isset($module_data['signal']) ? $module_data['signal'] : '';
+
+        $detail_value = $score_value;
+
+        if (!empty($status_meta['label'])) {
+            $detail_value .= ' • ' . $status_meta['label'];
+        }
+
+        if ($signal !== '') {
+            $detail_value .= ' — ' . $signal;
+        }
+
+        $card['details'][] = [
+            'label' => $label,
+            'value' => $detail_value,
+        ];
+
+        if (!empty($module_data['active']) && isset($module_data['score']) && is_numeric($module_data['score'])) {
+            $has_active_score = true;
+        }
+    }
+
+    if (!$has_active_score) {
+        $card['inactive'] = true;
+        $card['inactive_message'] = __('No active module provided enough data to compute the impact index.', 'sitepulse');
+    }
+
+    return $card;
+}
+
+/**
+ * Formats rows describing the impact index for CSV exports.
+ *
+ * @param array<string,mixed> $impact      Impact payload.
+ * @param string              $range_label Range label used in the export.
+ * @return array<int,array<int,string>>
+ */
+function sitepulse_custom_dashboard_format_impact_export_rows($impact, $range_label) {
+    if (!is_array($impact) || empty($impact['modules']) || !is_array($impact['modules'])) {
+        return [];
+    }
+
+    $rows = [];
+    $rows[] = [__('Indice transverse', 'sitepulse'), $range_label];
+
+    if (isset($impact['overall']) && is_numeric($impact['overall'])) {
+        $overall    = (float) $impact['overall'];
+        $status_key = sitepulse_custom_dashboard_resolve_score_status($overall);
+        $status_meta = sitepulse_custom_dashboard_resolve_status_meta($status_key);
+
+        $rows[] = [
+            __('Score global', 'sitepulse'),
+            number_format_i18n($overall, 1),
+            $status_meta['label'],
+        ];
+    }
+
+    $rows[] = [
+        __('Module', 'sitepulse'),
+        __('Score', 'sitepulse'),
+        __('Statut', 'sitepulse'),
+        __('Signal clé', 'sitepulse'),
+    ];
+
+    foreach ($impact['modules'] as $module_data) {
+        if (!is_array($module_data)) {
+            continue;
+        }
+
+        $label = isset($module_data['label']) ? $module_data['label'] : '';
+        $score_text = isset($module_data['score']) && is_numeric($module_data['score'])
+            ? number_format_i18n((float) $module_data['score'], 1)
+            : __('N/A', 'sitepulse');
+        $status_key = isset($module_data['status']) ? (string) $module_data['status'] : 'status-warn';
+        $status_meta = sitepulse_custom_dashboard_resolve_status_meta($status_key);
+        $signal = isset($module_data['signal']) ? $module_data['signal'] : '';
+
+        $rows[] = [
+            $label,
+            $score_text,
+            $status_meta['label'],
+            $signal,
+        ];
+    }
+
+    return $rows;
 }
 
 /**
