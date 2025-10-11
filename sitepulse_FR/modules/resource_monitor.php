@@ -219,7 +219,9 @@ function sitepulse_resource_monitor_rest_history($request) {
     $required_consecutive = sitepulse_resource_monitor_get_required_consecutive_snapshots();
 
     $response = [
-        'generated_at' => time(),
+        'generated_at' => function_exists('current_time')
+            ? (int) current_time('timestamp', true)
+            : time(),
         'request'      => [
             'per_page'         => $per_page,
             'since'            => $since_timestamp,

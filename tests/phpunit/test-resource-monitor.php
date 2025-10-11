@@ -87,13 +87,34 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
 
         add_filter('sitepulse_resource_monitor_cache_ttl', $callback, 10, 2);
 
+        $start_generated_at = function_exists('current_time')
+            ? (int) current_time('timestamp', true)
+            : time();
+
         $start = time();
         $snapshot = sitepulse_resource_monitor_get_snapshot();
+
+        $end_generated_at = function_exists('current_time')
+            ? (int) current_time('timestamp', true)
+            : time();
 
         remove_filter('sitepulse_resource_monitor_cache_ttl', $callback, 10);
 
         $this->assertSame(1, $filter_calls, 'Cache TTL filter should run once when generating a snapshot.');
         $this->assertSame($snapshot, $captured_snapshot, 'Filter should receive the freshly generated snapshot.');
+
+        $this->assertArrayHasKey('generated_at', $snapshot, 'Snapshot should include a generated_at timestamp.');
+        $this->assertIsInt($snapshot['generated_at'], 'Snapshot timestamp should be stored as an integer.');
+        $this->assertGreaterThanOrEqual(
+            $start_generated_at,
+            $snapshot['generated_at'],
+            'Snapshot timestamp should not be earlier than the pre-call UTC timestamp.'
+        );
+        $this->assertLessThanOrEqual(
+            $end_generated_at,
+            $snapshot['generated_at'],
+            'Snapshot timestamp should not be later than the post-call UTC timestamp.'
+        );
 
         $this->assertArrayHasKey('memory_usage_bytes', $snapshot, 'Snapshot should expose raw memory usage in bytes.');
         $this->assertArrayHasKey('disk_free_bytes', $snapshot, 'Snapshot should expose raw disk space in bytes.');
