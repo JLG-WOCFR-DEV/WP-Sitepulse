@@ -102,7 +102,7 @@ function sitepulse_schedule_debug_admin_notice($message, $type = 'error')
             'level'   => $type,
         ];
 
-        update_option(SITEPULSE_OPTION_DEBUG_NOTICES, $queued_notices);
+        update_option(SITEPULSE_OPTION_DEBUG_NOTICES, $queued_notices, false);
 
         return;
     }
@@ -179,7 +179,7 @@ function sitepulse_display_queued_debug_notices()
     if (function_exists('delete_option')) {
         delete_option(SITEPULSE_OPTION_DEBUG_NOTICES);
     } elseif (function_exists('update_option')) {
-        update_option(SITEPULSE_OPTION_DEBUG_NOTICES, []);
+        update_option(SITEPULSE_OPTION_DEBUG_NOTICES, [], false);
     }
 }
 
