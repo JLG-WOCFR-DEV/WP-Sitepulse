@@ -1810,8 +1810,6 @@ function sitepulse_ai_schedule_generation_job($force_refresh) {
         }
 
         if ('completed' === $job_state['status']) {
-            sitepulse_ai_delete_job_data($job_id);
-
             return $job_id;
         }
 
@@ -1856,34 +1854,65 @@ function sitepulse_ai_schedule_generation_job($force_refresh) {
     }
 
     if ($spawn_failed) {
-        $async_response = sitepulse_ai_trigger_async_job_request($job_id);
+        $async_response       = sitepulse_ai_trigger_async_job_request($job_id);
+        $async_error_log      = '';
+        $async_error_details  = '';
+        $async_error_code     = 500;
 
         if (is_wp_error($async_response)) {
-            $async_message = $async_response->get_error_message();
+            $async_error_details = $async_response->get_error_message();
+            $async_error_code    = sitepulse_ai_get_error_status_code($async_response, 500);
 
-            if ('' !== $async_message) {
-                $async_error = sprintf(
+            if ('' !== $async_error_details) {
+                $async_error_log = sprintf(
                     /* translators: %s: Error details. */
                     esc_html__('Échec du déclenchement immédiat de l’analyse IA via AJAX : %s', 'sitepulse'),
-                    $async_message
+                    $async_error_details
                 );
             } else {
-                $async_error = esc_html__('Échec du déclenchement immédiat de l’analyse IA via AJAX.', 'sitepulse');
+                $async_error_log = esc_html__('Échec du déclenchement immédiat de l’analyse IA via AJAX.', 'sitepulse');
             }
-
-            sitepulse_ai_record_critical_error($async_error);
         } else {
             $response_code = (int) wp_remote_retrieve_response_code($async_response);
 
             if ($response_code >= 400) {
-                $async_error = sprintf(
+                $async_error_code = $response_code;
+                $async_error_log  = sprintf(
                     /* translators: %d: HTTP status code. */
                     esc_html__('Échec du déclenchement immédiat de l’analyse IA via AJAX (code HTTP %d).', 'sitepulse'),
                     $response_code
                 );
-
-                sitepulse_ai_record_critical_error($async_error);
+                $async_error_details = (string) wp_remote_retrieve_response_message($async_response);
             }
+        }
+
+        if ('' !== $async_error_log) {
+            sitepulse_ai_record_critical_error($async_error_log);
+
+            $user_message = esc_html__('Impossible de déclencher immédiatement l’analyse IA. Réessayez dans quelques instants.', 'sitepulse');
+
+            if ('' !== $async_error_details) {
+                $user_message = sprintf(
+                    /* translators: %s: Error details. */
+                    esc_html__('Impossible de déclencher immédiatement l’analyse IA : %s', 'sitepulse'),
+                    wp_strip_all_tags($async_error_details)
+                );
+            }
+
+            if (function_exists('wp_unschedule_event')) {
+                wp_unschedule_event($current_time, 'sitepulse_run_ai_insight_job', [$job_id]);
+            }
+
+            sitepulse_ai_delete_job_data($job_id);
+
+            return sitepulse_ai_create_wp_error(
+                'sitepulse_ai_job_async_trigger_failed',
+                $user_message,
+                $async_error_code,
+                [
+                    'details' => wp_strip_all_tags($async_error_details),
+                ]
+            );
         }
     }
 
@@ -2775,6 +2804,22 @@ function sitepulse_get_ai_insight_status() {
     $response = [
         'status' => $status,
     ];
+
+    if (isset($job_data['created_at'])) {
+        $response['created_at'] = (int) $job_data['created_at'];
+    }
+
+    if (isset($job_data['finished'])) {
+        $response['finished_at'] = (int) $job_data['finished'];
+    }
+
+    if (isset($job_data['force_refresh'])) {
+        $response['force_refresh'] = (bool) $job_data['force_refresh'];
+    }
+
+    if (isset($job_data['fallback'])) {
+        $response['fallback'] = sanitize_text_field((string) $job_data['fallback']);
+    }
 
     if ('completed' === $status && isset($job_data['result']) && is_array($job_data['result'])) {
         $response['result'] = $job_data['result'];
