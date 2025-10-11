@@ -237,30 +237,35 @@ $raw_queue = [
         'payload'     => ['url' => 'https://example.com'],
         'scheduled_at'=> $now - 400,
         'created_at'  => $now - 500,
+        'priority'    => 5,
     ],
     [
         'agent'       => 'agent-a',
         'payload'     => ['url' => 'https://example.com'],
         'scheduled_at'=> $now - 400,
         'created_at'  => $now - 100,
+        'priority'    => 10,
     ],
     [
         'agent'       => 'agent-b',
         'payload'     => ['url' => 'https://example.net'],
         'scheduled_at'=> $now - (DAY_IN_SECONDS + 100),
         'created_at'  => $now - (DAY_IN_SECONDS + 50),
+        'priority'    => 4,
     ],
     [
         'agent'       => 'agent-c',
         'payload'     => ['url' => 'https://example.org'],
-        'scheduled_at'=> $now + 600,
+        'scheduled_at'=> $now - 300,
         'created_at'  => $now - 50,
+        'priority'    => 2,
     ],
     [
         'agent'       => 'agent-d',
         'payload'     => ['url' => 'https://example.net/ping'],
         'scheduled_at'=> $now - 10,
         'created_at'  => $now - 20,
+        'priority'    => 1,
     ],
     'invalid-item',
 ];
@@ -268,6 +273,7 @@ $raw_queue = [
 $normalized = sitepulse_uptime_normalize_remote_queue($raw_queue, $now);
 
 sitepulse_assert(count($normalized) === 2, 'Normalized queue should honour remote queue max size.');
+sitepulse_assert($normalized[0]['priority'] === 10, 'Normalized queue should retain the highest priority for duplicates.');
 
 $metrics_payload = get_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE_METRICS, []);
 sitepulse_assert(is_array($metrics_payload), 'Metrics payload must be stored as an array.');
@@ -283,9 +289,12 @@ sitepulse_assert($metrics['dropped_invalid'] === 1, 'Invalid entries should be r
 sitepulse_assert($metrics['dropped_overflow'] === 1, 'Overflow entries should be tracked when the limit is reached.');
 sitepulse_assert($metrics['delayed_jobs'] === 2, 'Both retained entries are already due and must be counted as delayed.');
 sitepulse_assert($metrics['max_wait_seconds'] === 400, 'Max wait should reflect the oldest scheduled timestamp.');
-sitepulse_assert($metrics['avg_wait_seconds'] === 205, 'Average wait should be rounded to the nearest second.');
+sitepulse_assert($metrics['avg_wait_seconds'] === 350, 'Average wait should be rounded to the nearest second.');
 sitepulse_assert($metrics['next_scheduled_at'] === $now - 400, 'Next scheduled timestamp should match the oldest entry.');
 sitepulse_assert($metrics['oldest_created_at'] === $now - 500, 'Oldest created timestamp should track the earliest queue entry.');
+sitepulse_assert($metrics['prioritized_jobs'] === 2, 'Prioritized jobs count should reflect retained queue entries.');
+sitepulse_assert($metrics['max_priority'] === 10, 'Max priority should capture the most urgent job.');
+sitepulse_assert($metrics['avg_priority'] === 6, 'Average priority should aggregate the retained jobs.');
 
 // Scenario 4b: queue analysis summarises alerts and exposes formatted labels.
 $analysis_payload = [
@@ -305,12 +314,16 @@ $analysis_payload = [
         'dropped_expired'    => 1,
         'dropped_duplicates' => 0,
         'dropped_overflow'   => 0,
+        'prioritized_jobs'   => 2,
+        'max_priority'       => 9,
+        'avg_priority'       => 6,
     ],
 ];
 
 $analysis = sitepulse_uptime_analyze_remote_queue($analysis_payload, $now);
 $alerts = $analysis['status']['alerts'];
 $capacity_alert = null;
+$priority_alert = null;
 
 foreach ($alerts as $alert) {
     if (isset($alert['code']) && $alert['code'] === 'queue_capacity_exceeded') {
@@ -319,9 +332,17 @@ foreach ($alerts as $alert) {
     }
 }
 
+foreach ($alerts as $alert) {
+    if (isset($alert['code']) && $alert['code'] === 'queue_priority_backlog') {
+        $priority_alert = $alert;
+        break;
+    }
+}
+
 sitepulse_assert($analysis['status']['level'] === 'critical', 'Combined capacity pressure and wait time should escalate to critical.');
 sitepulse_assert($analysis['metrics']['dropped_total'] === 2, 'Dropped total should include invalid and expired entries.');
 sitepulse_assert($capacity_alert !== null, 'Capacity alert should be raised when the queue reaches its maximum size.');
+sitepulse_assert($priority_alert !== null, 'Priority backlog alert should surface when high priority jobs are delayed.');
 sitepulse_assert(isset($analysis['schedule']['next']['label']) && $analysis['schedule']['next']['label'] !== '—', 'Next schedule label should provide formatted output.');
 
 // Scenario 5: persistent outage with unknown sample keeps original incident start.
