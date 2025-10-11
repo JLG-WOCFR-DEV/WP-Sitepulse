@@ -576,7 +576,11 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
 
         $job_data = sitepulse_ai_get_job_data($job_id);
 
-        $this->assertSame([], $job_data, 'Job metadata should be cleared once the synchronous fallback responds.');
+        $this->assertNotEmpty($job_data, 'Job metadata should persist so the UI can retrieve the result.');
+        $this->assertArrayHasKey('status', $job_data);
+        $this->assertSame('completed', $job_data['status'], 'Synchronous fallback should mark the job as completed.');
+        $this->assertArrayHasKey('result', $job_data, 'Job metadata should expose the generated result.');
+        $this->assertSame('Analyse générée en mode synchrone.', $job_data['result']['text']);
 
         $history_entries = sitepulse_ai_get_history_entries();
 
@@ -584,6 +588,8 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->assertSame('Analyse générée en mode synchrone.', $history_entries[0]['text']);
 
         $this->assertSame(1, $this->http_request_count, 'Synchronous fallback should execute the HTTP request once.');
+
+        sitepulse_ai_delete_job_data($job_id);
     }
 
     /**
@@ -643,6 +649,258 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->assertIsArray($logged_errors);
         $this->assertNotEmpty($logged_errors, 'Spawn failure should be visible in Site Health.');
         $this->assertStringContainsString('WP-Cron', end($logged_errors)['message']);
+    }
+
+    /**
+     * Ensures that a failing AJAX trigger surfaces a WP_Error instead of leaving the UI polling indefinitely.
+     */
+    public function test_schedule_returns_error_when_ajax_trigger_fails() {
+        add_filter('sitepulse_ai_spawn_cron_callable', [$this, 'filter_mock_spawn_callable'], 10, 2);
+        add_filter('pre_http_request', [$this, 'mock_async_job_request_failure'], 10, 3);
+
+        $result = sitepulse_ai_schedule_generation_job(false);
+
+        remove_filter('pre_http_request', [$this, 'mock_async_job_request_failure'], 10);
+        remove_filter('sitepulse_ai_spawn_cron_callable', [$this, 'filter_mock_spawn_callable'], 10);
+
+        $this->assertInstanceOf('WP_Error', $result, 'Scheduling should surface a WP_Error when the AJAX trigger fails.');
+        $this->assertSame('sitepulse_ai_job_async_trigger_failed', $result->get_error_code());
+        $this->assertStringContainsString(
+            'Impossible de déclencher immédiatement l’analyse IA',
+            $result->get_error_message(),
+            'Error message should inform the user that the immediate trigger failed.'
+        );
+
+        $this->assertSame(1, $this->async_request_count, 'A single asynchronous request should be attempted.');
+        $this->assertNotEmpty($this->last_async_request, 'Request arguments should be captured for debugging.');
+
+        if (isset($this->last_async_request['body']['job_id'])) {
+            $job_id = $this->last_async_request['body']['job_id'];
+
+            $this->assertSame([], sitepulse_ai_get_job_data($job_id), 'Job metadata should be cleared after a failed async trigger.');
+
+            if (function_exists('wp_next_scheduled')) {
+                $this->assertFalse(
+                    wp_next_scheduled('sitepulse_run_ai_insight_job', [$job_id]),
+                    'The failed job should be unscheduled to avoid unexpected executions.'
+                );
+            }
+        }
+    }
+
+    /**
+     * Ensures the status endpoint exposes the completed payload and clears metadata once consumed.
+     */
+    public function test_status_returns_completed_payload_and_cleans_job_metadata() {
+        $job_id      = 'job-completed';
+        $created_at  = time() - 5;
+        $started_at  = $created_at + 2;
+        $finished_at = time();
+        $result      = [
+            'text'       => 'Analyse prête.',
+            'html'       => '<p>Analyse prête.</p>',
+            'timestamp'  => absint(current_time('timestamp', true)),
+            'cached'     => false,
+            'model'      => [
+                'key'   => 'gemini-1.5-pro',
+                'label' => 'Gemini 1.5 Pro',
+            ],
+            'rate_limit' => [
+                'key'   => 'week',
+                'label' => 'Une fois par semaine',
+            ],
+            'id'   => 'ai-history-entry',
+            'note' => '',
+        ];
+
+        $saved = sitepulse_ai_save_job_data($job_id, [
+            'status'        => 'completed',
+            'result'        => $result,
+            'created_at'    => $created_at,
+            'started_at'    => $started_at,
+            'finished'      => $finished_at,
+            'force_refresh' => true,
+            'fallback'      => ' <b>synchronous</b> ',
+        ]);
+
+        $this->assertTrue($saved, 'Job metadata should be stored for the status endpoint.');
+
+        $_POST['nonce']  = wp_create_nonce(SITEPULSE_NONCE_ACTION_AI_INSIGHT);
+        $_POST['job_id'] = $job_id;
+
+        try {
+            $this->_handleAjax('sitepulse_get_ai_insight_status');
+        } catch (WPAjaxDieStopException $exception) {
+            // Expected.
+        }
+
+        $response = json_decode($this->_last_response, true);
+
+        $this->assertIsArray($response);
+        $this->assertArrayHasKey('success', $response);
+        $this->assertTrue($response['success'], 'Completed jobs should resolve successfully.');
+        $this->assertArrayHasKey('data', $response);
+
+        $data = $response['data'];
+
+        $this->assertSame('completed', $data['status']);
+        $this->assertArrayHasKey('result', $data);
+        $this->assertSame($result, $data['result'], 'The stored result should be returned as-is.');
+        $this->assertArrayHasKey('created_at', $data);
+        $this->assertSame($created_at, $data['created_at']);
+        $this->assertArrayHasKey('started_at', $data);
+        $this->assertSame($started_at, $data['started_at']);
+        $this->assertArrayHasKey('finished_at', $data);
+        $this->assertSame($finished_at, $data['finished_at']);
+        $this->assertArrayHasKey('force_refresh', $data);
+        $this->assertTrue($data['force_refresh']);
+        $this->assertArrayHasKey('fallback', $data);
+        $this->assertSame('synchronous', $data['fallback']);
+
+        $this->assertSame([], sitepulse_ai_get_job_data($job_id), 'Job metadata should be removed after retrieval.');
+
+        $_POST = [];
+    }
+
+    /**
+     * Ensures the status endpoint propagates failure metadata and cleans up stored state.
+     */
+    public function test_status_returns_failure_payload_with_retry_information() {
+        $job_id      = 'job-failed';
+        $created_at  = time() - 10;
+        $finished_at = time();
+        $retry_at    = $finished_at + 120;
+
+        $saved = sitepulse_ai_save_job_data($job_id, [
+            'status'        => 'failed',
+            'message'       => 'Analyse indisponible.',
+            'code'          => 503,
+            'retry_after'   => 120,
+            'retry_at'      => $retry_at,
+            'created_at'    => $created_at,
+            'started_at'    => $created_at + 1,
+            'finished'      => $finished_at,
+            'force_refresh' => false,
+        ]);
+
+        $this->assertTrue($saved, 'Failed job metadata should be persisted.');
+
+        $_POST['nonce']  = wp_create_nonce(SITEPULSE_NONCE_ACTION_AI_INSIGHT);
+        $_POST['job_id'] = $job_id;
+
+        try {
+            $this->_handleAjax('sitepulse_get_ai_insight_status');
+        } catch (WPAjaxDieStopException $exception) {
+            // Expected.
+        }
+
+        $response = json_decode($this->_last_response, true);
+
+        $this->assertIsArray($response);
+        $this->assertTrue($response['success'], 'Failed jobs still return a successful transport payload.');
+        $this->assertArrayHasKey('data', $response);
+
+        $data = $response['data'];
+
+        $this->assertSame('failed', $data['status']);
+        $this->assertArrayHasKey('message', $data);
+        $this->assertSame('Analyse indisponible.', $data['message']);
+        $this->assertArrayHasKey('code', $data);
+        $this->assertSame(503, $data['code']);
+        $this->assertArrayHasKey('retry_after', $data);
+        $this->assertSame(120, $data['retry_after']);
+        $this->assertArrayHasKey('retry_at', $data);
+        $this->assertSame($retry_at, $data['retry_at']);
+        $this->assertArrayHasKey('created_at', $data);
+        $this->assertSame($created_at, $data['created_at']);
+        $this->assertArrayHasKey('started_at', $data);
+        $this->assertSame($created_at + 1, $data['started_at']);
+        $this->assertArrayHasKey('finished_at', $data);
+        $this->assertSame($finished_at, $data['finished_at']);
+        $this->assertArrayHasKey('force_refresh', $data);
+        $this->assertFalse($data['force_refresh']);
+
+        $this->assertSame([], sitepulse_ai_get_job_data($job_id), 'Failed job metadata should be deleted after retrieval.');
+
+        $_POST = [];
+    }
+
+    /**
+     * Ensures running jobs expose timing metadata without clearing stored state.
+     */
+    public function test_status_returns_running_metadata_without_clearing_state() {
+        $job_id     = 'job-running';
+        $created_at = time() - 10;
+        $started_at = time() - 3;
+
+        $saved = sitepulse_ai_save_job_data($job_id, [
+            'status'        => 'running',
+            'created_at'    => $created_at,
+            'started_at'    => $started_at,
+            'force_refresh' => false,
+        ]);
+
+        $this->assertTrue($saved, 'Running job metadata should be persisted.');
+
+        $_POST['nonce']  = wp_create_nonce(SITEPULSE_NONCE_ACTION_AI_INSIGHT);
+        $_POST['job_id'] = $job_id;
+
+        try {
+            $this->_handleAjax('sitepulse_get_ai_insight_status');
+        } catch (WPAjaxDieStopException $exception) {
+            // Expected.
+        }
+
+        $response = json_decode($this->_last_response, true);
+
+        $this->assertIsArray($response);
+        $this->assertTrue($response['success']);
+        $this->assertArrayHasKey('data', $response);
+
+        $data = $response['data'];
+
+        $this->assertSame('running', $data['status']);
+        $this->assertArrayHasKey('created_at', $data);
+        $this->assertSame($created_at, $data['created_at']);
+        $this->assertArrayHasKey('started_at', $data);
+        $this->assertSame($started_at, $data['started_at']);
+        $this->assertArrayNotHasKey('finished_at', $data);
+
+        $stored_job = sitepulse_ai_get_job_data($job_id);
+
+        $this->assertIsArray($stored_job, 'Running job metadata should remain stored.');
+        $this->assertArrayHasKey('status', $stored_job);
+        $this->assertSame('running', $stored_job['status']);
+
+        $_POST = [];
+    }
+
+    /**
+     * Ensures the status endpoint reports an error when metadata is missing or expired.
+     */
+    public function test_status_returns_error_when_job_metadata_is_missing() {
+        $_POST['nonce']  = wp_create_nonce(SITEPULSE_NONCE_ACTION_AI_INSIGHT);
+        $_POST['job_id'] = 'missing-job';
+
+        try {
+            $this->_handleAjax('sitepulse_get_ai_insight_status');
+        } catch (WPAjaxDieStopException $exception) {
+            // Expected.
+        }
+
+        $response = json_decode($this->_last_response, true);
+
+        $this->assertIsArray($response);
+        $this->assertFalse($response['success']);
+        $this->assertArrayHasKey('data', $response);
+        $this->assertArrayHasKey('message', $response['data']);
+        $this->assertNotEmpty($response['data']['message']);
+
+        if (property_exists($this, '_last_response_code')) {
+            $this->assertSame(404, $this->_last_response_code);
+        }
+
+        $_POST = [];
     }
 
     /**
@@ -779,6 +1037,26 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
                 'message' => 'OK',
             ],
         ];
+    }
+
+    /**
+     * Simulates an asynchronous request failure (loopback disabled or remote error).
+     *
+     * @param false|array $preempt Whether to short-circuit the HTTP request.
+     * @param array        $args    HTTP request arguments.
+     * @param string       $url     Destination URL.
+     *
+     * @return WP_Error|false
+     */
+    public function mock_async_job_request_failure($preempt, $args, $url) {
+        if (false === strpos($url, 'admin-ajax.php')) {
+            return $preempt;
+        }
+
+        $this->async_request_count++;
+        $this->last_async_request = $args;
+
+        return new WP_Error('http_request_failed', 'Loopback request blocked.');
     }
 
     /**
