@@ -694,6 +694,7 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
     public function test_status_returns_completed_payload_and_cleans_job_metadata() {
         $job_id      = 'job-completed';
         $created_at  = time() - 5;
+        $started_at  = $created_at + 2;
         $finished_at = time();
         $result      = [
             'text'       => 'Analyse prête.',
@@ -716,9 +717,10 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
             'status'        => 'completed',
             'result'        => $result,
             'created_at'    => $created_at,
+            'started_at'    => $started_at,
             'finished'      => $finished_at,
             'force_refresh' => true,
-            'fallback'      => 'synchronous',
+            'fallback'      => ' <b>synchronous</b> ',
         ]);
 
         $this->assertTrue($saved, 'Job metadata should be stored for the status endpoint.');
@@ -746,6 +748,8 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->assertSame($result, $data['result'], 'The stored result should be returned as-is.');
         $this->assertArrayHasKey('created_at', $data);
         $this->assertSame($created_at, $data['created_at']);
+        $this->assertArrayHasKey('started_at', $data);
+        $this->assertSame($started_at, $data['started_at']);
         $this->assertArrayHasKey('finished_at', $data);
         $this->assertSame($finished_at, $data['finished_at']);
         $this->assertArrayHasKey('force_refresh', $data);
@@ -774,6 +778,7 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
             'retry_after'   => 120,
             'retry_at'      => $retry_at,
             'created_at'    => $created_at,
+            'started_at'    => $created_at + 1,
             'finished'      => $finished_at,
             'force_refresh' => false,
         ]);
@@ -808,12 +813,64 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->assertSame($retry_at, $data['retry_at']);
         $this->assertArrayHasKey('created_at', $data);
         $this->assertSame($created_at, $data['created_at']);
+        $this->assertArrayHasKey('started_at', $data);
+        $this->assertSame($created_at + 1, $data['started_at']);
         $this->assertArrayHasKey('finished_at', $data);
         $this->assertSame($finished_at, $data['finished_at']);
         $this->assertArrayHasKey('force_refresh', $data);
         $this->assertFalse($data['force_refresh']);
 
         $this->assertSame([], sitepulse_ai_get_job_data($job_id), 'Failed job metadata should be deleted after retrieval.');
+
+        $_POST = [];
+    }
+
+    /**
+     * Ensures running jobs expose timing metadata without clearing stored state.
+     */
+    public function test_status_returns_running_metadata_without_clearing_state() {
+        $job_id     = 'job-running';
+        $created_at = time() - 10;
+        $started_at = time() - 3;
+
+        $saved = sitepulse_ai_save_job_data($job_id, [
+            'status'        => 'running',
+            'created_at'    => $created_at,
+            'started_at'    => $started_at,
+            'force_refresh' => false,
+        ]);
+
+        $this->assertTrue($saved, 'Running job metadata should be persisted.');
+
+        $_POST['nonce']  = wp_create_nonce(SITEPULSE_NONCE_ACTION_AI_INSIGHT);
+        $_POST['job_id'] = $job_id;
+
+        try {
+            $this->_handleAjax('sitepulse_get_ai_insight_status');
+        } catch (WPAjaxDieStopException $exception) {
+            // Expected.
+        }
+
+        $response = json_decode($this->_last_response, true);
+
+        $this->assertIsArray($response);
+        $this->assertTrue($response['success']);
+        $this->assertArrayHasKey('data', $response);
+
+        $data = $response['data'];
+
+        $this->assertSame('running', $data['status']);
+        $this->assertArrayHasKey('created_at', $data);
+        $this->assertSame($created_at, $data['created_at']);
+        $this->assertArrayHasKey('started_at', $data);
+        $this->assertSame($started_at, $data['started_at']);
+        $this->assertArrayNotHasKey('finished_at', $data);
+
+        $stored_job = sitepulse_ai_get_job_data($job_id);
+
+        $this->assertIsArray($stored_job, 'Running job metadata should remain stored.');
+        $this->assertArrayHasKey('status', $stored_job);
+        $this->assertSame('running', $stored_job['status']);
 
         $_POST = [];
     }

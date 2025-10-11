@@ -21,6 +21,37 @@
         return date.toLocaleString();
     }
 
+    function normalizeTimestampValue(value) {
+        if (typeof value === 'string') {
+            value = parseInt(value, 10);
+        }
+
+        if (typeof value !== 'number' || !isFinite(value) || value <= 0) {
+            return null;
+        }
+
+        return value;
+    }
+
+    function formatTemplate(template, replacements) {
+        if (typeof template !== 'string' || template.length === 0) {
+            return '';
+        }
+
+        var args = Array.isArray(replacements) ? replacements.slice() : [replacements];
+        var formatted = template;
+
+        args.forEach(function (replacement) {
+            var safeReplacement = typeof replacement === 'undefined' || replacement === null
+                ? ''
+                : String(replacement);
+
+            formatted = formatted.replace('%s', safeReplacement);
+        });
+
+        return formatted;
+    }
+
     function generateHistoryFallbackId(parts) {
         var input = parts.join('|');
         var hash = 0;
@@ -223,7 +254,10 @@
             trimmedText = $('<div/>').html(trimmedHtml).text().trim();
         }
 
-        var timestamp = data && data.timestamp ? data.timestamp : null;
+        var timestamp = normalizeTimestampValue(data && data.timestamp ? data.timestamp : null);
+        var createdAt = normalizeTimestampValue(data && data.created_at ? data.created_at : null);
+        var startedAt = normalizeTimestampValue(data && data.started_at ? data.started_at : null);
+        var finishedAt = normalizeTimestampValue(data && data.finished_at ? data.finished_at : null);
         var isCached = data && typeof data.cached !== 'undefined' ? !!data.cached : false;
         var model = data && data.model ? data.model : null;
         var rateLimit = data && data.rate_limit ? data.rate_limit : null;
@@ -231,6 +265,14 @@
         var note = data && typeof data.note === 'string' ? data.note : '';
         var timestampDisplay = data && typeof data.timestamp_display === 'string' ? data.timestamp_display : '';
         var timestampIso = data && typeof data.timestamp_iso === 'string' ? data.timestamp_iso : '';
+        var forceRefresh = !!(data && data.force_refresh);
+        var fallbackMode = '';
+
+        if (data && typeof data.fallback === 'string') {
+            fallbackMode = data.fallback.trim();
+        } else if (data && typeof data.fallback !== 'undefined') {
+            fallbackMode = String(data.fallback || '').trim();
+        }
 
         var normalized = {
             text: trimmedText,
@@ -242,7 +284,12 @@
             id: entryId,
             note: note,
             timestamp_display: timestampDisplay,
-            timestamp_iso: timestampIso
+            timestamp_iso: timestampIso,
+            created_at: createdAt,
+            started_at: startedAt,
+            finished_at: finishedAt,
+            force_refresh: forceRefresh,
+            fallback: fallbackMode
         };
 
         if (trimmedText.length === 0 && trimmedHtml.length === 0) {
@@ -277,10 +324,32 @@
             $timestampEl.hide().text('');
         }
 
-        setStatus(
-            $statusEl,
-            isCached ? sitepulseAIInsights.strings.statusCached : sitepulseAIInsights.strings.statusFresh
-        );
+        var statusMessages = [];
+        var baseStatus = '';
+
+        if (isCached) {
+            baseStatus = sitepulseAIInsights.strings.statusCached;
+        } else if (fallbackMode === 'synchronous' && sitepulseAIInsights.strings.statusFallbackSynchronous) {
+            baseStatus = sitepulseAIInsights.strings.statusFallbackSynchronous;
+        } else if (forceRefresh && sitepulseAIInsights.strings.statusFreshForced) {
+            baseStatus = sitepulseAIInsights.strings.statusFreshForced;
+        } else {
+            baseStatus = sitepulseAIInsights.strings.statusFresh;
+        }
+
+        if (baseStatus) {
+            statusMessages.push(baseStatus);
+        }
+
+        if (finishedAt) {
+            var finishedDisplay = formatTimestamp(finishedAt);
+
+            if (finishedDisplay && sitepulseAIInsights.strings.statusFinishedAt) {
+                statusMessages.push(formatTemplate(sitepulseAIInsights.strings.statusFinishedAt, [finishedDisplay]));
+            }
+        }
+
+        setStatus($statusEl, statusMessages.join(' ').trim());
 
         $resultContainer.show();
 
@@ -1008,7 +1077,15 @@
                         var status = typeof response.data.status === 'string' ? response.data.status : 'queued';
 
                         if (status === 'completed' && response.data.result) {
-                            lastResultData = renderResult($resultContainer, $resultText, $timestampEl, $statusEl, response.data.result);
+                            var resultPayload = $.extend({}, response.data.result || {}, {
+                                created_at: response.data.created_at,
+                                started_at: response.data.started_at,
+                                finished_at: response.data.finished_at,
+                                force_refresh: response.data.force_refresh,
+                                fallback: response.data.fallback
+                            });
+
+                            lastResultData = renderResult($resultContainer, $resultText, $timestampEl, $statusEl, resultPayload);
                             addHistoryEntryFromResult(response.data.result);
                             finalizeRequest();
                         } else if (status === 'failed') {
@@ -1021,13 +1098,34 @@
                             }
                             finalizeRequest();
                         } else {
-                            var queuedMessage = sitepulseAIInsights.strings.statusGenerating;
+                            var baseQueuedMessage = sitepulseAIInsights.strings.statusGenerating;
 
                             if (status === 'queued' && sitepulseAIInsights.strings.statusQueued) {
-                                queuedMessage = sitepulseAIInsights.strings.statusQueued;
+                                baseQueuedMessage = sitepulseAIInsights.strings.statusQueued;
                             }
 
-                            setStatus($statusEl, queuedMessage);
+                            var pendingMessages = [baseQueuedMessage];
+                            var timestampSource = status === 'running'
+                                ? normalizeTimestampValue(response.data.started_at)
+                                : normalizeTimestampValue(response.data.created_at);
+                            var templateKey = status === 'running' ? 'statusRunningSince' : 'statusQueuedSince';
+                            var template = sitepulseAIInsights.strings[templateKey];
+
+                            if (timestampSource && template) {
+                                var displayValue = formatTimestamp(timestampSource);
+
+                                if (displayValue) {
+                                    pendingMessages.push(formatTemplate(template, [displayValue]));
+                                }
+                            }
+
+                            if (response.data.fallback === 'synchronous' && sitepulseAIInsights.strings.statusFallbackSynchronous) {
+                                if (pendingMessages.indexOf(sitepulseAIInsights.strings.statusFallbackSynchronous) === -1) {
+                                    pendingMessages.push(sitepulseAIInsights.strings.statusFallbackSynchronous);
+                                }
+                            }
+
+                            setStatus($statusEl, pendingMessages.join(' '));
                             $resultContainer.show();
                             scheduleJobPoll(jobId, false);
                         }
@@ -1069,7 +1167,12 @@
             text: sitepulseAIInsights.initialInsight,
             html: sitepulseAIInsights.initialInsightHtml,
             timestamp: sitepulseAIInsights.initialTimestamp,
-            cached: !!sitepulseAIInsights.initialCached
+            cached: !!sitepulseAIInsights.initialCached,
+            force_refresh: !!sitepulseAIInsights.initialForceRefresh,
+            fallback: sitepulseAIInsights.initialFallback,
+            created_at: sitepulseAIInsights.initialCreatedAt,
+            started_at: sitepulseAIInsights.initialStartedAt,
+            finished_at: sitepulseAIInsights.initialFinishedAt
         });
 
         initializeHistoryFilters();

@@ -2333,9 +2333,14 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
                 'cachedPrefix'    => esc_html__('Dernière mise à jour :', 'sitepulse'),
                 'statusCached'    => esc_html__('Résultat issu du cache.', 'sitepulse'),
                 'statusFresh'     => esc_html__('Nouvelle analyse générée.', 'sitepulse'),
+                'statusFreshForced' => esc_html__('Nouvelle analyse générée (rafraîchie manuellement).', 'sitepulse'),
                 'statusGenerating' => esc_html__('Génération en cours…', 'sitepulse'),
                 'statusQueued'    => esc_html__('Analyse en attente de traitement…', 'sitepulse'),
                 'statusFailed'    => esc_html__('La génération a échoué. Veuillez réessayer.', 'sitepulse'),
+                'statusQueuedSince' => esc_html__('Analyse en attente depuis %s.', 'sitepulse'),
+                'statusRunningSince' => esc_html__('Analyse en cours depuis %s.', 'sitepulse'),
+                'statusFinishedAt' => esc_html__('Terminée le %s.', 'sitepulse'),
+                'statusFallbackSynchronous' => esc_html__('Analyse exécutée immédiatement (WP-Cron indisponible).', 'sitepulse'),
                 'historyEmpty'    => esc_html__('Aucun historique disponible pour le moment.', 'sitepulse'),
                 'historyExportCsv' => esc_html__('Exporter en CSV', 'sitepulse'),
                 'historyCopy'     => esc_html__('Copier', 'sitepulse'),
@@ -2350,6 +2355,11 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
                 'historyAriaDefault' => esc_html__('Mise à jour de l’historique.', 'sitepulse'),
             ],
             'initialCached'     => '' !== $insight_text,
+            'initialForceRefresh' => false,
+            'initialFallback'   => '',
+            'initialCreatedAt'  => null,
+            'initialStartedAt'  => null,
+            'initialFinishedAt' => null,
             'statusAction'      => 'sitepulse_get_ai_insight_status',
             'pollInterval'      => 5000,
         ]
@@ -2807,6 +2817,10 @@ function sitepulse_get_ai_insight_status() {
 
     if (isset($job_data['created_at'])) {
         $response['created_at'] = (int) $job_data['created_at'];
+    }
+
+    if (isset($job_data['started_at'])) {
+        $response['started_at'] = (int) $job_data['started_at'];
     }
 
     if (isset($job_data['finished'])) {
