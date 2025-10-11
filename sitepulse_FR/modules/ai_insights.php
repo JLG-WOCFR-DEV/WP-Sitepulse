@@ -2805,6 +2805,22 @@ function sitepulse_get_ai_insight_status() {
         'status' => $status,
     ];
 
+    if (isset($job_data['created_at'])) {
+        $response['created_at'] = (int) $job_data['created_at'];
+    }
+
+    if (isset($job_data['finished'])) {
+        $response['finished_at'] = (int) $job_data['finished'];
+    }
+
+    if (isset($job_data['force_refresh'])) {
+        $response['force_refresh'] = (bool) $job_data['force_refresh'];
+    }
+
+    if (isset($job_data['fallback'])) {
+        $response['fallback'] = sanitize_text_field((string) $job_data['fallback']);
+    }
+
     if ('completed' === $status && isset($job_data['result']) && is_array($job_data['result'])) {
         $response['result'] = $job_data['result'];
     } elseif ('failed' === $status) {
