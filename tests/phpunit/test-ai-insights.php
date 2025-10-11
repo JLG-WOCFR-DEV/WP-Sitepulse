@@ -576,7 +576,11 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
 
         $job_data = sitepulse_ai_get_job_data($job_id);
 
-        $this->assertSame([], $job_data, 'Job metadata should be cleared once the synchronous fallback responds.');
+        $this->assertNotEmpty($job_data, 'Job metadata should persist so the UI can retrieve the result.');
+        $this->assertArrayHasKey('status', $job_data);
+        $this->assertSame('completed', $job_data['status'], 'Synchronous fallback should mark the job as completed.');
+        $this->assertArrayHasKey('result', $job_data, 'Job metadata should expose the generated result.');
+        $this->assertSame('Analyse générée en mode synchrone.', $job_data['result']['text']);
 
         $history_entries = sitepulse_ai_get_history_entries();
 
@@ -584,6 +588,8 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->assertSame('Analyse générée en mode synchrone.', $history_entries[0]['text']);
 
         $this->assertSame(1, $this->http_request_count, 'Synchronous fallback should execute the HTTP request once.');
+
+        sitepulse_ai_delete_job_data($job_id);
     }
 
     /**
@@ -643,6 +649,43 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->assertIsArray($logged_errors);
         $this->assertNotEmpty($logged_errors, 'Spawn failure should be visible in Site Health.');
         $this->assertStringContainsString('WP-Cron', end($logged_errors)['message']);
+    }
+
+    /**
+     * Ensures that a failing AJAX trigger surfaces a WP_Error instead of leaving the UI polling indefinitely.
+     */
+    public function test_schedule_returns_error_when_ajax_trigger_fails() {
+        add_filter('sitepulse_ai_spawn_cron_callable', [$this, 'filter_mock_spawn_callable'], 10, 2);
+        add_filter('pre_http_request', [$this, 'mock_async_job_request_failure'], 10, 3);
+
+        $result = sitepulse_ai_schedule_generation_job(false);
+
+        remove_filter('pre_http_request', [$this, 'mock_async_job_request_failure'], 10);
+        remove_filter('sitepulse_ai_spawn_cron_callable', [$this, 'filter_mock_spawn_callable'], 10);
+
+        $this->assertInstanceOf('WP_Error', $result, 'Scheduling should surface a WP_Error when the AJAX trigger fails.');
+        $this->assertSame('sitepulse_ai_job_async_trigger_failed', $result->get_error_code());
+        $this->assertStringContainsString(
+            'Impossible de déclencher immédiatement l’analyse IA',
+            $result->get_error_message(),
+            'Error message should inform the user that the immediate trigger failed.'
+        );
+
+        $this->assertSame(1, $this->async_request_count, 'A single asynchronous request should be attempted.');
+        $this->assertNotEmpty($this->last_async_request, 'Request arguments should be captured for debugging.');
+
+        if (isset($this->last_async_request['body']['job_id'])) {
+            $job_id = $this->last_async_request['body']['job_id'];
+
+            $this->assertSame([], sitepulse_ai_get_job_data($job_id), 'Job metadata should be cleared after a failed async trigger.');
+
+            if (function_exists('wp_next_scheduled')) {
+                $this->assertFalse(
+                    wp_next_scheduled('sitepulse_run_ai_insight_job', [$job_id]),
+                    'The failed job should be unscheduled to avoid unexpected executions.'
+                );
+            }
+        }
     }
 
     /**
@@ -779,6 +822,26 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
                 'message' => 'OK',
             ],
         ];
+    }
+
+    /**
+     * Simulates an asynchronous request failure (loopback disabled or remote error).
+     *
+     * @param false|array $preempt Whether to short-circuit the HTTP request.
+     * @param array        $args    HTTP request arguments.
+     * @param string       $url     Destination URL.
+     *
+     * @return WP_Error|false
+     */
+    public function mock_async_job_request_failure($preempt, $args, $url) {
+        if (false === strpos($url, 'admin-ajax.php')) {
+            return $preempt;
+        }
+
+        $this->async_request_count++;
+        $this->last_async_request = $args;
+
+        return new WP_Error('http_request_failed', 'Loopback request blocked.');
     }
 
     /**
