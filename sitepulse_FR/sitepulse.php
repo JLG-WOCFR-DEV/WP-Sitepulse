@@ -18,6 +18,77 @@ if (!defined('ABSPATH')) {
 
 require_once __DIR__ . '/includes/bootstrap/helpers.php';
 
+if (!defined('SITEPULSE_AI_QUEUE_GROUP')) {
+    define('SITEPULSE_AI_QUEUE_GROUP', 'sitepulse_ai');
+}
+
+add_action('plugins_loaded', 'sitepulse_bootstrap_action_scheduler', 5);
+
+if (!function_exists('sitepulse_bootstrap_action_scheduler')) {
+    /**
+     * Ensures the Action Scheduler library is available and registers the SitePulse queue group.
+     *
+     * @return void
+     */
+    function sitepulse_bootstrap_action_scheduler() {
+        if (!function_exists('as_enqueue_async_action')) {
+            $library = SITEPULSE_PATH . 'vendor/action-scheduler/action-scheduler.php';
+
+            if (file_exists($library)) {
+                require_once $library;
+            }
+        }
+
+        if (function_exists('add_action')) {
+            add_action('action_scheduler_init', 'sitepulse_register_ai_queue_group');
+        }
+
+        if (function_exists('do_action') && function_exists('as_enqueue_async_action')) {
+            /**
+             * Fires when the SitePulse AI queue group becomes available.
+             *
+             * @param string $group Queue group identifier.
+             */
+            do_action('sitepulse_ai_queue_initialized', SITEPULSE_AI_QUEUE_GROUP);
+        }
+    }
+}
+
+if (!function_exists('sitepulse_register_ai_queue_group')) {
+    /**
+     * Registers the Action Scheduler queue group used by SitePulse AI jobs.
+     *
+     * @return void
+     */
+    function sitepulse_register_ai_queue_group() {
+        if (!class_exists('ActionScheduler')) {
+            return;
+        }
+
+        try {
+            $store = ActionScheduler::store();
+        } catch (Throwable $throwable) {
+            if (function_exists('sitepulse_log')) {
+                sitepulse_log('SitePulse AI queue group registration failed: ' . $throwable->getMessage(), 'WARNING');
+            }
+
+            return;
+        }
+
+        if (!is_object($store) || !method_exists($store, 'save_group')) {
+            return;
+        }
+
+        try {
+            $store->save_group(SITEPULSE_AI_QUEUE_GROUP);
+        } catch (Throwable $throwable) {
+            if (function_exists('sitepulse_log')) {
+                sitepulse_log('SitePulse AI queue group save failed: ' . $throwable->getMessage(), 'WARNING');
+            }
+        }
+    }
+}
+
 sitepulse_define_constant('SITEPULSE_PATH', plugin_dir_path(__FILE__));
 sitepulse_define_constant('SITEPULSE_URL', plugin_dir_url(__FILE__));
 

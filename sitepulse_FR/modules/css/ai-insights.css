@@ -44,6 +44,24 @@
     white-space: pre-line;
 }
 
+.sitepulse-ai-queue-state {
+    display: none;
+    margin-bottom: 10px;
+    padding: 10px;
+    border: 1px dashed var(--sitepulse-color-border, #d0d5dd);
+    background-color: var(--sitepulse-color-surface-muted, #f6f7f7);
+}
+
+.sitepulse-ai-queue-state p {
+    margin: 0 0 4px;
+    color: var(--sitepulse-color-text-muted, #50575e);
+    font-size: 13px;
+}
+
+.sitepulse-ai-queue-state p:last-child {
+    margin-bottom: 0;
+}
+
 .sitepulse-ai-history {
     margin-top: 20px;
     background-color: var(--sitepulse-color-surface-elevated, #ffffff);

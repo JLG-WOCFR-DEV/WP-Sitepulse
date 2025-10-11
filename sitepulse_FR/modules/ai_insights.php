@@ -16,9 +16,10 @@ add_action('wp_ajax_sitepulse_generate_ai_insight', 'sitepulse_generate_ai_insig
 add_action('wp_ajax_sitepulse_get_ai_insight_status', 'sitepulse_get_ai_insight_status');
 add_action('wp_ajax_sitepulse_run_ai_insight_job', 'sitepulse_ai_handle_async_job_request');
 add_action('wp_ajax_nopriv_sitepulse_run_ai_insight_job', 'sitepulse_ai_handle_async_job_request');
-add_action('sitepulse_run_ai_insight_job', 'sitepulse_run_ai_insight_job', 10, 1);
+add_action('sitepulse_run_ai_insight_job', 'sitepulse_run_ai_insight_job', 10, 2);
 add_action('wp_ajax_sitepulse_save_ai_history_note', 'sitepulse_ai_save_history_note');
 add_action('admin_notices', 'sitepulse_ai_render_error_notices');
+add_action('rest_api_init', 'sitepulse_ai_register_rest_routes');
 
 if (!defined('SITEPULSE_TRANSIENT_AI_INSIGHT_JOB_PREFIX')) {
     define('SITEPULSE_TRANSIENT_AI_INSIGHT_JOB_PREFIX', 'sitepulse_ai_job_');
@@ -42,6 +43,10 @@ if (!defined('SITEPULSE_OPTION_AI_JOB_SECRET')) {
 
 if (!defined('SITEPULSE_OPTION_AI_RETRY_AFTER')) {
     define('SITEPULSE_OPTION_AI_RETRY_AFTER', 'sitepulse_ai_retry_after');
+}
+
+if (!defined('SITEPULSE_OPTION_AI_QUEUE_INDEX')) {
+    define('SITEPULSE_OPTION_AI_QUEUE_INDEX', 'sitepulse_ai_queue_index');
 }
 
 /**
@@ -218,7 +223,7 @@ function sitepulse_ai_get_job_secret() {
  *
  * @return array|WP_Error HTTP response or error on failure.
  */
-function sitepulse_ai_trigger_async_job_request($job_id) {
+function sitepulse_ai_trigger_async_job_request($job_id, array $queue_context = []) {
     $job_id = (string) $job_id;
 
     if ('' === $job_id) {
@@ -229,6 +234,12 @@ function sitepulse_ai_trigger_async_job_request($job_id) {
         return false;
     }
 
+    $encoded_context = wp_json_encode($queue_context);
+
+    if (false === $encoded_context) {
+        $encoded_context = '';
+    }
+
     $request_args = [
         'timeout'  => 5,
         'blocking' => true,
@@ -236,6 +247,7 @@ function sitepulse_ai_trigger_async_job_request($job_id) {
             'action' => 'sitepulse_run_ai_insight_job',
             'job_id' => $job_id,
             'secret' => sitepulse_ai_get_job_secret(),
+            'context'=> $encoded_context,
         ],
     ];
 
@@ -275,7 +287,17 @@ function sitepulse_ai_handle_async_job_request() {
         ], 400);
     }
 
-    sitepulse_run_ai_insight_job($job_id);
+    $context = [];
+
+    if (isset($_REQUEST['context'])) {
+        $decoded = json_decode((string) wp_unslash($_REQUEST['context']), true);
+
+        if (is_array($decoded)) {
+            $context = $decoded;
+        }
+    }
+
+    sitepulse_run_ai_insight_job($job_id, $context);
 
     wp_send_json_success([
         'job_id' => $job_id,
@@ -348,6 +370,7 @@ function sitepulse_ai_delete_job_data($job_id) {
     }
 
     delete_transient(sitepulse_ai_job_transient_key($job_id));
+    sitepulse_ai_remove_job_from_queue_index($job_id);
 }
 
 /**
@@ -367,7 +390,928 @@ function sitepulse_ai_save_job_data($job_id, array $job_data, $expiration = null
     $key        = sitepulse_ai_job_transient_key($job_id);
     $expiration = null === $expiration ? HOUR_IN_SECONDS : (int) $expiration;
 
-    return set_transient($key, $job_data, $expiration);
+    $saved = set_transient($key, $job_data, $expiration);
+
+    if ($saved) {
+        sitepulse_ai_sync_queue_index($job_id, $job_data);
+    }
+
+    return $saved;
+}
+
+/**
+ * Removes job metadata from the queue index and transient store.
+ *
+ * @param string $job_id Job identifier.
+ *
+ * @return void
+ */
+function sitepulse_ai_remove_job_from_queue_index($job_id) {
+    if (!function_exists('get_option') || !function_exists('update_option')) {
+        return;
+    }
+
+    $job_id = sanitize_key((string) $job_id);
+
+    if ('' === $job_id) {
+        return;
+    }
+
+    $index = get_option(SITEPULSE_OPTION_AI_QUEUE_INDEX, []);
+
+    if (!is_array($index) || empty($index)) {
+        return;
+    }
+
+    $changed = false;
+
+    foreach ($index as $position => $entry) {
+        if (!is_array($entry) || !isset($entry['id'])) {
+            continue;
+        }
+
+        if (sanitize_key((string) $entry['id']) === $job_id) {
+            unset($index[$position]);
+            $changed = true;
+        }
+    }
+
+    if ($changed) {
+        $index = array_values($index);
+        update_option(SITEPULSE_OPTION_AI_QUEUE_INDEX, $index, false);
+    }
+}
+
+/**
+ * Returns the queue group identifier shared with Action Scheduler.
+ *
+ * @return string
+ */
+function sitepulse_ai_get_queue_group() {
+    if (defined('SITEPULSE_AI_QUEUE_GROUP')) {
+        return SITEPULSE_AI_QUEUE_GROUP;
+    }
+
+    return 'sitepulse_ai';
+}
+
+/**
+ * Captures the current quota configuration for tracking purposes.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_ai_capture_quota_snapshot() {
+    $rate_limit_value = sitepulse_ai_get_current_rate_limit_value();
+
+    return [
+        'value'  => $rate_limit_value,
+        'label'  => sitepulse_ai_get_rate_limit_label($rate_limit_value),
+        'window' => sitepulse_ai_get_rate_limit_window_seconds($rate_limit_value),
+    ];
+}
+
+/**
+ * Returns a normalized queue context array without recursive data.
+ *
+ * @param array<string,mixed> $context Raw context.
+ * @param array<string,mixed> $job_data Optional job metadata.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_ai_normalize_queue_context(array $context, array $job_data = []) {
+    $normalized = [];
+
+    $normalized['priority'] = isset($context['priority'])
+        ? sanitize_key((string) $context['priority'])
+        : (isset($job_data['priority']) ? sanitize_key((string) $job_data['priority']) : 'normal');
+
+    $normalized['attempt'] = isset($context['attempt'])
+        ? max(1, (int) $context['attempt'])
+        : (isset($job_data['attempt']) ? max(1, (int) $job_data['attempt']) : 1);
+
+    $normalized['group'] = isset($context['group'])
+        ? sanitize_key((string) $context['group'])
+        : sitepulse_ai_get_queue_group();
+
+    $normalized['engine'] = isset($context['engine'])
+        ? sanitize_key((string) $context['engine'])
+        : (isset($job_data['queue']['engine']) ? sanitize_key((string) $job_data['queue']['engine']) : 'wp_cron');
+
+    $normalized['scheduled_at'] = isset($context['scheduled_at'])
+        ? (int) $context['scheduled_at']
+        : (isset($job_data['scheduled_at']) ? (int) $job_data['scheduled_at'] : time());
+
+    $normalized['next_attempt_at'] = isset($context['next_attempt_at'])
+        ? (int) $context['next_attempt_at']
+        : (isset($job_data['next_attempt_at']) ? (int) $job_data['next_attempt_at'] : 0);
+
+    if (isset($context['action_id'])) {
+        $normalized['action_id'] = (int) $context['action_id'];
+    } elseif (isset($job_data['queue']['action_id'])) {
+        $normalized['action_id'] = (int) $job_data['queue']['action_id'];
+    }
+
+    if (isset($context['message'])) {
+        $normalized['message'] = sanitize_text_field((string) $context['message']);
+    } elseif (isset($job_data['message'])) {
+        $normalized['message'] = sanitize_text_field((string) $job_data['message']);
+    }
+
+    if (isset($context['quota']) && is_array($context['quota'])) {
+        $normalized['quota'] = $context['quota'];
+    } elseif (isset($job_data['queue']['quota']) && is_array($job_data['queue']['quota'])) {
+        $normalized['quota'] = $job_data['queue']['quota'];
+    } else {
+        $normalized['quota'] = sitepulse_ai_capture_quota_snapshot();
+    }
+
+    if (isset($context['usage']) && is_array($context['usage'])) {
+        $normalized['usage'] = $context['usage'];
+    } elseif (isset($job_data['queue']['usage']) && is_array($job_data['queue']['usage'])) {
+        $normalized['usage'] = $job_data['queue']['usage'];
+    }
+
+    if (isset($context['args']) && is_array($context['args'])) {
+        $normalized['args'] = $context['args'];
+    } elseif (isset($job_data['queue']['args']) && is_array($job_data['queue']['args'])) {
+        $normalized['args'] = $job_data['queue']['args'];
+    }
+
+    if (isset($context['force_refresh'])) {
+        $normalized['force_refresh'] = (bool) $context['force_refresh'];
+    } elseif (isset($job_data['force_refresh'])) {
+        $normalized['force_refresh'] = (bool) $job_data['force_refresh'];
+    }
+
+    return $normalized;
+}
+
+/**
+ * Retrieves the stored queue index.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function sitepulse_ai_get_queue_index() {
+    if (!function_exists('get_option')) {
+        return [];
+    }
+
+    $index = get_option(SITEPULSE_OPTION_AI_QUEUE_INDEX, []);
+
+    if (!is_array($index)) {
+        return [];
+    }
+
+    $normalized = [];
+
+    foreach ($index as $entry) {
+        if (!is_array($entry) || !isset($entry['id'])) {
+            continue;
+        }
+
+        $normalized[] = [
+            'id'             => sanitize_key((string) $entry['id']),
+            'status'         => isset($entry['status']) ? sanitize_key((string) $entry['status']) : 'queued',
+            'priority'       => isset($entry['priority']) ? sanitize_key((string) $entry['priority']) : 'normal',
+            'attempt'        => isset($entry['attempt']) ? max(1, (int) $entry['attempt']) : 1,
+            'created_at'     => isset($entry['created_at']) ? (int) $entry['created_at'] : time(),
+            'updated_at'     => isset($entry['updated_at']) ? (int) $entry['updated_at'] : time(),
+            'next_attempt_at'=> isset($entry['next_attempt_at']) ? (int) $entry['next_attempt_at'] : 0,
+            'message'        => isset($entry['message']) ? sanitize_text_field((string) $entry['message']) : '',
+            'engine'         => isset($entry['engine']) ? sanitize_key((string) $entry['engine']) : 'wp_cron',
+            'quota'          => isset($entry['quota']) && is_array($entry['quota']) ? $entry['quota'] : sitepulse_ai_capture_quota_snapshot(),
+        ];
+    }
+
+    return array_values($normalized);
+}
+
+/**
+ * Persists the queue index in the options table.
+ *
+ * @param array<int,array<string,mixed>> $index Queue index data.
+ *
+ * @return void
+ */
+function sitepulse_ai_set_queue_index(array $index) {
+    if (!function_exists('update_option')) {
+        return;
+    }
+
+    update_option(SITEPULSE_OPTION_AI_QUEUE_INDEX, array_values($index), false);
+}
+
+/**
+ * Synchronizes an entry in the queue index with the provided job metadata.
+ *
+ * @param string               $job_id   Job identifier.
+ * @param array<string,mixed>  $job_data Job metadata.
+ *
+ * @return void
+ */
+function sitepulse_ai_sync_queue_index($job_id, array $job_data) {
+    if (!function_exists('update_option')) {
+        return;
+    }
+
+    $job_id = sanitize_key((string) $job_id);
+
+    if ('' === $job_id) {
+        return;
+    }
+
+    $index  = sitepulse_ai_get_queue_index();
+    $status = isset($job_data['status']) ? sanitize_key((string) $job_data['status']) : 'queued';
+
+    $queue_context = isset($job_data['queue']) && is_array($job_data['queue'])
+        ? sitepulse_ai_normalize_queue_context($job_data['queue'], $job_data)
+        : sitepulse_ai_normalize_queue_context([], $job_data);
+
+    $entry = [
+        'id'             => $job_id,
+        'status'         => $status,
+        'priority'       => $queue_context['priority'],
+        'attempt'        => isset($job_data['attempt']) ? max(1, (int) $job_data['attempt']) : $queue_context['attempt'],
+        'created_at'     => isset($job_data['created_at']) ? (int) $job_data['created_at'] : time(),
+        'updated_at'     => time(),
+        'next_attempt_at'=> $queue_context['next_attempt_at'],
+        'message'        => isset($job_data['message']) ? sanitize_text_field((string) $job_data['message']) : (isset($queue_context['message']) ? $queue_context['message'] : ''),
+        'engine'         => $queue_context['engine'],
+        'quota'          => $queue_context['quota'],
+    ];
+
+    $found = false;
+
+    foreach ($index as $position => $stored_entry) {
+        if ($stored_entry['id'] === $job_id) {
+            $index[$position] = array_merge($stored_entry, $entry);
+            $found            = true;
+            break;
+        }
+    }
+
+    if (!$found && in_array($status, ['queued', 'pending', 'running'], true)) {
+        $index[] = $entry;
+    } elseif ($found && in_array($status, ['completed'], true)) {
+        // Keep completed entries briefly for inspection, they will be purged when metadata is deleted.
+        $index[$position]['status'] = $status;
+    }
+
+    sitepulse_ai_set_queue_index($index);
+}
+
+/**
+ * Calculates the current position of a job in the queue.
+ *
+ * @param string $job_id Job identifier.
+ *
+ * @return array{position:int,total:int}
+ */
+function sitepulse_ai_calculate_queue_position($job_id) {
+    $index = sitepulse_ai_get_queue_index();
+    $total = count($index);
+    $position = 0;
+
+    foreach ($index as $offset => $entry) {
+        if ($entry['id'] === sanitize_key((string) $job_id)) {
+            $position = $offset + 1;
+            break;
+        }
+    }
+
+    return [
+        'position' => $position,
+        'total'    => $total,
+    ];
+}
+
+/**
+ * Returns a snapshot of all queued jobs.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function sitepulse_ai_get_queue_snapshot() {
+    $index    = sitepulse_ai_get_queue_index();
+    $snapshot = [];
+
+    foreach ($index as $entry) {
+        $job_id   = $entry['id'];
+        $job_data = sitepulse_ai_get_job_data($job_id);
+
+        if (empty($job_data)) {
+            $job_data = $entry;
+        }
+
+        $snapshot[] = sitepulse_ai_format_queue_payload($job_id, $job_data);
+    }
+
+    return $snapshot;
+}
+
+/**
+ * Formats queue metadata for responses and UI consumption.
+ *
+ * @param string                      $job_id   Job identifier.
+ * @param array<string,mixed>|null    $job_data Job metadata.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_ai_format_queue_payload($job_id, $job_data = null) {
+    $job_id    = sanitize_key((string) $job_id);
+    $job_data  = is_array($job_data) ? $job_data : [];
+    $queue_ctx = isset($job_data['queue']) && is_array($job_data['queue'])
+        ? sitepulse_ai_normalize_queue_context($job_data['queue'], $job_data)
+        : sitepulse_ai_normalize_queue_context([], $job_data);
+    $status    = isset($job_data['status']) ? sanitize_key((string) $job_data['status']) : (isset($job_data['status']) ? $job_data['status'] : 'queued');
+    $position  = sitepulse_ai_calculate_queue_position($job_id);
+    $max_attempts = sitepulse_ai_get_max_attempts();
+
+    $priority_labels = [
+        'high'   => esc_html__('Haute', 'sitepulse'),
+        'normal' => esc_html__('Normale', 'sitepulse'),
+        'low'    => esc_html__('Basse', 'sitepulse'),
+    ];
+
+    $status_labels = [
+        'queued'   => esc_html__('En attente', 'sitepulse'),
+        'pending'  => esc_html__('En pause', 'sitepulse'),
+        'running'  => esc_html__('En cours', 'sitepulse'),
+        'failed'   => esc_html__('Échec', 'sitepulse'),
+        'completed'=> esc_html__('Terminé', 'sitepulse'),
+    ];
+
+    $engine_labels = [
+        'action_scheduler' => esc_html__('Action Scheduler', 'sitepulse'),
+        'wp_cron'          => esc_html__('WP-Cron', 'sitepulse'),
+        'immediate'        => esc_html__('Exécution immédiate', 'sitepulse'),
+    ];
+
+    $next_attempt_at = isset($queue_ctx['next_attempt_at']) ? (int) $queue_ctx['next_attempt_at'] : 0;
+    $next_attempt_display = '';
+
+    if ($next_attempt_at > 0) {
+        if (function_exists('date_i18n')) {
+            $next_attempt_display = date_i18n(get_option('date_format') . ' ' . get_option('time_format'), $next_attempt_at);
+        } else {
+            $next_attempt_display = gmdate('Y-m-d H:i:s', $next_attempt_at);
+        }
+    }
+
+    $created_at = isset($job_data['created_at']) ? (int) $job_data['created_at'] : time();
+    $started_at = isset($job_data['started_at']) ? (int) $job_data['started_at'] : 0;
+    $finished_at = isset($job_data['finished']) ? (int) $job_data['finished'] : 0;
+
+    $quota_label = '';
+
+    if (!empty($queue_ctx['quota']) && is_array($queue_ctx['quota'])) {
+        $quota_value = isset($queue_ctx['quota']['label']) ? (string) $queue_ctx['quota']['label'] : '';
+
+        if ('' === $quota_value && isset($queue_ctx['quota']['value'])) {
+            $quota_value = (string) $queue_ctx['quota']['value'];
+        }
+
+        if ('' !== $quota_value) {
+            $quota_label = sprintf(
+                /* translators: %s: quota label */
+                esc_html__('Quota : %s', 'sitepulse'),
+                $quota_value
+            );
+        }
+    }
+
+    $usage_label = '';
+
+    if (!empty($queue_ctx['usage']) && is_array($queue_ctx['usage'])) {
+        $usage_parts = [];
+
+        foreach ($queue_ctx['usage'] as $key => $value) {
+            if (is_scalar($value) && '' !== (string) $value) {
+                $usage_parts[] = sanitize_text_field(sprintf('%s=%s', $key, (string) $value));
+            }
+        }
+
+        if (!empty($usage_parts)) {
+            $usage_label = sprintf(
+                /* translators: %s: usage metrics */
+                esc_html__('Consommation : %s', 'sitepulse'),
+                implode(', ', $usage_parts)
+            );
+        }
+    }
+
+    return [
+        'id'                   => $job_id,
+        'status'               => $status,
+        'status_label'         => isset($status_labels[$status]) ? $status_labels[$status] : ucfirst($status),
+        'position'             => $position['position'],
+        'size'                 => $position['total'],
+        'priority'             => $queue_ctx['priority'],
+        'priority_label'       => isset($priority_labels[$queue_ctx['priority']]) ? $priority_labels[$queue_ctx['priority']] : $queue_ctx['priority'],
+        'attempt'              => isset($job_data['attempt']) ? (int) $job_data['attempt'] : $queue_ctx['attempt'],
+        'attempt_label'        => sprintf(
+            /* translators: 1: attempt, 2: max attempts */
+            esc_html__('Tentative %1$d sur %2$d', 'sitepulse'),
+            isset($job_data['attempt']) ? (int) $job_data['attempt'] : $queue_ctx['attempt'],
+            $max_attempts
+        ),
+        'max_attempts'         => $max_attempts,
+        'engine'               => $queue_ctx['engine'],
+        'engine_label'         => isset($engine_labels[$queue_ctx['engine']]) ? $engine_labels[$queue_ctx['engine']] : $queue_ctx['engine'],
+        'next_attempt_at'      => $next_attempt_at,
+        'next_attempt_display' => $next_attempt_display,
+        'created_at'           => $created_at,
+        'started_at'           => $started_at,
+        'finished_at'          => $finished_at,
+        'message'              => isset($job_data['message']) ? (string) $job_data['message'] : (isset($queue_ctx['message']) ? $queue_ctx['message'] : ''),
+        'quota'                => $queue_ctx['quota'],
+        'quota_label'          => $quota_label,
+        'usage'                => isset($queue_ctx['usage']) ? $queue_ctx['usage'] : [],
+        'usage_label'          => $usage_label,
+        'force_refresh'        => isset($queue_ctx['force_refresh']) ? (bool) $queue_ctx['force_refresh'] : (isset($job_data['force_refresh']) ? (bool) $job_data['force_refresh'] : false),
+    ];
+}
+
+/**
+ * Determines the maximum number of retry attempts.
+ *
+ * @return int
+ */
+function sitepulse_ai_get_max_attempts() {
+    $max_attempts = (int) apply_filters('sitepulse_ai_queue_max_attempts', 5);
+
+    if ($max_attempts <= 0) {
+        $max_attempts = 1;
+    }
+
+    return $max_attempts;
+}
+
+/**
+ * Calculates the exponential backoff delay for the provided attempt.
+ *
+ * @param int $attempt Attempt number (1-indexed).
+ *
+ * @return int Delay in seconds.
+ */
+function sitepulse_ai_calculate_retry_delay($attempt) {
+    $attempt = max(1, (int) $attempt);
+    $base    = (int) apply_filters('sitepulse_ai_queue_retry_base_delay', 60);
+
+    if ($base <= 0) {
+        $base = 60;
+    }
+
+    $max_delay = (int) apply_filters('sitepulse_ai_queue_retry_max_delay', 30 * MINUTE_IN_SECONDS);
+
+    if ($max_delay <= 0) {
+        $max_delay = 30 * MINUTE_IN_SECONDS;
+    }
+
+    $delay = (int) ($base * pow(2, $attempt - 1));
+
+    if ($delay > $max_delay) {
+        $delay = $max_delay;
+    }
+
+    return $delay;
+}
+
+/**
+ * Schedules a job execution using the available queue engine.
+ *
+ * @param string               $job_id   Job identifier.
+ * @param array<string,mixed>  $context  Queue context.
+ * @param int                  $delay    Optional delay before execution.
+ *
+ * @return array<string,mixed>|WP_Error
+ */
+function sitepulse_ai_queue_schedule_action($job_id, array $context, $delay = 0) {
+    $job_id = (string) $job_id;
+    $delay  = max(0, (int) $delay);
+    $timestamp = time() + $delay;
+    $group = sitepulse_ai_get_queue_group();
+
+    $context = sitepulse_ai_normalize_queue_context(array_merge($context, [
+        'group'        => $group,
+        'scheduled_at' => $timestamp,
+    ]));
+
+    $args = [$job_id, $context];
+    $context['args'] = $args;
+
+    if (function_exists('as_enqueue_async_action')) {
+        if ($delay > 0 && function_exists('as_schedule_single_action')) {
+            $action_id = as_schedule_single_action($timestamp, 'sitepulse_run_ai_insight_job', $args, $group);
+        } else {
+            $action_id = as_enqueue_async_action('sitepulse_run_ai_insight_job', $args, $group);
+        }
+
+        if (is_wp_error($action_id) || empty($action_id)) {
+            return is_wp_error($action_id)
+                ? $action_id
+                : sitepulse_ai_create_wp_error(
+                    'sitepulse_ai_queue_schedule_failed',
+                    esc_html__('Impossible de planifier la tâche IA via Action Scheduler.', 'sitepulse'),
+                    500
+                );
+        }
+
+        $context['engine']    = 'action_scheduler';
+        $context['action_id'] = (int) $action_id;
+
+        return [
+            'engine'  => 'action_scheduler',
+            'action_id' => (int) $action_id,
+            'context' => $context,
+            'timestamp' => $timestamp,
+        ];
+    }
+
+    $scheduled = wp_schedule_single_event($timestamp, 'sitepulse_run_ai_insight_job', $args);
+
+    if (false === $scheduled) {
+        return sitepulse_ai_create_wp_error(
+            'sitepulse_ai_queue_schedule_failed',
+            esc_html__('Impossible de planifier la tâche IA via WP-Cron.', 'sitepulse'),
+            500
+        );
+    }
+
+    $context['engine'] = 'wp_cron';
+
+    return [
+        'engine'    => 'wp_cron',
+        'context'   => $context,
+        'timestamp' => $timestamp,
+    ];
+}
+
+/**
+ * Attempts to cancel a scheduled job when purging.
+ *
+ * @param string              $job_id Job identifier.
+ * @param array<string,mixed> $context Queue context.
+ *
+ * @return void
+ */
+function sitepulse_ai_queue_clear_scheduled_action($job_id, array $context) {
+    $args = isset($context['args']) && is_array($context['args'])
+        ? $context['args']
+        : [$job_id, $context];
+
+    if (function_exists('as_unschedule_action')) {
+        as_unschedule_action('sitepulse_run_ai_insight_job', $args, sitepulse_ai_get_queue_group());
+    }
+
+    if (function_exists('wp_clear_scheduled_hook')) {
+        wp_clear_scheduled_hook('sitepulse_run_ai_insight_job', $args);
+    }
+}
+
+/**
+ * Retries a queued job immediately.
+ *
+ * @param string $job_id Job identifier.
+ *
+ * @return true|WP_Error
+ */
+function sitepulse_ai_queue_retry_job($job_id) {
+    $job_id = (string) $job_id;
+    $job_data = sitepulse_ai_get_job_data($job_id);
+
+    if (empty($job_data)) {
+        return sitepulse_ai_create_wp_error('sitepulse_ai_missing_job', esc_html__('Tâche introuvable dans la file.', 'sitepulse'), 404);
+    }
+
+    $attempt = isset($job_data['attempt']) ? max(1, (int) $job_data['attempt']) + 1 : 1;
+    $context = sitepulse_ai_normalize_queue_context(isset($job_data['queue']) ? $job_data['queue'] : [], $job_data);
+
+    $context['attempt']      = $attempt;
+    $context['next_attempt_at'] = 0;
+
+    $job_data['status']      = 'queued';
+    $job_data['attempt']     = $attempt;
+    unset($job_data['message'], $job_data['retry_after'], $job_data['retry_at']);
+
+    $schedule = sitepulse_ai_queue_schedule_action($job_id, $context, 0);
+
+    if (is_wp_error($schedule)) {
+        return $schedule;
+    }
+
+    if (isset($schedule['context'])) {
+        $job_data['queue'] = $schedule['context'];
+    }
+
+    sitepulse_ai_save_job_data($job_id, $job_data);
+
+    return true;
+}
+
+/**
+ * Purges queued jobs matching the provided statuses.
+ *
+ * @param array<int,string>|null $statuses Optional statuses to purge. Null purges all queued jobs.
+ *
+ * @return int Number of purged jobs.
+ */
+function sitepulse_ai_queue_purge($statuses = null) {
+    $index = sitepulse_ai_get_queue_index();
+    $purged = 0;
+
+    foreach ($index as $entry) {
+        $status = isset($entry['status']) ? $entry['status'] : 'queued';
+
+        if (is_array($statuses) && !in_array($status, $statuses, true)) {
+            continue;
+        }
+
+        $job_id = $entry['id'];
+        $job_data = sitepulse_ai_get_job_data($job_id);
+
+        if (!empty($job_data)) {
+            $context = isset($job_data['queue']) ? $job_data['queue'] : [];
+            sitepulse_ai_queue_clear_scheduled_action($job_id, sitepulse_ai_normalize_queue_context($context, $job_data));
+            sitepulse_ai_delete_job_data($job_id);
+        } else {
+            sitepulse_ai_remove_job_from_queue_index($job_id);
+        }
+
+        $purged++;
+    }
+
+    return $purged;
+}
+
+/**
+ * Registers REST API routes to manage the AI queue.
+ *
+ * @return void
+ */
+function sitepulse_ai_register_rest_routes() {
+    if (!function_exists('register_rest_route') || !class_exists('WP_REST_Server')) {
+        return;
+    }
+
+    register_rest_route(
+        'sitepulse/v1',
+        '/ai/queue',
+        [
+            [
+                'methods'             => WP_REST_Server::READABLE,
+                'callback'            => 'sitepulse_ai_rest_list_queue',
+                'permission_callback' => 'sitepulse_ai_rest_permission_check',
+            ],
+            [
+                'methods'             => WP_REST_Server::DELETABLE,
+                'callback'            => 'sitepulse_ai_rest_purge_queue',
+                'permission_callback' => 'sitepulse_ai_rest_permission_check',
+            ],
+        ]
+    );
+
+    register_rest_route(
+        'sitepulse/v1',
+        '/ai/queue/(?P<job_id>[a-zA-Z0-9_\-]+)',
+        [
+            'methods'             => WP_REST_Server::CREATABLE,
+            'callback'            => 'sitepulse_ai_rest_retry_job',
+            'permission_callback' => 'sitepulse_ai_rest_permission_check',
+            'args'                => [
+                'job_id' => [
+                    'required' => true,
+                    'sanitize_callback' => 'sanitize_key',
+                ],
+            ],
+        ]
+    );
+}
+
+/**
+ * REST permission callback for queue endpoints.
+ *
+ * @return bool
+ */
+function sitepulse_ai_rest_permission_check() {
+    return current_user_can(sitepulse_get_capability());
+}
+
+/**
+ * Returns the queued jobs snapshot over REST.
+ *
+ * @return WP_REST_Response
+ */
+function sitepulse_ai_rest_list_queue() {
+    return new WP_REST_Response([
+        'jobs' => sitepulse_ai_get_queue_snapshot(),
+    ]);
+}
+
+/**
+ * Retries a queued job via REST.
+ *
+ * @param WP_REST_Request $request Request instance.
+ *
+ * @return WP_REST_Response|WP_Error
+ */
+function sitepulse_ai_rest_retry_job(WP_REST_Request $request) {
+    $job_id = $request->get_param('job_id');
+
+    $retry = sitepulse_ai_queue_retry_job($job_id);
+
+    if (is_wp_error($retry)) {
+        return $retry;
+    }
+
+    return new WP_REST_Response([
+        'job' => sitepulse_ai_format_queue_payload($job_id, sitepulse_ai_get_job_data($job_id)),
+    ]);
+}
+
+/**
+ * Purges the queue via REST.
+ *
+ * @return WP_REST_Response
+ */
+function sitepulse_ai_rest_purge_queue() {
+    $purged = sitepulse_ai_queue_purge();
+
+    return new WP_REST_Response([
+        'purged' => $purged,
+        'jobs'   => sitepulse_ai_get_queue_snapshot(),
+    ]);
+}
+
+if (defined('WP_CLI') && WP_CLI && class_exists('WP_CLI_Command')) {
+    /**
+     * WP-CLI command for managing the SitePulse AI queue.
+     */
+    class SitePulse_AI_Queue_CLI_Command extends WP_CLI_Command {
+        /**
+         * Lists queued AI jobs.
+         *
+         * ## EXAMPLES
+         *
+         *     wp sitepulse ai queue list
+         */
+        public function list_() {
+            $jobs = sitepulse_ai_get_queue_snapshot();
+
+            if (empty($jobs)) {
+                WP_CLI::success('La file AI est vide.');
+
+                return;
+            }
+
+            $items = [];
+
+            foreach ($jobs as $job) {
+                $items[] = [
+                    'id'        => isset($job['id']) ? $job['id'] : '',
+                    'status'    => isset($job['status_label']) ? $job['status_label'] : (isset($job['status']) ? $job['status'] : ''),
+                    'priority'  => isset($job['priority_label']) ? $job['priority_label'] : (isset($job['priority']) ? $job['priority'] : ''),
+                    'attempt'   => isset($job['attempt']) ? $job['attempt'] : '',
+                    'position'  => isset($job['position']) && isset($job['size']) ? sprintf('%d/%d', $job['position'], $job['size']) : '',
+                    'engine'    => isset($job['engine_label']) ? $job['engine_label'] : (isset($job['engine']) ? $job['engine'] : ''),
+                    'next_run'  => isset($job['next_attempt_display']) ? $job['next_attempt_display'] : '',
+                ];
+            }
+
+            WP_CLI\Utils\format_items('table', $items, ['id', 'status', 'priority', 'attempt', 'position', 'engine', 'next_run']);
+        }
+
+        /**
+         * Retries a failed or pending AI job immediately.
+         *
+         * ## OPTIONS
+         *
+         * <job-id>
+         * : Identifiant de la tâche.
+         */
+        public function retry($args) {
+            if (empty($args[0])) {
+                WP_CLI::error('Veuillez fournir un identifiant de tâche.');
+            }
+
+            $job_id = sanitize_key($args[0]);
+            $retry  = sitepulse_ai_queue_retry_job($job_id);
+
+            if (is_wp_error($retry)) {
+                WP_CLI::error($retry->get_error_message());
+            }
+
+            WP_CLI::success(sprintf('Relance planifiée pour la tâche %s.', $job_id));
+        }
+
+        /**
+         * Purges the AI queue.
+         */
+        public function purge() {
+            $purged = sitepulse_ai_queue_purge();
+
+            WP_CLI::success(sprintf('%d tâche(s) supprimée(s) de la file.', (int) $purged));
+        }
+    }
+
+    WP_CLI::add_command('sitepulse ai queue', 'SitePulse_AI_Queue_CLI_Command');
+}
+
+/**
+ * Parses usage headers returned by the Gemini API.
+ *
+ * @param array|ArrayAccess|mixed $headers HTTP headers.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_ai_parse_response_usage($headers) {
+    $usage = [];
+
+    if (is_object($headers) && method_exists($headers, 'getAll')) {
+        $headers = $headers->getAll();
+    }
+
+    if (!is_array($headers)) {
+        return $usage;
+    }
+
+    $map = [
+        'x-ratelimit-remaining' => 'remaining',
+        'x-ratelimit-limit'     => 'limit',
+        'x-ratelimit-reset'     => 'reset',
+        'x-ratelimit-usage'     => 'usage',
+        'x-ratelimit-cost'      => 'cost',
+        'x-usage-tokens'        => 'tokens',
+    ];
+
+    foreach ($headers as $name => $value) {
+        $key = strtolower((string) $name);
+
+        if (!isset($map[$key])) {
+            continue;
+        }
+
+        if (is_array($value)) {
+            $value = reset($value);
+        }
+
+        if (is_scalar($value)) {
+            $usage[$map[$key]] = $value;
+        }
+    }
+
+    return $usage;
+}
+
+/**
+ * Logs execution metrics for completed AI jobs.
+ *
+ * @param string               $job_id   Job identifier.
+ * @param array<string,mixed>  $job_data Job metadata.
+ * @param array<string,mixed>  $usage    Usage metadata.
+ *
+ * @return void
+ */
+function sitepulse_ai_log_execution_metrics($job_id, array $job_data, array $usage = []) {
+    if (!function_exists('sitepulse_log')) {
+        return;
+    }
+
+    $queue_context = isset($job_data['queue']) ? sitepulse_ai_normalize_queue_context($job_data['queue'], $job_data) : sitepulse_ai_normalize_queue_context([], $job_data);
+    $duration = 0;
+
+    if (isset($job_data['started_at'], $job_data['finished'])) {
+        $duration = max(0, (int) $job_data['finished'] - (int) $job_data['started_at']);
+    }
+
+    $message = sprintf(
+        'AI Insights job %s — attempt %d/%d (%s, engine=%s, duration=%ss)',
+        $job_id,
+        isset($job_data['attempt']) ? (int) $job_data['attempt'] : $queue_context['attempt'],
+        sitepulse_ai_get_max_attempts(),
+        isset($queue_context['priority']) ? $queue_context['priority'] : 'normal',
+        isset($queue_context['engine']) ? $queue_context['engine'] : 'wp_cron',
+        $duration
+    );
+
+    if (!empty($queue_context['quota']) && isset($queue_context['quota']['label'])) {
+        $message .= ' — quota=' . $queue_context['quota']['label'];
+    }
+
+    if (!empty($usage)) {
+        $usage_parts = [];
+
+        foreach ($usage as $key => $value) {
+            if (is_scalar($value)) {
+                $usage_parts[] = $key . '=' . $value;
+            }
+        }
+
+        if (!empty($usage_parts)) {
+            $message .= ' — usage=' . implode(',', $usage_parts);
+        }
+    }
+
+    sitepulse_log($message, 'INFO');
 }
 
 /**
@@ -1751,11 +2695,14 @@ function sitepulse_ai_execute_generation($api_key, $selected_model, array $avail
         ];
     }
 
+    $usage = sitepulse_ai_parse_response_usage($headers);
+
     return [
         'text'      => isset($fresh_payload['text']) ? $fresh_payload['text'] : $variants['text'],
         'html'      => isset($fresh_payload['html']) ? $fresh_payload['html'] : $variants['html'],
         'timestamp' => isset($fresh_payload['timestamp']) ? $fresh_payload['timestamp'] : $timestamp,
         'cached'    => false,
+        'usage'     => $usage,
     ];
 }
 
@@ -1768,11 +2715,26 @@ function sitepulse_ai_execute_generation($api_key, $selected_model, array $avail
  */
 function sitepulse_ai_schedule_generation_job($force_refresh) {
     $job_id = function_exists('wp_generate_uuid4') ? wp_generate_uuid4() : uniqid('sitepulse_ai_', true);
+    $now    = time();
+    $priority = $force_refresh ? 'high' : 'normal';
+
+    $queue_context = sitepulse_ai_normalize_queue_context([
+        'priority'      => $priority,
+        'attempt'       => 1,
+        'engine'        => function_exists('as_enqueue_async_action') ? 'action_scheduler' : 'wp_cron',
+        'group'         => sitepulse_ai_get_queue_group(),
+        'force_refresh' => (bool) $force_refresh,
+        'quota'         => sitepulse_ai_capture_quota_snapshot(),
+        'scheduled_at'  => $now,
+    ]);
 
     $job_data = [
         'status'        => 'queued',
-        'created_at'    => time(),
+        'created_at'    => $now,
         'force_refresh' => (bool) $force_refresh,
+        'attempt'       => 1,
+        'priority'      => $priority,
+        'queue'         => $queue_context,
     ];
 
     if (!sitepulse_ai_save_job_data($job_id, $job_data)) {
@@ -1781,17 +2743,17 @@ function sitepulse_ai_schedule_generation_job($force_refresh) {
         return sitepulse_ai_create_wp_error('sitepulse_ai_job_storage_failed', $error_message, 500);
     }
 
-    $current_time = time();
+    $schedule = sitepulse_ai_queue_schedule_action($job_id, $queue_context, 0);
 
-    $scheduled = wp_schedule_single_event($current_time, 'sitepulse_run_ai_insight_job', [$job_id]);
-
-    if (false === $scheduled) {
+    if (is_wp_error($schedule)) {
         $guidance_message = esc_html__('WP-Cron semble désactivé sur ce site. L’analyse IA sera exécutée immédiatement, mais pensez à réactiver WP-Cron (retirez DISABLE_WP_CRON de wp-config.php ou planifiez une tâche serveur).', 'sitepulse');
         $fallback_message = esc_html__('La planification du traitement IA a échoué. L’analyse est exécutée immédiatement.', 'sitepulse');
 
-        sitepulse_ai_save_job_data($job_id, array_merge($job_data, [
-            'fallback' => 'synchronous',
-        ]));
+        $job_data['fallback']       = 'synchronous';
+        $job_data['queue']['engine'] = 'immediate';
+        $job_data['queue']['message'] = $fallback_message;
+
+        sitepulse_ai_save_job_data($job_id, $job_data);
 
         if (sitepulse_ai_is_wp_cron_disabled()) {
             sitepulse_ai_record_critical_error($guidance_message);
@@ -1799,7 +2761,7 @@ function sitepulse_ai_schedule_generation_job($force_refresh) {
             sitepulse_ai_record_critical_error($fallback_message);
         }
 
-        sitepulse_run_ai_insight_job($job_id);
+        sitepulse_run_ai_insight_job($job_id, $job_data['queue']);
 
         $job_state = sitepulse_ai_get_job_data($job_id);
 
@@ -1830,89 +2792,93 @@ function sitepulse_ai_schedule_generation_job($force_refresh) {
         return sitepulse_ai_create_wp_error('sitepulse_ai_job_schedule_failed', $error_message, $status_code, $extra_data);
     }
 
-    $spawn_result = sitepulse_ai_spawn_cron($current_time);
-    $spawn_failed = false;
-
-    if (is_wp_error($spawn_result)) {
-        $spawn_failed        = true;
-        $spawn_error_message = $spawn_result->get_error_message();
-
-        if ('' !== $spawn_error_message) {
-            $spawn_message = sprintf(
-                /* translators: %s: Error details. */
-                esc_html__('Échec du déclenchement immédiat de WP-Cron pour l’analyse IA : %s', 'sitepulse'),
-                $spawn_error_message
-            );
-        } else {
-            $spawn_message = esc_html__('Échec du déclenchement immédiat de WP-Cron pour l’analyse IA.', 'sitepulse');
-        }
-
-        sitepulse_ai_record_critical_error($spawn_message);
-    } elseif (false === $spawn_result) {
-        $spawn_failed = true;
-        sitepulse_ai_record_critical_error(esc_html__('Échec du déclenchement immédiat de WP-Cron pour l’analyse IA.', 'sitepulse'));
+    if (isset($schedule['context'])) {
+        $job_data['queue'] = $schedule['context'];
+        sitepulse_ai_save_job_data($job_id, $job_data);
     }
 
-    if ($spawn_failed) {
-        $async_response       = sitepulse_ai_trigger_async_job_request($job_id);
-        $async_error_log      = '';
-        $async_error_details  = '';
-        $async_error_code     = 500;
+    if (isset($schedule['engine']) && 'wp_cron' === $schedule['engine']) {
+        $spawn_result = sitepulse_ai_spawn_cron(isset($schedule['timestamp']) ? (int) $schedule['timestamp'] : time());
+        $spawn_failed = false;
 
-        if (is_wp_error($async_response)) {
-            $async_error_details = $async_response->get_error_message();
-            $async_error_code    = sitepulse_ai_get_error_status_code($async_response, 500);
+        if (is_wp_error($spawn_result)) {
+            $spawn_failed        = true;
+            $spawn_error_message = $spawn_result->get_error_message();
 
-            if ('' !== $async_error_details) {
-                $async_error_log = sprintf(
+            if ('' !== $spawn_error_message) {
+                $spawn_message = sprintf(
                     /* translators: %s: Error details. */
-                    esc_html__('Échec du déclenchement immédiat de l’analyse IA via AJAX : %s', 'sitepulse'),
-                    $async_error_details
+                    esc_html__('Échec du déclenchement immédiat de WP-Cron pour l’analyse IA : %s', 'sitepulse'),
+                    $spawn_error_message
                 );
             } else {
-                $async_error_log = esc_html__('Échec du déclenchement immédiat de l’analyse IA via AJAX.', 'sitepulse');
+                $spawn_message = esc_html__('Échec du déclenchement immédiat de WP-Cron pour l’analyse IA.', 'sitepulse');
             }
-        } else {
-            $response_code = (int) wp_remote_retrieve_response_code($async_response);
 
-            if ($response_code >= 400) {
-                $async_error_code = $response_code;
-                $async_error_log  = sprintf(
-                    /* translators: %d: HTTP status code. */
-                    esc_html__('Échec du déclenchement immédiat de l’analyse IA via AJAX (code HTTP %d).', 'sitepulse'),
-                    $response_code
-                );
-                $async_error_details = (string) wp_remote_retrieve_response_message($async_response);
-            }
+            sitepulse_ai_record_critical_error($spawn_message);
+        } elseif (false === $spawn_result) {
+            $spawn_failed = true;
+            sitepulse_ai_record_critical_error(esc_html__('Échec du déclenchement immédiat de WP-Cron pour l’analyse IA.', 'sitepulse'));
         }
 
-        if ('' !== $async_error_log) {
-            sitepulse_ai_record_critical_error($async_error_log);
+        if ($spawn_failed) {
+            $async_response       = sitepulse_ai_trigger_async_job_request($job_id, $job_data['queue']);
+            $async_error_log      = '';
+            $async_error_details  = '';
+            $async_error_code     = 500;
 
-            $user_message = esc_html__('Impossible de déclencher immédiatement l’analyse IA. Réessayez dans quelques instants.', 'sitepulse');
+            if (is_wp_error($async_response)) {
+                $async_error_details = $async_response->get_error_message();
+                $async_error_code    = sitepulse_ai_get_error_status_code($async_response, 500);
 
-            if ('' !== $async_error_details) {
-                $user_message = sprintf(
-                    /* translators: %s: Error details. */
-                    esc_html__('Impossible de déclencher immédiatement l’analyse IA : %s', 'sitepulse'),
-                    wp_strip_all_tags($async_error_details)
+                if ('' !== $async_error_details) {
+                    $async_error_log = sprintf(
+                        /* translators: %s: Error details. */
+                        esc_html__('Échec du déclenchement immédiat de l’analyse IA via AJAX : %s', 'sitepulse'),
+                        $async_error_details
+                    );
+                } else {
+                    $async_error_log = esc_html__('Échec du déclenchement immédiat de l’analyse IA via AJAX.', 'sitepulse');
+                }
+            } else {
+                $response_code = (int) wp_remote_retrieve_response_code($async_response);
+
+                if ($response_code >= 400) {
+                    $async_error_code = $response_code;
+                    $async_error_log  = sprintf(
+                        /* translators: %d: HTTP status code. */
+                        esc_html__('Échec du déclenchement immédiat de l’analyse IA via AJAX (code HTTP %d).', 'sitepulse'),
+                        $response_code
+                    );
+                    $async_error_details = (string) wp_remote_retrieve_response_message($async_response);
+                }
+            }
+
+            if ('' !== $async_error_log) {
+                sitepulse_ai_record_critical_error($async_error_log);
+
+                $user_message = esc_html__('Impossible de déclencher immédiatement l’analyse IA. Réessayez dans quelques instants.', 'sitepulse');
+
+                if ('' !== $async_error_details) {
+                    $user_message = sprintf(
+                        /* translators: %s: Error details. */
+                        esc_html__('Impossible de déclencher immédiatement l’analyse IA : %s', 'sitepulse'),
+                        wp_strip_all_tags($async_error_details)
+                    );
+                }
+
+                sitepulse_ai_queue_clear_scheduled_action($job_id, $job_data['queue']);
+                sitepulse_ai_delete_job_data($job_id);
+
+                return sitepulse_ai_create_wp_error(
+                    'sitepulse_ai_job_async_trigger_failed',
+                    $user_message,
+                    $async_error_code,
+                    [
+                        'details' => wp_strip_all_tags($async_error_details),
+                    ]
                 );
             }
-
-            if (function_exists('wp_unschedule_event')) {
-                wp_unschedule_event($current_time, 'sitepulse_run_ai_insight_job', [$job_id]);
-            }
-
-            sitepulse_ai_delete_job_data($job_id);
-
-            return sitepulse_ai_create_wp_error(
-                'sitepulse_ai_job_async_trigger_failed',
-                $user_message,
-                $async_error_code,
-                [
-                    'details' => wp_strip_all_tags($async_error_details),
-                ]
-            );
         }
     }
 
@@ -1926,7 +2892,7 @@ function sitepulse_ai_schedule_generation_job($force_refresh) {
  *
  * @return void
  */
-function sitepulse_run_ai_insight_job($job_id) {
+function sitepulse_run_ai_insight_job($job_id, $queue_context = []) {
     $job_id = (string) $job_id;
 
     if ('' === $job_id) {
@@ -1935,8 +2901,21 @@ function sitepulse_run_ai_insight_job($job_id) {
 
     $job_data = sitepulse_ai_get_job_data($job_id);
 
+    if (!is_array($job_data)) {
+        $job_data = [];
+    }
+
+    $queue_context = sitepulse_ai_normalize_queue_context(is_array($queue_context) ? $queue_context : [], $job_data);
+
+    $attempt = isset($job_data['attempt']) ? max((int) $job_data['attempt'], $queue_context['attempt']) : $queue_context['attempt'];
+    $queue_context['attempt'] = $attempt;
+
     $job_data['status']     = 'running';
     $job_data['started_at'] = time();
+    $job_data['attempt']    = $attempt;
+    $job_data['queue']      = $queue_context;
+
+    unset($job_data['message'], $job_data['code']);
 
     sitepulse_ai_save_job_data($job_id, $job_data);
 
@@ -1951,6 +2930,7 @@ function sitepulse_run_ai_insight_job($job_id) {
                 'status'  => 'failed',
                 'message' => $error_message,
                 'code'    => $status_code,
+                'finished'=> time(),
             ]));
 
             return;
@@ -1967,11 +2947,12 @@ function sitepulse_run_ai_insight_job($job_id) {
             $status_code   = sitepulse_ai_get_error_status_code($result, 500);
             $retry_after   = sitepulse_ai_get_error_retry_after($result);
             $retry_at      = sitepulse_ai_get_error_retry_at($result);
+            $now_utc       = absint(current_time('timestamp', true));
 
             if ($retry_at > 0) {
                 sitepulse_ai_set_retry_after_timestamp($retry_at);
             } elseif ($retry_after > 0) {
-                $calculated_retry_at = absint(current_time('timestamp', true)) + $retry_after;
+                $calculated_retry_at = $now_utc + $retry_after;
                 sitepulse_ai_set_retry_after_timestamp($calculated_retry_at);
                 $retry_at = $calculated_retry_at;
             }
@@ -1989,6 +2970,42 @@ function sitepulse_run_ai_insight_job($job_id) {
 
             if ($retry_at > 0) {
                 $job_failure['retry_at'] = (int) $retry_at;
+            }
+
+            $max_attempts = sitepulse_ai_get_max_attempts();
+
+            if ($attempt < $max_attempts) {
+                $delay_seconds = 0;
+
+                if ($retry_at > $now_utc) {
+                    $delay_seconds = max(0, $retry_at - $now_utc);
+                } elseif ($retry_after > 0) {
+                    $delay_seconds = (int) $retry_after;
+                } else {
+                    $delay_seconds = sitepulse_ai_calculate_retry_delay($attempt + 1);
+                }
+
+                $next_attempt_at = $now_utc + $delay_seconds;
+                $retry_context   = $queue_context;
+                $retry_context['attempt']        = $attempt + 1;
+                $retry_context['next_attempt_at'] = $next_attempt_at;
+                $retry_context['message']        = $error_message;
+
+                $schedule_retry = sitepulse_ai_queue_schedule_action($job_id, $retry_context, $delay_seconds);
+
+                if (!is_wp_error($schedule_retry) && isset($schedule_retry['context'])) {
+                    $job_failure['status'] = 'pending';
+                    $job_failure['queue']  = $schedule_retry['context'];
+                    $job_failure['queue']['next_attempt_at'] = isset($schedule_retry['timestamp']) ? (int) $schedule_retry['timestamp'] : $next_attempt_at;
+
+                    sitepulse_ai_save_job_data($job_id, $job_failure);
+
+                    return;
+                }
+
+                if (is_wp_error($schedule_retry)) {
+                    sitepulse_ai_record_critical_error($schedule_retry->get_error_message(), sitepulse_ai_get_error_status_code($schedule_retry, 500));
+                }
             }
 
             sitepulse_ai_save_job_data($job_id, $job_failure);
@@ -2032,16 +3049,25 @@ function sitepulse_run_ai_insight_job($job_id) {
             'note'       => '',
         ]);
 
+        $job_data['queue']['next_attempt_at'] = 0;
+        $job_data['queue']['usage'] = isset($result['usage']) && is_array($result['usage']) ? $result['usage'] : [];
+
         sitepulse_ai_save_job_data($job_id, array_merge($job_data, [
             'status'     => 'completed',
             'result'     => $result_with_context,
             'finished'   => time(),
+            'queue'      => $job_data['queue'],
         ]));
 
         sitepulse_ai_record_history_entry($history_entry);
 
         update_option(SITEPULSE_OPTION_AI_LAST_RUN, absint(current_time('timestamp', true)));
         sitepulse_ai_set_retry_after_timestamp(0);
+
+        sitepulse_ai_log_execution_metrics($job_id, array_merge($job_data, [
+            'result'   => $result_with_context,
+            'finished' => time(),
+        ]), isset($result['usage']) && is_array($result['usage']) ? $result['usage'] : []);
     } catch (Throwable $throwable) {
         $message = sprintf(
             /* translators: %s: error message */
@@ -2294,6 +3320,7 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
     $history_export_name  = sanitize_file_name('sitepulse-ai-historique');
     $site_name            = wp_strip_all_tags(get_bloginfo('name', 'display'));
     $site_url             = home_url('/');
+    $queue_snapshot       = sitepulse_ai_get_queue_snapshot();
 
     wp_localize_script(
         'sitepulse-ai-insights',
@@ -2327,6 +3354,7 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
                 'siteName' => $site_name,
                 'siteUrl'  => esc_url_raw($site_url),
             ],
+            'initialQueue'      => $queue_snapshot,
             'noteAction'        => 'sitepulse_save_ai_history_note',
             'strings'           => [
                 'defaultError'    => esc_html__('Une erreur inattendue est survenue. Veuillez réessayer.', 'sitepulse'),
@@ -2336,6 +3364,7 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
                 'statusFreshForced' => esc_html__('Nouvelle analyse générée (rafraîchie manuellement).', 'sitepulse'),
                 'statusGenerating' => esc_html__('Génération en cours…', 'sitepulse'),
                 'statusQueued'    => esc_html__('Analyse en attente de traitement…', 'sitepulse'),
+                'statusPending'   => esc_html__('Nouvelle tentative programmée…', 'sitepulse'),
                 'statusFailed'    => esc_html__('La génération a échoué. Veuillez réessayer.', 'sitepulse'),
                 'statusQueuedSince' => esc_html__('Analyse en attente depuis %s.', 'sitepulse'),
                 'statusRunningSince' => esc_html__('Analyse en cours depuis %s.', 'sitepulse'),
@@ -2353,6 +3382,8 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
                 'historyNoteSaved' => esc_html__('Note enregistrée.', 'sitepulse'),
                 'historyNoteError' => esc_html__('Échec de l’enregistrement de la note.', 'sitepulse'),
                 'historyAriaDefault' => esc_html__('Mise à jour de l’historique.', 'sitepulse'),
+                'queuePosition'   => esc_html__('Position %1$d sur %2$d', 'sitepulse'),
+                'queueNextAttempt'=> esc_html__('Prochain essai : %s', 'sitepulse'),
             ],
             'initialCached'     => '' !== $insight_text,
             'initialForceRefresh' => false,
@@ -2447,6 +3478,11 @@ function sitepulse_ai_insights_page() {
         <div id="sitepulse-ai-insight-result" class="sitepulse-ai-result">
             <h2><?php esc_html_e('Votre Recommandation par IA', 'sitepulse'); ?></h2>
             <p class="sitepulse-ai-insight-status" role="status" aria-live="polite" aria-hidden="true"></p>
+            <div id="sitepulse-ai-queue-state" class="sitepulse-ai-queue-state" aria-live="polite" aria-atomic="true">
+                <p class="sitepulse-ai-queue-summary"></p>
+                <p class="sitepulse-ai-queue-next"></p>
+                <p class="sitepulse-ai-queue-usage"></p>
+            </div>
             <div class="sitepulse-ai-insight-text"></div>
             <p class="sitepulse-ai-insight-timestamp"></p>
         </div>
@@ -2759,9 +3795,13 @@ function sitepulse_generate_ai_insight() {
         wp_send_json_error($error_payload, $status_code);
     }
 
+    $job_snapshot = sitepulse_ai_get_job_data($job_id);
+    $queue_payload = !empty($job_snapshot) ? sitepulse_ai_format_queue_payload($job_id, $job_snapshot) : [];
+
     wp_send_json_success([
         'jobId'  => $job_id,
         'status' => 'queued',
+        'queue'  => $queue_payload,
     ]);
 }
 
@@ -2834,6 +3874,8 @@ function sitepulse_get_ai_insight_status() {
     if (isset($job_data['fallback'])) {
         $response['fallback'] = sanitize_text_field((string) $job_data['fallback']);
     }
+
+    $response['queue'] = sitepulse_ai_format_queue_payload($job_id, $job_data);
 
     if ('completed' === $status && isset($job_data['result']) && is_array($job_data['result'])) {
         $response['result'] = $job_data['result'];
