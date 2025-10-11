@@ -15,7 +15,7 @@ class Sitepulse_Debug_Notices_Test extends WP_UnitTestCase {
     protected function set_up(): void {
         parent::set_up();
 
-        update_option(SITEPULSE_OPTION_DEBUG_NOTICES, []);
+        delete_option(SITEPULSE_OPTION_DEBUG_NOTICES);
         sitepulse_debug_notice_registry(null, true);
 
         if (function_exists('sitepulse_debug_logging_block_state')) {
@@ -54,6 +54,17 @@ class Sitepulse_Debug_Notices_Test extends WP_UnitTestCase {
         return $count;
     }
 
+    private function get_option_autoload_flag(string $option_name): ?string {
+        global $wpdb;
+
+        return $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT autoload FROM {$wpdb->options} WHERE option_name = %s",
+                $option_name
+            )
+        ) ?: null;
+    }
+
     public function test_debug_notices_queue_and_rendering() {
         $this->assertSame(0, has_action('admin_notices', 'sitepulse_display_queued_debug_notices'));
 
@@ -64,6 +75,7 @@ class Sitepulse_Debug_Notices_Test extends WP_UnitTestCase {
         $this->assertCount(1, $queued);
         $this->assertSame('Rotation failed', $queued[0]['message']);
         $this->assertSame('error', $queued[0]['level']);
+        $this->assertSame('no', $this->get_option_autoload_flag(SITEPULSE_OPTION_DEBUG_NOTICES));
 
         sitepulse_schedule_debug_admin_notice('Rotation failed', 'error');
         $this->assertCount(1, get_option(SITEPULSE_OPTION_DEBUG_NOTICES, []));
@@ -82,12 +94,14 @@ class Sitepulse_Debug_Notices_Test extends WP_UnitTestCase {
             '<div class="notice notice-warning"><p>Write failure</p></div>';
         $this->assertSame($expected_output, $output);
         $this->assertSame([], get_option(SITEPULSE_OPTION_DEBUG_NOTICES, []));
+        $this->assertNull($this->get_option_autoload_flag(SITEPULSE_OPTION_DEBUG_NOTICES));
 
         $initial_hook_count = $this->get_admin_notices_callback_count();
         sitepulse_schedule_debug_admin_notice('Immediate notice', 'info');
         $after_hook_count = $this->get_admin_notices_callback_count();
         $this->assertSame($initial_hook_count + 1, $after_hook_count);
         $this->assertSame([], get_option(SITEPULSE_OPTION_DEBUG_NOTICES, []));
+        $this->assertNull($this->get_option_autoload_flag(SITEPULSE_OPTION_DEBUG_NOTICES));
 
         ob_start();
         do_action('admin_notices');
