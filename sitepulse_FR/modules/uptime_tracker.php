@@ -132,7 +132,7 @@ function sitepulse_uptime_tracker_register_cron_schedules($schedules) {
  */
 function sitepulse_uptime_register_remote_worker_hooks() {
     add_action('sitepulse_uptime_process_remote_queue', 'sitepulse_uptime_process_remote_queue');
-    add_action('sitepulse_uptime_schedule_internal_request', 'sitepulse_uptime_schedule_internal_request', 10, 3);
+    add_action('sitepulse_uptime_schedule_internal_request', 'sitepulse_uptime_schedule_internal_request', 10, 4);
     add_action('rest_api_init', 'sitepulse_uptime_register_rest_routes');
 
     if (defined('WP_CLI') && WP_CLI && class_exists('WP_CLI')) {
@@ -140,13 +140,14 @@ function sitepulse_uptime_register_remote_worker_hooks() {
             $agent = isset($assoc_args['agent']) ? $assoc_args['agent'] : 'default';
             $payload = isset($assoc_args['payload']) ? json_decode($assoc_args['payload'], true) : [];
             $timestamp = isset($assoc_args['timestamp']) ? (int) $assoc_args['timestamp'] : null;
+            $priority = isset($assoc_args['priority']) ? (int) $assoc_args['priority'] : 0;
 
             if (!is_array($payload)) {
                 $payload = [];
             }
 
-            sitepulse_uptime_schedule_internal_request($agent, $payload, $timestamp);
-            WP_CLI::success(sprintf('Vérification programmée pour %s.', $agent));
+            sitepulse_uptime_schedule_internal_request($agent, $payload, $timestamp, $priority);
+            WP_CLI::success(sprintf('Vérification programmée pour %s (priorité %d).', $agent, $priority));
         });
     }
 }
@@ -182,6 +183,11 @@ function sitepulse_uptime_register_rest_routes() {
                     'type'              => 'array',
                     'required'          => false,
                     'default'           => [],
+                ],
+                'priority'  => [
+                    'type'              => 'integer',
+                    'required'          => false,
+                    'default'           => 0,
                 ],
             ],
         ]
@@ -305,6 +311,7 @@ function sitepulse_uptime_rest_schedule_callback($request) {
     $agent = $request->get_param('agent');
     $payload = $request->get_param('payload');
     $timestamp = $request->get_param('timestamp');
+    $priority = $request->get_param('priority');
 
     if (!is_array($payload)) {
         $payload = [];
@@ -314,7 +321,13 @@ function sitepulse_uptime_rest_schedule_callback($request) {
         $timestamp = (int) $timestamp;
     }
 
-    sitepulse_uptime_schedule_internal_request($agent, $payload, $timestamp);
+    if (!is_numeric($priority)) {
+        $priority = 0;
+    }
+
+    $priority = (int) $priority;
+
+    sitepulse_uptime_schedule_internal_request($agent, $payload, $timestamp, $priority);
 
     $scheduled_timestamp = null === $timestamp
         ? (int) current_time('timestamp')
@@ -325,6 +338,7 @@ function sitepulse_uptime_rest_schedule_callback($request) {
         'agent'         => sitepulse_uptime_normalize_agent_id($agent),
         'scheduled_at'  => $scheduled_timestamp,
         'payload'       => empty($payload) ? new stdClass() : $payload,
+        'priority'      => $priority,
     ]);
 }
 
@@ -967,6 +981,9 @@ function sitepulse_uptime_get_default_queue_metrics($now, $ttl, $max_size) {
         'delayed_jobs'       => 0,
         'max_wait_seconds'   => 0,
         'avg_wait_seconds'   => 0,
+        'max_priority'       => 0,
+        'avg_priority'       => 0,
+        'prioritized_jobs'   => 0,
         'next_scheduled_at'  => null,
         'oldest_created_at'  => null,
         'limit_ttl'          => (int) $ttl,
@@ -1159,6 +1176,9 @@ function sitepulse_uptime_analyze_remote_queue($payload = null, $current_timesta
         'delayed_jobs'       => max(0, (int) ($metrics['delayed_jobs'] ?? 0)),
         'max_wait_seconds'   => max(0, (int) ($metrics['max_wait_seconds'] ?? 0)),
         'avg_wait_seconds'   => max(0, (int) ($metrics['avg_wait_seconds'] ?? 0)),
+        'max_priority'       => isset($metrics['max_priority']) ? (int) $metrics['max_priority'] : 0,
+        'avg_priority'       => isset($metrics['avg_priority']) ? (int) $metrics['avg_priority'] : 0,
+        'prioritized_jobs'   => max(0, (int) ($metrics['prioritized_jobs'] ?? 0)),
         'next_scheduled_at'  => isset($metrics['next_scheduled_at']) && (int) $metrics['next_scheduled_at'] > 0
             ? (int) $metrics['next_scheduled_at']
             : null,
@@ -1240,6 +1260,24 @@ function sitepulse_uptime_analyze_remote_queue($payload = null, $current_timesta
                 number_format_i18n($sanitized['delayed_jobs'])
             )
         );
+
+        if ($sanitized['prioritized_jobs'] > 0) {
+            $priority_level = $sanitized['max_priority'] >= 5 ? 'critical' : 'warning';
+            $register_alert(
+                'queue_priority_backlog',
+                $priority_level,
+                sprintf(
+                    _n(
+                        '%1$s job prioritaire attend (priorité max %2$s).',
+                        '%1$s jobs prioritaires attendent (priorité max %2$s).',
+                        $sanitized['prioritized_jobs'],
+                        'sitepulse'
+                    ),
+                    number_format_i18n($sanitized['prioritized_jobs']),
+                    number_format_i18n(max(1, $sanitized['max_priority']))
+                )
+            );
+        }
     }
 
     if ($sanitized['dropped_total'] > 0) {
@@ -1446,6 +1484,7 @@ function sitepulse_uptime_normalize_remote_queue($queue, $now = null) {
         $payload = isset($item['payload']) && is_array($item['payload']) ? $item['payload'] : [];
         $scheduled_at = isset($item['scheduled_at']) ? (int) $item['scheduled_at'] : $now;
         $created_at = isset($item['created_at']) ? (int) $item['created_at'] : $now;
+        $priority = isset($item['priority']) && is_numeric($item['priority']) ? (int) $item['priority'] : 0;
 
         if ($ttl > 0 && $scheduled_at <= ($now - $ttl)) {
             $metrics['dropped_expired']++;
@@ -1459,6 +1498,7 @@ function sitepulse_uptime_normalize_remote_queue($queue, $now = null) {
 
             $existing_created = isset($unique[$key]['created_at']) ? (int) $unique[$key]['created_at'] : null;
             $existing_scheduled = isset($unique[$key]['scheduled_at']) ? (int) $unique[$key]['scheduled_at'] : null;
+            $existing_priority = isset($unique[$key]['priority']) ? (int) $unique[$key]['priority'] : 0;
 
             if (null !== $existing_created && ($created_at > 0 && $created_at < $existing_created)) {
                 $unique[$key]['created_at'] = $created_at;
@@ -1466,6 +1506,10 @@ function sitepulse_uptime_normalize_remote_queue($queue, $now = null) {
 
             if (null !== $existing_scheduled && ($scheduled_at > 0 && $scheduled_at < $existing_scheduled)) {
                 $unique[$key]['scheduled_at'] = $scheduled_at;
+            }
+
+            if ($priority > $existing_priority) {
+                $unique[$key]['priority'] = $priority;
             }
 
             continue;
@@ -1476,6 +1520,7 @@ function sitepulse_uptime_normalize_remote_queue($queue, $now = null) {
             'payload'     => $payload,
             'scheduled_at'=> $scheduled_at,
             'created_at'  => $created_at,
+            'priority'    => $priority,
         ];
     }
 
@@ -1488,6 +1533,13 @@ function sitepulse_uptime_normalize_remote_queue($queue, $now = null) {
     $normalized = array_values($unique);
 
     usort($normalized, function ($a, $b) {
+        $a_priority = isset($a['priority']) ? (int) $a['priority'] : 0;
+        $b_priority = isset($b['priority']) ? (int) $b['priority'] : 0;
+
+        if ($a_priority !== $b_priority) {
+            return $b_priority <=> $a_priority;
+        }
+
         $a_scheduled = isset($a['scheduled_at']) ? (int) $a['scheduled_at'] : 0;
         $b_scheduled = isset($b['scheduled_at']) ? (int) $b['scheduled_at'] : 0;
 
@@ -1516,6 +1568,9 @@ function sitepulse_uptime_normalize_remote_queue($queue, $now = null) {
     $delayed_jobs = 0;
     $wait_total = 0;
     $max_wait = 0;
+    $priority_total = 0;
+    $prioritized_jobs = 0;
+    $max_priority_value = null;
 
     foreach ($normalized as $item) {
         if (isset($item['scheduled_at']) && (int) $item['scheduled_at'] > 0) {
@@ -1544,6 +1599,16 @@ function sitepulse_uptime_normalize_remote_queue($queue, $now = null) {
                 $oldest_created_at = $created;
             }
         }
+
+        $priority_value = isset($item['priority']) ? (int) $item['priority'] : 0;
+
+        if ($priority_value !== 0) {
+            $prioritized_jobs++;
+            $priority_total += $priority_value;
+            $max_priority_value = null === $max_priority_value
+                ? $priority_value
+                : max($max_priority_value, $priority_value);
+        }
     }
 
     $metrics['delayed_jobs'] = $delayed_jobs;
@@ -1553,6 +1618,12 @@ function sitepulse_uptime_normalize_remote_queue($queue, $now = null) {
         : 0;
     $metrics['next_scheduled_at'] = null !== $next_scheduled_at ? (int) $next_scheduled_at : null;
     $metrics['oldest_created_at'] = null !== $oldest_created_at ? (int) $oldest_created_at : null;
+
+    if ($prioritized_jobs > 0) {
+        $metrics['prioritized_jobs'] = $prioritized_jobs;
+        $metrics['max_priority'] = (int) $max_priority_value;
+        $metrics['avg_priority'] = (int) round($priority_total / $prioritized_jobs);
+    }
 
     sitepulse_uptime_record_queue_metrics($metrics);
 
@@ -1592,11 +1663,13 @@ function sitepulse_uptime_get_queue_next_scheduled_at($queue, $fallback = null) 
  * @param string   $agent_id  Agent identifier.
  * @param array    $payload   Optional overrides for the request.
  * @param int|null $timestamp When the request should be executed.
+ * @param int      $priority  Optional priority override (higher values are executed first).
  * @return void
  */
-function sitepulse_uptime_schedule_internal_request($agent_id, $payload = [], $timestamp = null) {
+function sitepulse_uptime_schedule_internal_request($agent_id, $payload = [], $timestamp = null, $priority = 0) {
     $agent_id = sitepulse_uptime_normalize_agent_id($agent_id);
     $timestamp = null === $timestamp ? (int) current_time('timestamp', true) : (int) $timestamp;
+    $priority = (int) $priority;
 
     if (!is_array($payload)) {
         $payload = [];
@@ -1613,6 +1686,7 @@ function sitepulse_uptime_schedule_internal_request($agent_id, $payload = [], $t
         'payload'     => $payload,
         'scheduled_at'=> $timestamp,
         'created_at'  => (int) current_time('timestamp', true),
+        'priority'    => $priority,
     ];
 
     $queue = sitepulse_uptime_normalize_remote_queue($queue);
@@ -3068,6 +3142,9 @@ function sitepulse_uptime_tracker_page() {
     $remote_queue_limit_ttl = isset($remote_queue_metrics['limit_ttl']) ? (int) $remote_queue_metrics['limit_ttl'] : 0;
     $remote_queue_limit_size = isset($remote_queue_metrics['limit_size']) ? (int) $remote_queue_metrics['limit_size'] : 0;
     $remote_queue_dropped_total = isset($remote_queue_metrics['dropped_total']) ? (int) $remote_queue_metrics['dropped_total'] : 0;
+    $remote_queue_prioritized_jobs = isset($remote_queue_metrics['prioritized_jobs']) ? (int) $remote_queue_metrics['prioritized_jobs'] : 0;
+    $remote_queue_max_priority = isset($remote_queue_metrics['max_priority']) ? (int) $remote_queue_metrics['max_priority'] : 0;
+    $remote_queue_avg_priority = isset($remote_queue_metrics['avg_priority']) ? (int) $remote_queue_metrics['avg_priority'] : 0;
 
     $queue_status = isset($remote_queue_status['level']) ? (string) $remote_queue_status['level'] : 'ok';
     $queue_status_headline = isset($remote_queue_status['headline']) ? (string) $remote_queue_status['headline'] : __('File d’orchestration nominale', 'sitepulse');
@@ -3279,6 +3356,20 @@ function sitepulse_uptime_tracker_page() {
                             esc_html(number_format_i18n($remote_queue_requested))
                         );
                         ?>
+                    </p>
+                    <p class="sitepulse-uptime-remote-metrics__meta">
+                        <?php if ($remote_queue_prioritized_jobs > 0) : ?>
+                            <?php
+                            printf(
+                                esc_html__('Priorité max : %1$s • Moyenne : %2$s • Jobs prioritaires : %3$s', 'sitepulse'),
+                                esc_html(number_format_i18n($remote_queue_max_priority)),
+                                esc_html(number_format_i18n($remote_queue_avg_priority)),
+                                esc_html(number_format_i18n($remote_queue_prioritized_jobs))
+                            );
+                            ?>
+                        <?php else : ?>
+                            <?php esc_html_e('Aucun job prioritaire en file.', 'sitepulse'); ?>
+                        <?php endif; ?>
                     </p>
                 </div>
                 <div class="sitepulse-uptime-remote-metrics__card">

@@ -3,6 +3,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/impact-scoring.php';
+
 if (!defined('SITEPULSE_PLUGIN_IMPACT_OPTION')) {
     define('SITEPULSE_PLUGIN_IMPACT_OPTION', 'sitepulse_plugin_impact_stats');
 }
@@ -199,6 +201,12 @@ function sitepulse_plugin_impact_tracker_update_history(array $samples, $now) {
     ];
 
     update_option(SITEPULSE_OPTION_PLUGIN_IMPACT_HISTORY, $payload, false);
+
+    if (!empty($stored_plugins)) {
+        sitepulse_plugin_impact_persist_scores($stored_plugins, $now);
+    } else {
+        sitepulse_plugin_impact_persist_scores([], $now);
+    }
 }
 
 /**

@@ -7,6 +7,10 @@ if (!defined('MINUTE_IN_SECONDS')) {
     define('MINUTE_IN_SECONDS', 60);
 }
 
+if (!defined('DAY_IN_SECONDS')) {
+    define('DAY_IN_SECONDS', 86400);
+}
+
 if (!defined('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS')) {
     define('SITEPULSE_TRANSIENT_SPEED_SCAN_RESULTS', 'sitepulse_speed_scan_results');
 }
@@ -38,6 +42,12 @@ function apply_filters($hook, $value, ...$args) {
     }
 
     return $value;
+}
+
+if (!function_exists('wp_parse_args')) {
+    function wp_parse_args($args, $defaults = []) {
+        return array_merge($defaults, (array) $args);
+    }
 }
 
 function current_time($type, $gmt = 0) {
@@ -129,6 +139,12 @@ sitepulse_assert($payload['interval'] === 1, 'Interval should fall back to sanit
 
 // Ensure samples were persisted using sanitized interval.
 sitepulse_assert(!empty($payload['samples']), 'Samples should be persisted when available.');
+
+$scores = get_option(SITEPULSE_OPTION_PLUGIN_IMPACT_SCORES, []);
+sitepulse_assert(isset($scores['plugins']['example/plugin.php']), 'Impact scores should be calculated for persisted plugins.');
+$example_score = $scores['plugins']['example/plugin.php'];
+sitepulse_assert(isset($example_score['score']) && $example_score['score'] > 0, 'Persisted plugin should have a positive impact score.');
+sitepulse_assert($scores['updated_at'] === $GLOBALS['sitepulse_fake_time'], 'Score payload must reuse the tracker timestamp.');
 
 $sitepulse_plugin_impact_tracker_force_persist = false;
 $sitepulse_plugin_impact_tracker_samples = [];

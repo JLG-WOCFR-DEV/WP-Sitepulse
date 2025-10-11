@@ -40,6 +40,7 @@ return [
     'SITEPULSE_OPTION_ALERT_RECIPIENTS' => 'sitepulse_alert_recipients',
     'SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE' => 'sitepulse_impact_loader_signature',
     'SITEPULSE_OPTION_IMPACT_THRESHOLDS' => 'sitepulse_impact_thresholds',
+    'SITEPULSE_OPTION_PLUGIN_IMPACT_SCORES' => 'sitepulse_plugin_impact_scores',
     'SITEPULSE_OPTION_PLUGIN_BASENAME' => 'sitepulse_plugin_basename',
     'SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER' => 'sitepulse_error_alert_log_pointer',
     'SITEPULSE_OPTION_CRON_WARNINGS' => 'sitepulse_cron_warnings',
