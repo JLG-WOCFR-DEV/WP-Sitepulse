@@ -311,11 +311,61 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_HTTP_METHOD, [
         'type' => 'string', 'sanitize_callback' => 'sitepulse_sanitize_uptime_http_method', 'default' => SITEPULSE_DEFAULT_UPTIME_HTTP_METHOD
     ]);
+    $uptime_agents_sanitize_callback = function_exists('sitepulse_uptime_sanitize_agents')
+        ? 'sitepulse_uptime_sanitize_agents'
+        : static function ($value) {
+            if (!is_array($value)) {
+                return [];
+            }
+
+            $sanitized = [];
+
+            foreach ($value as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+
+                $label = isset($row['label']) ? sanitize_text_field($row['label']) : '';
+                $region = isset($row['region']) ? sanitize_key($row['region']) : '';
+                $key = isset($row['id']) ? sanitize_key($row['id']) : '';
+
+                if ($label === '' && $region === '' && $key === '') {
+                    continue;
+                }
+
+                if ($key === '') {
+                    $key = sanitize_key($label);
+                }
+
+                if ($key === '') {
+                    $key = uniqid('agent_', false);
+                }
+
+                if (isset($sanitized[$key])) {
+                    continue;
+                }
+
+                $sanitized[$key] = [
+                    'label'  => $label,
+                    'region' => $region !== '' ? $region : 'global',
+                    'active' => !empty($row['active']),
+                    'url'    => isset($row['url']) ? esc_url_raw(trim((string) $row['url'])) : '',
+                    'timeout'=> isset($row['timeout']) && is_numeric($row['timeout']) ? max(1, (int) $row['timeout']) : null,
+                    'weight' => isset($row['weight']) && is_numeric($row['weight']) ? max(0, (float) $row['weight']) : 1.0,
+                ];
+            }
+
+            return $sanitized;
+        };
+
     register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_HTTP_HEADERS, [
         'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_uptime_http_headers', 'default' => []
     ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_EXPECTED_CODES, [
         'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_uptime_expected_codes', 'default' => []
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_AGENTS, [
+        'type' => 'array', 'sanitize_callback' => $uptime_agents_sanitize_callback, 'default' => []
     ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_LATENCY_THRESHOLD, [
         'type' => 'number', 'sanitize_callback' => 'sitepulse_sanitize_uptime_latency_threshold', 'default' => SITEPULSE_DEFAULT_UPTIME_LATENCY_THRESHOLD
@@ -2176,23 +2226,47 @@ function sitepulse_settings_page() {
     $uptime_maintenance_windows = sitepulse_sanitize_uptime_maintenance_windows($uptime_maintenance_windows_option);
     $uptime_maintenance_rows_to_render = max(count($uptime_maintenance_windows) + 1, 1);
     $uptime_maintenance_rows_to_render = min($uptime_maintenance_rows_to_render, 6);
-    $uptime_agents_choices = ['all' => __('Tous les agents', 'sitepulse')];
+    $uptime_agents_config = function_exists('sitepulse_uptime_get_agents')
+        ? sitepulse_uptime_get_agents()
+        : [];
 
-    if (function_exists('sitepulse_uptime_get_agents')) {
-        foreach (sitepulse_uptime_get_agents() as $agent_id => $agent_data) {
-            $agent_key = sanitize_key($agent_id);
-
-            if ($agent_key === '') {
-                continue;
-            }
-
-            $agent_label = isset($agent_data['label']) && is_string($agent_data['label'])
-                ? $agent_data['label']
-                : ucfirst(str_replace('_', ' ', $agent_key));
-
-            $uptime_agents_choices[$agent_key] = $agent_label;
-        }
+    if (!is_array($uptime_agents_config)) {
+        $uptime_agents_config = [];
     }
+
+    $uptime_agents_choices = ['all' => __('Tous les agents', 'sitepulse')];
+    $uptime_agents_rows = [];
+
+    foreach ($uptime_agents_config as $agent_id => $agent_data) {
+        $agent_key = sanitize_key($agent_id);
+
+        if ($agent_key === '') {
+            continue;
+        }
+
+        $agent_label = isset($agent_data['label']) && is_string($agent_data['label'])
+            ? $agent_data['label']
+            : ucfirst(str_replace('_', ' ', $agent_key));
+
+        $uptime_agents_choices[$agent_key] = $agent_label;
+
+        $uptime_agents_rows[] = [
+            'id'      => $agent_id,
+            'label'   => $agent_label,
+            'region'  => isset($agent_data['region']) ? sanitize_key($agent_data['region']) : 'global',
+            'url'     => isset($agent_data['url']) ? (string) $agent_data['url'] : '',
+            'timeout' => isset($agent_data['timeout']) && is_numeric($agent_data['timeout'])
+                ? (int) $agent_data['timeout']
+                : '',
+            'weight'  => isset($agent_data['weight']) && is_numeric($agent_data['weight'])
+                ? (float) $agent_data['weight']
+                : 1.0,
+            'active'  => !isset($agent_data['active']) || (bool) $agent_data['active'],
+        ];
+    }
+
+    $uptime_agents_rows_to_render = count($uptime_agents_rows) + 1;
+    $uptime_agents_rows_to_render = max(1, min($uptime_agents_rows_to_render, 12));
 
     $uptime_day_choices = [
         1 => __('Lundi', 'sitepulse'),
@@ -2768,6 +2842,76 @@ function sitepulse_settings_page() {
                                     <?php endforeach; ?>
                                 </ul>
                             <?php endif; ?>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Agents de surveillance', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <p class="sitepulse-card-description"><?php esc_html_e('Déclarez les points de présence utilisés pour contrôler la disponibilité. Les agents inactifs ne seront plus planifiés et sont exclus des calculs globaux.', 'sitepulse'); ?></p>
+                            <table class="widefat striped sitepulse-uptime-agents-table">
+                                <thead>
+                                    <tr>
+                                        <th scope="col"><?php esc_html_e('Actif', 'sitepulse'); ?></th>
+                                        <th scope="col"><?php esc_html_e('Libellé', 'sitepulse'); ?></th>
+                                        <th scope="col"><?php esc_html_e('Région', 'sitepulse'); ?></th>
+                                        <th scope="col"><?php esc_html_e('URL spécifique', 'sitepulse'); ?></th>
+                                        <th scope="col"><?php esc_html_e('Délai dédié (s)', 'sitepulse'); ?></th>
+                                        <th scope="col"><?php esc_html_e('Poids', 'sitepulse'); ?></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php for ($index = 0; $index < $uptime_agents_rows_to_render; $index++) :
+                                        $agent_row = isset($uptime_agents_rows[$index]) ? $uptime_agents_rows[$index] : [
+                                            'id'      => '',
+                                            'label'   => '',
+                                            'region'  => 'global',
+                                            'url'     => '',
+                                            'timeout' => '',
+                                            'weight'  => 1.0,
+                                            'active'  => true,
+                                        ];
+                                        $row_prefix = SITEPULSE_OPTION_UPTIME_AGENTS . '[' . $index . ']';
+                                        $timeout_value = '' !== $agent_row['timeout'] ? (int) $agent_row['timeout'] : '';
+                                        $weight_value = is_numeric($agent_row['weight']) ? (float) $agent_row['weight'] : 1.0;
+                                    ?>
+                                        <tr>
+                                            <td class="sitepulse-uptime-agent-active">
+                                                <label class="screen-reader-text" for="<?php echo esc_attr($row_prefix . '[active]'); ?>">
+                                                    <?php esc_html_e('Activer l’agent', 'sitepulse'); ?>
+                                                </label>
+                                                <input type="checkbox" id="<?php echo esc_attr($row_prefix . '[active]'); ?>" name="<?php echo esc_attr($row_prefix . '[active]'); ?>" value="1" <?php checked(!empty($agent_row['active'])); ?>>
+                                                <input type="hidden" name="<?php echo esc_attr($row_prefix . '[id]'); ?>" value="<?php echo esc_attr($agent_row['id']); ?>">
+                                            </td>
+                                            <td>
+                                                <label class="screen-reader-text" for="<?php echo esc_attr($row_prefix . '[label]'); ?>"><?php esc_html_e('Libellé de l’agent', 'sitepulse'); ?></label>
+                                                <input type="text" id="<?php echo esc_attr($row_prefix . '[label]'); ?>" name="<?php echo esc_attr($row_prefix . '[label]'); ?>" value="<?php echo esc_attr($agent_row['label']); ?>" class="regular-text" placeholder="<?php esc_attr_e('Ex. Paris (FR)', 'sitepulse'); ?>">
+                                                <?php if (!empty($agent_row['id'])) : ?>
+                                                    <p class="description"><?php printf(esc_html__('Identifiant : %s', 'sitepulse'), esc_html($agent_row['id'])); ?></p>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
+                                                <label class="screen-reader-text" for="<?php echo esc_attr($row_prefix . '[region]'); ?>"><?php esc_html_e('Région de l’agent', 'sitepulse'); ?></label>
+                                                <input type="text" id="<?php echo esc_attr($row_prefix . '[region]'); ?>" name="<?php echo esc_attr($row_prefix . '[region]'); ?>" value="<?php echo esc_attr($agent_row['region']); ?>" class="regular-text" maxlength="32" placeholder="<?php esc_attr_e('ex. eu-west', 'sitepulse'); ?>">
+                                            </td>
+                                            <td>
+                                                <label class="screen-reader-text" for="<?php echo esc_attr($row_prefix . '[url]'); ?>"><?php esc_html_e('URL spécifique pour cet agent', 'sitepulse'); ?></label>
+                                                <input type="url" id="<?php echo esc_attr($row_prefix . '[url]'); ?>" name="<?php echo esc_attr($row_prefix . '[url]'); ?>" value="<?php echo esc_attr($agent_row['url']); ?>" class="regular-text" placeholder="<?php echo esc_attr__('https://example.com/status', 'sitepulse'); ?>">
+                                            </td>
+                                            <td>
+                                                <label class="screen-reader-text" for="<?php echo esc_attr($row_prefix . '[timeout]'); ?>"><?php esc_html_e('Délai maximum pour cet agent', 'sitepulse'); ?></label>
+                                                <input type="number" min="1" id="<?php echo esc_attr($row_prefix . '[timeout]'); ?>" name="<?php echo esc_attr($row_prefix . '[timeout]'); ?>" value="<?php echo '' === $timeout_value ? '' : esc_attr($timeout_value); ?>" class="small-text" placeholder="—">
+                                            </td>
+                                            <td>
+                                                <label class="screen-reader-text" for="<?php echo esc_attr($row_prefix . '[weight]'); ?>"><?php esc_html_e('Poids de l’agent', 'sitepulse'); ?></label>
+                                                <input type="number" min="0" step="0.1" id="<?php echo esc_attr($row_prefix . '[weight]'); ?>" name="<?php echo esc_attr($row_prefix . '[weight]'); ?>" value="<?php echo esc_attr($weight_value); ?>" class="small-text">
+                                            </td>
+                                        </tr>
+                                    <?php endfor; ?>
+                                </tbody>
+                            </table>
+                            <p class="description"><?php esc_html_e('Laissez une ligne vide pour supprimer un agent. Les poids permettent de prioriser certaines régions dans le calcul du SLA.', 'sitepulse'); ?></p>
                         </div>
                     </div>
                     <div class="sitepulse-module-card sitepulse-module-card--setting">

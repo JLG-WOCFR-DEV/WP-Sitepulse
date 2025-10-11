@@ -70,6 +70,35 @@ Chaque module peut être activé/désactivé depuis l’interface d’administra
 4. **Remédiation** : déclenchez les actions de nettoyage, les scripts de maintenance ou les escalades depuis les modules concernés. Les événements sont historisés dans les options du plugin afin d’assurer un audit trail minimum.
 5. **Partage** : exportez les rapports CSV/PDF, copiez les recommandations IA contextualisées et partagez les liens d’incident pour garder vos équipes alignées.
 
+## Provisionner des agents de surveillance
+
+Les déploiements multi-sites peuvent piloter la liste des agents d’uptime depuis le code :
+
+- Filtrez les données persistées avec `sitepulse_uptime_sanitized_agents` ou écoutez l’action `sitepulse_uptime_agents_prepared` pour synchroniser une configuration centralisée.
+- Ajustez dynamiquement les définitions exposées côté lecture via `sitepulse_uptime_agents`, y compris depuis un MU-plugin.
+- Forcez l’activation ou le poids d’un agent grâce aux filtres `sitepulse_uptime_agent_is_active` et `sitepulse_uptime_agent_weight` afin d’orchestrer des régions prioritaires.
+- Interceptez l’orchestration de jobs distants avec `sitepulse_uptime_pre_enqueue_job` (filtre) et `sitepulse_uptime_job_enqueued` (action) pour tracer les vérifications ou injecter des métadonnées spécifiques.
+
+```php
+add_filter('sitepulse_uptime_sanitized_agents', function (array $agents) {
+    $agents['paris'] = [
+        'label'  => 'Paris (FR)',
+        'region' => 'eu-fr',
+        'url'    => 'https://paris.example.com/health',
+        'weight' => 2.0,
+        'active' => true,
+    ];
+
+    return $agents;
+});
+
+add_filter('sitepulse_uptime_agent_weight', function ($weight, $agent_id) {
+    return $agent_id === 'backup_dc' ? 0.5 : $weight;
+}, 10, 2);
+```
+
+Les métriques d’uptime exposées via l’écran d’administration, l’API REST (`/sitepulse/v1/uptime/remote-queue`) et l’export CSV incluent désormais les pondérations et ignorent automatiquement les agents désactivés.
+
 ## Sécurité, audit et conformité
 
 - **Gestion des secrets** : définissez `SITEPULSE_GEMINI_API_KEY` dans `wp-config.php` ou via le filtre `sitepulse_gemini_api_key` pour éviter de stocker les clés en clair.
