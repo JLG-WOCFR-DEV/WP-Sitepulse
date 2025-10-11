@@ -409,6 +409,10 @@
         var $historyExportButton = $('#sitepulse-ai-history-export-csv');
         var $historyCopyButton = $('#sitepulse-ai-history-copy');
         var $historyFeedback = $('#sitepulse-ai-history-feedback');
+        var $queueState = $('#sitepulse-ai-queue-state');
+        var $queueSummary = $queueState.find('.sitepulse-ai-queue-summary');
+        var $queueNext = $queueState.find('.sitepulse-ai-queue-next');
+        var $queueUsage = $queueState.find('.sitepulse-ai-queue-usage');
         var historyEntries = [];
         var historyMaxEntries = parseInt(sitepulseAIInsights.historyMaxEntries, 10);
         var lastResultData = null;
@@ -494,6 +498,103 @@
                 delete historyExportRowsMap[id];
             }
         });
+
+        function clearQueueState() {
+            if (!$queueState.length) {
+                return;
+            }
+
+            $queueSummary.text('');
+            $queueNext.text('');
+            $queueUsage.text('');
+            $queueSummary.hide();
+            $queueNext.hide();
+            $queueUsage.hide();
+            $queueState.hide();
+        }
+
+        function renderQueueState(queue) {
+            if (!$queueState.length) {
+                return;
+            }
+
+            if (!queue || typeof queue !== 'object') {
+                clearQueueState();
+
+                return;
+            }
+
+            var summaryParts = [];
+
+            if (queue.status_label) {
+                summaryParts.push(queue.status_label);
+            }
+
+            if (queue.priority_label) {
+                summaryParts.push(queue.priority_label);
+            }
+
+            if (queue.attempt_label) {
+                summaryParts.push(queue.attempt_label);
+            }
+
+            if (
+                queue.position
+                && queue.size
+                && sitepulseAIInsights.strings
+                && sitepulseAIInsights.strings.queuePosition
+            ) {
+                summaryParts.push(formatTemplate(sitepulseAIInsights.strings.queuePosition, [queue.position, queue.size]));
+            }
+
+            if (queue.engine_label) {
+                summaryParts.push(queue.engine_label);
+            }
+
+            if (summaryParts.length) {
+                $queueSummary.text(summaryParts.join(' • ')).show();
+            } else {
+                $queueSummary.text('').hide();
+            }
+
+            var nextParts = [];
+
+            if (queue.next_attempt_display) {
+                if (sitepulseAIInsights.strings && sitepulseAIInsights.strings.queueNextAttempt) {
+                    nextParts.push(formatTemplate(sitepulseAIInsights.strings.queueNextAttempt, [queue.next_attempt_display]));
+                } else {
+                    nextParts.push(queue.next_attempt_display);
+                }
+            }
+
+            if (queue.quota_label) {
+                nextParts.push(queue.quota_label);
+            }
+
+            if (nextParts.length) {
+                $queueNext.text(nextParts.join(' • ')).show();
+            } else {
+                $queueNext.text('').hide();
+            }
+
+            if (queue.usage_label) {
+                $queueUsage.text(queue.usage_label).show();
+            } else {
+                $queueUsage.text('').hide();
+            }
+
+            if ($queueSummary.is(':visible') || $queueNext.is(':visible') || $queueUsage.is(':visible')) {
+                $queueState.show();
+            } else {
+                clearQueueState();
+            }
+        }
+
+        clearQueueState();
+
+        if (Array.isArray(sitepulseAIInsights.initialQueue) && sitepulseAIInsights.initialQueue.length) {
+            renderQueueState(sitepulseAIInsights.initialQueue[0]);
+        }
 
         function setActionsBusy(isBusy) {
             if ($actionsContainer.length === 0) {
@@ -620,6 +721,7 @@
             $spinner.removeClass('is-active');
             $button.prop('disabled', false);
             setActionsBusy(false);
+            clearQueueState();
         }
 
         function ensureFilterOption($select, data) {
@@ -1076,6 +1178,12 @@
                     if (response && response.success && response.data) {
                         var status = typeof response.data.status === 'string' ? response.data.status : 'queued';
 
+                        if (response.data.queue) {
+                            renderQueueState(response.data.queue);
+                        } else {
+                            clearQueueState();
+                        }
+
                         if (status === 'completed' && response.data.result) {
                             var resultPayload = $.extend({}, response.data.result || {}, {
                                 created_at: response.data.created_at,
@@ -1102,6 +1210,8 @@
 
                             if (status === 'queued' && sitepulseAIInsights.strings.statusQueued) {
                                 baseQueuedMessage = sitepulseAIInsights.strings.statusQueued;
+                            } else if (status === 'pending' && sitepulseAIInsights.strings.statusPending) {
+                                baseQueuedMessage = sitepulseAIInsights.strings.statusPending;
                             }
 
                             var pendingMessages = [baseQueuedMessage];
@@ -1280,6 +1390,12 @@
 
             $.post(sitepulseAIInsights.ajaxUrl, requestData).done(function (response) {
                 if (response && response.success && response.data) {
+                    if (response.data.queue) {
+                        renderQueueState(response.data.queue);
+                    } else {
+                        clearQueueState();
+                    }
+
                     if (response.data.jobId) {
                         activeJobId = response.data.jobId;
                         setStatus($statusEl, sitepulseAIInsights.strings.statusGenerating);
@@ -1301,6 +1417,7 @@
                     finalizeRequest();
                 }
             }).fail(function (xhr) {
+                clearQueueState();
                 var message = sitepulseAIInsights.strings.defaultError;
 
                 if (xhr && xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) {
