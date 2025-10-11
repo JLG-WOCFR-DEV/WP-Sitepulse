@@ -146,8 +146,11 @@ function sitepulse_uptime_register_remote_worker_hooks() {
                 $payload = [];
             }
 
-            sitepulse_uptime_schedule_internal_request($agent, $payload, $timestamp, $priority);
-            WP_CLI::success(sprintf('Vérification programmée pour %s (priorité %d).', $agent, $priority));
+            if (sitepulse_uptime_enqueue_remote_job($agent, $payload, $timestamp, $priority)) {
+                WP_CLI::success(sprintf('Vérification programmée pour %s (priorité %d).', $agent, $priority));
+            } else {
+                WP_CLI::warning(sprintf('Agent %s ignoré (inactif ou filtré).', $agent));
+            }
         });
     }
 }
@@ -327,7 +330,15 @@ function sitepulse_uptime_rest_schedule_callback($request) {
 
     $priority = (int) $priority;
 
-    sitepulse_uptime_schedule_internal_request($agent, $payload, $timestamp, $priority);
+    if (!sitepulse_uptime_enqueue_remote_job($agent, $payload, $timestamp, $priority)) {
+        return new WP_Error(
+            'sitepulse_uptime_agent_inactive',
+            __('Impossible de planifier cette vérification : l’agent est inactif ou interdit par un filtre.', 'sitepulse'),
+            [
+                'status' => 409,
+            ]
+        );
+    }
 
     $scheduled_timestamp = null === $timestamp
         ? (int) current_time('timestamp')
@@ -475,6 +486,22 @@ function sitepulse_uptime_rest_remote_queue_callback($request) {
         $payload['status']['notes'] = array_values(array_map('strval', $payload['status']['notes']));
     }
 
+    $agent_definitions = sitepulse_uptime_get_agents();
+    $agent_metrics = sitepulse_calculate_agent_uptime_metrics(sitepulse_get_uptime_archive(), 30, $agent_definitions);
+
+    $payload['agents'] = [
+        'window_days'  => 30,
+        'definitions'  => array_map(static function ($config) {
+            return [
+                'label'  => isset($config['label']) ? (string) $config['label'] : '',
+                'region' => isset($config['region']) ? sanitize_key($config['region']) : 'global',
+                'active' => !isset($config['active']) || (bool) $config['active'],
+                'weight' => isset($config['weight']) && is_numeric($config['weight']) ? (float) $config['weight'] : 1.0,
+            ];
+        }, $agent_definitions),
+        'metrics'      => $agent_metrics,
+    ];
+
     return function_exists('rest_ensure_response')
         ? rest_ensure_response($payload)
         : $payload;
@@ -505,6 +532,162 @@ function sitepulse_uptime_tracker_get_schedule() {
 }
 
 /**
+ * Sanitizes the uptime agent definitions before storage.
+ *
+ * @param mixed $value Raw agent configuration.
+ * @return array<string,array<string,mixed>>
+ */
+function sitepulse_uptime_sanitize_agents($value) {
+    $existing = get_option(SITEPULSE_OPTION_UPTIME_AGENTS, []);
+
+    if (!is_array($existing)) {
+        $existing = [];
+    }
+
+    if (!is_array($value)) {
+        $value = [];
+    }
+
+    $sanitized = [];
+    $generated_index = 0;
+
+    foreach ($value as $raw_agent) {
+        if (!is_array($raw_agent)) {
+            continue;
+        }
+
+        $label = isset($raw_agent['label']) ? sanitize_text_field($raw_agent['label']) : '';
+        $region = isset($raw_agent['region']) ? sanitize_key($raw_agent['region']) : '';
+        $identifier = isset($raw_agent['id']) ? sanitize_key($raw_agent['id']) : '';
+
+        if ($identifier === '' && isset($raw_agent['slug'])) {
+            $identifier = sanitize_key($raw_agent['slug']);
+        }
+
+        if ($identifier === '' && $label !== '') {
+            $identifier = sanitize_key($label);
+        }
+
+        if ($identifier === '') {
+            if ($label === '') {
+                continue;
+            }
+
+            $generated_index++;
+            $identifier = sanitize_key('agent_' . $generated_index);
+        }
+
+        if ($identifier === '' || isset($sanitized[$identifier])) {
+            continue;
+        }
+
+        $url = '';
+
+        if (isset($raw_agent['url']) && is_string($raw_agent['url'])) {
+            $candidate_url = trim($raw_agent['url']);
+
+            if ($candidate_url !== '') {
+                $validated_url = wp_http_validate_url($candidate_url);
+
+                if ($validated_url) {
+                    $url = esc_url_raw($validated_url);
+                }
+            }
+        }
+
+        $timeout = null;
+
+        if (isset($raw_agent['timeout']) && $raw_agent['timeout'] !== '') {
+            $timeout_candidate = is_numeric($raw_agent['timeout']) ? (int) $raw_agent['timeout'] : null;
+
+            if (null !== $timeout_candidate && $timeout_candidate > 0) {
+                $timeout = $timeout_candidate;
+            }
+        }
+
+        $weight = isset($raw_agent['weight']) && is_numeric($raw_agent['weight'])
+            ? (float) $raw_agent['weight']
+            : 1.0;
+
+        if ($weight <= 0) {
+            $weight = 1.0;
+        }
+
+        $active = !empty($raw_agent['active']);
+
+        $existing_agent = isset($existing[$identifier]) && is_array($existing[$identifier])
+            ? $existing[$identifier]
+            : [];
+
+        $headers = isset($existing_agent['headers']) && is_array($existing_agent['headers'])
+            ? $existing_agent['headers']
+            : [];
+
+        if (!empty($raw_agent['headers']) && is_array($raw_agent['headers'])) {
+            $headers = $raw_agent['headers'];
+        }
+
+        if (function_exists('sitepulse_sanitize_uptime_http_headers')) {
+            $headers = sitepulse_sanitize_uptime_http_headers($headers);
+        }
+
+        $expected_codes = isset($existing_agent['expected_codes']) && is_array($existing_agent['expected_codes'])
+            ? $existing_agent['expected_codes']
+            : [];
+
+        if (!empty($raw_agent['expected_codes']) && is_array($raw_agent['expected_codes'])) {
+            $expected_codes = $raw_agent['expected_codes'];
+        }
+
+        if (function_exists('sitepulse_sanitize_uptime_expected_codes')) {
+            $expected_codes = sitepulse_sanitize_uptime_expected_codes($expected_codes);
+        }
+
+        $agent = [
+            'label'          => $label !== '' ? $label : ucfirst(str_replace('_', ' ', $identifier)),
+            'region'         => $region !== '' ? $region : 'global',
+            'url'            => $url,
+            'timeout'        => null === $timeout ? null : max(1, (int) $timeout),
+            'method'         => isset($existing_agent['method']) ? $existing_agent['method'] : null,
+            'headers'        => $headers,
+            'expected_codes' => $expected_codes,
+            'active'         => $active,
+            'weight'         => (float) $weight,
+        ];
+
+        if (isset($existing_agent['metadata']) && is_array($existing_agent['metadata'])) {
+            $agent['metadata'] = $existing_agent['metadata'];
+        }
+
+        $sanitized[$identifier] = $agent;
+    }
+
+    if (empty($sanitized)) {
+        return [];
+    }
+
+    /**
+     * Filters the sanitized agent configuration prior to persistence.
+     *
+     * @param array<string,array<string,mixed>> $sanitized Sanitized agents.
+     * @param array<mixed>                       $raw       Raw submitted payload.
+     * @param array<string,array<string,mixed>>  $existing  Previously saved agents.
+     */
+    $sanitized = apply_filters('sitepulse_uptime_sanitized_agents', $sanitized, $value, $existing);
+
+    /**
+     * Fires after the agent configuration has been sanitized.
+     *
+     * @param array<string,array<string,mixed>> $sanitized Sanitized agents.
+     * @param array<string,array<string,mixed>> $existing  Previously saved agents.
+     * @param array<mixed>                       $raw       Raw submitted payload.
+     */
+    do_action('sitepulse_uptime_agents_prepared', $sanitized, $existing, $value);
+
+    return $sanitized;
+}
+
+/**
  * Returns the configured uptime monitoring agents.
  *
  * @return array<string,array<string,mixed>>
@@ -512,23 +695,19 @@ function sitepulse_uptime_tracker_get_schedule() {
 function sitepulse_uptime_get_agents() {
     $agents = get_option(SITEPULSE_OPTION_UPTIME_AGENTS, []);
 
-    if (!is_array($agents)) {
-        $agents = [];
-    }
-
-    if (empty($agents)) {
+    if (!is_array($agents) || empty($agents)) {
         $agents = [
             'default' => [
                 'label'  => __('Agent principal', 'sitepulse'),
                 'region' => 'global',
                 'active' => true,
+                'weight' => 1.0,
             ],
         ];
     }
 
     foreach ($agents as $agent_id => $agent_data) {
         if (!is_array($agent_data)) {
-            $agents[$agent_id] = [];
             $agent_data = [];
         }
 
@@ -541,10 +720,19 @@ function sitepulse_uptime_get_agents() {
             'headers'        => [],
             'expected_codes' => [],
             'active'         => true,
+            'weight'         => 1.0,
         ]);
+
+        $agents[$agent_id]['region'] = sanitize_key($agents[$agent_id]['region']);
+        $agents[$agent_id]['weight'] = (float) max(0.0, $agents[$agent_id]['weight']);
     }
 
-    return $agents;
+    /**
+     * Filters the agent definitions returned by SitePulse.
+     *
+     * @param array<string,array<string,mixed>> $agents Agent configuration keyed by identifier.
+     */
+    return apply_filters('sitepulse_uptime_agents', $agents);
 }
 
 /**
@@ -567,10 +755,67 @@ function sitepulse_uptime_get_agent($agent_id) {
             'headers'        => [],
             'expected_codes' => [],
             'active'         => true,
+            'weight'         => 1.0,
         ];
     }
 
     return $agents[$agent_id];
+}
+
+/**
+ * Determines whether an agent is active.
+ *
+ * @param string                          $agent_id     Agent identifier.
+ * @param array<string,mixed>|null        $agent_config Optional configuration override.
+ * @return bool
+ */
+function sitepulse_uptime_agent_is_active($agent_id, $agent_config = null) {
+    if (null === $agent_config) {
+        $agent_config = sitepulse_uptime_get_agent($agent_id);
+    }
+
+    $is_active = !isset($agent_config['active']) || (bool) $agent_config['active'];
+
+    /**
+     * Filters whether a given agent should be considered active.
+     *
+     * @param bool                           $is_active     Whether the agent is active.
+     * @param string                         $agent_id      Agent identifier.
+     * @param array<string,mixed>|null       $agent_config Agent configuration.
+     */
+    return (bool) apply_filters('sitepulse_uptime_agent_is_active', $is_active, $agent_id, $agent_config);
+}
+
+/**
+ * Returns the normalized weight for an agent.
+ *
+ * @param string                          $agent_id     Agent identifier.
+ * @param array<string,mixed>|null        $agent_config Optional configuration override.
+ * @return float
+ */
+function sitepulse_uptime_get_agent_weight($agent_id, $agent_config = null) {
+    if (null === $agent_config) {
+        $agent_config = sitepulse_uptime_get_agent($agent_id);
+    }
+
+    $weight = isset($agent_config['weight']) && is_numeric($agent_config['weight'])
+        ? (float) $agent_config['weight']
+        : 1.0;
+
+    if ($weight < 0) {
+        $weight = 0.0;
+    }
+
+    /**
+     * Filters the weight applied to an agent.
+     *
+     * @param float                          $weight        Agent weight.
+     * @param string                         $agent_id      Agent identifier.
+     * @param array<string,mixed>|null       $agent_config Agent configuration.
+     */
+    $weight = apply_filters('sitepulse_uptime_agent_weight', $weight, $agent_id, $agent_config);
+
+    return (float) max(0.0, $weight);
 }
 
 /**
@@ -1658,6 +1903,80 @@ function sitepulse_uptime_get_queue_next_scheduled_at($queue, $fallback = null) 
 }
 
 /**
+ * High-level helper to enqueue a remote job for an agent.
+ *
+ * @param string     $agent_id  Agent identifier.
+ * @param array      $payload   Optional request overrides.
+ * @param int|null   $timestamp Scheduled timestamp (UTC).
+ * @param int|null   $priority  Optional priority override.
+ * @return bool True when the job was enqueued, false when skipped.
+ */
+function sitepulse_uptime_enqueue_remote_job($agent_id, $payload = [], $timestamp = null, $priority = null) {
+    $agent_id = sitepulse_uptime_normalize_agent_id($agent_id);
+    $agent_config = sitepulse_uptime_get_agent($agent_id);
+
+    if (!sitepulse_uptime_agent_is_active($agent_id, $agent_config)) {
+        return false;
+    }
+
+    if (!is_array($payload)) {
+        $payload = [];
+    }
+
+    if (null === $priority) {
+        $weight = sitepulse_uptime_get_agent_weight($agent_id, $agent_config);
+        $priority = (int) round($weight * 100);
+    }
+
+    $job = [
+        'agent'     => $agent_id,
+        'payload'   => $payload,
+        'timestamp' => $timestamp,
+        'priority'  => $priority,
+    ];
+
+    /**
+     * Filters the job payload before it is persisted in the remote queue.
+     *
+     * Returning false aborts the enqueue operation.
+     *
+     * @param array<string,mixed>|false $job          Normalized job payload.
+     * @param array<string,mixed>       $agent_config Agent configuration.
+     */
+    $job = apply_filters('sitepulse_uptime_pre_enqueue_job', $job, $agent_config);
+
+    if (false === $job) {
+        return false;
+    }
+
+    $job_agent = isset($job['agent']) ? sitepulse_uptime_normalize_agent_id($job['agent']) : $agent_id;
+    $job_payload = isset($job['payload']) && is_array($job['payload']) ? $job['payload'] : $payload;
+    $job_timestamp = array_key_exists('timestamp', $job) ? $job['timestamp'] : $timestamp;
+    $job_priority = array_key_exists('priority', $job) ? $job['priority'] : $priority;
+
+    $job_priority = is_numeric($job_priority) ? (int) $job_priority : 0;
+
+    if (null !== $job_timestamp) {
+        $job_timestamp = (int) $job_timestamp;
+    }
+
+    sitepulse_uptime_schedule_internal_request($job_agent, $job_payload, $job_timestamp, $job_priority);
+
+    /**
+     * Fires after an uptime job has been enqueued.
+     *
+     * @param string                    $agent_id     Agent identifier.
+     * @param array<string,mixed>       $payload      Job payload.
+     * @param int|null                  $timestamp    Scheduled timestamp.
+     * @param int                       $priority     Job priority.
+     * @param array<string,mixed>       $agent_config Agent configuration.
+     */
+    do_action('sitepulse_uptime_job_enqueued', $job_agent, $job_payload, $job_timestamp, $job_priority, $agent_config);
+
+    return true;
+}
+
+/**
  * Queues a remote worker request so it is executed internally.
  *
  * @param string   $agent_id  Agent identifier.
@@ -1752,6 +2071,10 @@ function sitepulse_uptime_process_remote_queue() {
 
         $agent = isset($item['agent']) ? $item['agent'] : 'default';
         $payload = isset($item['payload']) && is_array($item['payload']) ? $item['payload'] : [];
+
+        if (!sitepulse_uptime_agent_is_active($agent)) {
+            continue;
+        }
 
         sitepulse_run_uptime_check($agent, $payload);
     }
@@ -2342,9 +2665,10 @@ function sitepulse_update_uptime_archive($entry) {
  *
  * @param array<string,array<string,int>> $archive Archive of daily totals.
  * @param int                             $days    Number of days to include.
+ * @param array<string,array<string,mixed>>|null $agents Optional agent definitions.
  * @return array<string,int|float>
  */
-function sitepulse_calculate_uptime_window_metrics($archive, $days) {
+function sitepulse_calculate_uptime_window_metrics($archive, $days, $agents = null) {
     if (!is_array($archive) || empty($archive) || $days < 1) {
         return [
             'days'           => 0,
@@ -2397,15 +2721,50 @@ function sitepulse_calculate_uptime_window_metrics($archive, $days) {
         $totals['violations'] += isset($entry['violations']) ? (int) $entry['violations'] : 0;
     }
 
-    if ($totals['total_checks'] > 0) {
+    $agents_for_weights = is_array($agents) ? $agents : sitepulse_uptime_get_agents();
+    $agent_metrics = sitepulse_calculate_agent_uptime_metrics($archive, $days, $agents_for_weights);
+
+    $weighted_total = 0.0;
+    $weighted_up = 0.0;
+    $weighted_down = 0.0;
+    $weighted_unknown = 0.0;
+    $weighted_latency_sum = 0.0;
+    $weighted_latency_count = 0.0;
+    $weighted_ttfb_sum = 0.0;
+    $weighted_ttfb_count = 0.0;
+
+    foreach ($agent_metrics as $agent_id => $agent_counts) {
+        $weight = sitepulse_uptime_get_agent_weight($agent_id, isset($agents_for_weights[$agent_id]) ? $agents_for_weights[$agent_id] : null);
+
+        if ($weight <= 0) {
+            continue;
+        }
+
+        $weighted_total += (isset($agent_counts['effective_total']) ? (int) $agent_counts['effective_total'] : 0) * $weight;
+        $weighted_up += (isset($agent_counts['up']) ? (int) $agent_counts['up'] : 0) * $weight;
+        $weighted_down += (isset($agent_counts['down']) ? (int) $agent_counts['down'] : 0) * $weight;
+        $weighted_unknown += (isset($agent_counts['unknown']) ? (int) $agent_counts['unknown'] : 0) * $weight;
+        $weighted_latency_sum += (isset($agent_counts['latency_sum']) ? (float) $agent_counts['latency_sum'] : 0.0) * $weight;
+        $weighted_latency_count += (isset($agent_counts['latency_count']) ? (int) $agent_counts['latency_count'] : 0) * $weight;
+        $weighted_ttfb_sum += (isset($agent_counts['ttfb_sum']) ? (float) $agent_counts['ttfb_sum'] : 0.0) * $weight;
+        $weighted_ttfb_count += (isset($agent_counts['ttfb_count']) ? (int) $agent_counts['ttfb_count'] : 0) * $weight;
+    }
+
+    if ($weighted_total > 0) {
+        $totals['uptime'] = ($weighted_up / $weighted_total) * 100;
+    } elseif ($totals['total_checks'] > 0) {
         $totals['uptime'] = ($totals['up_checks'] / $totals['total_checks']) * 100;
     }
 
-    if ($totals['latency_count'] > 0) {
+    if ($weighted_latency_count > 0) {
+        $totals['latency_avg'] = $weighted_latency_sum / $weighted_latency_count;
+    } elseif ($totals['latency_count'] > 0) {
         $totals['latency_avg'] = $totals['latency_sum'] / $totals['latency_count'];
     }
 
-    if ($totals['ttfb_count'] > 0) {
+    if ($weighted_ttfb_count > 0) {
+        $totals['ttfb_avg'] = $weighted_ttfb_sum / $weighted_ttfb_count;
+    } elseif ($totals['ttfb_count'] > 0) {
         $totals['ttfb_avg'] = $totals['ttfb_sum'] / $totals['ttfb_count'];
     }
 
@@ -2417,15 +2776,25 @@ function sitepulse_calculate_uptime_window_metrics($archive, $days) {
  *
  * @param array<string,array<string,mixed>> $archive Archive entries.
  * @param int                               $days    Window size.
+ * @param array<string,array<string,mixed>>|null $agents Optional agent definitions to filter inactive entries.
  * @return array<string,array<string,mixed>>
  */
-function sitepulse_calculate_agent_uptime_metrics($archive, $days) {
+function sitepulse_calculate_agent_uptime_metrics($archive, $days, $agents = null) {
     if (!is_array($archive) || empty($archive) || $days < 1) {
         return [];
     }
 
     $window = array_slice($archive, -$days, null, true);
     $totals = [];
+    $active_map = null;
+
+    if (is_array($agents)) {
+        $active_map = [];
+
+        foreach ($agents as $agent_id => $agent_config) {
+            $active_map[$agent_id] = sitepulse_uptime_agent_is_active($agent_id, $agent_config);
+        }
+    }
 
     foreach ($window as $entry) {
         $agents = isset($entry['agents']) && is_array($entry['agents']) ? $entry['agents'] : [];
@@ -2497,6 +2866,11 @@ function sitepulse_calculate_agent_uptime_metrics($archive, $days) {
     }
 
     foreach ($totals as $agent_id => $counts) {
+        if (is_array($active_map) && array_key_exists($agent_id, $active_map) && !$active_map[$agent_id]) {
+            unset($totals[$agent_id]);
+            continue;
+        }
+
         $effective_total = max(0, (int) $counts['total'] - (int) $counts['maintenance']);
         $uptime = $effective_total > 0 ? ($counts['up'] / $effective_total) * 100 : 100;
         $totals[$agent_id]['uptime'] = max(0, min(100, $uptime));
@@ -2822,6 +3196,7 @@ function sitepulse_uptime_handle_sla_export() {
     $header = [
         __('Agent', 'sitepulse'),
         __('Région', 'sitepulse'),
+        __('Poids', 'sitepulse'),
         __('Disponibilité (%)', 'sitepulse'),
         __('Contrôles évalués', 'sitepulse'),
         __('Incidents détectés', 'sitepulse'),
@@ -2834,6 +3209,12 @@ function sitepulse_uptime_handle_sla_export() {
 
     foreach ($metrics['agents'] as $agent_id => $agent_totals) {
         $agent = isset($agents[$agent_id]) ? $agents[$agent_id] : sitepulse_uptime_get_agent($agent_id);
+
+        if (!sitepulse_uptime_agent_is_active($agent_id, $agent)) {
+            continue;
+        }
+
+        $agent_weight = sitepulse_uptime_get_agent_weight($agent_id, $agent);
         $total_checks = isset($agent_totals['total']) ? (int) $agent_totals['total'] : 0;
         $maintenance_checks = isset($agent_totals['maintenance']) ? (int) $agent_totals['maintenance'] : 0;
         $effective_total = max(0, $total_checks - $maintenance_checks);
@@ -2852,6 +3233,7 @@ function sitepulse_uptime_handle_sla_export() {
         fputcsv($output, [
             isset($agent['label']) ? $agent['label'] : ucfirst(str_replace('_', ' ', $agent_id)),
             isset($agent['region']) ? $agent['region'] : 'global',
+            number_format((float) $agent_weight, 2, '.', ''),
             number_format((float) $uptime, 3, '.', ''),
             $effective_total,
             $down_checks,
@@ -2899,7 +3281,13 @@ function sitepulse_calculate_region_uptime_metrics($agent_metrics, $agents) {
 
     foreach ($agent_metrics as $agent_id => $metrics) {
         $agent = isset($agents[$agent_id]) ? $agents[$agent_id] : ['region' => 'global'];
+
+        if (!sitepulse_uptime_agent_is_active($agent_id, $agent)) {
+            continue;
+        }
+
         $region = isset($agent['region']) && is_string($agent['region']) ? sanitize_key($agent['region']) : 'global';
+        $weight = sitepulse_uptime_get_agent_weight($agent_id, $agent);
 
         if (!isset($regions[$region])) {
             $regions[$region] = [
@@ -2915,6 +3303,16 @@ function sitepulse_calculate_region_uptime_metrics($agent_metrics, $agents) {
                 'violations'      => 0,
                 'violation_types' => [],
                 'agents'          => [],
+                'weighted'        => [
+                    'effective_total' => 0.0,
+                    'up'              => 0.0,
+                    'down'            => 0.0,
+                    'unknown'         => 0.0,
+                    'latency_sum'     => 0.0,
+                    'latency_count'   => 0.0,
+                    'ttfb_sum'        => 0.0,
+                    'ttfb_count'      => 0.0,
+                ],
             ];
         }
 
@@ -2930,6 +3328,17 @@ function sitepulse_calculate_region_uptime_metrics($agent_metrics, $agents) {
         $regions[$region]['violations'] += isset($metrics['violations']) ? (int) $metrics['violations'] : 0;
 
         $regions[$region]['agents'][] = $agent_id;
+
+        if ($weight > 0) {
+            $regions[$region]['weighted']['effective_total'] += (isset($metrics['effective_total']) ? (int) $metrics['effective_total'] : 0) * $weight;
+            $regions[$region]['weighted']['up'] += (isset($metrics['up']) ? (int) $metrics['up'] : 0) * $weight;
+            $regions[$region]['weighted']['down'] += (isset($metrics['down']) ? (int) $metrics['down'] : 0) * $weight;
+            $regions[$region]['weighted']['unknown'] += (isset($metrics['unknown']) ? (int) $metrics['unknown'] : 0) * $weight;
+            $regions[$region]['weighted']['latency_sum'] += (isset($metrics['latency_sum']) ? (float) $metrics['latency_sum'] : 0.0) * $weight;
+            $regions[$region]['weighted']['latency_count'] += (isset($metrics['latency_count']) ? (int) $metrics['latency_count'] : 0) * $weight;
+            $regions[$region]['weighted']['ttfb_sum'] += (isset($metrics['ttfb_sum']) ? (float) $metrics['ttfb_sum'] : 0.0) * $weight;
+            $regions[$region]['weighted']['ttfb_count'] += (isset($metrics['ttfb_count']) ? (int) $metrics['ttfb_count'] : 0) * $weight;
+        }
 
         if (isset($metrics['violation_types']) && is_array($metrics['violation_types'])) {
             foreach ($metrics['violation_types'] as $type => $count) {
@@ -2950,7 +3359,17 @@ function sitepulse_calculate_region_uptime_metrics($agent_metrics, $agents) {
 
     foreach ($regions as $region => $region_metrics) {
         $effective_total = max(0, (int) $region_metrics['effective_total']);
-        $uptime = $effective_total > 0 ? ($region_metrics['up'] / $effective_total) * 100 : 100;
+        $weighted_effective_total = isset($region_metrics['weighted']['effective_total'])
+            ? (float) $region_metrics['weighted']['effective_total']
+            : 0.0;
+        $weighted_up = isset($region_metrics['weighted']['up']) ? (float) $region_metrics['weighted']['up'] : 0.0;
+
+        if ($weighted_effective_total > 0) {
+            $uptime = ($weighted_up / $weighted_effective_total) * 100;
+        } else {
+            $uptime = $effective_total > 0 ? ($region_metrics['up'] / $effective_total) * 100 : 100;
+        }
+
         $regions[$region]['uptime'] = max(0, min(100, $uptime));
 
         $latency_count = isset($region_metrics['latency_count']) ? (int) $region_metrics['latency_count'] : 0;
@@ -2958,8 +3377,36 @@ function sitepulse_calculate_region_uptime_metrics($agent_metrics, $agents) {
         $ttfb_count = isset($region_metrics['ttfb_count']) ? (int) $region_metrics['ttfb_count'] : 0;
         $ttfb_sum = isset($region_metrics['ttfb_sum']) ? (float) $region_metrics['ttfb_sum'] : 0.0;
 
-        $regions[$region]['latency_avg'] = $latency_count > 0 ? $latency_sum / $latency_count : null;
-        $regions[$region]['ttfb_avg'] = $ttfb_count > 0 ? $ttfb_sum / $ttfb_count : null;
+        $weighted_latency_count = isset($region_metrics['weighted']['latency_count'])
+            ? (float) $region_metrics['weighted']['latency_count']
+            : 0.0;
+        $weighted_latency_sum = isset($region_metrics['weighted']['latency_sum'])
+            ? (float) $region_metrics['weighted']['latency_sum']
+            : 0.0;
+        $weighted_ttfb_count = isset($region_metrics['weighted']['ttfb_count'])
+            ? (float) $region_metrics['weighted']['ttfb_count']
+            : 0.0;
+        $weighted_ttfb_sum = isset($region_metrics['weighted']['ttfb_sum'])
+            ? (float) $region_metrics['weighted']['ttfb_sum']
+            : 0.0;
+
+        if ($weighted_latency_count > 0) {
+            $regions[$region]['latency_avg'] = $weighted_latency_sum / $weighted_latency_count;
+        } elseif ($latency_count > 0) {
+            $regions[$region]['latency_avg'] = $latency_sum / $latency_count;
+        } else {
+            $regions[$region]['latency_avg'] = null;
+        }
+
+        if ($weighted_ttfb_count > 0) {
+            $regions[$region]['ttfb_avg'] = $weighted_ttfb_sum / $weighted_ttfb_count;
+        } elseif ($ttfb_count > 0) {
+            $regions[$region]['ttfb_avg'] = $ttfb_sum / $ttfb_count;
+        } else {
+            $regions[$region]['ttfb_avg'] = null;
+        }
+
+        unset($regions[$region]['weighted']);
     }
 
     return $regions;
@@ -3040,17 +3487,64 @@ function sitepulse_uptime_tracker_page() {
             'ttfb_count'         => 0,
         ];
     $preview_effective_total = isset($preview_global['total_checks']) ? (int) $preview_global['total_checks'] : 0;
-    $preview_uptime = $preview_effective_total > 0
-        ? ($preview_global['up_checks'] / max(1, $preview_effective_total)) * 100
-        : 100.0;
+    $preview_weighted_total = 0.0;
+    $preview_weighted_up = 0.0;
+    $preview_weighted_latency_sum = 0.0;
+    $preview_weighted_latency_count = 0.0;
+    $preview_weighted_ttfb_sum = 0.0;
+    $preview_weighted_ttfb_count = 0.0;
+
+    if (isset($preview_metrics['agents']) && is_array($preview_metrics['agents'])) {
+        foreach ($preview_metrics['agents'] as $agent_id => $agent_totals) {
+            $agent_config = isset($agents[$agent_id]) ? $agents[$agent_id] : null;
+
+            if (!sitepulse_uptime_agent_is_active($agent_id, $agent_config)) {
+                continue;
+            }
+
+            $weight = sitepulse_uptime_get_agent_weight($agent_id, $agent_config);
+
+            if ($weight <= 0) {
+                continue;
+            }
+
+            $agent_effective_total = isset($agent_totals['total'], $agent_totals['maintenance'])
+                ? max(0, (int) $agent_totals['total'] - (int) $agent_totals['maintenance'])
+                : 0;
+
+            $preview_weighted_total += $agent_effective_total * $weight;
+            $preview_weighted_up += (isset($agent_totals['up']) ? (int) $agent_totals['up'] : 0) * $weight;
+            $preview_weighted_latency_sum += (isset($agent_totals['latency_sum']) ? (float) $agent_totals['latency_sum'] : 0.0) * $weight;
+            $preview_weighted_latency_count += (isset($agent_totals['latency_count']) ? (int) $agent_totals['latency_count'] : 0) * $weight;
+            $preview_weighted_ttfb_sum += (isset($agent_totals['ttfb_sum']) ? (float) $agent_totals['ttfb_sum'] : 0.0) * $weight;
+            $preview_weighted_ttfb_count += (isset($agent_totals['ttfb_count']) ? (int) $agent_totals['ttfb_count'] : 0) * $weight;
+        }
+    }
+
+    if ($preview_weighted_total > 0) {
+        $preview_uptime = ($preview_weighted_up / $preview_weighted_total) * 100;
+    } else {
+        $preview_uptime = $preview_effective_total > 0
+            ? ($preview_global['up_checks'] / max(1, $preview_effective_total)) * 100
+            : 100.0;
+    }
     $preview_incidents = isset($preview_global['down_checks']) ? (int) $preview_global['down_checks'] : 0;
     $preview_maintenance = isset($preview_global['maintenance_checks']) ? (int) $preview_global['maintenance_checks'] : 0;
-    $preview_ttfb_avg = (isset($preview_global['ttfb_sum'], $preview_global['ttfb_count']) && $preview_global['ttfb_count'] > 0)
-        ? ($preview_global['ttfb_sum'] / $preview_global['ttfb_count']) * 1000
-        : null;
-    $preview_latency_avg = (isset($preview_global['latency_sum'], $preview_global['latency_count']) && $preview_global['latency_count'] > 0)
-        ? ($preview_global['latency_sum'] / $preview_global['latency_count']) * 1000
-        : null;
+    if ($preview_weighted_ttfb_count > 0) {
+        $preview_ttfb_avg = ($preview_weighted_ttfb_sum / $preview_weighted_ttfb_count) * 1000;
+    } elseif (isset($preview_global['ttfb_sum'], $preview_global['ttfb_count']) && $preview_global['ttfb_count'] > 0) {
+        $preview_ttfb_avg = ($preview_global['ttfb_sum'] / $preview_global['ttfb_count']) * 1000;
+    } else {
+        $preview_ttfb_avg = null;
+    }
+
+    if ($preview_weighted_latency_count > 0) {
+        $preview_latency_avg = ($preview_weighted_latency_sum / $preview_weighted_latency_count) * 1000;
+    } elseif (isset($preview_global['latency_sum'], $preview_global['latency_count']) && $preview_global['latency_count'] > 0) {
+        $preview_latency_avg = ($preview_global['latency_sum'] / $preview_global['latency_count']) * 1000;
+    } else {
+        $preview_latency_avg = null;
+    }
     $preview_ttfb_count = isset($preview_global['ttfb_count']) ? (int) $preview_global['ttfb_count'] : 0;
     $preview_latency_count = isset($preview_global['latency_count']) ? (int) $preview_global['latency_count'] : 0;
     $preview_month_label = ($selected_month_key !== '' && isset($available_months[$selected_month_key]['label']))
@@ -3116,9 +3610,9 @@ function sitepulse_uptime_tracker_page() {
         ];
     }
 
-    $seven_day_metrics = sitepulse_calculate_uptime_window_metrics($uptime_archive, 7);
-    $thirty_day_metrics = sitepulse_calculate_uptime_window_metrics($uptime_archive, 30);
-    $agent_metrics = sitepulse_calculate_agent_uptime_metrics($uptime_archive, 30);
+    $seven_day_metrics = sitepulse_calculate_uptime_window_metrics($uptime_archive, 7, $agents);
+    $thirty_day_metrics = sitepulse_calculate_uptime_window_metrics($uptime_archive, 30, $agents);
+    $agent_metrics = sitepulse_calculate_agent_uptime_metrics($uptime_archive, 30, $agents);
     $region_metrics = sitepulse_calculate_region_uptime_metrics($agent_metrics, $agents);
     $maintenance_windows = sitepulse_uptime_get_maintenance_windows();
     $maintenance_notice_log = sitepulse_uptime_get_maintenance_notice_log();
@@ -3622,6 +4116,7 @@ function sitepulse_uptime_tracker_page() {
                         'unknown'         => 0,
                         'maintenance'     => 0,
                     ];
+                    $agent_is_active = sitepulse_uptime_agent_is_active($agent_id, $agent_data);
                     $uptime_value = number_format_i18n($agent_metrics_entry['uptime'], 2);
                     $ttfb_avg_value = isset($agent_metrics_entry['ttfb_avg']) ? $agent_metrics_entry['ttfb_avg'] : null;
                     $latency_avg_value = isset($agent_metrics_entry['latency_avg']) ? $agent_metrics_entry['latency_avg'] : null;
@@ -3693,6 +4188,11 @@ function sitepulse_uptime_tracker_page() {
                         }
                     }
 
+                    if (!$agent_is_active) {
+                        $status_label = __('Inactif', 'sitepulse');
+                        $status_class = 'status-unknown';
+                    }
+
                     $active_window = sitepulse_uptime_find_active_maintenance_window($agent_id, $current_timestamp);
                     $upcoming_window = null;
 
@@ -3740,7 +4240,10 @@ function sitepulse_uptime_tracker_page() {
                 ?>
                 <tr>
                     <td>
-                        <strong><?php echo esc_html($agent_data['label']); ?></strong><br />
+                        <strong><?php echo esc_html($agent_data['label']); ?></strong>
+                        <?php if (!$agent_is_active) : ?>
+                            <span class="description"><?php esc_html_e('Inactif', 'sitepulse'); ?></span>
+                        <?php endif; ?><br />
                         <small><?php echo esc_html($agent_id); ?></small>
                     </td>
                     <td><?php echo esc_html(isset($agent_data['region']) ? strtoupper($agent_data['region']) : 'GLOBAL'); ?></td>

@@ -451,6 +451,102 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $this->assertSame(0.0, $region_metrics['us']['uptime']);
     }
 
+    public function test_enqueue_remote_job_respects_inactive_agents() {
+        update_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, []);
+        update_option(SITEPULSE_OPTION_UPTIME_AGENTS, [
+            'default' => [
+                'label'  => 'Paris',
+                'region' => 'eu',
+                'active' => false,
+            ],
+        ]);
+
+        $queued = sitepulse_uptime_enqueue_remote_job('default');
+
+        $this->assertFalse($queued, 'Inactive agents should not be queued.');
+        $this->assertEmpty(get_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, []));
+    }
+
+    public function test_weighted_uptime_metrics_prioritise_heavier_agents() {
+        $archive = [
+            '2024-01-01' => [
+                'date'        => '2024-01-01',
+                'total'       => 2,
+                'maintenance' => 0,
+                'up'          => 1,
+                'down'        => 1,
+                'agents'      => [
+                    'heavy' => [
+                        'up'          => 0,
+                        'down'        => 1,
+                        'unknown'     => 0,
+                        'maintenance' => 0,
+                        'total'       => 1,
+                    ],
+                    'light' => [
+                        'up'          => 1,
+                        'down'        => 0,
+                        'unknown'     => 0,
+                        'maintenance' => 0,
+                        'total'       => 1,
+                    ],
+                ],
+            ],
+        ];
+
+        update_option(SITEPULSE_OPTION_UPTIME_AGENTS, [
+            'heavy' => [
+                'label'  => 'Heavy',
+                'region' => 'eu',
+                'weight' => 3,
+            ],
+            'light' => [
+                'label'  => 'Light',
+                'region' => 'eu',
+                'weight' => 1,
+            ],
+        ]);
+
+        $agents = sitepulse_uptime_get_agents();
+        $metrics = sitepulse_calculate_uptime_window_metrics($archive, 1, $agents);
+        $this->assertEqualsWithDelta(25.0, $metrics['uptime'], 0.01, 'Weighted uptime should favour heavier agents.');
+
+        $region_metrics = sitepulse_calculate_region_uptime_metrics(sitepulse_calculate_agent_uptime_metrics($archive, 1, $agents), $agents);
+        $this->assertArrayHasKey('eu', $region_metrics);
+        $this->assertEqualsWithDelta(25.0, $region_metrics['eu']['uptime'], 0.01);
+    }
+
+    public function test_agent_sanitizer_normalises_entries() {
+        $raw = [
+            [
+                'label'  => 'Paris',
+                'region' => 'EU',
+                'url'    => 'https://example.com/health',
+                'timeout'=> '5',
+                'weight' => '2.5',
+                'active' => '1',
+            ],
+            [
+                'label'  => 'Paris',
+                'region' => 'eu-west',
+                'active' => '',
+            ],
+        ];
+
+        $sanitized = sitepulse_uptime_sanitize_agents($raw);
+
+        $this->assertArrayHasKey('paris', $sanitized);
+        $paris = $sanitized['paris'];
+        $this->assertCount(1, $sanitized);
+
+        $this->assertSame('Paris', $paris['label']);
+        $this->assertSame('eu', $paris['region']);
+        $this->assertSame('https://example.com/health', $paris['url']);
+        $this->assertSame(5, $paris['timeout']);
+        $this->assertSame(2.5, $paris['weight']);
+        $this->assertTrue($paris['active']);
+    }
+
     public function test_internal_queue_uses_utc_timestamps() {
         update_option('timezone_string', '');
         update_option('gmt_offset', 5);
