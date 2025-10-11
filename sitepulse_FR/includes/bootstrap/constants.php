@@ -46,6 +46,7 @@ return [
     'SITEPULSE_OPTION_CRON_WARNINGS' => 'sitepulse_cron_warnings',
     'SITEPULSE_OPTION_DEBUG_NOTICES' => 'sitepulse_debug_notices',
     'SITEPULSE_OPTION_DASHBOARD_RANGE' => 'sitepulse_dashboard_range',
+    'SITEPULSE_OPTION_DASHBOARD_IMPACT_INDEX' => 'sitepulse_dashboard_impact_index',
     'SITEPULSE_OPTION_SPEED_WARNING_MS' => 'sitepulse_speed_warning_ms',
     'SITEPULSE_OPTION_SPEED_CRITICAL_MS' => 'sitepulse_speed_critical_ms',
     'SITEPULSE_OPTION_UPTIME_WARNING_PERCENT' => 'sitepulse_uptime_warning_percent',
