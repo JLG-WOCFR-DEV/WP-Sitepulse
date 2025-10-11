@@ -401,7 +401,9 @@ function sitepulse_log_analyzer_rest_recent_logs($request) {
     }
 
     $response_data = [
-        'generated_at' => time(),
+        'generated_at' => function_exists('current_time')
+            ? (int) current_time('timestamp', true)
+            : time(),
         'status'       => sitepulse_log_analyzer_determine_status($filtered_counts ?: $totals),
         'request'      => [
             'max_lines' => $max_lines,

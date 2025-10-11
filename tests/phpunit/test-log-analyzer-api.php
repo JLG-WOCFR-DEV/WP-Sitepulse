@@ -59,6 +59,10 @@ class Sitepulse_Log_Analyzer_Api_Test extends WP_UnitTestCase {
         rest_get_server();
         do_action('rest_api_init');
 
+        $start_generated_at = function_exists('current_time')
+            ? (int) current_time('timestamp', true)
+            : time();
+
         $request  = new WP_REST_Request('GET', '/sitepulse/v1/logs/recent');
         $response = rest_do_request($request);
 
@@ -66,10 +70,27 @@ class Sitepulse_Log_Analyzer_Api_Test extends WP_UnitTestCase {
 
         $data = $response->get_data();
 
+        $end_generated_at = function_exists('current_time')
+            ? (int) current_time('timestamp', true)
+            : time();
+
         $this->assertArrayHasKey('meta', $data);
         $this->assertArrayHasKey('lines', $data);
         $this->assertArrayHasKey('categories', $data);
         $this->assertArrayHasKey('sections', $data);
+
+        $this->assertArrayHasKey('generated_at', $data);
+        $this->assertIsInt($data['generated_at']);
+        $this->assertGreaterThanOrEqual(
+            $start_generated_at,
+            $data['generated_at'],
+            'Log analyzer timestamp should not precede the pre-request UTC timestamp.'
+        );
+        $this->assertLessThanOrEqual(
+            $end_generated_at,
+            $data['generated_at'],
+            'Log analyzer timestamp should not exceed the post-request UTC timestamp.'
+        );
 
         $this->assertSame('critical', $data['status']);
         $this->assertSame(5, $data['meta']['total_lines']);
