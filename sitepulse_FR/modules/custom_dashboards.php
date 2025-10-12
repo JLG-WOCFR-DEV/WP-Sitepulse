@@ -226,17 +226,9 @@ function sitepulse_custom_dashboard_get_default_status_labels() {
  */
 function sitepulse_get_dashboard_theme_options() {
     $options = [
-        'auto'  => [
-            'label'       => __('Automatique', 'sitepulse'),
-            'description' => __('Suit le thème défini par votre système.', 'sitepulse'),
-        ],
         'light' => [
             'label'       => __('Clair', 'sitepulse'),
             'description' => __('Palette lumineuse optimisée pour la lisibilité diurne.', 'sitepulse'),
-        ],
-        'dark'  => [
-            'label'       => __('Sombre', 'sitepulse'),
-            'description' => __('Palette sombre pour réduire la fatigue visuelle.', 'sitepulse'),
         ],
     ];
 
@@ -254,7 +246,7 @@ function sitepulse_get_dashboard_theme_options() {
  * @return string
  */
 function sitepulse_get_dashboard_default_theme() {
-    $default = 'auto';
+    $default = 'light';
 
     /**
      * Filters the default dashboard theme.
@@ -278,7 +270,7 @@ function sitepulse_normalize_dashboard_theme($theme) {
     $options = sitepulse_get_dashboard_theme_options();
 
     if ($theme === '' || !array_key_exists($theme, $options)) {
-        return 'auto';
+        return 'light';
     }
 
     return $theme;
@@ -354,7 +346,7 @@ function sitepulse_custom_dashboard_body_class($classes) {
  * @return string
  */
 function sitepulse_render_dashboard_theme_toggle($current_theme, $options) {
-    if (!is_array($options) || empty($options)) {
+    if (!is_array($options) || count($options) <= 1) {
         return '';
     }
 

@@ -366,12 +366,7 @@ function sitepulse_get_module_navigation_items($current_page = '') {
         }
     }
 
-    if ($current_page !== '') {
-        sitepulse_module_selector_record_visit($current_page);
-    }
-
     $items = sitepulse_get_module_selector_items();
-    $usage_counts = sitepulse_get_module_selector_usage_counts();
 
     $categories = sitepulse_get_module_selector_categories();
     $category_order = sitepulse_get_module_selector_category_order();
@@ -388,20 +383,11 @@ function sitepulse_get_module_navigation_items($current_page = '') {
 
         $items[$index]['category'] = $category_slug;
         $items[$index]['category_label'] = $categories[$category_slug];
-        $items[$index]['usage_count'] = isset($usage_counts[$slug]) ? (int) $usage_counts[$slug] : 0;
-        $items[$index]['favorite'] = $items[$index]['usage_count'] > 0;
     }
 
     usort(
         $items,
         static function ($a, $b) use ($category_order) {
-            $a_count = $a['usage_count'] ?? 0;
-            $b_count = $b['usage_count'] ?? 0;
-
-            if ($a_count !== $b_count) {
-                return $a_count > $b_count ? -1 : 1;
-            }
-
             $a_category = $a['category'] ?? 'other';
             $b_category = $b['category'] ?? 'other';
             $a_category_position = array_search($a_category, $category_order, true);
@@ -426,31 +412,11 @@ function sitepulse_get_module_navigation_items($current_page = '') {
         }
     );
 
-    $max_favorites = (int) apply_filters('sitepulse_module_selector_max_favorites', 4);
-    $favorites = [];
-    $remaining = [];
-
-    foreach ($items as $item) {
-        if ($item['favorite'] && count($favorites) < $max_favorites) {
-            $favorites[] = $item;
-        } else {
-            $remaining[] = $item;
-        }
-    }
-
     $grouped = [];
-
-    if (!empty($favorites)) {
-        $grouped[] = [
-            'slug'  => 'favorites',
-            'label' => __('Favoris', 'sitepulse'),
-            'items' => $favorites,
-        ];
-    }
 
     $buckets = [];
 
-    foreach ($remaining as $item) {
+    foreach ($items as $item) {
         $category_slug = $item['category'] ?? 'other';
         $bucket_key = isset($categories[$category_slug]) ? $category_slug : 'other';
 
