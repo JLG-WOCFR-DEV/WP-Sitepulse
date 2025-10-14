@@ -69,7 +69,10 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
 
         $this->assertSame($cached_snapshot, $result, 'Cached snapshot should be returned untouched.');
         $this->assertSame(0, $filter_calls, 'Cache TTL filter should not run when cached data is returned.');
-        $this->assertSame([], sitepulse_resource_monitor_get_history(), 'History should remain empty when serving cached data.');
+
+        $history = sitepulse_resource_monitor_get_history();
+        $this->assertArrayHasKey('entries', $history, 'History response should expose entries key.');
+        $this->assertSame([], $history['entries'], 'History should remain empty when serving cached data.');
     }
 
     public function test_generates_snapshot_with_custom_ttl_and_caches() {
@@ -372,7 +375,8 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
         sitepulse_resource_monitor_get_snapshot();
 
         $history_before = sitepulse_resource_monitor_get_history();
-        $this->assertGreaterThanOrEqual(2, count($history_before), 'History should contain multiple entries before refresh.');
+        $this->assertArrayHasKey('entries', $history_before, 'History response should expose entries key.');
+        $this->assertGreaterThanOrEqual(2, count($history_before['entries']), 'History should contain multiple entries before refresh.');
 
         $administrator_id = self::factory()->user->create(['role' => 'administrator']);
         wp_set_current_user($administrator_id);
@@ -386,11 +390,15 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
         $output = ob_get_clean();
 
         $history_after = sitepulse_resource_monitor_get_history();
-        $this->assertCount(1, $history_after, 'History should be rebuilt from a single fresh snapshot after refresh.');
+        $this->assertArrayHasKey('entries', $history_after, 'History response should expose entries key.');
+        $this->assertCount(1, $history_after['entries'], 'History should be rebuilt from a single fresh snapshot after refresh.');
 
-        $latest_before = end($history_before);
+        $history_before_entries = $history_before['entries'];
+        $latest_before = end($history_before_entries);
         $this->assertIsArray($latest_before, 'History should return array entries.');
-        $latest_after = $history_after[0];
+
+        $latest_after_entries = $history_after['entries'];
+        $latest_after = $latest_after_entries[0];
 
         $this->assertGreaterThan($latest_before['timestamp'], $latest_after['timestamp'], 'Refreshed snapshot should have a newer timestamp.');
         $this->assertStringContainsString(esc_html__('Les mesures et l’historique ont été actualisés.', 'sitepulse'), $output, 'Success notice should confirm history reset.');
