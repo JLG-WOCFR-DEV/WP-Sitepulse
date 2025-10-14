@@ -248,22 +248,73 @@ function sitepulse_resource_monitor_insert_history_entry(array $entry, $apply_re
     $disk = isset($entry['disk']) && is_array($entry['disk']) ? $entry['disk'] : [];
     $source = isset($entry['source']) ? (string) $entry['source'] : 'manual';
 
-    $data = [
-        'recorded_at'   => $timestamp,
-        'load_1'        => isset($load[0]) && is_numeric($load[0]) ? (float) $load[0] : null,
-        'load_5'        => isset($load[1]) && is_numeric($load[1]) ? (float) $load[1] : null,
-        'load_15'       => isset($load[2]) && is_numeric($load[2]) ? (float) $load[2] : null,
-        'memory_usage'  => isset($memory['usage']) && is_numeric($memory['usage']) ? max(0, (int) $memory['usage']) : null,
-        'memory_limit'  => isset($memory['limit']) && is_numeric($memory['limit']) ? max(0, (int) $memory['limit']) : null,
-        'disk_free'     => isset($disk['free']) && is_numeric($disk['free']) ? max(0, (int) $disk['free']) : null,
-        'disk_total'    => isset($disk['total']) && is_numeric($disk['total']) ? max(0, (int) $disk['total']) : null,
-        'source'        => $source !== '' ? $source : 'manual',
-        'created_at'    => gmdate('Y-m-d H:i:s'),
+    $fields = [
+        'recorded_at'  => [
+            'value'  => $timestamp,
+            'format' => '%d',
+        ],
+        'load_1'       => [
+            'value'  => isset($load[0]) && is_numeric($load[0]) ? (float) $load[0] : null,
+            'format' => '%f',
+        ],
+        'load_5'       => [
+            'value'  => isset($load[1]) && is_numeric($load[1]) ? (float) $load[1] : null,
+            'format' => '%f',
+        ],
+        'load_15'      => [
+            'value'  => isset($load[2]) && is_numeric($load[2]) ? (float) $load[2] : null,
+            'format' => '%f',
+        ],
+        'memory_usage' => [
+            'value'  => isset($memory['usage']) && is_numeric($memory['usage']) ? max(0, (int) $memory['usage']) : null,
+            'format' => '%d',
+        ],
+        'memory_limit' => [
+            'value'  => isset($memory['limit']) && is_numeric($memory['limit']) ? max(0, (int) $memory['limit']) : null,
+            'format' => '%d',
+        ],
+        'disk_free'    => [
+            'value'  => isset($disk['free']) && is_numeric($disk['free']) ? max(0, (int) $disk['free']) : null,
+            'format' => '%d',
+        ],
+        'disk_total'   => [
+            'value'  => isset($disk['total']) && is_numeric($disk['total']) ? max(0, (int) $disk['total']) : null,
+            'format' => '%d',
+        ],
+        'source'       => [
+            'value'  => $source !== '' ? $source : 'manual',
+            'format' => '%s',
+        ],
+        'created_at'   => [
+            'value'  => gmdate('Y-m-d H:i:s'),
+            'format' => '%s',
+        ],
     ];
 
-    $formats = ['%d', '%f', '%f', '%f', '%d', '%d', '%d', '%d', '%s', '%s'];
+    $data = [];
+    $formats = [];
 
-    $wpdb->insert($table, $data, $formats);
+    foreach ($fields as $column => $field) {
+        if (!is_array($field) || !array_key_exists('value', $field)) {
+            continue;
+        }
+
+        $value = $field['value'];
+
+        if ($value === null) {
+            continue;
+        }
+
+        $data[$column] = $value;
+
+        if (isset($field['format'])) {
+            $formats[] = $field['format'];
+        }
+    }
+
+    if (!empty($data)) {
+        $wpdb->insert($table, $data, $formats);
+    }
 
     if ($apply_retention) {
         sitepulse_resource_monitor_apply_retention();
