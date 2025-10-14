@@ -8,6 +8,7 @@
     var profileCatalog = {};
     var manualProfile = settings.manualProfile || null;
     var manualThresholds = {};
+    var activeSourceCatalog = {};
 
     updateProfileCatalog(settings.profiles || {});
     updateManualProfile(manualProfile || {});
@@ -132,10 +133,42 @@
         }
     }
 
-    function sanitizeHistory(history) {
+    function buildSourceCatalog(meta) {
+        var catalog = {};
+
+        if (!Array.isArray(meta)) {
+            return catalog;
+        }
+
+        meta.forEach(function (item) {
+            if (!item || typeof item !== 'object') {
+                return;
+            }
+
+            var key = typeof item.key === 'string' && item.key ? item.key : null;
+
+            if (!key) {
+                return;
+            }
+
+            catalog[key] = {
+                key: key,
+                label: typeof item.label === 'string' ? item.label : '',
+                type: typeof item.type === 'string' ? item.type : 'site',
+                profile: typeof item.profile === 'string' ? item.profile : null,
+                budget: typeof item.budget === 'number' && isFinite(item.budget) ? item.budget : null
+            };
+        });
+
+        return catalog;
+    }
+
+    function sanitizeHistory(history, sourceCatalog) {
         if (!Array.isArray(history)) {
             return [];
         }
+
+        var catalog = sourceCatalog && typeof sourceCatalog === 'object' ? sourceCatalog : {};
 
         return history
             .map(function (entry) {
@@ -147,6 +180,28 @@
                 var value = typeof entry.server_processing_ms === 'number'
                     ? entry.server_processing_ms
                     : parseFloat(entry.server_processing_ms);
+                var sourceKey = typeof entry.source === 'string' && entry.source
+                    ? entry.source
+                    : 'site';
+                var sourceMeta = catalog[sourceKey] || {};
+                var sourceLabel = typeof entry.source_label === 'string' && entry.source_label
+                    ? entry.source_label
+                    : (sourceMeta.label || (sourceKey === 'site'
+                        ? (settings.i18n && settings.i18n.ownSourceLabel ? settings.i18n.ownSourceLabel : 'Site')
+                        : (settings.i18n && settings.i18n.competitorSourceLabel ? settings.i18n.competitorSourceLabel : 'Concurrent')));
+                var sourceType = typeof entry.source_type === 'string' && entry.source_type
+                    ? entry.source_type
+                    : (sourceMeta.type || (sourceKey === 'site' ? 'site' : 'competitor'));
+                var profile = typeof entry.profile === 'string' && entry.profile
+                    ? entry.profile
+                    : (sourceMeta.profile || null);
+                var budget = null;
+
+                if (typeof entry.benchmark_budget === 'number' && isFinite(entry.benchmark_budget)) {
+                    budget = entry.benchmark_budget;
+                } else if (typeof sourceMeta.budget === 'number' && isFinite(sourceMeta.budget)) {
+                    budget = sourceMeta.budget;
+                }
 
                 if (!isFinite(timestamp) || timestamp <= 0 || !isFinite(value) || value < 0) {
                     return null;
@@ -154,7 +209,13 @@
 
                 return {
                     timestamp: timestamp,
-                    server_processing_ms: value
+                    server_processing_ms: value,
+                    source: sourceKey,
+                    source_label: sourceLabel,
+                    source_type: sourceType,
+                    profile: profile,
+                    benchmark_budget: budget,
+                    url: typeof entry.url === 'string' ? entry.url : null
                 };
             })
             .filter(function (entry) {
@@ -212,7 +273,16 @@
                 aggregates: settings.aggregates || {},
                 recommendations: settings.recommendations || [],
                 profile: manualThresholds.profile,
-                thresholds: cloneThresholds(manualThresholds)
+                thresholds: cloneThresholds(manualThresholds),
+                sourcesMeta: [
+                    {
+                        key: 'site',
+                        label: (settings.i18n && settings.i18n.ownSourceLabel) || '',
+                        type: 'site',
+                        profile: manualThresholds.profile || null,
+                        budget: null
+                    }
+                ]
             };
         }
 
@@ -228,7 +298,8 @@
                     aggregates: preset.aggregates || {},
                     recommendations: [],
                     profile: preset.profile || (preset.thresholds && preset.thresholds.profile) || null,
-                    thresholds: cloneThresholds(preset.thresholds || {})
+                    thresholds: cloneThresholds(preset.thresholds || {}),
+                    sourcesMeta: Array.isArray(preset.sources) ? preset.sources : []
                 };
             }
         }
@@ -294,7 +365,7 @@
         settings.thresholds = thresholds;
         updateProfileBadge(thresholds.profile, dom);
 
-        renderHistory(source.history, source.detailedHistory, dom);
+        renderHistory(source.history, source.detailedHistory, dom, source.sourcesMeta || []);
         renderSummary(source.aggregates || {}, dom);
         updateRecommendations(source.recommendations || [], dom);
     }
@@ -497,12 +568,43 @@
         return date.toLocaleString();
     }
 
-    function renderHistory(history, detailedHistory, dom) {
-        var sanitized = sanitizeHistory(history);
+    function renderHistory(history, detailedHistory, dom, sourcesMeta) {
+        activeSourceCatalog = buildSourceCatalog(sourcesMeta || []);
+        var sanitized = sanitizeHistory(history, activeSourceCatalog);
         var canvas = dom.canvas;
         var tableBody = dom.tableBody;
         var i18n = settings.i18n || {};
         var metaMap = buildMetaMap(detailedHistory);
+        var timestamps = [];
+        var seriesMap = {};
+
+        sanitized.forEach(function (entry) {
+            if (timestamps.indexOf(entry.timestamp) === -1) {
+                timestamps.push(entry.timestamp);
+            }
+
+            var sourceKey = entry.source || 'site';
+
+            if (!seriesMap[sourceKey]) {
+                var meta = activeSourceCatalog[sourceKey] || {};
+                var label = entry.source_label || meta.label || (sourceKey === 'site'
+                    ? (i18n.ownSourceLabel || 'Site')
+                    : (i18n.competitorSourceLabel || 'Concurrent'));
+                seriesMap[sourceKey] = {
+                    key: sourceKey,
+                    label: label,
+                    type: entry.source_type || meta.type || 'site',
+                    budget: typeof entry.benchmark_budget === 'number' ? entry.benchmark_budget : (meta.budget || null),
+                    data: {}
+                };
+            }
+
+            seriesMap[sourceKey].data[entry.timestamp] = entry.server_processing_ms;
+        });
+
+        timestamps.sort(function (a, b) {
+            return a - b;
+        });
 
         if (tableBody) {
             tableBody.innerHTML = '';
@@ -510,7 +612,7 @@
             if (!sanitized.length) {
                 var emptyRow = document.createElement('tr');
                 var emptyCell = document.createElement('td');
-                emptyCell.colSpan = 3;
+                emptyCell.colSpan = 4;
                 emptyCell.textContent = i18n.noHistory || '';
                 emptyRow.appendChild(emptyCell);
                 tableBody.appendChild(emptyRow);
@@ -518,10 +620,12 @@
                 sanitized.forEach(function (entry) {
                     var row = document.createElement('tr');
                     var dateCell = document.createElement('td');
+                    var sourceCell = document.createElement('td');
                     var valueCell = document.createElement('td');
                     var statusCell = document.createElement('td');
                     statusCell.className = 'speed-history-status';
                     dateCell.textContent = formatTimestamp(entry.timestamp);
+                    sourceCell.textContent = entry.source_label || (i18n.ownSourceLabel || 'Site');
                     valueCell.textContent = entry.server_processing_ms.toFixed(2);
 
                     var meta = metaMap[entry.timestamp] || null;
@@ -551,6 +655,7 @@
                     statusCell.textContent = statusText;
 
                     row.appendChild(dateCell);
+                    row.appendChild(sourceCell);
                     row.appendChild(valueCell);
                     row.appendChild(statusCell);
                     tableBody.appendChild(row);
@@ -562,27 +667,64 @@
             return;
         }
 
-        var labels = sanitized.map(function (entry) {
-            return formatTimestamp(entry.timestamp);
+        var labels = timestamps.map(function (timestamp) {
+            return formatTimestamp(timestamp);
         });
-        var values = sanitized.map(function (entry) {
-            return entry.server_processing_ms;
-        });
-        var datasets = [
-            {
-                label: i18n.chartLabel || '',
-                data: values,
-                borderColor: '#0073aa',
-                backgroundColor: 'rgba(0, 115, 170, 0.15)',
+
+        var datasets = [];
+        var colorPalette = {
+            site: {
+                border: '#0073aa',
+                background: 'rgba(0, 115, 170, 0.15)'
+            },
+            competitor: {
+                border: '#d63638',
+                background: 'rgba(214, 54, 56, 0.15)'
+            }
+        };
+
+        Object.keys(seriesMap).forEach(function (sourceKey, index) {
+            var series = seriesMap[sourceKey];
+            var palette = colorPalette[series.type] || colorPalette.site;
+            var seriesValues = timestamps.map(function (timestamp) {
+                if (Object.prototype.hasOwnProperty.call(series.data, timestamp)) {
+                    return series.data[timestamp];
+                }
+
+                return null;
+            });
+
+            datasets.push({
+                label: series.label,
+                data: seriesValues,
+                borderColor: palette.border,
+                backgroundColor: palette.background,
                 borderWidth: 2,
                 pointRadius: 3,
                 pointBackgroundColor: '#ffffff',
-                pointBorderColor: '#0073aa',
+                pointBorderColor: palette.border,
                 tension: 0.25,
-                fill: true,
-                order: 2
+                fill: series.type !== 'competitor',
+                spanGaps: true,
+                order: 2 + index
+            });
+
+            if (series.type === 'site' && typeof series.budget === 'number') {
+                datasets.push({
+                    label: (i18n.budgetLabel || 'Budget') + ' – ' + series.label,
+                    data: new Array(timestamps.length).fill(series.budget),
+                    borderColor: '#46b450',
+                    borderWidth: 1,
+                    borderDash: [4, 4],
+                    pointRadius: 0,
+                    fill: false,
+                    tension: 0,
+                    order: 1
+                });
             }
-        ].concat(buildThresholdDatasets(values.length));
+        });
+
+        datasets = datasets.concat(buildThresholdDatasets(timestamps.length));
 
         if (!chartInstance) {
             chartInstance = new window.Chart(canvas.getContext('2d'), {
@@ -606,7 +748,7 @@
                     },
                     plugins: {
                         legend: {
-                            display: false
+                            display: true
                         },
                         tooltip: {
                             callbacks: {
@@ -624,6 +766,7 @@
             chartInstance.data.labels = labels;
             chartInstance.data.datasets = datasets;
             chartInstance.options.plugins.tooltip.callbacks.afterBody = tooltipAfterBody;
+            chartInstance.options.plugins.legend.display = true;
             chartInstance.update();
         }
     }

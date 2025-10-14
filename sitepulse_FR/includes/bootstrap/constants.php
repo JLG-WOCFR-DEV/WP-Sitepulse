@@ -28,6 +28,7 @@ return [
     'SITEPULSE_OPTION_SPEED_AUTOMATION_CONFIG' => 'sitepulse_speed_automation_config',
     'SITEPULSE_OPTION_SPEED_AUTOMATION_HISTORY' => 'sitepulse_speed_automation_history',
     'SITEPULSE_OPTION_SPEED_AUTOMATION_QUEUE' => 'sitepulse_speed_automation_queue',
+    'SITEPULSE_OPTION_SPEED_BENCHMARKS' => 'sitepulse_speed_benchmarks',
     'SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS' => 'sitepulse_alert_enabled_channels',
     'SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS' => 'sitepulse_error_alert_delivery_channels',
     'SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS' => 'sitepulse_error_alert_webhooks',

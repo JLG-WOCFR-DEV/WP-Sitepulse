@@ -58,6 +58,12 @@ return [
     SITEPULSE_OPTION_SPEED_CRITICAL_MS => [
         'value' => SITEPULSE_DEFAULT_SPEED_CRITICAL_MS,
     ],
+    SITEPULSE_OPTION_SPEED_BENCHMARKS => [
+        'value' => [
+            'competitors' => [],
+            'budgets'     => [],
+        ],
+    ],
     SITEPULSE_OPTION_UPTIME_WARNING_PERCENT => [
         'value' => SITEPULSE_DEFAULT_UPTIME_WARNING_PERCENT,
     ],

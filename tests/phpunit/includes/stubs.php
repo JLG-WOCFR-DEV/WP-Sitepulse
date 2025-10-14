@@ -23,6 +23,10 @@ if (!defined('SITEPULSE_OPTION_SPEED_CRITICAL_MS')) {
     define('SITEPULSE_OPTION_SPEED_CRITICAL_MS', 'sitepulse_speed_critical_ms');
 }
 
+if (!defined('SITEPULSE_OPTION_SPEED_BENCHMARKS')) {
+    define('SITEPULSE_OPTION_SPEED_BENCHMARKS', 'sitepulse_speed_benchmarks');
+}
+
 if (!defined('SITEPULSE_OPTION_UPTIME_WARNING_PERCENT')) {
     define('SITEPULSE_OPTION_UPTIME_WARNING_PERCENT', 'sitepulse_uptime_warning_percent');
 }
