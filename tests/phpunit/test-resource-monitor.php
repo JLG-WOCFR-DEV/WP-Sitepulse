@@ -131,11 +131,13 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
         $this->assertEqualsWithDelta($custom_ttl, $timeout_option - time(), 3, 'Stored TTL should respect the filter override.');
 
         $history = sitepulse_resource_monitor_get_history();
-        $this->assertArrayHasKey('entries', $history, 'History response should expose entries key.');
-        $this->assertNotEmpty($history['entries'], 'History should include the newly generated snapshot.');
+        $this->assertIsArray($history, 'History response should be an array.');
+        $this->assertArrayHasKey('entries', $history, 'History should expose an entries collection.');
+        $this->assertIsArray($history['entries'], 'History entries should be an array.');
+        $this->assertNotEmpty($history['entries'], 'History entries should include the newly generated snapshot.');
 
-        $history_entries = $history['entries'];
-        $latest_entry = end($history_entries);
+        $entries = $history['entries'];
+        $latest_entry = end($entries);
         $this->assertSame($snapshot['generated_at'], $latest_entry['timestamp'], 'Latest history entry should match snapshot timestamp.');
     }
 
