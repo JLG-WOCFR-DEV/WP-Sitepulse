@@ -197,15 +197,15 @@ function sitepulse_ai_spawn_cron($timestamp) {
 /**
  * Returns the shared secret used to trigger AI insight jobs via AJAX.
  *
+ * @param bool $force_regenerate Optional. Whether to regenerate a new secret.
+ *
  * @return string
  */
-function sitepulse_ai_get_job_secret() {
+function sitepulse_ai_get_job_secret($force_regenerate = false) {
     $secret = get_option(SITEPULSE_OPTION_AI_JOB_SECRET, '');
 
-    if (!is_string($secret) || '' === $secret) {
-        $secret = wp_generate_password(64, false, false);
-
-        update_option(SITEPULSE_OPTION_AI_JOB_SECRET, $secret, false);
+    if ($force_regenerate || !is_string($secret) || '' === $secret) {
+        $secret = sitepulse_ai_regenerate_job_secret();
     }
 
     /**
@@ -214,6 +214,19 @@ function sitepulse_ai_get_job_secret() {
      * @param string $secret Secret stored in the database.
      */
     return (string) apply_filters('sitepulse_ai_job_secret', $secret);
+}
+
+/**
+ * Regenerates the shared secret used to trigger AI insight jobs.
+ *
+ * @return string Newly generated secret stored in the database.
+ */
+function sitepulse_ai_regenerate_job_secret() {
+    $secret = wp_generate_password(64, false, false);
+
+    update_option(SITEPULSE_OPTION_AI_JOB_SECRET, $secret, false);
+
+    return $secret;
 }
 
 /**
@@ -1144,6 +1157,28 @@ function sitepulse_ai_rest_purge_queue() {
 
 if (defined('WP_CLI') && WP_CLI && class_exists('WP_CLI_Command')) {
     /**
+     * WP-CLI command for rotating the AI job secret.
+     */
+    class SitePulse_AI_Secret_CLI_Command extends WP_CLI_Command {
+        /**
+         * Regenerates the secret used to trigger AI insight jobs.
+         *
+         * ## EXAMPLES
+         *
+         *     wp sitepulse ai secret regenerate
+         */
+        public function regenerate() {
+            if (!function_exists('sitepulse_ai_regenerate_job_secret')) {
+                WP_CLI::error('La fonction de régénération du secret IA est indisponible.');
+            }
+
+            $secret = sitepulse_ai_regenerate_job_secret();
+
+            WP_CLI::success(sprintf('Nouveau secret IA généré : %s', $secret));
+        }
+    }
+
+    /**
      * WP-CLI command for managing the SitePulse AI queue.
      */
     class SitePulse_AI_Queue_CLI_Command extends WP_CLI_Command {
@@ -1213,6 +1248,7 @@ if (defined('WP_CLI') && WP_CLI && class_exists('WP_CLI_Command')) {
         }
     }
 
+    WP_CLI::add_command('sitepulse ai secret', 'SitePulse_AI_Secret_CLI_Command');
     WP_CLI::add_command('sitepulse ai queue', 'SitePulse_AI_Queue_CLI_Command');
 }
 

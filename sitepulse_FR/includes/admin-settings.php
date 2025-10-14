@@ -187,6 +187,37 @@ function sitepulse_admin_settings_enqueue_assets($hook_suffix) {
 }
 add_action('admin_enqueue_scripts', 'sitepulse_admin_settings_enqueue_assets');
 
+/**
+ * Handles the regeneration of the AI job secret from the settings screen.
+ *
+ * @return void
+ */
+function sitepulse_admin_handle_ai_secret_regeneration() {
+    if (!current_user_can(sitepulse_get_capability())) {
+        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour effectuer cette action.", 'sitepulse'));
+    }
+
+    check_admin_referer('sitepulse_regenerate_ai_secret');
+
+    if (function_exists('sitepulse_ai_regenerate_job_secret')) {
+        sitepulse_ai_regenerate_job_secret();
+    }
+
+    $redirect_url = add_query_arg(
+        [
+            'page'                            => 'sitepulse-settings',
+            'sitepulse_ai_secret_regenerated' => 1,
+            'sitepulse-settings-active-tab'   => 'sitepulse-tab-ai',
+        ],
+        admin_url('admin.php')
+    );
+
+    wp_safe_redirect($redirect_url . '#sitepulse-tab-ai');
+    exit;
+}
+
+add_action('admin_post_sitepulse_regenerate_ai_secret', 'sitepulse_admin_handle_ai_secret_regeneration');
+
 if (!function_exists('sitepulse_ajax_async_jobs_overview')) {
     /**
      * Ajax handler returning the latest async job summaries.
@@ -1982,6 +2013,12 @@ function sitepulse_settings_page() {
         }
     }
 
+    $ai_secret_notice = '';
+
+    if (isset($_GET['sitepulse_ai_secret_regenerated'])) {
+        $ai_secret_notice = esc_html__('Le secret utilisé pour les analyses IA a été régénéré.', 'sitepulse');
+    }
+
     $modules = [
         'log_analyzer'          => [
             'label'       => __('Log Analyzer', 'sitepulse'),
@@ -2553,6 +2590,10 @@ function sitepulse_settings_page() {
     if ($test_notice !== '') {
         printf('<div class="notice notice-%1$s is-dismissible"><p>%2$s</p></div>', esc_attr($test_notice_class), $test_notice);
     }
+
+    if ($ai_secret_notice !== '') {
+        echo '<div class="notice notice-success is-dismissible"><p>' . esc_html($ai_secret_notice) . '</p></div>';
+    }
     ?>
     <div
         class="wrap sitepulse-settings-wrap"
@@ -2725,6 +2766,10 @@ function sitepulse_settings_page() {
                         <a id="sitepulse-tab-maintenance-label" class="nav-tab sitepulse-tab-link" href="#sitepulse-tab-maintenance" data-tab-target="sitepulse-tab-maintenance" role="tab" aria-controls="sitepulse-tab-maintenance" aria-selected="false" tabindex="-1"><?php esc_html_e('Maintenance', 'sitepulse'); ?></a>
                     </h2>
                     <div class="sitepulse-tab-panels">
+                        <form id="sitepulse-ai-secret-regen-form" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="screen-reader-text">
+                            <input type="hidden" name="action" value="sitepulse_regenerate_ai_secret">
+                            <?php wp_nonce_field('sitepulse_regenerate_ai_secret'); ?>
+                        </form>
                         <form method="post" action="options.php" class="sitepulse-settings-form">
                             <?php settings_fields('sitepulse_settings'); do_settings_sections('sitepulse_settings'); ?>
             <div class="sitepulse-tab-panel" id="sitepulse-tab-overview" role="tabpanel" aria-labelledby="sitepulse-tab-overview-label" tabindex="0">
@@ -2926,6 +2971,18 @@ function sitepulse_settings_page() {
                                 <?php endforeach; ?>
                             </select>
                             <p class="sitepulse-card-description"><?php esc_html_e('Définissez la fréquence maximale des nouvelles recommandations générées automatiquement.', 'sitepulse'); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting" data-sitepulse-view="expert">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Secret des tâches IA', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <p class="sitepulse-card-description"><?php esc_html_e('Ce secret sécurise les exécutions déclenchées via AJAX ou WP-CLI. Régénérez-le si vous suspectez une fuite ou après avoir partagé un accès temporaire.', 'sitepulse'); ?></p>
+                            <p class="sitepulse-card-description"><?php esc_html_e('La nouvelle valeur est stockée immédiatement et devra être mise à jour dans les scripts externes qui invoquent les analyses.', 'sitepulse'); ?></p>
+                            <button type="submit" form="sitepulse-ai-secret-regen-form" class="button button-secondary">
+                                <?php esc_html_e('Régénérer le secret', 'sitepulse'); ?>
+                            </button>
                         </div>
                     </div>
                 </div>
