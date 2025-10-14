@@ -22,6 +22,344 @@ add_action('admin_menu', function() {
 
 add_action('admin_enqueue_scripts', 'sitepulse_resource_monitor_enqueue_assets');
 add_action('rest_api_init', 'sitepulse_resource_monitor_register_rest_routes');
+add_action('plugins_loaded', 'sitepulse_resource_monitor_bootstrap_storage', 9);
+
+/**
+ * Ensures the resource monitor datastore is ready.
+ *
+ * @return void
+ */
+function sitepulse_resource_monitor_bootstrap_storage() {
+    sitepulse_resource_monitor_maybe_upgrade_schema();
+}
+
+/**
+ * Retrieves the fully qualified name of the resource monitor history table.
+ *
+ * @return string
+ */
+function sitepulse_resource_monitor_get_table_name() {
+    if (!defined('SITEPULSE_TABLE_RESOURCE_MONITOR_HISTORY')) {
+        return '';
+    }
+
+    global $wpdb;
+
+    if (!($wpdb instanceof wpdb)) {
+        return '';
+    }
+
+    $suffix = SITEPULSE_TABLE_RESOURCE_MONITOR_HISTORY;
+
+    return $wpdb->prefix . $suffix;
+}
+
+/**
+ * Determines whether the resource monitor history table exists.
+ *
+ * @param bool $force_refresh Optional. When true, bypasses the cached result.
+ * @return bool
+ */
+function sitepulse_resource_monitor_table_exists($force_refresh = false) {
+    static $exists = null;
+
+    if ($force_refresh) {
+        $exists = null;
+    }
+
+    if ($exists !== null) {
+        return $exists;
+    }
+
+    $table = sitepulse_resource_monitor_get_table_name();
+
+    if ($table === '') {
+        $exists = false;
+
+        return $exists;
+    }
+
+    global $wpdb;
+
+    if (!($wpdb instanceof wpdb)) {
+        $exists = false;
+
+        return $exists;
+    }
+
+    $exists = (bool) $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
+
+    return $exists;
+}
+
+/**
+ * Creates or upgrades the resource monitor history table.
+ *
+ * @return void
+ */
+function sitepulse_resource_monitor_maybe_upgrade_schema() {
+    if (!defined('SITEPULSE_RESOURCE_MONITOR_SCHEMA_VERSION')
+        || !defined('SITEPULSE_OPTION_RESOURCE_MONITOR_SCHEMA_VERSION')) {
+        return;
+    }
+
+    $target_version = (int) SITEPULSE_RESOURCE_MONITOR_SCHEMA_VERSION;
+    $current_version = (int) get_option(SITEPULSE_OPTION_RESOURCE_MONITOR_SCHEMA_VERSION, 0);
+
+    if ($current_version >= $target_version && sitepulse_resource_monitor_table_exists()) {
+        return;
+    }
+
+    sitepulse_resource_monitor_install_table();
+
+    if ($current_version < $target_version) {
+        sitepulse_resource_monitor_migrate_legacy_history();
+        update_option(SITEPULSE_OPTION_RESOURCE_MONITOR_SCHEMA_VERSION, $target_version);
+    }
+}
+
+/**
+ * Installs the resource monitor history table.
+ *
+ * @return void
+ */
+function sitepulse_resource_monitor_install_table() {
+    $table = sitepulse_resource_monitor_get_table_name();
+
+    if ($table === '') {
+        return;
+    }
+
+    global $wpdb;
+
+    if (!($wpdb instanceof wpdb)) {
+        return;
+    }
+
+    $charset_collate = $wpdb->get_charset_collate();
+
+    $sql = "CREATE TABLE {$table} (
+        id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+        recorded_at int(10) unsigned NOT NULL,
+        load_1 float NULL,
+        load_5 float NULL,
+        load_15 float NULL,
+        memory_usage bigint(20) unsigned NULL,
+        memory_limit bigint(20) unsigned NULL,
+        disk_free bigint(20) unsigned NULL,
+        disk_total bigint(20) unsigned NULL,
+        source varchar(32) NOT NULL DEFAULT 'manual',
+        created_at datetime NOT NULL,
+        PRIMARY KEY  (id),
+        KEY recorded_at (recorded_at),
+        KEY source (source)
+    ) {$charset_collate};";
+
+    if (!function_exists('dbDelta')) {
+        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    }
+
+    dbDelta($sql);
+
+    sitepulse_resource_monitor_table_exists(true);
+}
+
+/**
+ * Migrates legacy option-based history into the dedicated table.
+ *
+ * @return void
+ */
+function sitepulse_resource_monitor_migrate_legacy_history() {
+    if (!defined('SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY')) {
+        return;
+    }
+
+    $table = sitepulse_resource_monitor_get_table_name();
+
+    if ($table === '' || !sitepulse_resource_monitor_table_exists()) {
+        return;
+    }
+
+    $legacy_history = get_option(SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY, []);
+
+    if (!is_array($legacy_history) || empty($legacy_history)) {
+        delete_option(SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY);
+
+        return;
+    }
+
+    global $wpdb;
+
+    if (!($wpdb instanceof wpdb)) {
+        return;
+    }
+
+    $existing_rows = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table}");
+
+    if ($existing_rows > 0) {
+        delete_option(SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY);
+
+        return;
+    }
+
+    $normalized_entries = sitepulse_resource_monitor_normalize_history($legacy_history);
+
+    if (empty($normalized_entries)) {
+        delete_option(SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY);
+
+        return;
+    }
+
+    foreach ($normalized_entries as $entry) {
+        sitepulse_resource_monitor_insert_history_entry($entry, false);
+    }
+
+    delete_option(SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY);
+}
+
+/**
+ * Inserts a normalized history entry into the datastore.
+ *
+ * @param array $entry            Normalized history entry.
+ * @param bool  $apply_retention Optional. Whether to enforce retention after inserting.
+ * @return void
+ */
+function sitepulse_resource_monitor_insert_history_entry(array $entry, $apply_retention = true) {
+    $table = sitepulse_resource_monitor_get_table_name();
+
+    if ($table === '' || !sitepulse_resource_monitor_table_exists()) {
+        return;
+    }
+
+    $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+
+    if ($timestamp <= 0) {
+        return;
+    }
+
+    global $wpdb;
+
+    if (!($wpdb instanceof wpdb)) {
+        return;
+    }
+
+    $load = isset($entry['load']) && is_array($entry['load']) ? array_values($entry['load']) : [null, null, null];
+    $memory = isset($entry['memory']) && is_array($entry['memory']) ? $entry['memory'] : [];
+    $disk = isset($entry['disk']) && is_array($entry['disk']) ? $entry['disk'] : [];
+    $source = isset($entry['source']) ? (string) $entry['source'] : 'manual';
+
+    $data = [
+        'recorded_at'   => $timestamp,
+        'load_1'        => isset($load[0]) && is_numeric($load[0]) ? (float) $load[0] : null,
+        'load_5'        => isset($load[1]) && is_numeric($load[1]) ? (float) $load[1] : null,
+        'load_15'       => isset($load[2]) && is_numeric($load[2]) ? (float) $load[2] : null,
+        'memory_usage'  => isset($memory['usage']) && is_numeric($memory['usage']) ? max(0, (int) $memory['usage']) : null,
+        'memory_limit'  => isset($memory['limit']) && is_numeric($memory['limit']) ? max(0, (int) $memory['limit']) : null,
+        'disk_free'     => isset($disk['free']) && is_numeric($disk['free']) ? max(0, (int) $disk['free']) : null,
+        'disk_total'    => isset($disk['total']) && is_numeric($disk['total']) ? max(0, (int) $disk['total']) : null,
+        'source'        => $source !== '' ? $source : 'manual',
+        'created_at'    => gmdate('Y-m-d H:i:s'),
+    ];
+
+    $formats = ['%d', '%f', '%f', '%f', '%d', '%d', '%d', '%d', '%s', '%s'];
+
+    $wpdb->insert($table, $data, $formats);
+
+    if ($apply_retention) {
+        sitepulse_resource_monitor_apply_retention();
+    }
+}
+
+/**
+ * Retrieves the configured retention duration in days.
+ *
+ * @return int
+ */
+function sitepulse_resource_monitor_get_retention_days() {
+    $default = defined('SITEPULSE_DEFAULT_RESOURCE_MONITOR_RETENTION_DAYS')
+        ? (int) SITEPULSE_DEFAULT_RESOURCE_MONITOR_RETENTION_DAYS
+        : 180;
+
+    $retention = (int) get_option(SITEPULSE_OPTION_RESOURCE_MONITOR_RETENTION_DAYS, $default);
+
+    $allowed_values = apply_filters('sitepulse_resource_monitor_allowed_retention_days', [90, 180, 365]);
+
+    if (is_array($allowed_values) && !empty($allowed_values)) {
+        $allowed_values = array_map('intval', $allowed_values);
+        sort($allowed_values);
+
+        if (in_array($retention, $allowed_values, true)) {
+            return max(0, $retention);
+        }
+
+        $closest = $allowed_values[0];
+        $min_diff = abs($retention - $closest);
+
+        foreach ($allowed_values as $value) {
+            $diff = abs($retention - $value);
+
+            if ($diff < $min_diff) {
+                $min_diff = $diff;
+                $closest = $value;
+            }
+        }
+
+        return max(0, (int) $closest);
+    }
+
+    return max(0, $retention);
+}
+
+/**
+ * Applies the retention policy by removing outdated entries.
+ *
+ * @return void
+ */
+function sitepulse_resource_monitor_apply_retention() {
+    $table = sitepulse_resource_monitor_get_table_name();
+
+    if ($table === '' || !sitepulse_resource_monitor_table_exists()) {
+        return;
+    }
+
+    $retention_days = (int) apply_filters(
+        'sitepulse_resource_monitor_history_retention_days',
+        sitepulse_resource_monitor_get_retention_days()
+    );
+
+    if ($retention_days <= 0) {
+        return;
+    }
+
+    $cutoff = (int) current_time('timestamp', true) - ($retention_days * DAY_IN_SECONDS);
+
+    global $wpdb;
+
+    if (!($wpdb instanceof wpdb)) {
+        return;
+    }
+
+    $wpdb->query($wpdb->prepare("DELETE FROM {$table} WHERE recorded_at < %d", $cutoff));
+}
+
+/**
+ * Retrieves the maximum number of rows allowed in an export.
+ *
+ * @return int
+ */
+function sitepulse_resource_monitor_get_export_max_rows() {
+    $default = defined('SITEPULSE_DEFAULT_RESOURCE_MONITOR_EXPORT_MAX_ROWS')
+        ? (int) SITEPULSE_DEFAULT_RESOURCE_MONITOR_EXPORT_MAX_ROWS
+        : 2000;
+
+    $max_rows = (int) get_option(SITEPULSE_OPTION_RESOURCE_MONITOR_EXPORT_MAX_ROWS, $default);
+
+    if ($max_rows < 0) {
+        $max_rows = $default;
+    }
+
+    return (int) apply_filters('sitepulse_resource_monitor_export_max_rows', $max_rows);
+}
 
 /**
  * Registers and enqueues the stylesheet used by the resource monitor page.
@@ -101,6 +439,12 @@ function sitepulse_resource_monitor_register_rest_routes() {
                     'type'        => 'integer',
                     'required'    => false,
                 ],
+                'page' => [
+                    'description' => __('Numéro de page à retourner.', 'sitepulse'),
+                    'type'        => 'integer',
+                    'required'    => false,
+                    'default'     => 1,
+                ],
                 'since' => [
                     'description' => __('Filtrer les entrées depuis un horodatage (Unix) ou une date ISO 8601.', 'sitepulse'),
                     'type'        => 'string',
@@ -152,10 +496,21 @@ function sitepulse_resource_monitor_rest_history($request) {
     $per_page = absint($request->get_param('per_page'));
 
     if ($per_page <= 0) {
-        $per_page = 120;
+        $per_page = 288;
     }
 
-    $per_page = max(1, min(288, $per_page));
+    $max_per_page = (int) apply_filters('sitepulse_resource_monitor_rest_max_per_page', 1000);
+    if ($max_per_page <= 0) {
+        $max_per_page = 1000;
+    }
+
+    $per_page = max(1, min($max_per_page, $per_page));
+
+    $page = absint($request->get_param('page'));
+
+    if ($page <= 0) {
+        $page = 1;
+    }
 
     $raw_since = $request->get_param('since');
     $since_parse = sitepulse_resource_monitor_rest_parse_since_param($raw_since);
@@ -181,27 +536,17 @@ function sitepulse_resource_monitor_rest_history($request) {
         $include_snapshot = false;
     }
 
-    $history_all = sitepulse_resource_monitor_get_history();
-    $total_available = count($history_all);
+    $history_query = sitepulse_resource_monitor_get_history([
+        'per_page' => $per_page,
+        'page'     => $page,
+        'since'    => $since_timestamp,
+        'order'    => 'ASC',
+    ]);
 
-    $history_filtered = $history_all;
+    $history_entries = isset($history_query['entries']) && is_array($history_query['entries'])
+        ? $history_query['entries']
+        : [];
 
-    if ($since_timestamp !== null) {
-        $history_filtered = array_values(array_filter(
-            $history_filtered,
-            static function ($entry) use ($since_timestamp) {
-                return isset($entry['timestamp']) && (int) $entry['timestamp'] >= $since_timestamp;
-            }
-        ));
-    }
-
-    $filtered_count = count($history_filtered);
-
-    if ($filtered_count > $per_page) {
-        $history_filtered = array_slice($history_filtered, -$per_page);
-    }
-
-    $history_entries = $history_filtered;
     $returned_count = count($history_entries);
 
     $history_summary = sitepulse_resource_monitor_calculate_history_summary($history_entries);
@@ -213,7 +558,7 @@ function sitepulse_resource_monitor_rest_history($request) {
         ? $history_prepared[count($history_prepared) - 1]
         : null;
 
-    $last_cron_overall = sitepulse_resource_monitor_get_last_cron_timestamp($history_all);
+    $last_cron_overall = sitepulse_resource_monitor_get_last_cron_timestamp();
     $last_cron_included = sitepulse_resource_monitor_get_last_cron_timestamp($history_entries);
 
     $required_consecutive = sitepulse_resource_monitor_get_required_consecutive_snapshots();
@@ -224,13 +569,18 @@ function sitepulse_resource_monitor_rest_history($request) {
             : time(),
         'request'      => [
             'per_page'         => $per_page,
+            'page'             => isset($history_query['page']) ? (int) $history_query['page'] : $page,
             'since'            => $since_timestamp,
             'include_snapshot' => (bool) $include_snapshot,
         ],
         'history'      => [
-            'total_available'      => $total_available,
-            'filtered_count'       => $filtered_count,
+            'total_available'      => isset($history_query['total']) ? (int) $history_query['total'] : $returned_count,
+            'filtered_count'       => isset($history_query['filtered']) ? (int) $history_query['filtered'] : $returned_count,
             'returned_count'       => $returned_count,
+            'page'                 => isset($history_query['page']) ? (int) $history_query['page'] : $page,
+            'per_page'             => isset($history_query['per_page']) ? (int) $history_query['per_page'] : $per_page,
+            'total_pages'          => isset($history_query['pages']) ? (int) $history_query['pages'] : 0,
+            'order'                => isset($history_query['order']) ? $history_query['order'] : 'ASC',
             'last_cron_timestamp'  => $last_cron_overall,
             'last_cron_included'   => $last_cron_included,
             'required_consecutive' => $required_consecutive,
@@ -256,8 +606,23 @@ function sitepulse_resource_monitor_rest_history($request) {
         }
     }
 
-    if (function_exists('apply_filters')) {
-        $response = apply_filters('sitepulse_resource_monitor_rest_response', $response, $request, $history_entries, $history_all);
+    if (function_exists('apply_filters') && has_filter('sitepulse_resource_monitor_rest_response')) {
+        $history_all_entries = sitepulse_resource_monitor_get_history([
+            'per_page' => 0,
+            'order'    => 'ASC',
+        ]);
+
+        $all_entries = isset($history_all_entries['entries']) && is_array($history_all_entries['entries'])
+            ? $history_all_entries['entries']
+            : [];
+
+        $response = apply_filters(
+            'sitepulse_resource_monitor_rest_response',
+            $response,
+            $request,
+            $history_entries,
+            $all_entries
+        );
     }
 
     return rest_ensure_response($response);
@@ -998,7 +1363,16 @@ function sitepulse_resource_monitor_page() {
 
     $snapshot = sitepulse_resource_monitor_get_snapshot();
 
-    $history_entries = sitepulse_resource_monitor_get_history();
+    $history_result = sitepulse_resource_monitor_get_history([
+        'per_page' => 288,
+        'page'     => 1,
+        'order'    => 'DESC',
+    ]);
+
+    $history_entries = isset($history_result['entries']) && is_array($history_result['entries'])
+        ? array_reverse($history_result['entries'])
+        : [];
+
     $history_summary = sitepulse_resource_monitor_calculate_history_summary($history_entries);
     $history_summary_text = sitepulse_resource_monitor_format_history_summary($history_summary);
     $history_for_js = sitepulse_resource_monitor_prepare_history_for_js($history_entries);
@@ -1302,24 +1676,32 @@ function sitepulse_resource_monitor_append_history(array $snapshot) {
         return;
     }
 
-    $option_name = SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY;
+    sitepulse_resource_monitor_maybe_upgrade_schema();
+
     $lock_token = sitepulse_resource_monitor_acquire_history_lock();
 
+    if ($lock_token === false) {
+        return;
+    }
+
     try {
-        $history = get_option($option_name, []);
+        if (sitepulse_resource_monitor_table_exists()) {
+            sitepulse_resource_monitor_insert_history_entry($entry);
+        } else {
+            $option_name = SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY;
+            $history = get_option($option_name, []);
 
-        if (!is_array($history)) {
-            $history = [];
+            if (!is_array($history)) {
+                $history = [];
+            }
+
+            $history[] = $entry;
+            $history = sitepulse_resource_monitor_normalize_history($history);
+
+            update_option($option_name, $history, false);
         }
-
-        $history[] = $entry;
-        $history = sitepulse_resource_monitor_normalize_history($history);
-
-        update_option($option_name, $history, false);
     } finally {
-        if (is_string($lock_token) && $lock_token !== '') {
-            sitepulse_resource_monitor_release_history_lock($lock_token);
-        }
+        sitepulse_resource_monitor_release_history_lock($lock_token);
     }
 }
 
@@ -1449,108 +1831,141 @@ function sitepulse_resource_monitor_build_history_entry(array $snapshot) {
  * @return array<int, array>
  */
 function sitepulse_resource_monitor_normalize_history(array $history) {
-    $now = (int) current_time('timestamp', true);
     $sanitized = [];
 
     foreach ($history as $entry) {
-        if (!is_array($entry)) {
+        $normalized = sitepulse_resource_monitor_normalize_single_history_entry($entry);
+
+        if ($normalized === null) {
             continue;
         }
 
-        $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+        $timestamp = $normalized['timestamp'];
 
-        if ($timestamp <= 0) {
-            continue;
+        $sanitized[$timestamp] = $normalized;
+    }
+
+    if (empty($sanitized)) {
+        return [];
+    }
+
+    ksort($sanitized, SORT_NUMERIC);
+
+    return array_values($sanitized);
+}
+
+/**
+ * Normalizes a raw history entry regardless of its source.
+ *
+ * @param mixed $entry Raw entry structure.
+ * @return array|null
+ */
+function sitepulse_resource_monitor_normalize_single_history_entry($entry) {
+    if (!is_array($entry)) {
+        return null;
+    }
+
+    $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+
+    if ($timestamp <= 0 && isset($entry['recorded_at'])) {
+        $timestamp = (int) $entry['recorded_at'];
+    }
+
+    if ($timestamp <= 0) {
+        return null;
+    }
+
+    $load = [null, null, null];
+
+    if (isset($entry['load']) && is_array($entry['load'])) {
+        foreach (array_slice(array_values($entry['load']), 0, 3) as $index => $value) {
+            $load[$index] = is_numeric($value) ? (float) $value : null;
+        }
+    } else {
+        if (isset($entry['load_1']) && is_numeric($entry['load_1'])) {
+            $load[0] = (float) $entry['load_1'];
         }
 
-        $load = [null, null, null];
-        if (isset($entry['load']) && is_array($entry['load'])) {
-            foreach (array_slice(array_values($entry['load']), 0, 3) as $index => $value) {
-                $load[$index] = is_numeric($value) ? (float) $value : null;
-            }
+        if (isset($entry['load_5']) && is_numeric($entry['load_5'])) {
+            $load[1] = (float) $entry['load_5'];
         }
 
-        $memory_usage = null;
+        if (isset($entry['load_15']) && is_numeric($entry['load_15'])) {
+            $load[2] = (float) $entry['load_15'];
+        }
+    }
+
+    $memory_usage = null;
+    $memory_limit = null;
+
+    if (isset($entry['memory']) && is_array($entry['memory'])) {
         if (isset($entry['memory']['usage']) && is_numeric($entry['memory']['usage'])) {
             $memory_usage = max(0, (int) $entry['memory']['usage']);
         }
 
-        $memory_limit = null;
         if (isset($entry['memory']['limit']) && is_numeric($entry['memory']['limit'])) {
             $memory_limit = max(0, (int) $entry['memory']['limit']);
         }
+    } else {
+        if (isset($entry['memory_usage']) && is_numeric($entry['memory_usage'])) {
+            $memory_usage = max(0, (int) $entry['memory_usage']);
+        }
 
-        $disk_free = null;
+        if (isset($entry['memory_limit']) && is_numeric($entry['memory_limit'])) {
+            $memory_limit = max(0, (int) $entry['memory_limit']);
+        }
+    }
+
+    $disk_free = null;
+    $disk_total = null;
+
+    if (isset($entry['disk']) && is_array($entry['disk'])) {
         if (isset($entry['disk']['free']) && is_numeric($entry['disk']['free'])) {
             $disk_free = max(0, (int) $entry['disk']['free']);
         }
 
-        $disk_total = null;
         if (isset($entry['disk']['total']) && is_numeric($entry['disk']['total'])) {
             $disk_total = max(0, (int) $entry['disk']['total']);
         }
-
-        $source = 'manual';
-
-        if (isset($entry['source'])) {
-            $entry_source = (string) $entry['source'];
-
-            if (function_exists('sanitize_key')) {
-                $entry_source = sanitize_key($entry_source);
-            } else {
-                $entry_source = strtolower(preg_replace('/[^a-z0-9_\-]/', '', $entry_source));
-            }
-
-            if ($entry_source !== '') {
-                $source = $entry_source;
-            }
+    } else {
+        if (isset($entry['disk_free']) && is_numeric($entry['disk_free'])) {
+            $disk_free = max(0, (int) $entry['disk_free']);
         }
 
-        $sanitized[$timestamp] = [
-            'timestamp' => $timestamp,
-            'load'      => $load,
-            'memory'    => [
-                'usage' => $memory_usage,
-                'limit' => $memory_limit,
-            ],
-            'disk'      => [
-                'free'  => $disk_free,
-                'total' => $disk_total,
-            ],
-            'source'    => $source,
-        ];
+        if (isset($entry['disk_total']) && is_numeric($entry['disk_total'])) {
+            $disk_total = max(0, (int) $entry['disk_total']);
+        }
     }
 
-    if (empty($sanitized)) {
-        return [];
+    $source = 'manual';
+
+    if (isset($entry['source'])) {
+        $entry_source = (string) $entry['source'];
+
+        if (function_exists('sanitize_key')) {
+            $entry_source = sanitize_key($entry_source);
+        } else {
+            $entry_source = strtolower(preg_replace('/[^a-z0-9_\-]/', '', $entry_source));
+        }
+
+        if ($entry_source !== '') {
+            $source = $entry_source;
+        }
     }
 
-    ksort($sanitized);
-    $sanitized = array_values($sanitized);
-
-    $history_ttl = (int) apply_filters('sitepulse_resource_monitor_history_ttl', DAY_IN_SECONDS, $sanitized);
-
-    if ($history_ttl > 0) {
-        $cutoff = $now - $history_ttl;
-        $sanitized = array_values(array_filter(
-            $sanitized,
-            static function ($entry) use ($cutoff) {
-                return isset($entry['timestamp']) && (int) $entry['timestamp'] >= $cutoff;
-            }
-        ));
-    }
-
-    if (empty($sanitized)) {
-        return [];
-    }
-
-    $max_entries = (int) apply_filters('sitepulse_resource_monitor_history_max_entries', 288, $sanitized);
-
-    if ($max_entries > 0 && count($sanitized) > $max_entries) {
-        $sanitized = array_slice($sanitized, -$max_entries);
-    }
-
-    return array_values($sanitized);
+    return [
+        'timestamp' => $timestamp,
+        'load'      => $load,
+        'memory'    => [
+            'usage' => $memory_usage,
+            'limit' => $memory_limit,
+        ],
+        'disk'      => [
+            'free'  => $disk_free,
+            'total' => $disk_total,
+        ],
+        'source'    => $source,
+    ];
 }
 
 /**
@@ -1558,15 +1973,161 @@ function sitepulse_resource_monitor_normalize_history(array $history) {
  *
  * @return array<int, array>
  */
-function sitepulse_resource_monitor_get_history() {
-    $option_name = SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY;
-    $history = get_option($option_name, []);
+function sitepulse_resource_monitor_get_history($args = []) {
+    $defaults = [
+        'per_page' => 0,
+        'page'     => 1,
+        'since'    => null,
+        'order'    => 'ASC',
+    ];
 
-    if (!is_array($history)) {
-        $history = [];
+    if (function_exists('wp_parse_args')) {
+        $args = wp_parse_args($args, $defaults);
+    } else {
+        $args = array_merge($defaults, is_array($args) ? $args : []);
     }
 
-    return sitepulse_resource_monitor_normalize_history($history);
+    $per_page = (int) $args['per_page'];
+    $page = (int) $args['page'];
+    $page = $page > 0 ? $page : 1;
+    $since = $args['since'];
+    $order = strtoupper((string) $args['order']) === 'DESC' ? 'DESC' : 'ASC';
+
+    if ($since !== null) {
+        $since = is_numeric($since) ? (int) $since : null;
+
+        if ($since !== null && $since <= 0) {
+            $since = null;
+        }
+    }
+
+    sitepulse_resource_monitor_maybe_upgrade_schema();
+
+    $table_exists = sitepulse_resource_monitor_table_exists();
+    $total = 0;
+    $filtered_total = 0;
+    $entries = [];
+    $pages = 0;
+
+    if ($table_exists) {
+        $table = sitepulse_resource_monitor_get_table_name();
+
+        global $wpdb;
+
+        if ($table !== '' && $wpdb instanceof wpdb) {
+            $where_clauses = [];
+            $where_params = [];
+
+            if ($since !== null) {
+                $where_clauses[] = 'recorded_at >= %d';
+                $where_params[] = $since;
+            }
+
+            $where_sql = '';
+
+            if (!empty($where_clauses)) {
+                $where_sql = 'WHERE ' . implode(' AND ', $where_clauses);
+            }
+
+            $total = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table}");
+            $filtered_total = $total;
+
+            if ($since !== null) {
+                $filtered_total = (int) $wpdb->get_var(
+                    $wpdb->prepare("SELECT COUNT(*) FROM {$table} {$where_sql}", $where_params)
+                );
+            }
+
+            if ($per_page > 0) {
+                $pages = $filtered_total > 0 ? (int) ceil($filtered_total / $per_page) : 0;
+
+                if ($pages > 0) {
+                    $page = max(1, min($page, $pages));
+                } else {
+                    $page = 1;
+                }
+
+                $offset = max(0, ($page - 1) * $per_page);
+                $limit_sql = $wpdb->prepare(' LIMIT %d OFFSET %d', $per_page, $offset);
+            } else {
+                $limit_sql = '';
+                $page = 1;
+            }
+
+            $query = "SELECT recorded_at, load_1, load_5, load_15, memory_usage, memory_limit, disk_free, disk_total, source FROM {$table} {$where_sql} ORDER BY recorded_at {$order}{$limit_sql}";
+
+            if (!empty($where_params)) {
+                $query = $wpdb->prepare($query, $where_params);
+            }
+
+            $rows = $wpdb->get_results($query, ARRAY_A);
+
+            if (is_array($rows)) {
+                foreach ($rows as $row) {
+                    $normalized = sitepulse_resource_monitor_normalize_single_history_entry($row);
+
+                    if ($normalized !== null) {
+                        $entries[] = $normalized;
+                    }
+                }
+            }
+        }
+    } else {
+        $option_name = SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY;
+        $history = get_option($option_name, []);
+
+        if (!is_array($history)) {
+            $history = [];
+        }
+
+        $history = sitepulse_resource_monitor_normalize_history($history);
+        $total = count($history);
+        $filtered_entries = $history;
+
+        if ($since !== null) {
+            $filtered_entries = array_values(array_filter(
+                $filtered_entries,
+                static function ($entry) use ($since) {
+                    return isset($entry['timestamp']) && (int) $entry['timestamp'] >= $since;
+                }
+            ));
+        }
+
+        if ($order === 'DESC') {
+            $filtered_entries = array_reverse($filtered_entries);
+        }
+
+        $filtered_total = count($filtered_entries);
+
+        if ($per_page > 0) {
+            $pages = $filtered_total > 0 ? (int) ceil($filtered_total / $per_page) : 0;
+
+            if ($pages > 0) {
+                $page = max(1, min($page, $pages));
+                $entries = array_slice($filtered_entries, ($page - 1) * $per_page, $per_page);
+            } else {
+                $page = 1;
+                $entries = [];
+            }
+        } else {
+            $entries = $filtered_entries;
+            $page = 1;
+        }
+    }
+
+    if ($per_page <= 0) {
+        $pages = $filtered_total > 0 ? 1 : 0;
+    }
+
+    return [
+        'entries'  => $entries,
+        'total'    => $total,
+        'filtered' => $filtered_total,
+        'page'     => $page,
+        'per_page' => $per_page,
+        'pages'    => $pages,
+        'order'    => $order,
+    ];
 }
 
 /**
@@ -1576,16 +2137,58 @@ function sitepulse_resource_monitor_get_history() {
  * @return int|null
  */
 function sitepulse_resource_monitor_get_last_cron_timestamp($history_entries = null) {
-    if ($history_entries === null) {
-        $history_entries = sitepulse_resource_monitor_get_history();
+    if (is_array($history_entries)) {
+        if (isset($history_entries['entries']) && is_array($history_entries['entries'])) {
+            $history_entries = $history_entries['entries'];
+        }
+
+        if (is_array($history_entries)) {
+            for ($index = count($history_entries) - 1; $index >= 0; $index--) {
+                $entry = $history_entries[$index];
+
+                if (!is_array($entry)) {
+                    continue;
+                }
+
+                if (isset($entry['source']) && $entry['source'] === 'cron') {
+                    return isset($entry['timestamp']) ? (int) $entry['timestamp'] : null;
+                }
+            }
+        }
     }
 
-    if (!is_array($history_entries) || empty($history_entries)) {
+    sitepulse_resource_monitor_maybe_upgrade_schema();
+
+    if (sitepulse_resource_monitor_table_exists()) {
+        $table = sitepulse_resource_monitor_get_table_name();
+
+        global $wpdb;
+
+        if ($table !== '' && $wpdb instanceof wpdb) {
+            $timestamp = $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT recorded_at FROM {$table} WHERE source = %s ORDER BY recorded_at DESC LIMIT 1",
+                    'cron'
+                )
+            );
+
+            if ($timestamp !== null) {
+                return (int) $timestamp;
+            }
+        }
+    }
+
+    $option_name = SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY;
+    $history = get_option($option_name, []);
+
+    if (!is_array($history) || empty($history)) {
         return null;
     }
 
-    for ($index = count($history_entries) - 1; $index >= 0; $index--) {
-        $entry = $history_entries[$index];
+    $history = sitepulse_resource_monitor_normalize_history($history);
+
+    for ($index = count($history) - 1; $index >= 0; $index--) {
+        $entry = $history[$index];
 
         if (!is_array($entry)) {
             continue;
@@ -1606,6 +2209,26 @@ function sitepulse_resource_monitor_get_last_cron_timestamp($history_entries = n
  */
 function sitepulse_resource_monitor_clear_history() {
     delete_option(SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY);
+
+    sitepulse_resource_monitor_maybe_upgrade_schema();
+
+    if (!sitepulse_resource_monitor_table_exists()) {
+        return;
+    }
+
+    $table = sitepulse_resource_monitor_get_table_name();
+
+    if ($table === '') {
+        return;
+    }
+
+    global $wpdb;
+
+    if (!($wpdb instanceof wpdb)) {
+        return;
+    }
+
+    $wpdb->query("DELETE FROM {$table}");
 }
 
 /**
@@ -2023,7 +2646,18 @@ function sitepulse_resource_monitor_run_cron() {
     }
 
     $snapshot = sitepulse_resource_monitor_get_snapshot('cron');
-    $history_entries = sitepulse_resource_monitor_get_history();
+    $required = sitepulse_resource_monitor_get_required_consecutive_snapshots();
+    $fetch_count = max($required * 2, 50);
+
+    $history_result = sitepulse_resource_monitor_get_history([
+        'per_page' => $fetch_count,
+        'page'     => 1,
+        'order'    => 'DESC',
+    ]);
+
+    $history_entries = isset($history_result['entries']) && is_array($history_result['entries'])
+        ? array_reverse($history_result['entries'])
+        : [];
     $thresholds = sitepulse_resource_monitor_get_threshold_configuration();
 
     sitepulse_resource_monitor_check_thresholds($history_entries, $thresholds, $snapshot);
@@ -2235,7 +2869,22 @@ function sitepulse_resource_monitor_handle_export() {
 
     $format = isset($_REQUEST['format']) ? sanitize_key(wp_unslash($_REQUEST['format'])) : 'csv';
 
-    $history_entries = sitepulse_resource_monitor_get_history();
+    $max_rows = sitepulse_resource_monitor_get_export_max_rows();
+
+    $history_result = sitepulse_resource_monitor_get_history([
+        'per_page' => $max_rows > 0 ? $max_rows : 0,
+        'page'     => 1,
+        'order'    => 'ASC',
+    ]);
+
+    $history_entries = isset($history_result['entries']) && is_array($history_result['entries'])
+        ? $history_result['entries']
+        : [];
+
+    if ($max_rows > 0 && count($history_entries) > $max_rows) {
+        $history_entries = array_slice($history_entries, 0, $max_rows);
+    }
+
     $rows = sitepulse_resource_monitor_prepare_export_rows($history_entries);
 
     if (!function_exists('nocache_headers')) {

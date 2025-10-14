@@ -309,6 +309,16 @@ function sitepulse_register_settings() {
         'sanitize_callback' => 'sitepulse_sanitize_resource_monitor_disk_threshold',
         'default' => SITEPULSE_DEFAULT_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT,
     ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_RESOURCE_MONITOR_RETENTION_DAYS, [
+        'type'              => 'integer',
+        'sanitize_callback' => 'sitepulse_sanitize_resource_monitor_retention_days',
+        'default'           => SITEPULSE_DEFAULT_RESOURCE_MONITOR_RETENTION_DAYS,
+    ]);
+    register_setting('sitepulse_settings', SITEPULSE_OPTION_RESOURCE_MONITOR_EXPORT_MAX_ROWS, [
+        'type'              => 'integer',
+        'sanitize_callback' => 'sitepulse_sanitize_resource_monitor_export_rows',
+        'default'           => SITEPULSE_DEFAULT_RESOURCE_MONITOR_EXPORT_MAX_ROWS,
+    ]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD, [
         'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_php_fatal_threshold', 'default' => 1
     ]);
@@ -670,6 +680,101 @@ function sitepulse_sanitize_resource_monitor_memory_threshold($value) {
  */
 function sitepulse_sanitize_resource_monitor_disk_threshold($value) {
     return sitepulse_sanitize_percentage_threshold($value, SITEPULSE_DEFAULT_RESOURCE_MONITOR_DISK_THRESHOLD_PERCENT);
+}
+
+/**
+ * Sanitizes the retention duration for the resource monitor history (in days).
+ *
+ * @param mixed $value Raw value provided by the user.
+ * @return int
+ */
+function sitepulse_sanitize_resource_monitor_retention_days($value) {
+    $default = defined('SITEPULSE_DEFAULT_RESOURCE_MONITOR_RETENTION_DAYS')
+        ? (int) SITEPULSE_DEFAULT_RESOURCE_MONITOR_RETENTION_DAYS
+        : 180;
+
+    if (!is_numeric($value)) {
+        $value = $default;
+    }
+
+    $value = (int) $value;
+
+    if ($value < 0) {
+        $value = $default;
+    }
+
+    $allowed_values = apply_filters('sitepulse_resource_monitor_allowed_retention_days', [90, 180, 365]);
+
+    if (!is_array($allowed_values) || empty($allowed_values)) {
+        return max(0, $value);
+    }
+
+    $allowed_values = array_map('intval', $allowed_values);
+    $allowed_values = array_values(array_filter($allowed_values, static function ($candidate) {
+        return $candidate >= 0;
+    }));
+
+    if (empty($allowed_values)) {
+        return max(0, $value);
+    }
+
+    sort($allowed_values);
+
+    if (in_array($value, $allowed_values, true)) {
+        return max(0, $value);
+    }
+
+    $closest = $allowed_values[0];
+    $min_diff = abs($value - $closest);
+
+    foreach ($allowed_values as $candidate) {
+        $diff = abs($value - $candidate);
+
+        if ($diff < $min_diff) {
+            $min_diff = $diff;
+            $closest = $candidate;
+        }
+    }
+
+    return max(0, (int) $closest);
+}
+
+/**
+ * Sanitizes the maximum number of rows allowed in resource monitor exports.
+ *
+ * @param mixed $value Raw value provided by the user.
+ * @return int
+ */
+function sitepulse_sanitize_resource_monitor_export_rows($value) {
+    $default = defined('SITEPULSE_DEFAULT_RESOURCE_MONITOR_EXPORT_MAX_ROWS')
+        ? (int) SITEPULSE_DEFAULT_RESOURCE_MONITOR_EXPORT_MAX_ROWS
+        : 2000;
+
+    if (!is_numeric($value)) {
+        return $default;
+    }
+
+    $value = (int) $value;
+
+    if ($value < 0) {
+        return $default;
+    }
+
+    if ($value === 0) {
+        return 0;
+    }
+
+    $ceiling = (int) apply_filters('sitepulse_resource_monitor_export_rows_ceiling', 50000);
+
+    if ($ceiling > 0 && $value > $ceiling) {
+        $value = $ceiling;
+    }
+
+    if ($value <= 0) {
+        return $default;
+    }
+
+    return $value;
 }
 
 /**
@@ -1648,65 +1753,81 @@ function sitepulse_get_module_status_summaries() {
     ];
 
     // Resource Monitor – last recorded load and memory usage.
-    $resource_history = get_option(SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY, []);
+    $latest_resource_entry = null;
 
-    if (is_array($resource_history) && !empty($resource_history)) {
-        $latest_entry = end($resource_history);
+    if (function_exists('sitepulse_resource_monitor_get_history')) {
+        $history_snapshot = sitepulse_resource_monitor_get_history([
+            'per_page' => 1,
+            'page'     => 1,
+            'order'    => 'DESC',
+        ]);
 
-        if (is_array($latest_entry)) {
-            $load_value = null;
+        if (isset($history_snapshot['entries'][0]) && is_array($history_snapshot['entries'][0])) {
+            $latest_resource_entry = $history_snapshot['entries'][0];
+        }
+    }
 
-            if (isset($latest_entry['load']) && is_array($latest_entry['load'])) {
-                if (isset($latest_entry['load'][0]) && is_numeric($latest_entry['load'][0])) {
-                    $load_value = (float) $latest_entry['load'][0];
-                } else {
-                    $first_load = reset($latest_entry['load']);
+    if ($latest_resource_entry === null) {
+        $legacy_history = get_option(SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY, []);
 
-                    if ($first_load !== false && is_numeric($first_load)) {
-                        $load_value = (float) $first_load;
-                    }
+        if (is_array($legacy_history) && !empty($legacy_history)) {
+            $latest_resource_entry = end($legacy_history);
+        }
+    }
+
+    if (is_array($latest_resource_entry)) {
+        $load_value = null;
+
+        if (isset($latest_resource_entry['load']) && is_array($latest_resource_entry['load'])) {
+            if (isset($latest_resource_entry['load'][0]) && is_numeric($latest_resource_entry['load'][0])) {
+                $load_value = (float) $latest_resource_entry['load'][0];
+            } else {
+                $first_load = reset($latest_resource_entry['load']);
+
+                if ($first_load !== false && is_numeric($first_load)) {
+                    $load_value = (float) $first_load;
                 }
             }
+        }
 
-            if ($load_value !== null) {
-                $load_status = 'is-success';
+        if ($load_value !== null) {
+            $load_status = 'is-success';
 
-                if ($load_value >= 2) {
-                    $load_status = 'is-critical';
-                } elseif ($load_value >= 1) {
-                    $load_status = 'is-warning';
-                }
-
-                $summaries['resource_monitor'][] = [
-                    'label'  => __('Charge serveur', 'sitepulse'),
-                    'value'  => sprintf(__('%s (1 min)', 'sitepulse'), number_format_i18n($load_value, 2)),
-                    'status' => $load_status,
-                ];
+            if ($load_value >= 2) {
+                $load_status = 'is-critical';
+            } elseif ($load_value >= 1) {
+                $load_status = 'is-warning';
             }
 
-            $memory_usage = isset($latest_entry['memory']['usage']) && is_numeric($latest_entry['memory']['usage'])
-                ? (int) $latest_entry['memory']['usage']
-                : null;
-            $memory_limit = isset($latest_entry['memory']['limit']) && is_numeric($latest_entry['memory']['limit'])
-                ? (int) $latest_entry['memory']['limit']
-                : null;
+            $summaries['resource_monitor'][] = [
+                'label'  => __('Charge serveur', 'sitepulse'),
+                'value'  => sprintf(__('%s (1 min)', 'sitepulse'), number_format_i18n($load_value, 2)),
+                'status' => $load_status,
+            ];
+        }
 
-            if ($memory_usage !== null && $memory_limit !== null && $memory_limit > 0) {
-                $memory_percent = ($memory_usage / $memory_limit) * 100;
-                $memory_status  = 'is-success';
+        $memory_usage = isset($latest_resource_entry['memory']['usage']) && is_numeric($latest_resource_entry['memory']['usage'])
+            ? (int) $latest_resource_entry['memory']['usage']
+            : null;
+        $memory_limit = isset($latest_resource_entry['memory']['limit']) && is_numeric($latest_resource_entry['memory']['limit'])
+            ? (int) $latest_resource_entry['memory']['limit']
+            : null;
 
-                if ($memory_percent >= 90) {
-                    $memory_status = 'is-critical';
-                } elseif ($memory_percent >= 75) {
-                    $memory_status = 'is-warning';
-                }
+        if ($memory_usage !== null && $memory_limit !== null && $memory_limit > 0) {
+            $memory_percent = ($memory_usage / $memory_limit) * 100;
+            $memory_status  = 'is-success';
 
-                $summaries['resource_monitor'][] = [
-                    'label'  => __('Mémoire', 'sitepulse'),
-                    'value'  => sprintf(__('%s %% utilisés', 'sitepulse'), number_format_i18n($memory_percent, 0)),
-                    'status' => $memory_status,
-                ];
+            if ($memory_percent >= 90) {
+                $memory_status = 'is-critical';
+            } elseif ($memory_percent >= 75) {
+                $memory_status = 'is-warning';
             }
+
+            $summaries['resource_monitor'][] = [
+                'label'  => __('Mémoire', 'sitepulse'),
+                'value'  => sprintf(__('%s %% utilisés', 'sitepulse'), number_format_i18n($memory_percent, 0)),
+                'status' => $memory_status,
+            ];
         }
     }
 
@@ -3326,6 +3447,60 @@ function sitepulse_settings_page() {
                                         <span aria-hidden="true">%</span>
                                     </div>
                                     <p class="sitepulse-resource-thresholds__hint" id="<?php echo esc_attr($disk_description_id); ?>"><?php esc_html_e('100 % correspond à un disque plein. Harmonisé avec le tableau de bord.', 'sitepulse'); ?></p>
+                                </div>
+                            </div>
+                            <?php
+                            $retention_days = (int) get_option(
+                                SITEPULSE_OPTION_RESOURCE_MONITOR_RETENTION_DAYS,
+                                SITEPULSE_DEFAULT_RESOURCE_MONITOR_RETENTION_DAYS
+                            );
+                            $export_limit = (int) get_option(
+                                SITEPULSE_OPTION_RESOURCE_MONITOR_EXPORT_MAX_ROWS,
+                                SITEPULSE_DEFAULT_RESOURCE_MONITOR_EXPORT_MAX_ROWS
+                            );
+                            $retention_choices = apply_filters('sitepulse_resource_monitor_allowed_retention_days', [90, 180, 365]);
+
+                            if (!is_array($retention_choices) || empty($retention_choices)) {
+                                $retention_choices = [90, 180, 365];
+                            }
+
+                            $retention_choices = array_values(array_unique(array_map('intval', $retention_choices)));
+                            $retention_choices = array_filter($retention_choices, static function ($candidate) {
+                                return $candidate >= 0;
+                            });
+                            sort($retention_choices);
+
+                            $retention_description_id = SITEPULSE_OPTION_RESOURCE_MONITOR_RETENTION_DAYS . '-help';
+                            $export_description_id = SITEPULSE_OPTION_RESOURCE_MONITOR_EXPORT_MAX_ROWS . '-help';
+                            ?>
+                            <hr class="sitepulse-card-divider">
+                            <div class="sitepulse-resource-history-settings" role="group" aria-label="<?php esc_attr_e('Historique conservé et exports', 'sitepulse'); ?>">
+                                <div class="sitepulse-resource-thresholds__field">
+                                    <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_RETENTION_DAYS); ?>"><?php esc_html_e('Durée de conservation', 'sitepulse'); ?></label>
+                                    <div class="sitepulse-resource-thresholds__input">
+                                        <select id="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_RETENTION_DAYS); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_RETENTION_DAYS); ?>" aria-describedby="<?php echo esc_attr($retention_description_id); ?>">
+                                            <?php foreach ($retention_choices as $choice_days) : ?>
+                                                <option value="<?php echo esc_attr($choice_days); ?>" <?php selected($retention_days, $choice_days); ?>>
+                                                    <?php
+                                                    $label = sprintf(
+                                                        /* translators: %d: number of days. */
+                                                        _n('%d jour', '%d jours', $choice_days, 'sitepulse'),
+                                                        absint($choice_days)
+                                                    );
+                                                    echo esc_html($label);
+                                                    ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <p class="sitepulse-resource-thresholds__hint" id="<?php echo esc_attr($retention_description_id); ?>"><?php esc_html_e('Détermine combien de jours de mesures sont conservés avant purge automatique.', 'sitepulse'); ?></p>
+                                </div>
+                                <div class="sitepulse-resource-thresholds__field">
+                                    <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_EXPORT_MAX_ROWS); ?>"><?php esc_html_e('Lignes exportées', 'sitepulse'); ?></label>
+                                    <div class="sitepulse-resource-thresholds__input">
+                                        <input type="number" min="0" step="1" id="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_EXPORT_MAX_ROWS); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_RESOURCE_MONITOR_EXPORT_MAX_ROWS); ?>" value="<?php echo esc_attr($export_limit); ?>" class="small-text" aria-describedby="<?php echo esc_attr($export_description_id); ?>">
+                                    </div>
+                                    <p class="sitepulse-resource-thresholds__hint" id="<?php echo esc_attr($export_description_id); ?>"><?php esc_html_e('Nombre maximum de lignes incluses dans un export CSV/JSON (0 pour illimité).', 'sitepulse'); ?></p>
                                 </div>
                             </div>
                         </div>

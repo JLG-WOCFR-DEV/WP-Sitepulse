@@ -53,7 +53,7 @@ Toggle modules in the admin panel to keep it lightweight. Includes debug mode an
 | **Speed Analyzer** | Mesurer la performance front-end | Scans manuels et planifiés, agrégation mobile/desktop, recommandations contextualisées, budgets de vitesse personnalisables |
 | **Database Optimizer** | Nettoyer et optimiser la base | Purge des révisions/transients, historique des opérations, seuils ajustables et notifications de nettoyage |
 | **Uptime Tracker** | Surveiller la disponibilité | Agents multiples avec file d’attente distante normalisée (TTL/limite filtrables), rétention 30-365 jours, export CSV, intégration Site Health, fenêtres de maintenance ciblées par agent |
-| **Resource Monitor** | Suivre CPU/RAM/Disque | Snapshots réguliers, historique 24 h, export JSON/CSV, alertes visuelles basées sur les seuils |
+| **Resource Monitor** | Suivre CPU/RAM/Disque | Snapshots réguliers, historique configurable (90-365 jours), exports JSON/CSV volumineux, alertes visuelles basées sur les seuils |
 | **Error Alerts** | Détecter les erreurs PHP/JS | Lecture sécurisée de `debug.log`, webhooks Slack/Teams/Discord, filtrage par gravité, journal d’alertes |
 | **AI Insights** | Générer des recommandations | Orchestrateur Gemini avec cache, historique commentable, export CSV/clipboard, module de notes collaboratif |
 | **Plugin Impact Scanner** | Évaluer l’effet des extensions | Mesures de temps de chargement, poids disque, filtres multi-critères, scénarios d’atténuation |
@@ -69,6 +69,16 @@ Chaque module peut être activé/désactivé depuis l’interface d’administra
 3. **Analyse** : consultez le tableau de bord personnalisé, les rapports IA et les historiques de performance pour prioriser les actions. Les métadonnées exposées par les fonctions `sitepulse_get_recent_log_lines()` et `sitepulse_get_speed_thresholds()` facilitent les corrélations entre modules.
 4. **Remédiation** : déclenchez les actions de nettoyage, les scripts de maintenance ou les escalades depuis les modules concernés. Les événements sont historisés dans les options du plugin afin d’assurer un audit trail minimum.
 5. **Partage** : exportez les rapports CSV/PDF, copiez les recommandations IA contextualisées et partagez les liens d’incident pour garder vos équipes alignées.
+
+### Gérer l’historique des ressources
+
+Le module Resource Monitor enregistre désormais ses relevés dans une table dédiée afin de conserver plusieurs mois de tendance.
+Dans **Réglages → Modules → Seuils du moniteur de ressources**, vous pouvez :
+
+- choisir la durée de conservation (90, 180 ou 365 jours). Les entrées plus anciennes sont purgées automatiquement dès qu’un nouveau snapshot est stocké ;
+- fixer le nombre maximal de lignes incluses dans un export CSV/JSON. Renseignez `0` pour autoriser un export illimité lorsque vous devez analyser un historique complet.
+
+Ces paramètres sont également filtrables via `sitepulse_resource_monitor_allowed_retention_days` et `sitepulse_resource_monitor_export_rows_ceiling` pour harmoniser la politique de rétention sur plusieurs sites.
 
 ## Provisionner des agents de surveillance
 

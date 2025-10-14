@@ -59,6 +59,9 @@ $sitepulse_constants = [
     'SITEPULSE_OPTION_CRON_WARNINGS'              => 'sitepulse_cron_warnings',
     'SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT' => 'sitepulse_resource_monitor_snapshot',
     'SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY'       => 'sitepulse_resource_monitor_history',
+    'SITEPULSE_OPTION_RESOURCE_MONITOR_SCHEMA_VERSION' => 'sitepulse_resource_monitor_schema_version',
+    'SITEPULSE_OPTION_RESOURCE_MONITOR_RETENTION_DAYS' => 'sitepulse_resource_monitor_retention_days',
+    'SITEPULSE_OPTION_RESOURCE_MONITOR_EXPORT_MAX_ROWS' => 'sitepulse_resource_monitor_export_max_rows',
     'SITEPULSE_PLUGIN_IMPACT_OPTION'              => 'sitepulse_plugin_impact_stats',
     'SITEPULSE_OPTION_PLUGIN_IMPACT_HISTORY'      => 'sitepulse_plugin_impact_history',
     'SITEPULSE_OPTION_PLUGIN_IMPACT_SCORES'       => 'sitepulse_plugin_impact_scores',
@@ -152,6 +155,9 @@ $options = [
     SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER,
     SITEPULSE_OPTION_CRON_WARNINGS,
     SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY,
+    SITEPULSE_OPTION_RESOURCE_MONITOR_SCHEMA_VERSION,
+    SITEPULSE_OPTION_RESOURCE_MONITOR_RETENTION_DAYS,
+    SITEPULSE_OPTION_RESOURCE_MONITOR_EXPORT_MAX_ROWS,
     SITEPULSE_PLUGIN_IMPACT_OPTION,
     SITEPULSE_OPTION_PLUGIN_IMPACT_HISTORY,
     SITEPULSE_OPTION_PLUGIN_IMPACT_SCORES,
@@ -259,6 +265,29 @@ if (!is_array($cron_hooks)) {
 
 wp_clear_scheduled_hook('sitepulse_queue_plugin_dir_scan');
 
+if (!function_exists('sitepulse_uninstall_drop_resource_monitor_table')) {
+    /**
+     * Drops the resource monitor history table for the current blog.
+     *
+     * @return void
+     */
+    function sitepulse_uninstall_drop_resource_monitor_table() {
+        if (!defined('SITEPULSE_TABLE_RESOURCE_MONITOR_HISTORY')) {
+            return;
+        }
+
+        global $wpdb;
+
+        if (!($wpdb instanceof wpdb)) {
+            return;
+        }
+
+        $table = $wpdb->prefix . SITEPULSE_TABLE_RESOURCE_MONITOR_HISTORY;
+
+        $wpdb->query("DROP TABLE IF EXISTS {$table}");
+    }
+}
+
 /**
  * Removes plugin data for a single site.
  *
@@ -287,6 +316,8 @@ function sitepulse_uninstall_cleanup_blog($options, $transients, $cron_hooks, $t
     }
 
     sitepulse_remove_administrator_capability();
+
+    sitepulse_uninstall_drop_resource_monitor_table();
 }
 
 if (is_multisite()) {
