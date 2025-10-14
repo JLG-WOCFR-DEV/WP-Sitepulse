@@ -261,9 +261,26 @@ function sitepulse_resource_monitor_insert_history_entry(array $entry, $apply_re
         'created_at'    => gmdate('Y-m-d H:i:s'),
     ];
 
-    $formats = ['%d', '%f', '%f', '%f', '%d', '%d', '%d', '%d', '%s', '%s'];
+    $formats = [
+        'recorded_at'  => '%d',
+        'load_1'       => '%f',
+        'load_5'       => '%f',
+        'load_15'      => '%f',
+        'memory_usage' => '%d',
+        'memory_limit' => '%d',
+        'disk_free'    => '%d',
+        'disk_total'   => '%d',
+        'source'       => '%s',
+        'created_at'   => '%s',
+    ];
 
-    $wpdb->insert($table, $data, $formats);
+    foreach ($data as $column => $value) {
+        if ($value === null) {
+            unset($data[$column], $formats[$column]);
+        }
+    }
+
+    $wpdb->insert($table, $data, array_values($formats));
 
     if ($apply_retention) {
         sitepulse_resource_monitor_apply_retention();
