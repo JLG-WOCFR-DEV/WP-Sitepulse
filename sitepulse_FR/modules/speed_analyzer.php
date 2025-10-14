@@ -252,6 +252,249 @@ function sitepulse_speed_analyzer_prepare_profiles_for_js($catalog = null) {
 }
 
 /**
+ * Retrieves the benchmark configuration (competitors and budgets).
+ *
+ * @return array{competitors:array<int,array{slug:string,label:string,url:string,type:string}>,budgets:array<string,int>}
+ */
+function sitepulse_speed_analyzer_get_benchmark_settings() {
+    $defaults = [
+        'competitors' => [],
+        'budgets'     => [],
+    ];
+
+    $stored = get_option(
+        defined('SITEPULSE_OPTION_SPEED_BENCHMARKS') ? SITEPULSE_OPTION_SPEED_BENCHMARKS : 'sitepulse_speed_benchmarks',
+        $defaults
+    );
+
+    if (!is_array($stored)) {
+        $stored = $defaults;
+    }
+
+    $competitors = [];
+    $raw_competitors = isset($stored['competitors']) ? $stored['competitors'] : [];
+
+    if (is_string($raw_competitors)) {
+        $raw_competitors = preg_split('/[\r\n]+/', $raw_competitors) ?: [];
+    }
+
+    if (is_array($raw_competitors)) {
+        foreach ($raw_competitors as $entry) {
+            if (is_string($entry)) {
+                $entry = ['url' => $entry];
+            }
+
+            if (!is_array($entry)) {
+                continue;
+            }
+
+            $url = isset($entry['url']) ? esc_url_raw((string) $entry['url']) : '';
+
+            if ($url === '') {
+                continue;
+            }
+
+            $host = wp_parse_url($url, PHP_URL_HOST);
+            $label = isset($entry['label']) && $entry['label'] !== '' ? (string) $entry['label'] : ($host ? $host : $url);
+            $slug_source = isset($entry['slug']) && $entry['slug'] !== '' ? (string) $entry['slug'] : ($host ? $host : md5($url));
+            $slug = sanitize_key($slug_source);
+
+            if ($slug === '') {
+                $slug = substr(md5($slug_source), 0, 12);
+            }
+
+            $competitors[] = [
+                'slug'  => $slug,
+                'label' => $label,
+                'url'   => $url,
+                'type'  => 'competitor',
+            ];
+        }
+    }
+
+    $budgets = [];
+    $raw_budgets = isset($stored['budgets']) && is_array($stored['budgets']) ? $stored['budgets'] : [];
+
+    foreach ($raw_budgets as $profile => $value) {
+        if (!is_scalar($profile)) {
+            continue;
+        }
+
+        $profile_slug = sitepulse_speed_analyzer_normalize_profile($profile);
+        $budget_value = is_numeric($value) ? (int) $value : 0;
+
+        if ($budget_value > 0) {
+            $budgets[$profile_slug] = $budget_value;
+        }
+    }
+
+    return [
+        'competitors' => $competitors,
+        'budgets'     => $budgets,
+    ];
+}
+
+/**
+ * Retrieves the configured benchmark budget for a profile.
+ *
+ * @param string $profile Profile slug.
+ *
+ * @return int|null
+ */
+function sitepulse_speed_analyzer_get_profile_benchmark_budget($profile) {
+    $settings = sitepulse_speed_analyzer_get_benchmark_settings();
+    $profile = sitepulse_speed_analyzer_normalize_profile($profile);
+
+    if (isset($settings['budgets'][$profile])) {
+        return (int) $settings['budgets'][$profile];
+    }
+
+    return null;
+}
+
+/**
+ * Builds a queue token for a preset/source pair.
+ *
+ * @param string $preset Preset identifier.
+ * @param string $source Source identifier.
+ *
+ * @return string
+ */
+function sitepulse_speed_analyzer_build_queue_token($preset, $source) {
+    $preset = sanitize_key($preset);
+    $source = sanitize_key($source);
+
+    if ($preset === '') {
+        $preset = 'default';
+    }
+
+    if ($source === '') {
+        $source = 'site';
+    }
+
+    return $preset . '|' . $source;
+}
+
+/**
+ * Parses a queue token.
+ *
+ * @param mixed $token Queue entry.
+ *
+ * @return array{preset:string,source:string}
+ */
+function sitepulse_speed_analyzer_parse_queue_token($token) {
+    $preset = '';
+    $source = 'site';
+
+    if (is_string($token)) {
+        $parts = explode('|', $token, 2);
+        $preset = isset($parts[0]) ? sanitize_key($parts[0]) : '';
+
+        if (isset($parts[1])) {
+            $source_candidate = sanitize_key($parts[1]);
+
+            if ($source_candidate !== '') {
+                $source = $source_candidate;
+            }
+        }
+    } elseif (is_array($token)) {
+        $preset = isset($token['preset']) ? sanitize_key($token['preset']) : '';
+        $source_candidate = isset($token['source']) ? sanitize_key($token['source']) : '';
+
+        if ($source_candidate !== '') {
+            $source = $source_candidate;
+        }
+    }
+
+    if ($preset === '') {
+        $preset = 'default';
+    }
+
+    return [
+        'preset' => $preset,
+        'source' => $source,
+    ];
+}
+
+/**
+ * Resolves the targets that should be tested for a preset.
+ *
+ * @param string               $preset Preset slug.
+ * @param array<string,string> $config Preset configuration.
+ *
+ * @return array<int,array{key:string,label:string,url:string,type:string,profile:string}>
+ */
+function sitepulse_speed_analyzer_resolve_targets_for_preset($preset, $config) {
+    $targets = [];
+
+    if (!is_array($config)) {
+        $config = [];
+    }
+
+    $profile = isset($config['profile']) ? sitepulse_speed_analyzer_normalize_profile($config['profile']) : 'default';
+    $url = isset($config['url']) ? esc_url_raw((string) $config['url']) : '';
+    $label = isset($config['label']) ? (string) $config['label'] : ucfirst($preset);
+
+    if ($url !== '') {
+        $targets[] = [
+            'key'     => 'site',
+            'label'   => $label,
+            'url'     => $url,
+            'type'    => 'site',
+            'profile' => $profile,
+        ];
+    }
+
+    $benchmarks = sitepulse_speed_analyzer_get_benchmark_settings();
+
+    foreach ($benchmarks['competitors'] as $competitor) {
+        if (!isset($competitor['url']) || $competitor['url'] === '') {
+            continue;
+        }
+
+        $targets[] = [
+            'key'     => isset($competitor['slug']) ? (string) $competitor['slug'] : 'competitor',
+            'label'   => isset($competitor['label']) ? (string) $competitor['label'] : $competitor['url'],
+            'url'     => (string) $competitor['url'],
+            'type'    => 'competitor',
+            'profile' => $profile,
+        ];
+    }
+
+    return $targets;
+}
+
+/**
+ * Finds a resolved target matching the provided key.
+ *
+ * @param array<int,array<string,mixed>> $targets Target descriptors.
+ * @param string                         $key     Target key.
+ *
+ * @return array<string,mixed>|null
+ */
+function sitepulse_speed_analyzer_get_target_by_key($targets, $key) {
+    if (!is_array($targets)) {
+        return null;
+    }
+
+    foreach ($targets as $target) {
+        if (!is_array($target)) {
+            continue;
+        }
+
+        if (!isset($target['key'])) {
+            continue;
+        }
+
+        if (sanitize_key($target['key']) === sanitize_key($key)) {
+            return $target;
+        }
+    }
+
+    return null;
+}
+
+/**
  * Returns the available status labels for summary badges.
  *
  * @return array<string,array{label:string,sr:string,icon:string}>
@@ -532,8 +775,10 @@ function sitepulse_speed_analyzer_save_automation_settings($settings) {
     $queue = sitepulse_speed_analyzer_get_queue();
     $queue = array_values(array_filter(
         $queue,
-        static function ($slug) use ($presets) {
-            return isset($presets[$slug]);
+        static function ($token) use ($presets) {
+            $parsed = sitepulse_speed_analyzer_parse_queue_token($token);
+
+            return isset($presets[$parsed['preset']]);
         }
     ));
     sitepulse_speed_analyzer_update_queue($queue);
@@ -615,6 +860,26 @@ function sitepulse_speed_analyzer_get_automation_history($preset, $include_meta 
                     $entry['profile'] = sitepulse_speed_analyzer_normalize_profile($entry['profile']);
                 }
 
+                if (isset($entry['source'])) {
+                    $entry['source'] = sanitize_key($entry['source']);
+                }
+
+                if (isset($entry['source_label'])) {
+                    $entry['source_label'] = sanitize_text_field((string) $entry['source_label']);
+                }
+
+                if (isset($entry['source_type'])) {
+                    $entry['source_type'] = sanitize_key($entry['source_type']);
+                }
+
+                if (isset($entry['url'])) {
+                    $entry['url'] = esc_url_raw((string) $entry['url']);
+                }
+
+                if (isset($entry['benchmark_budget']) && is_numeric($entry['benchmark_budget'])) {
+                    $entry['benchmark_budget'] = (int) $entry['benchmark_budget'];
+                }
+
                 return $entry;
             },
             $entries
@@ -636,10 +901,36 @@ function sitepulse_speed_analyzer_get_automation_history($preset, $include_meta 
             continue;
         }
 
-        $normalized[] = [
+        $normalized_entry = [
             'timestamp'            => max(0, (int) $entry['timestamp']),
             'server_processing_ms' => max(0.0, (float) $entry['server_processing_ms']),
         ];
+
+        if (isset($entry['profile'])) {
+            $normalized_entry['profile'] = sitepulse_speed_analyzer_normalize_profile($entry['profile']);
+        }
+
+        if (isset($entry['source'])) {
+            $normalized_entry['source'] = sanitize_key($entry['source']);
+        }
+
+        if (isset($entry['source_label'])) {
+            $normalized_entry['source_label'] = sanitize_text_field((string) $entry['source_label']);
+        }
+
+        if (isset($entry['source_type'])) {
+            $normalized_entry['source_type'] = sanitize_key($entry['source_type']);
+        }
+
+        if (isset($entry['url'])) {
+            $normalized_entry['url'] = esc_url_raw((string) $entry['url']);
+        }
+
+        if (isset($entry['benchmark_budget']) && is_numeric($entry['benchmark_budget'])) {
+            $normalized_entry['benchmark_budget'] = (int) $entry['benchmark_budget'];
+        }
+
+        $normalized[] = $normalized_entry;
     }
 
     return $normalized;
@@ -675,6 +966,7 @@ function sitepulse_speed_analyzer_build_automation_payload($default_thresholds =
         $profile = isset($preset['profile']) ? sitepulse_speed_analyzer_normalize_profile($preset['profile']) : 'default';
         $profile_thresholds = sitepulse_speed_analyzer_get_thresholds($profile);
         $profile_label = isset($profiles[$profile]['label']) ? (string) $profiles[$profile]['label'] : ucfirst($profile);
+        $targets = sitepulse_speed_analyzer_resolve_targets_for_preset($slug, $preset);
 
         $payload['presets'][$slug] = [
             'label'           => isset($preset['label']) ? (string) $preset['label'] : ucfirst($slug),
@@ -690,6 +982,21 @@ function sitepulse_speed_analyzer_build_automation_payload($default_thresholds =
                 'critical' => (int) $profile_thresholds['critical'],
                 'profile'  => $profile,
             ],
+            'sources'         => array_map(
+                static function ($target) {
+                    $profile = isset($target['profile']) ? sitepulse_speed_analyzer_normalize_profile($target['profile']) : 'default';
+                    $budget = sitepulse_speed_analyzer_get_profile_benchmark_budget($profile);
+
+                    return [
+                        'key'     => isset($target['key']) ? sanitize_key($target['key']) : 'site',
+                        'label'   => isset($target['label']) ? (string) $target['label'] : '',
+                        'type'    => isset($target['type']) ? sanitize_key($target['type']) : 'site',
+                        'profile' => $profile,
+                        'budget'  => $budget !== null ? (int) $budget : null,
+                    ];
+                },
+                $targets
+            ),
         ];
     }
 
@@ -700,10 +1007,11 @@ function sitepulse_speed_analyzer_build_automation_payload($default_thresholds =
  * Retrieves the most recent numeric entry from a preset history.
  *
  * @param array<int,array<string,mixed>> $entries Entries.
+ * @param string|null                    $source  Optional source filter.
  *
  * @return array<string,mixed>|null
  */
-function sitepulse_speed_analyzer_get_latest_numeric_entry_from_history($entries) {
+function sitepulse_speed_analyzer_get_latest_numeric_entry_from_history($entries, $source = null) {
     if (!is_array($entries)) {
         return null;
     }
@@ -713,6 +1021,14 @@ function sitepulse_speed_analyzer_get_latest_numeric_entry_from_history($entries
     foreach ($reversed as $entry) {
         if (!is_array($entry)) {
             continue;
+        }
+
+        if ($source !== null) {
+            $entry_source = isset($entry['source']) ? sanitize_key($entry['source']) : '';
+
+            if ($entry_source !== sanitize_key($source)) {
+                continue;
+            }
         }
 
         if (!isset($entry['server_processing_ms']) || !is_numeric($entry['server_processing_ms'])) {
@@ -744,8 +1060,9 @@ function sitepulse_speed_analyzer_store_automation_measurement($preset, array $e
         $history[$preset] = [];
     }
 
-    $previous = sitepulse_speed_analyzer_get_latest_numeric_entry_from_history($history[$preset]);
-    $profile = isset($config['profile']) ? sitepulse_speed_analyzer_normalize_profile($config['profile']) : 'default';
+    $source_key = isset($entry['source']) ? sanitize_key($entry['source']) : 'site';
+    $previous = sitepulse_speed_analyzer_get_latest_numeric_entry_from_history($history[$preset], $source_key);
+    $profile = isset($entry['profile']) ? sitepulse_speed_analyzer_normalize_profile($entry['profile']) : (isset($config['profile']) ? sitepulse_speed_analyzer_normalize_profile($config['profile']) : 'default');
 
     $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : current_time('timestamp');
     $value = null;
@@ -756,6 +1073,7 @@ function sitepulse_speed_analyzer_store_automation_measurement($preset, array $e
 
     $stored_entry = [
         'timestamp' => max(0, $timestamp),
+        'profile'   => $profile,
     ];
 
     if ($value !== null) {
@@ -770,7 +1088,27 @@ function sitepulse_speed_analyzer_store_automation_measurement($preset, array $e
         $stored_entry['error'] = (string) $entry['error'];
     }
 
-    $stored_entry['profile'] = $profile;
+    if ($source_key !== '') {
+        $stored_entry['source'] = $source_key;
+    }
+
+    if (isset($entry['source_label'])) {
+        $stored_entry['source_label'] = sanitize_text_field((string) $entry['source_label']);
+    }
+
+    if (isset($entry['source_type'])) {
+        $stored_entry['source_type'] = sanitize_key($entry['source_type']);
+    }
+
+    if (isset($entry['url'])) {
+        $stored_entry['url'] = esc_url_raw((string) $entry['url']);
+    }
+
+    $budget = sitepulse_speed_analyzer_get_profile_benchmark_budget($profile);
+
+    if ($budget !== null) {
+        $stored_entry['benchmark_budget'] = (int) $budget;
+    }
 
     $history[$preset][] = $stored_entry;
 
@@ -831,11 +1169,8 @@ function sitepulse_speed_analyzer_get_queue() {
     $normalized = [];
 
     foreach ($queue as $entry) {
-        if (!is_string($entry) || $entry === '') {
-            continue;
-        }
-
-        $normalized[] = sanitize_key($entry);
+        $parsed = sitepulse_speed_analyzer_parse_queue_token($entry);
+        $normalized[] = sitepulse_speed_analyzer_build_queue_token($parsed['preset'], $parsed['source']);
     }
 
     return array_values(array_unique($normalized));
@@ -859,22 +1194,54 @@ function sitepulse_speed_analyzer_update_queue($queue) {
 /**
  * Adds presets to the automation queue.
  *
- * @param string[] $presets Preset slugs.
+ * @param array<int|string,mixed> $presets Preset definitions or slugs.
  *
  * @return void
  */
 function sitepulse_speed_analyzer_enqueue_presets(array $presets) {
     $queue = sitepulse_speed_analyzer_get_queue();
 
-    foreach ($presets as $preset) {
-        if (!is_string($preset) || $preset === '') {
+    foreach ($presets as $key => $preset) {
+        $slug = null;
+        $config = null;
+
+        if (is_string($key) && $key !== '' && is_array($preset)) {
+            $slug = sanitize_key($key);
+            $config = $preset;
+        } elseif (is_string($preset)) {
+            $slug = sanitize_key($preset);
+        }
+
+        if ($slug === null || $slug === '') {
             continue;
         }
 
-        $slug = sanitize_key($preset);
+        if (!is_array($config) && isset($presets[$slug]) && is_array($presets[$slug])) {
+            $config = $presets[$slug];
+        }
 
-        if (!in_array($slug, $queue, true)) {
-            $queue[] = $slug;
+        $targets = sitepulse_speed_analyzer_resolve_targets_for_preset($slug, is_array($config) ? $config : []);
+
+        if ($targets === []) {
+            $token = sitepulse_speed_analyzer_build_queue_token($slug, 'site');
+
+            if (!in_array($token, $queue, true)) {
+                $queue[] = $token;
+            }
+
+            continue;
+        }
+
+        foreach ($targets as $target) {
+            if (!isset($target['key'])) {
+                continue;
+            }
+
+            $token = sitepulse_speed_analyzer_build_queue_token($slug, $target['key']);
+
+            if (!in_array($token, $queue, true)) {
+                $queue[] = $token;
+            }
         }
     }
 
@@ -1014,7 +1381,7 @@ function sitepulse_speed_analyzer_run_cron() {
         return;
     }
 
-    sitepulse_speed_analyzer_enqueue_presets(array_keys($settings['presets']));
+    sitepulse_speed_analyzer_enqueue_presets($settings['presets']);
     sitepulse_speed_analyzer_drain_queue($settings);
 }
 
@@ -1062,18 +1429,33 @@ function sitepulse_speed_analyzer_drain_queue($settings, $is_retry = false) {
     $presets = $settings['presets'];
 
     while ($processed < $batch_size) {
-        $preset = sitepulse_speed_analyzer_shift_queue();
+        $token = sitepulse_speed_analyzer_shift_queue();
 
-        if ($preset === null) {
+        if ($token === null) {
             break;
         }
 
-        if (!isset($presets[$preset])) {
+        $parsed = sitepulse_speed_analyzer_parse_queue_token($token);
+        $preset_slug = $parsed['preset'];
+        $source_key = $parsed['source'];
+
+        if (!isset($presets[$preset_slug])) {
             $processed++;
+
             continue;
         }
 
-        sitepulse_speed_analyzer_execute_automation_scan($preset, $presets[$preset]);
+        $config = $presets[$preset_slug];
+        $targets = sitepulse_speed_analyzer_resolve_targets_for_preset($preset_slug, $config);
+        $target = sitepulse_speed_analyzer_get_target_by_key($targets, $source_key);
+
+        if ($target === null) {
+            $processed++;
+
+            continue;
+        }
+
+        sitepulse_speed_analyzer_execute_automation_scan($preset_slug, $config, $target);
         $processed++;
     }
 
@@ -1097,15 +1479,20 @@ function sitepulse_speed_analyzer_drain_queue($settings, $is_retry = false) {
  *
  * @param string               $preset Preset identifier.
  * @param array<string,string> $config Preset configuration.
+ * @param array<string,mixed>  $target Target descriptor.
  *
  * @return void
  */
-function sitepulse_speed_analyzer_execute_automation_scan($preset, $config) {
+function sitepulse_speed_analyzer_execute_automation_scan($preset, $config, $target) {
     if (!is_array($config)) {
+        $config = [];
+    }
+
+    if (!is_array($target)) {
         return;
     }
 
-    $url = isset($config['url']) ? (string) $config['url'] : '';
+    $url = isset($target['url']) ? (string) $target['url'] : (isset($config['url']) ? (string) $config['url'] : '');
 
     if ($url === '') {
         return;
@@ -1116,6 +1503,11 @@ function sitepulse_speed_analyzer_execute_automation_scan($preset, $config) {
     if (!in_array($method, ['GET', 'POST', 'HEAD'], true)) {
         $method = 'GET';
     }
+
+    $profile = isset($target['profile']) ? sitepulse_speed_analyzer_normalize_profile($target['profile']) : (isset($config['profile']) ? sitepulse_speed_analyzer_normalize_profile($config['profile']) : 'default');
+    $source_key = isset($target['key']) ? sanitize_key($target['key']) : 'site';
+    $source_label = isset($target['label']) ? (string) $target['label'] : ($source_key === 'site' ? (isset($config['label']) ? (string) $config['label'] : ucfirst($preset)) : $url);
+    $source_type = isset($target['type']) ? (string) $target['type'] : 'site';
 
     if (!function_exists('wp_remote_request')) {
         include_once ABSPATH . WPINC . '/http.php';
@@ -1148,8 +1540,16 @@ function sitepulse_speed_analyzer_execute_automation_scan($preset, $config) {
             'server_processing_ms' => $duration_ms,
             'http_code'            => $http_code,
             'error'                => $error_message,
+            'source'               => $source_key,
+            'source_label'         => $source_label,
+            'source_type'          => $source_type,
+            'profile'              => $profile,
+            'url'                  => $url,
         ],
-        $config
+        array_merge($config, [
+            'profile' => $profile,
+            'label'   => isset($config['label']) ? $config['label'] : $source_label,
+        ])
     );
 
     sitepulse_speed_analyzer_notify_regression_if_needed($preset, $config, $result['current'], $result['previous']);
@@ -1174,34 +1574,116 @@ function sitepulse_speed_analyzer_notify_regression_if_needed($preset, $config, 
         return;
     }
 
-    if (!is_array($previous) || !isset($previous['server_processing_ms']) || !is_numeric($previous['server_processing_ms'])) {
-        return;
-    }
-
     $current_value = max(0.0, (float) $current['server_processing_ms']);
-    $previous_value = max(0.0, (float) $previous['server_processing_ms']);
+    $previous_value = is_array($previous) && isset($previous['server_processing_ms']) && is_numeric($previous['server_processing_ms'])
+        ? max(0.0, (float) $previous['server_processing_ms'])
+        : null;
 
-    if ($previous_value <= 0.0) {
+    $source_key = isset($current['source']) ? sanitize_key($current['source']) : 'site';
+    $source_type = isset($current['source_type']) ? sanitize_key($current['source_type']) : 'site';
+
+    if ($source_type !== 'site') {
         return;
     }
 
-    $threshold = apply_filters('sitepulse_speed_analyzer_regression_threshold', 0.3, $preset, $config);
+    $profile = isset($current['profile'])
+        ? sitepulse_speed_analyzer_normalize_profile($current['profile'])
+        : (isset($config['profile']) ? sitepulse_speed_analyzer_normalize_profile($config['profile']) : 'default');
 
-    if (!is_numeric($threshold) || $threshold <= 0) {
-        $threshold = 0.3;
+    $label = isset($config['label']) ? (string) $config['label'] : ucfirst($preset);
+    $site_name = function_exists('get_bloginfo') ? get_bloginfo('name') : 'WordPress';
+
+    $alerts = [];
+    $messages = [];
+
+    if ($previous_value !== null && $previous_value > 0.0) {
+        $threshold = apply_filters('sitepulse_speed_analyzer_regression_threshold', 0.3, $preset, $config);
+
+        if (!is_numeric($threshold) || $threshold <= 0) {
+            $threshold = 0.3;
+        }
+
+        $min_delta = apply_filters('sitepulse_speed_analyzer_regression_min_delta', 100.0, $preset, $config);
+
+        if (!is_numeric($min_delta) || $min_delta < 0) {
+            $min_delta = 0;
+        }
+
+        $delta = $current_value - $previous_value;
+
+        if ($delta >= $min_delta && $current_value >= $previous_value * (1 + $threshold)) {
+            $alerts[] = 'regression';
+            $messages[] = sprintf(
+                /* translators: 1: preset label, 2: previous duration, 3: current duration. */
+                __('Régression : « %1$s » est passé de %2$.2f ms à %3$.2f ms.', 'sitepulse'),
+                $label,
+                $previous_value,
+                $current_value
+            );
+        }
     }
 
-    $min_delta = apply_filters('sitepulse_speed_analyzer_regression_min_delta', 100.0, $preset, $config);
+    $budget = sitepulse_speed_analyzer_get_profile_benchmark_budget($profile);
 
-    if (!is_numeric($min_delta) || $min_delta < 0) {
-        $min_delta = 0;
+    if ($budget !== null && $current_value > $budget) {
+        $alerts[] = 'budget';
+        $messages[] = sprintf(
+            /* translators: 1: profile label, 2: measured value, 3: budget value. */
+            __('Budget dépassé : profil %1$s à %2$.2f ms (budget %3$d ms).', 'sitepulse'),
+            $profile,
+            $current_value,
+            (int) $budget
+        );
     }
 
-    $delta = $current_value - $previous_value;
+    $benchmark_label = '';
+    $benchmark_value = null;
+    $history = sitepulse_speed_analyzer_get_raw_automation_history();
 
-    if ($delta < $min_delta || $current_value < $previous_value * (1 + $threshold)) {
+    if (isset($history[$preset]) && is_array($history[$preset])) {
+        $entries = array_reverse($history[$preset]);
+
+        foreach ($entries as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+
+            if (!isset($entry['source_type']) || sanitize_key($entry['source_type']) !== 'competitor') {
+                continue;
+            }
+
+            $entry_profile = isset($entry['profile']) ? sitepulse_speed_analyzer_normalize_profile($entry['profile']) : 'default';
+
+            if ($entry_profile !== $profile) {
+                continue;
+            }
+
+            if (!isset($entry['server_processing_ms']) || !is_numeric($entry['server_processing_ms'])) {
+                continue;
+            }
+
+            $benchmark_value = max(0.0, (float) $entry['server_processing_ms']);
+            $benchmark_label = isset($entry['source_label']) ? (string) $entry['source_label'] : (isset($entry['source']) ? (string) $entry['source'] : '');
+            break;
+        }
+    }
+
+    if ($benchmark_value !== null && $current_value > $benchmark_value) {
+        $alerts[] = 'benchmark';
+        $messages[] = sprintf(
+            /* translators: 1: competitor label, 2: competitor value, 3: own value. */
+            __('Benchmark perdu : %1$s mesure %2$.2f ms contre %3$.2f ms.', 'sitepulse'),
+            $benchmark_label !== '' ? $benchmark_label : __('le concurrent suivi', 'sitepulse'),
+            $benchmark_value,
+            $current_value
+        );
+    }
+
+    if ($messages === []) {
         return;
     }
+
+    $current['alerts'] = $alerts;
 
     $cooldown = apply_filters('sitepulse_speed_analyzer_regression_cooldown', 3 * HOUR_IN_SECONDS, $preset, $config);
 
@@ -1209,30 +1691,20 @@ function sitepulse_speed_analyzer_notify_regression_if_needed($preset, $config, 
         $cooldown = 3 * HOUR_IN_SECONDS;
     }
 
-    $transient_key = 'sitepulse_speed_regression_' . md5($preset);
+    $transient_key = 'sitepulse_speed_regression_' . md5($preset . '|' . $source_key . '|' . implode('-', $alerts));
 
     if (function_exists('get_transient') && false !== get_transient($transient_key)) {
         return;
     }
 
-    $label = isset($config['label']) ? (string) $config['label'] : ucfirst($preset);
-    $site_name = function_exists('get_bloginfo') ? get_bloginfo('name') : 'WordPress';
     $subject = sprintf(
         /* translators: %1$s: preset label, %2$s: site name. */
-        __('Régression de performance détectée pour %1$s sur %2$s', 'sitepulse'),
+        __('Alerte performance pour %1$s sur %2$s', 'sitepulse'),
         $label,
         $site_name
     );
 
-    $message = sprintf(
-        /* translators: 1: preset label, 2: previous duration, 3: current duration. */
-        __('Le preset « %1$s » est passé de %2$.2f ms à %3$.2f ms. Vérifiez l’URL surveillée : %4$s', 'sitepulse'),
-        $label,
-        $previous_value,
-        $current_value,
-        isset($config['url']) ? $config['url'] : ''
-    );
-
+    $message = implode("\n\n", $messages);
     $should_notify = apply_filters('sitepulse_speed_analyzer_send_regression_notification', true, $preset, $config, $current, $previous);
 
     if ($should_notify && function_exists('wp_mail')) {
@@ -1250,7 +1722,13 @@ function sitepulse_speed_analyzer_notify_regression_if_needed($preset, $config, 
     }
 
     if (function_exists('do_action')) {
-        do_action('sitepulse_speed_analyzer_regression_detected', $preset, $config, $current, $previous);
+        if (in_array('regression', $alerts, true)) {
+            do_action('sitepulse_speed_analyzer_regression_detected', $preset, $config, $current, $previous);
+        }
+
+        if (in_array('benchmark', $alerts, true) || in_array('budget', $alerts, true)) {
+            do_action('sitepulse_speed_analyzer_benchmark_alert', $preset, $config, $current, $previous, $alerts);
+        }
     }
 
     if (function_exists('set_transient')) {
@@ -1486,6 +1964,10 @@ function sitepulse_speed_analyzer_get_aggregates($history = null, $thresholds = 
     if (is_array($history)) {
         foreach ($history as $entry) {
             if (!is_array($entry) || !isset($entry['server_processing_ms'])) {
+                continue;
+            }
+
+            if (isset($entry['source_type']) && sanitize_key($entry['source_type']) !== 'site') {
                 continue;
             }
 
@@ -1864,6 +2346,7 @@ function sitepulse_speed_analyzer_enqueue_assets($hook_suffix) {
                 'retry'          => esc_html__('Relancer un test', 'sitepulse'),
                 'noHistory'      => esc_html__("Aucun historique disponible pour le moment.", 'sitepulse'),
                 'timestamp'      => esc_html__('Horodatage', 'sitepulse'),
+                'source'         => esc_html__('Source', 'sitepulse'),
                 'duration'       => esc_html__('Temps serveur (ms)', 'sitepulse'),
                 'status'         => esc_html__('Statut', 'sitepulse'),
                 'chartLabel'     => esc_html__('Temps de traitement du serveur', 'sitepulse'),
@@ -1883,6 +2366,9 @@ function sitepulse_speed_analyzer_enqueue_assets($hook_suffix) {
                 'summarySamplePlural'   => esc_html__('Basé sur %d mesures.', 'sitepulse'),
                 'summaryOutlierSingular'=> esc_html__('%d mesure extrême ignorée lors du calcul des moyennes.', 'sitepulse'),
                 'summaryOutlierPlural'  => esc_html__('%d mesures extrêmes ignorées lors du calcul des moyennes.', 'sitepulse'),
+                'ownSourceLabel'        => esc_html__('Votre site', 'sitepulse'),
+                'competitorSourceLabel' => esc_html__('Concurrent', 'sitepulse'),
+                'budgetLabel'           => esc_html__('Budget', 'sitepulse'),
             ],
         ]
     );
@@ -2041,6 +2527,7 @@ function sitepulse_speed_analyzer_page() {
                 <thead>
                     <tr>
                         <th scope="col"><?php esc_html_e('Horodatage', 'sitepulse'); ?></th>
+                        <th scope="col"><?php esc_html_e('Source', 'sitepulse'); ?></th>
                         <th scope="col"><?php esc_html_e('Temps serveur (ms)', 'sitepulse'); ?></th>
                         <th scope="col"><?php esc_html_e('Statut', 'sitepulse'); ?></th>
                     </tr>
@@ -2050,13 +2537,14 @@ function sitepulse_speed_analyzer_page() {
                         <?php foreach ($history as $entry) : ?>
                             <tr>
                                 <td><?php echo esc_html(wp_date(get_option('date_format') . ' ' . get_option('time_format'), $entry['timestamp'])); ?></td>
+                                <td><?php echo esc_html(!empty($entry['source_label']) ? $entry['source_label'] : __('Votre site', 'sitepulse')); ?></td>
                                 <td><?php echo esc_html(number_format_i18n($entry['server_processing_ms'], 2)); ?></td>
                                 <td>&mdash;</td>
                             </tr>
                         <?php endforeach; ?>
                     <?php else : ?>
                         <tr>
-                            <td colspan="3"><?php esc_html_e('Aucun historique disponible pour le moment.', 'sitepulse'); ?></td>
+                            <td colspan="4"><?php esc_html_e('Aucun historique disponible pour le moment.', 'sitepulse'); ?></td>
                         </tr>
                     <?php endif; ?>
                 </tbody>

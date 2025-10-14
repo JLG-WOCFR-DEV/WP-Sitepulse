@@ -422,12 +422,20 @@ function sitepulse_register_settings() {
     register_setting('sitepulse_settings', SITEPULSE_OPTION_UPTIME_MAINTENANCE_WINDOWS, [
         'type' => 'array', 'sanitize_callback' => 'sitepulse_sanitize_uptime_maintenance_windows', 'default' => []
     ]);
-    register_setting('sitepulse_settings', SITEPULSE_OPTION_SPEED_WARNING_MS, [
-        'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_speed_warning_threshold', 'default' => SITEPULSE_DEFAULT_SPEED_WARNING_MS
-    ]);
-    register_setting('sitepulse_settings', SITEPULSE_OPTION_SPEED_CRITICAL_MS, [
-        'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_speed_critical_threshold', 'default' => SITEPULSE_DEFAULT_SPEED_CRITICAL_MS
-    ]);
+register_setting('sitepulse_settings', SITEPULSE_OPTION_SPEED_WARNING_MS, [
+    'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_speed_warning_threshold', 'default' => SITEPULSE_DEFAULT_SPEED_WARNING_MS
+]);
+register_setting('sitepulse_settings', SITEPULSE_OPTION_SPEED_CRITICAL_MS, [
+    'type' => 'integer', 'sanitize_callback' => 'sitepulse_sanitize_speed_critical_threshold', 'default' => SITEPULSE_DEFAULT_SPEED_CRITICAL_MS
+]);
+register_setting('sitepulse_settings', SITEPULSE_OPTION_SPEED_BENCHMARKS, [
+    'type' => 'array',
+    'sanitize_callback' => 'sitepulse_sanitize_speed_benchmarks',
+    'default' => [
+        'competitors' => [],
+        'budgets'     => [],
+    ],
+]);
     register_setting('sitepulse_settings', SITEPULSE_OPTION_IMPACT_THRESHOLDS, [
         'type'              => 'array',
         'sanitize_callback' => 'sitepulse_sanitize_impact_thresholds',
@@ -1496,6 +1504,90 @@ function sitepulse_sanitize_speed_critical_threshold($value) {
 }
 
 /**
+ * Sanitizes the competitor benchmark configuration for the speed analyzer.
+ *
+ * @param array<string,mixed>|string $value Raw option payload.
+ *
+ * @return array{competitors:array<int,array{slug:string,label:string,url:string}>,budgets:array<string,int>}
+ */
+function sitepulse_sanitize_speed_benchmarks($value) {
+    if (!is_array($value)) {
+        $value = [];
+    }
+
+    $raw_competitors = '';
+
+    if (isset($value['competitors']) && is_string($value['competitors'])) {
+        $raw_competitors = $value['competitors'];
+    } elseif (isset($value['competitors_raw']) && is_string($value['competitors_raw'])) {
+        $raw_competitors = $value['competitors_raw'];
+    }
+
+    $competitors = [];
+    $lines = preg_split('/[\r\n]+/', (string) $raw_competitors) ?: [];
+
+    foreach ($lines as $line) {
+        $line = trim($line);
+
+        if ($line === '') {
+            continue;
+        }
+
+        $url = esc_url_raw($line);
+
+        if ($url === '') {
+            continue;
+        }
+
+        $host = wp_parse_url($url, PHP_URL_HOST);
+        $label = $host ? $host : $url;
+        $slug_source = $host ? $host : md5($url);
+        $slug = sanitize_key($slug_source);
+
+        if ($slug === '') {
+            $slug = substr(md5($slug_source), 0, 12);
+        }
+
+        $competitors[] = [
+            'slug'  => $slug,
+            'label' => $label,
+            'url'   => $url,
+        ];
+    }
+
+    $profiles = [];
+
+    if (function_exists('sitepulse_speed_analyzer_get_profile_catalog')) {
+        $profiles = sitepulse_speed_analyzer_get_profile_catalog();
+    }
+
+    if (!is_array($profiles) || $profiles === []) {
+        $profiles = [
+            'default' => [
+                'label' => __('Standard', 'sitepulse'),
+            ],
+        ];
+    }
+
+    $budgets_input = isset($value['budgets']) && is_array($value['budgets']) ? $value['budgets'] : [];
+    $budgets = [];
+
+    foreach ($profiles as $slug => $profile) {
+        $raw_budget = isset($budgets_input[$slug]) ? $budgets_input[$slug] : null;
+        $budget_value = is_numeric($raw_budget) ? (int) $raw_budget : 0;
+
+        if ($budget_value > 0) {
+            $budgets[$slug] = $budget_value;
+        }
+    }
+
+    return [
+        'competitors' => $competitors,
+        'budgets'     => $budgets,
+    ];
+}
+
+/**
  * Returns the default thresholds used for plugin impact highlighting.
  *
  * @return array<string,float>
@@ -2462,6 +2554,35 @@ function sitepulse_settings_page() {
         $speed_critical_threshold = max($speed_warning_threshold + 1, $default_speed_thresholds['critical']);
     }
 
+    $raw_speed_benchmarks = get_option(
+        SITEPULSE_OPTION_SPEED_BENCHMARKS,
+        [
+            'competitors' => [],
+            'budgets'     => [],
+        ]
+    );
+
+    $speed_benchmark_settings = sitepulse_sanitize_speed_benchmarks($raw_speed_benchmarks);
+    $speed_benchmark_competitors = $speed_benchmark_settings['competitors'];
+    $speed_benchmark_budgets = $speed_benchmark_settings['budgets'];
+    $speed_benchmark_competitors_value = '';
+
+    if (!empty($speed_benchmark_competitors)) {
+        $speed_benchmark_competitors_value = implode(
+            "\n",
+            array_map(
+                static function ($competitor) {
+                    return isset($competitor['url']) ? (string) $competitor['url'] : '';
+                },
+                $speed_benchmark_competitors
+            )
+        );
+    }
+
+    $speed_profiles_catalog = function_exists('sitepulse_speed_analyzer_get_profile_catalog')
+        ? sitepulse_speed_analyzer_get_profile_catalog()
+        : ['default' => ['label' => __('Standard', 'sitepulse')]];
+
     $default_plugin_impact_thresholds = sitepulse_get_default_plugin_impact_thresholds();
     $stored_plugin_impact_thresholds = get_option(
         SITEPULSE_OPTION_IMPACT_THRESHOLDS,
@@ -3157,6 +3278,51 @@ function sitepulse_settings_page() {
                                 esc_html__('Temps de traitement à partir duquel les cartes passent en statut critique. Valeur par défaut : %d ms.', 'sitepulse'),
                                 (int) (defined('SITEPULSE_DEFAULT_SPEED_CRITICAL_MS') ? SITEPULSE_DEFAULT_SPEED_CRITICAL_MS : 500)
                             ); ?></p>
+                        </div>
+                    </div>
+                    <div class="sitepulse-module-card sitepulse-module-card--setting">
+                        <div class="sitepulse-card-header">
+                            <h3 class="sitepulse-card-title"><?php esc_html_e('Benchmarks et concurrents', 'sitepulse'); ?></h3>
+                        </div>
+                        <div class="sitepulse-card-body">
+                            <?php $competitor_field_id = SITEPULSE_OPTION_SPEED_BENCHMARKS . '-competitors'; ?>
+                            <label class="sitepulse-field-label" for="<?php echo esc_attr($competitor_field_id); ?>"><?php esc_html_e('URLs concurrentes', 'sitepulse'); ?></label>
+                            <textarea
+                                id="<?php echo esc_attr($competitor_field_id); ?>"
+                                name="<?php echo esc_attr(SITEPULSE_OPTION_SPEED_BENCHMARKS); ?>[competitors]"
+                                rows="4"
+                                class="large-text"
+                                placeholder="<?php echo esc_attr__('https://exemple.com\nhttps://autre-competiteur.com', 'sitepulse'); ?>"
+                            ><?php echo esc_textarea($speed_benchmark_competitors_value); ?></textarea>
+                            <p class="sitepulse-card-description"><?php esc_html_e('Indiquez une URL par ligne pour suivre des sites de référence. Les hôtes servent à nommer les séries de comparaison.', 'sitepulse'); ?></p>
+                            <div class="sitepulse-benchmark-grid">
+                                <?php foreach ($speed_profiles_catalog as $profile_slug => $profile_meta) :
+                                    $profile_label = isset($profile_meta['label']) ? $profile_meta['label'] : ucfirst($profile_slug);
+                                    $profile_description = isset($profile_meta['description']) ? $profile_meta['description'] : '';
+                                    $budget_field_name = SITEPULSE_OPTION_SPEED_BENCHMARKS . '[budgets][' . $profile_slug . ']';
+                                    $budget_field_id = SITEPULSE_OPTION_SPEED_BENCHMARKS . '-budget-' . $profile_slug;
+                                    $budget_value = isset($speed_benchmark_budgets[$profile_slug]) ? (int) $speed_benchmark_budgets[$profile_slug] : '';
+                                ?>
+                                    <div class="sitepulse-benchmark-field">
+                                        <label class="sitepulse-field-label" for="<?php echo esc_attr($budget_field_id); ?>">
+                                            <?php printf(esc_html__('Budget %s (ms)', 'sitepulse'), esc_html($profile_label)); ?>
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            step="1"
+                                            id="<?php echo esc_attr($budget_field_id); ?>"
+                                            name="<?php echo esc_attr($budget_field_name); ?>"
+                                            value="<?php echo '' === $budget_value ? '' : esc_attr($budget_value); ?>"
+                                            class="small-text"
+                                        >
+                                        <?php if (!empty($profile_description)) : ?>
+                                            <p class="sitepulse-card-note"><?php echo esc_html($profile_description); ?></p>
+                                        <?php endif; ?>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                            <p class="sitepulse-card-description"><?php esc_html_e('Ces budgets alimentent les alertes ainsi que les comparaisons dans le module Speed Analyzer.', 'sitepulse'); ?></p>
                         </div>
                     </div>
                     <div class="sitepulse-module-card sitepulse-module-card--setting">
