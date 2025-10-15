@@ -11,6 +11,10 @@ if (!defined('SITEPULSE_DEBUG')) {
     define('SITEPULSE_DEBUG', true);
 }
 
+if (!defined('SITEPULSE_DEBUG_NOTICE_QUEUE_LIMIT')) {
+    define('SITEPULSE_DEBUG_NOTICE_QUEUE_LIMIT', 2);
+}
+
 if (!function_exists('add_action')) {
     function add_action($hook, $callback, $priority = 10, $accepted_args = 1)
     {
@@ -33,7 +37,7 @@ if (!function_exists('get_option')) {
 }
 
 if (!function_exists('update_option')) {
-    function update_option($name, $value)
+    function update_option($name, $value, $autoload = null)
     {
         $GLOBALS['sitepulse_options'][$name] = $value;
 
@@ -95,13 +99,20 @@ sitepulse_schedule_debug_admin_notice('Write failure', 'warning');
 $queued = get_option(SITEPULSE_OPTION_DEBUG_NOTICES, []);
 sitepulse_assert(count($queued) === 2, 'Second unique frontend notice should be queued.');
 
+// Queue should drop the oldest entry when exceeding the limit.
+sitepulse_schedule_debug_admin_notice('Cache saturated', 'info');
+$queued = get_option(SITEPULSE_OPTION_DEBUG_NOTICES, []);
+sitepulse_assert(count($queued) === SITEPULSE_DEBUG_NOTICE_QUEUE_LIMIT, 'Queue should respect the configured limit.');
+sitepulse_assert($queued[0]['message'] === 'Write failure', 'Queue should retain the most recent entries.');
+sitepulse_assert($queued[1]['message'] === 'Cache saturated', 'Newest notice should be kept when trimming the queue.');
+
 // Scenario 2: Visiting admin displays and clears queued notices.
 sitepulse_debug_notice_registry(null, true);
 $GLOBALS['sitepulse_is_admin'] = true;
 ob_start();
 sitepulse_display_queued_debug_notices();
 $output = ob_get_clean();
-$expected_output = '<div class="notice notice-error"><p>Rotation failed</p></div><div class="notice notice-warning"><p>Write failure</p></div>';
+$expected_output = '<div class="notice notice-warning"><p>Write failure</p></div><div class="notice notice-info"><p>Cache saturated</p></div>';
 sitepulse_assert($output === $expected_output, 'Queued notices should render once in admin.');
 sitepulse_assert(get_option(SITEPULSE_OPTION_DEBUG_NOTICES, []) === [], 'Queued notices should be cleared after rendering.');
 
