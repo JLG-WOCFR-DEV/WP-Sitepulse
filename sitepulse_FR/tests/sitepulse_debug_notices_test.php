@@ -6,9 +6,14 @@ define('ABSPATH', __DIR__);
 $GLOBALS['sitepulse_hooks'] = [];
 $GLOBALS['sitepulse_options'] = [];
 $GLOBALS['sitepulse_is_admin'] = false;
+$GLOBALS['sitepulse_filters'] = [];
 
 if (!defined('SITEPULSE_DEBUG')) {
     define('SITEPULSE_DEBUG', true);
+}
+
+if (!defined('SITEPULSE_DEBUG_NOTICE_QUEUE_LIMIT')) {
+    define('SITEPULSE_DEBUG_NOTICE_QUEUE_LIMIT', 2);
 }
 
 if (!function_exists('add_action')) {
@@ -33,7 +38,7 @@ if (!function_exists('get_option')) {
 }
 
 if (!function_exists('update_option')) {
-    function update_option($name, $value)
+    function update_option($name, $value, $autoload = null)
     {
         $GLOBALS['sitepulse_options'][$name] = $value;
 
@@ -47,6 +52,32 @@ if (!function_exists('delete_option')) {
         unset($GLOBALS['sitepulse_options'][$name]);
 
         return true;
+    }
+}
+
+if (!function_exists('apply_filters')) {
+    function apply_filters($hook_name, $value)
+    {
+        if (!isset($GLOBALS['sitepulse_filters'][$hook_name])) {
+            return $value;
+        }
+
+        $args = func_get_args();
+        array_shift($args);
+
+        foreach ($GLOBALS['sitepulse_filters'][$hook_name] as $callback) {
+            $value = call_user_func_array($callback, $args);
+            $args[0] = $value;
+        }
+
+        return $value;
+    }
+}
+
+if (!function_exists('add_filter')) {
+    function add_filter($hook_name, $callback)
+    {
+        $GLOBALS['sitepulse_filters'][$hook_name][] = $callback;
     }
 }
 
@@ -95,13 +126,21 @@ sitepulse_schedule_debug_admin_notice('Write failure', 'warning');
 $queued = get_option(SITEPULSE_OPTION_DEBUG_NOTICES, []);
 sitepulse_assert(count($queued) === 2, 'Second unique frontend notice should be queued.');
 
+// Queue should drop the oldest entry when exceeding the limit.
+sitepulse_schedule_debug_admin_notice('Cache saturated', 'info');
+$queued = get_option(SITEPULSE_OPTION_DEBUG_NOTICES, []);
+sitepulse_assert(count($queued) === SITEPULSE_DEBUG_NOTICE_QUEUE_LIMIT, 'Queue should respect the configured limit.');
+sitepulse_assert($queued[0]['message'] === 'Write failure', 'Queue should retain the most recent entries.');
+sitepulse_assert($queued[1]['message'] === 'Cache saturated', 'Newest notice should be kept when trimming the queue.');
+
 // Scenario 2: Visiting admin displays and clears queued notices.
 sitepulse_debug_notice_registry(null, true);
 $GLOBALS['sitepulse_is_admin'] = true;
 ob_start();
 sitepulse_display_queued_debug_notices();
 $output = ob_get_clean();
-$expected_output = '<div class="notice notice-error"><p>Rotation failed</p></div><div class="notice notice-warning"><p>Write failure</p></div>';
+$expected_output = '<div class="notice notice-warning" role="alert" aria-live="assertive" aria-atomic="true"><p>Write failure</p></div>'
+    . '<div class="notice notice-info" role="status" aria-live="polite" aria-atomic="true"><p>Cache saturated</p></div>';
 sitepulse_assert($output === $expected_output, 'Queued notices should render once in admin.');
 sitepulse_assert(get_option(SITEPULSE_OPTION_DEBUG_NOTICES, []) === [], 'Queued notices should be cleared after rendering.');
 
@@ -116,6 +155,33 @@ $callback = end($GLOBALS['sitepulse_hooks']['admin_notices']);
 ob_start();
 call_user_func($callback);
 $immediate_output = ob_get_clean();
-sitepulse_assert($immediate_output === '<div class="notice notice-info"><p>Immediate notice</p></div>', 'Admin scheduling should render immediately.');
+sitepulse_assert(
+    $immediate_output === '<div class="notice notice-info" role="status" aria-live="polite" aria-atomic="true"><p>Immediate notice</p></div>',
+    'Admin scheduling should render immediately.'
+);
+
+// Scenario 4: Rendering helper normalises types and allows filters to adjust attributes.
+$default_markup = sitepulse_render_debug_notice('Unknown severity', 'fatal');
+sitepulse_assert(
+    $default_markup === '<div class="notice notice-error" role="alert" aria-live="assertive" aria-atomic="true"><p>Unknown severity</p></div>',
+    'Render helper should fallback to error notices for unknown severities.'
+);
+
+$GLOBALS['sitepulse_filters'] = [];
+add_filter('sitepulse_debug_notice_accessibility_attributes', function ($attributes, $type) {
+    if ($type !== 'warning') {
+        return $attributes;
+    }
+
+    $attributes['aria-live'] = 'polite';
+
+    return $attributes;
+});
+
+$filtered_markup = sitepulse_render_debug_notice('Filtered warning', 'warning');
+sitepulse_assert(
+    $filtered_markup === '<div class="notice notice-warning" role="alert" aria-live="polite" aria-atomic="true"><p>Filtered warning</p></div>',
+    'Filters should be able to adjust accessibility attributes on rendered notices.'
+);
 
 echo "All debug notice assertions passed." . PHP_EOL;

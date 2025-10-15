@@ -7,8 +7,128 @@ if (!defined('SITEPULSE_OPTION_DEBUG_NOTICES')) {
     define('SITEPULSE_OPTION_DEBUG_NOTICES', 'sitepulse_debug_notices');
 }
 
+if (!defined('SITEPULSE_DEBUG_NOTICE_QUEUE_LIMIT')) {
+    define('SITEPULSE_DEBUG_NOTICE_QUEUE_LIMIT', 20);
+}
+
 if (!defined('SITEPULSE_DEBUG')) {
     define('SITEPULSE_DEBUG', false);
+}
+
+/**
+ * Returns ARIA attributes matching the severity of a debug notice.
+ *
+ * @param string $type Notice type.
+ *
+ * @return array<string,string>
+ */
+function sitepulse_debug_notice_accessibility_attributes($type)
+{
+    $type = (string) $type;
+
+    if ($type === 'info' || $type === 'success') {
+        $attributes = [
+            'role'        => 'status',
+            'aria-live'   => 'polite',
+            'aria-atomic' => 'true',
+        ];
+    } else {
+        $attributes = [
+            'role'        => 'alert',
+            'aria-live'   => 'assertive',
+            'aria-atomic' => 'true',
+        ];
+    }
+
+    if (function_exists('apply_filters')) {
+        $attributes = apply_filters('sitepulse_debug_notice_accessibility_attributes', $attributes, $type);
+
+        if (!is_array($attributes)) {
+            $attributes = [];
+        }
+    }
+
+    return $attributes;
+}
+
+/**
+ * Converts accessibility attributes to an HTML string.
+ *
+ * @param array<string,string> $attributes Attributes to render.
+ *
+ * @return string
+ */
+function sitepulse_debug_notice_attributes_to_html(array $attributes)
+{
+    if ($attributes === []) {
+        return '';
+    }
+
+    $html = '';
+
+    foreach ($attributes as $attribute => $value) {
+        if ($value === '') {
+            continue;
+        }
+
+        $html .= sprintf(' %s="%s"', esc_attr($attribute), esc_attr($value));
+    }
+
+    return $html;
+}
+
+/**
+ * Renders a debug notice with accessibility attributes.
+ *
+ * @param string $message Notice body.
+ * @param string $type    Notice severity.
+ *
+ * @return string
+ */
+function sitepulse_render_debug_notice($message, $type)
+{
+    if (!function_exists('esc_attr') || !function_exists('esc_html')) {
+        return '';
+    }
+
+    $allowed_types = ['error', 'warning', 'info', 'success'];
+
+    if (!in_array($type, $allowed_types, true)) {
+        $type = 'error';
+    }
+
+    $class       = 'notice notice-' . $type;
+    $attributes  = sitepulse_debug_notice_accessibility_attributes($type);
+    $attribute_html = sitepulse_debug_notice_attributes_to_html($attributes);
+    $markup      = sprintf('<div class="%s"%s><p>%s</p></div>', esc_attr($class), $attribute_html, esc_html((string) $message));
+
+    if (function_exists('apply_filters')) {
+        $markup = apply_filters('sitepulse_render_debug_notice', $markup, $message, $type, $attributes);
+    }
+
+    return is_string($markup) ? $markup : '';
+}
+
+/**
+ * Logs a warning when the debug notice queue limit is reached.
+ *
+ * @param int $limit Queue capacity.
+ *
+ * @return void
+ */
+function sitepulse_debug_notice_log_limit($limit)
+{
+    static $has_logged = false;
+
+    if ($has_logged) {
+        return;
+    }
+
+    $has_logged = true;
+
+    if (function_exists('error_log')) {
+        error_log(sprintf('SitePulse debug notice queue limit reached (%d). Oldest entries were discarded.', (int) $limit));
+    }
 }
 
 /**
@@ -102,7 +222,21 @@ function sitepulse_schedule_debug_admin_notice($message, $type = 'error')
             'level'   => $type,
         ];
 
+        $limit        = (int) SITEPULSE_DEBUG_NOTICE_QUEUE_LIMIT;
+        $has_limit    = $limit > 0;
+        $queue_size   = count($queued_notices);
+        $limit_hit    = false;
+
+        if ($has_limit && $queue_size > $limit) {
+            $queued_notices = array_slice($queued_notices, -$limit);
+            $limit_hit      = true;
+        }
+
         update_option(SITEPULSE_OPTION_DEBUG_NOTICES, $queued_notices, false);
+
+        if ($limit_hit) {
+            sitepulse_debug_notice_log_limit($limit);
+        }
 
         return;
     }
@@ -111,14 +245,14 @@ function sitepulse_schedule_debug_admin_notice($message, $type = 'error')
         return;
     }
 
-    $class = 'notice notice-' . $type;
+    add_action('admin_notices', function () use ($message, $type) {
+        $markup = sitepulse_render_debug_notice($message, $type);
 
-    add_action('admin_notices', function () use ($message, $class) {
-        if (!function_exists('esc_attr') || !function_exists('esc_html')) {
+        if ($markup === '') {
             return;
         }
 
-        printf('<div class="%s"><p>%s</p></div>', esc_attr($class), esc_html($message));
+        echo $markup; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
     });
 }
 
@@ -163,8 +297,6 @@ function sitepulse_display_queued_debug_notices()
             $type = 'error';
         }
 
-        $class = 'notice notice-' . $type;
-
         $notice_key = $type . '|' . $message;
 
         if (sitepulse_debug_notice_registry($notice_key)) {
@@ -173,7 +305,13 @@ function sitepulse_display_queued_debug_notices()
 
         sitepulse_debug_notice_registry($notice_key, true);
 
-        printf('<div class="%s"><p>%s</p></div>', esc_attr($class), esc_html($message));
+        $markup = sitepulse_render_debug_notice($message, $type);
+
+        if ($markup === '') {
+            continue;
+        }
+
+        echo $markup; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
     }
 
     if (function_exists('delete_option')) {
