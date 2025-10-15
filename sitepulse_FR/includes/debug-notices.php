@@ -16,6 +16,58 @@ if (!defined('SITEPULSE_DEBUG')) {
 }
 
 /**
+ * Returns ARIA attributes matching the severity of a debug notice.
+ *
+ * @param string $type Notice type.
+ *
+ * @return array<string,string>
+ */
+function sitepulse_debug_notice_accessibility_attributes($type)
+{
+    $type = (string) $type;
+
+    if ($type === 'info' || $type === 'success') {
+        return [
+            'role'      => 'status',
+            'aria-live' => 'polite',
+            'aria-atomic' => 'true',
+        ];
+    }
+
+    return [
+        'role'        => 'alert',
+        'aria-live'   => 'assertive',
+        'aria-atomic' => 'true',
+    ];
+}
+
+/**
+ * Converts accessibility attributes to an HTML string.
+ *
+ * @param array<string,string> $attributes Attributes to render.
+ *
+ * @return string
+ */
+function sitepulse_debug_notice_attributes_to_html(array $attributes)
+{
+    if ($attributes === []) {
+        return '';
+    }
+
+    $html = '';
+
+    foreach ($attributes as $attribute => $value) {
+        if ($value === '') {
+            continue;
+        }
+
+        $html .= sprintf(' %s="%s"', esc_attr($attribute), esc_attr($value));
+    }
+
+    return $html;
+}
+
+/**
  * Logs a warning when the debug notice queue limit is reached.
  *
  * @param int $limit Queue capacity.
@@ -152,13 +204,16 @@ function sitepulse_schedule_debug_admin_notice($message, $type = 'error')
     }
 
     $class = 'notice notice-' . $type;
+    $attributes = sitepulse_debug_notice_accessibility_attributes($type);
 
-    add_action('admin_notices', function () use ($message, $class) {
+    add_action('admin_notices', function () use ($message, $class, $attributes) {
         if (!function_exists('esc_attr') || !function_exists('esc_html')) {
             return;
         }
 
-        printf('<div class="%s"><p>%s</p></div>', esc_attr($class), esc_html($message));
+        $attribute_html = sitepulse_debug_notice_attributes_to_html($attributes);
+
+        printf('<div class="%s"%s><p>%s</p></div>', esc_attr($class), $attribute_html, esc_html($message));
     });
 }
 
@@ -204,6 +259,7 @@ function sitepulse_display_queued_debug_notices()
         }
 
         $class = 'notice notice-' . $type;
+        $attributes = sitepulse_debug_notice_accessibility_attributes($type);
 
         $notice_key = $type . '|' . $message;
 
@@ -213,7 +269,9 @@ function sitepulse_display_queued_debug_notices()
 
         sitepulse_debug_notice_registry($notice_key, true);
 
-        printf('<div class="%s"><p>%s</p></div>', esc_attr($class), esc_html($message));
+        $attribute_html = sitepulse_debug_notice_attributes_to_html($attributes);
+
+        printf('<div class="%s"%s><p>%s</p></div>', esc_attr($class), $attribute_html, esc_html($message));
     }
 
     if (function_exists('delete_option')) {

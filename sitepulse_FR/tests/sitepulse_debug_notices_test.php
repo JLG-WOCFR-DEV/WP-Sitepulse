@@ -112,7 +112,8 @@ $GLOBALS['sitepulse_is_admin'] = true;
 ob_start();
 sitepulse_display_queued_debug_notices();
 $output = ob_get_clean();
-$expected_output = '<div class="notice notice-warning"><p>Write failure</p></div><div class="notice notice-info"><p>Cache saturated</p></div>';
+$expected_output = '<div class="notice notice-warning" role="alert" aria-live="assertive" aria-atomic="true"><p>Write failure</p></div>'
+    . '<div class="notice notice-info" role="status" aria-live="polite" aria-atomic="true"><p>Cache saturated</p></div>';
 sitepulse_assert($output === $expected_output, 'Queued notices should render once in admin.');
 sitepulse_assert(get_option(SITEPULSE_OPTION_DEBUG_NOTICES, []) === [], 'Queued notices should be cleared after rendering.');
 
@@ -127,6 +128,9 @@ $callback = end($GLOBALS['sitepulse_hooks']['admin_notices']);
 ob_start();
 call_user_func($callback);
 $immediate_output = ob_get_clean();
-sitepulse_assert($immediate_output === '<div class="notice notice-info"><p>Immediate notice</p></div>', 'Admin scheduling should render immediately.');
+sitepulse_assert(
+    $immediate_output === '<div class="notice notice-info" role="status" aria-live="polite" aria-atomic="true"><p>Immediate notice</p></div>',
+    'Admin scheduling should render immediately.'
+);
 
 echo "All debug notice assertions passed." . PHP_EOL;
