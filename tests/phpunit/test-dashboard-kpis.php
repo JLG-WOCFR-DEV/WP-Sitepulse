@@ -9,13 +9,26 @@ if (!defined('SITEPULSE_OPTION_DASHBOARD_DEBT_HISTORY')) {
     define('SITEPULSE_OPTION_DASHBOARD_DEBT_HISTORY', 'sitepulse_dashboard_debt_history');
 }
 
+if (!defined('SITEPULSE_OPTION_DASHBOARD_RANGE')) {
+    define('SITEPULSE_OPTION_DASHBOARD_RANGE', 'sitepulse_dashboard_range');
+}
+
+if (!defined('SITEPULSE_OPTION_UPTIME_ARCHIVE')) {
+    define('SITEPULSE_OPTION_UPTIME_ARCHIVE', 'sitepulse_uptime_archive');
+}
+
 require_once dirname(__DIR__, 2) . '/sitepulse_FR/modules/custom_dashboards.php';
 
 class Sitepulse_Dashboard_Kpis_Test extends WP_UnitTestCase {
     protected function setUp(): void {
         parent::setUp();
 
+        wp_set_current_user($this->factory->user->create(['role' => 'administrator']));
+
         delete_option(SITEPULSE_OPTION_DASHBOARD_DEBT_HISTORY);
+        delete_option(SITEPULSE_OPTION_DASHBOARD_RANGE);
+        delete_option(SITEPULSE_OPTION_UPTIME_ARCHIVE);
+        delete_option(SITEPULSE_OPTION_UPTIME_LOG);
     }
 
     public function test_build_kpi_cards_includes_incidents_even_when_empty(): void {
@@ -125,6 +138,103 @@ class Sitepulse_Dashboard_Kpis_Test extends WP_UnitTestCase {
         $this->assertIsArray($card['trend']);
         $this->assertArrayHasKey('direction', $card['trend']);
         $this->assertStringContainsString('File d’attente', $card['summary']);
+    }
+
+    public function test_kpi_endpoint_returns_structured_response(): void {
+        $now = time();
+
+        update_option(
+            SITEPULSE_OPTION_UPTIME_ARCHIVE,
+            [
+                date('Y-m-d', $now - DAY_IN_SECONDS) => [
+                    'total'        => 24,
+                    'up'           => 23,
+                    'down'         => 1,
+                    'unknown'      => 0,
+                    'latency_sum'  => 2400,
+                    'latency_count'=> 24,
+                    'ttfb_sum'     => 600,
+                    'ttfb_count'   => 24,
+                    'violations'   => 1,
+                ],
+                date('Y-m-d', $now) => [
+                    'total'        => 24,
+                    'up'           => 24,
+                    'down'         => 0,
+                    'unknown'      => 0,
+                    'latency_sum'  => 2200,
+                    'latency_count'=> 24,
+                    'ttfb_sum'     => 500,
+                    'ttfb_count'   => 24,
+                    'violations'   => 0,
+                ],
+            ]
+        );
+
+        update_option(
+            SITEPULSE_OPTION_UPTIME_LOG,
+            [
+                [
+                    'timestamp'      => $now - HOUR_IN_SECONDS,
+                    'status'         => false,
+                    'incident_start' => $now - (2 * HOUR_IN_SECONDS),
+                    'agent'          => 'eu-west',
+                    'error'          => 'HTTP 500',
+                ],
+            ]
+        );
+
+        rest_get_server();
+        do_action('rest_api_init');
+
+        $request = new WP_REST_Request('GET', '/sitepulse/v1/dashboard/kpi');
+        $request->set_param('range', '7d');
+
+        $response = rest_do_request($request);
+
+        $this->assertSame(200, $response->get_status());
+
+        $data = $response->get_data();
+
+        $this->assertSame('7d', $data['range']);
+        $this->assertSame('7d', get_option(SITEPULSE_OPTION_DASHBOARD_RANGE));
+        $this->assertGreaterThan(0, $data['generated_at']);
+
+        $this->assertArrayHasKey('kpis', $data);
+        $this->assertGreaterThanOrEqual(3, count($data['kpis']));
+
+        $this->assertArrayHasKey('metrics', $data);
+        $this->assertArrayHasKey('uptime', $data['metrics']);
+        $this->assertArrayHasKey('incidents', $data['metrics']);
+        $this->assertArrayHasKey('debt', $data['metrics']);
+
+        $this->assertNotEmpty($data['metrics']['incidents']);
+        $this->assertSame('critical', $data['metrics']['incidents'][0]['severity']);
+
+        $this->assertArrayHasKey('score', $data['metrics']['debt']);
+        $this->assertIsNumeric($data['metrics']['debt']['score']);
+
+        $this->assertArrayHasKey('ranges', $data);
+        $this->assertNotEmpty($data['ranges']);
+    }
+
+    public function test_kpi_endpoint_falls_back_to_stored_range(): void {
+        update_option(SITEPULSE_OPTION_DASHBOARD_RANGE, '30d');
+
+        rest_get_server();
+        do_action('rest_api_init');
+
+        $request = new WP_REST_Request('GET', '/sitepulse/v1/dashboard/kpi');
+        $request->set_param('range', 'invalid');
+
+        $response = rest_do_request($request);
+
+        $this->assertSame(200, $response->get_status());
+
+        $data = $response->get_data();
+
+        $this->assertSame('30d', $data['range']);
+        $this->assertSame('30d', get_option(SITEPULSE_OPTION_DASHBOARD_RANGE));
     }
 }
 

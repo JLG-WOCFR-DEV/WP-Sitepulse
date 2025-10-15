@@ -2629,6 +2629,23 @@ function sitepulse_custom_dashboard_register_rest_routes() {
             ],
         ]
     );
+
+    register_rest_route(
+        'sitepulse/v1',
+        '/dashboard/kpi',
+        [
+            'methods'             => defined('WP_REST_Server::READABLE') ? WP_REST_Server::READABLE : 'GET',
+            'callback'            => 'sitepulse_custom_dashboard_rest_kpis',
+            'permission_callback' => 'sitepulse_custom_dashboard_rest_permission_check',
+            'args'                => [
+                'range' => [
+                    'type'              => 'string',
+                    'required'          => false,
+                    'sanitize_callback' => 'sanitize_key',
+                ],
+            ],
+        ]
+    );
 }
 
 /**
@@ -2731,6 +2748,72 @@ function sitepulse_custom_dashboard_prepare_metrics_payload($range) {
 }
 
 /**
+ * Builds the payload returned by the KPI endpoint.
+ *
+ * @param string $range Range identifier to compute.
+ * @return array<string,mixed>
+ */
+function sitepulse_custom_dashboard_prepare_kpi_payload($range) {
+    $metrics_payload = sitepulse_custom_dashboard_prepare_metrics_payload($range);
+
+    $view = isset($metrics_payload['view']) && is_array($metrics_payload['view'])
+        ? $metrics_payload['view']
+        : sitepulse_custom_dashboard_format_metrics_view($metrics_payload);
+
+    $range_id = isset($view['range']) ? (string) $view['range'] : (string) ($metrics_payload['range'] ?? sitepulse_custom_dashboard_get_default_range());
+
+    $available_ranges = isset($metrics_payload['available_ranges']) && is_array($metrics_payload['available_ranges'])
+        ? array_values($metrics_payload['available_ranges'])
+        : array_values(sitepulse_custom_dashboard_get_metric_ranges());
+
+    $range_label = isset($view['range_label'])
+        ? (string) $view['range_label']
+        : sitepulse_custom_dashboard_resolve_range_label($range_id, $available_ranges);
+
+    $generated_at = isset($view['generated_at'])
+        ? absint($view['generated_at'])
+        : (isset($metrics_payload['generated_at']) ? absint($metrics_payload['generated_at']) : sitepulse_custom_dashboard_get_current_timestamp());
+
+    if ($generated_at <= 0) {
+        $generated_at = sitepulse_custom_dashboard_get_current_timestamp();
+    }
+
+    $banner = isset($view['banner']) && is_array($view['banner']) ? $view['banner'] : [];
+    $kpis = isset($banner['kpis']) && is_array($banner['kpis'])
+        ? array_values(array_filter($banner['kpis'], 'is_array'))
+        : [];
+
+    if (empty($kpis)) {
+        $kpis = sitepulse_custom_dashboard_build_kpi_cards($metrics_payload, $range_label, $generated_at);
+    }
+
+    $ai_summary = isset($metrics_payload['ai_summary']) && is_array($metrics_payload['ai_summary'])
+        ? $metrics_payload['ai_summary']
+        : [];
+
+    $debt_snapshot = sitepulse_custom_dashboard_calculate_operational_debt_snapshot(
+        isset($metrics_payload['remote_queue']) ? $metrics_payload['remote_queue'] : null,
+        $ai_summary,
+        $generated_at
+    );
+
+    return [
+        'range'           => $range_id,
+        'range_label'     => $range_label,
+        'generated_at'    => $generated_at,
+        'generated_label' => isset($view['generated_label']) ? (string) $view['generated_label'] : '',
+        'generated_text'  => isset($view['generated_text']) ? (string) $view['generated_text'] : '',
+        'kpis'            => $kpis,
+        'metrics'         => [
+            'uptime'    => isset($metrics_payload['uptime']) && is_array($metrics_payload['uptime']) ? $metrics_payload['uptime'] : [],
+            'incidents' => isset($metrics_payload['incidents']) && is_array($metrics_payload['incidents']) ? array_values($metrics_payload['incidents']) : [],
+            'debt'      => $debt_snapshot,
+        ],
+        'ranges'          => $available_ranges,
+    ];
+}
+
+/**
  * REST API callback returning dashboard metrics.
  *
  * @param WP_REST_Request $request Incoming REST request.
@@ -2748,6 +2831,28 @@ function sitepulse_custom_dashboard_rest_metrics($request) {
     }
 
     $payload = sitepulse_custom_dashboard_prepare_metrics_payload($range);
+
+    return rest_ensure_response($payload);
+}
+
+/**
+ * REST API callback returning dashboard KPI cards.
+ *
+ * @param WP_REST_Request $request Incoming REST request.
+ * @return WP_REST_Response
+ */
+function sitepulse_custom_dashboard_rest_kpis($request) {
+    $provided = $request instanceof WP_REST_Request ? $request->get_param('range') : null;
+    $sanitized = sitepulse_custom_dashboard_sanitize_range($provided);
+
+    if ($sanitized !== '') {
+        update_option(sitepulse_custom_dashboard_get_range_option_name(), $sanitized, false);
+        $range = $sanitized;
+    } else {
+        $range = sitepulse_custom_dashboard_get_stored_range();
+    }
+
+    $payload = sitepulse_custom_dashboard_prepare_kpi_payload($range);
 
     return rest_ensure_response($payload);
 }
