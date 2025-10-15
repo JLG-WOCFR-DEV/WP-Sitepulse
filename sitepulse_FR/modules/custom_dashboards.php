@@ -126,7 +126,7 @@ function sitepulse_custom_dashboard_enqueue_assets($hook_suffix) {
     wp_register_script(
         'sitepulse-dashboard-nav',
         SITEPULSE_URL . 'modules/js/sitepulse-dashboard-nav.js',
-        [],
+        ['wp-i18n'],
         SITEPULSE_VERSION,
         true
     );

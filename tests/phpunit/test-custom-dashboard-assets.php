@@ -64,7 +64,7 @@ class Sitepulse_Custom_Dashboard_Assets_Test extends WP_UnitTestCase {
             SITEPULSE_URL . 'modules/js/sitepulse-dashboard-nav.js',
             $scripts->registered['sitepulse-dashboard-nav']->src
         );
-        $this->assertSame([], $scripts->registered['sitepulse-dashboard-nav']->deps);
+        $this->assertSame(['wp-i18n'], $scripts->registered['sitepulse-dashboard-nav']->deps);
         $this->assertTrue($scripts->registered['sitepulse-dashboard-nav']->args);
     }
 }

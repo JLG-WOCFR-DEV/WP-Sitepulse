@@ -298,7 +298,7 @@ function sitepulse_enqueue_module_navigation_assets() {
         wp_register_script(
             $script_handle,
             SITEPULSE_URL . 'modules/js/sitepulse-dashboard-nav.js',
-            [],
+            ['wp-i18n'],
             SITEPULSE_VERSION,
             true
         );

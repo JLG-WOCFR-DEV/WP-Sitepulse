@@ -60,6 +60,34 @@
         }
     };
 
+    var sprintfFn = null;
+
+    if (window.wp && window.wp.i18n && typeof window.wp.i18n.sprintf === 'function') {
+        sprintfFn = window.wp.i18n.sprintf;
+    }
+
+    var formatCount = function (template, value) {
+        if (!template) {
+            return '';
+        }
+
+        var count = Number(value);
+
+        if (!Number.isFinite(count)) {
+            count = value;
+        }
+
+        if (sprintfFn) {
+            try {
+                return sprintfFn(template, count);
+            } catch (error) {
+                // Fallback to manual replacement below.
+            }
+        }
+
+        return template.replace(/%(\d+\$)?[ds]/g, String(count));
+    };
+
     var initNavigation = function (nav) {
         if (!nav) {
             return;
@@ -114,7 +142,7 @@
             } else if (visibleCount === 1 && singular) {
                 text = singular;
             } else if (plural) {
-                text = plural.replace('%d', String(visibleCount));
+                text = formatCount(plural, visibleCount);
             } else {
                 text = String(visibleCount);
             }
