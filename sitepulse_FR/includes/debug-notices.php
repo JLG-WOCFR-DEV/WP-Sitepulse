@@ -7,8 +7,34 @@ if (!defined('SITEPULSE_OPTION_DEBUG_NOTICES')) {
     define('SITEPULSE_OPTION_DEBUG_NOTICES', 'sitepulse_debug_notices');
 }
 
+if (!defined('SITEPULSE_DEBUG_NOTICE_QUEUE_LIMIT')) {
+    define('SITEPULSE_DEBUG_NOTICE_QUEUE_LIMIT', 20);
+}
+
 if (!defined('SITEPULSE_DEBUG')) {
     define('SITEPULSE_DEBUG', false);
+}
+
+/**
+ * Logs a warning when the debug notice queue limit is reached.
+ *
+ * @param int $limit Queue capacity.
+ *
+ * @return void
+ */
+function sitepulse_debug_notice_log_limit($limit)
+{
+    static $has_logged = false;
+
+    if ($has_logged) {
+        return;
+    }
+
+    $has_logged = true;
+
+    if (function_exists('error_log')) {
+        error_log(sprintf('SitePulse debug notice queue limit reached (%d). Oldest entries were discarded.', (int) $limit));
+    }
 }
 
 /**
@@ -102,7 +128,21 @@ function sitepulse_schedule_debug_admin_notice($message, $type = 'error')
             'level'   => $type,
         ];
 
+        $limit        = (int) SITEPULSE_DEBUG_NOTICE_QUEUE_LIMIT;
+        $has_limit    = $limit > 0;
+        $queue_size   = count($queued_notices);
+        $limit_hit    = false;
+
+        if ($has_limit && $queue_size > $limit) {
+            $queued_notices = array_slice($queued_notices, -$limit);
+            $limit_hit      = true;
+        }
+
         update_option(SITEPULSE_OPTION_DEBUG_NOTICES, $queued_notices, false);
+
+        if ($limit_hit) {
+            sitepulse_debug_notice_log_limit($limit);
+        }
 
         return;
     }
