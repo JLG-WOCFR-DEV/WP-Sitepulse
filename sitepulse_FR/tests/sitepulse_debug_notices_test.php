@@ -6,6 +6,7 @@ define('ABSPATH', __DIR__);
 $GLOBALS['sitepulse_hooks'] = [];
 $GLOBALS['sitepulse_options'] = [];
 $GLOBALS['sitepulse_is_admin'] = false;
+$GLOBALS['sitepulse_filters'] = [];
 
 if (!defined('SITEPULSE_DEBUG')) {
     define('SITEPULSE_DEBUG', true);
@@ -51,6 +52,32 @@ if (!function_exists('delete_option')) {
         unset($GLOBALS['sitepulse_options'][$name]);
 
         return true;
+    }
+}
+
+if (!function_exists('apply_filters')) {
+    function apply_filters($hook_name, $value)
+    {
+        if (!isset($GLOBALS['sitepulse_filters'][$hook_name])) {
+            return $value;
+        }
+
+        $args = func_get_args();
+        array_shift($args);
+
+        foreach ($GLOBALS['sitepulse_filters'][$hook_name] as $callback) {
+            $value = call_user_func_array($callback, $args);
+            $args[0] = $value;
+        }
+
+        return $value;
+    }
+}
+
+if (!function_exists('add_filter')) {
+    function add_filter($hook_name, $callback)
+    {
+        $GLOBALS['sitepulse_filters'][$hook_name][] = $callback;
     }
 }
 
@@ -131,6 +158,30 @@ $immediate_output = ob_get_clean();
 sitepulse_assert(
     $immediate_output === '<div class="notice notice-info" role="status" aria-live="polite" aria-atomic="true"><p>Immediate notice</p></div>',
     'Admin scheduling should render immediately.'
+);
+
+// Scenario 4: Rendering helper normalises types and allows filters to adjust attributes.
+$default_markup = sitepulse_render_debug_notice('Unknown severity', 'fatal');
+sitepulse_assert(
+    $default_markup === '<div class="notice notice-error" role="alert" aria-live="assertive" aria-atomic="true"><p>Unknown severity</p></div>',
+    'Render helper should fallback to error notices for unknown severities.'
+);
+
+$GLOBALS['sitepulse_filters'] = [];
+add_filter('sitepulse_debug_notice_accessibility_attributes', function ($attributes, $type) {
+    if ($type !== 'warning') {
+        return $attributes;
+    }
+
+    $attributes['aria-live'] = 'polite';
+
+    return $attributes;
+});
+
+$filtered_markup = sitepulse_render_debug_notice('Filtered warning', 'warning');
+sitepulse_assert(
+    $filtered_markup === '<div class="notice notice-warning" role="alert" aria-live="polite" aria-atomic="true"><p>Filtered warning</p></div>',
+    'Filters should be able to adjust accessibility attributes on rendered notices.'
 );
 
 echo "All debug notice assertions passed." . PHP_EOL;
