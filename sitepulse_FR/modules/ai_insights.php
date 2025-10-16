@@ -19,7 +19,10 @@ add_action('wp_ajax_nopriv_sitepulse_run_ai_insight_job', 'sitepulse_ai_handle_a
 add_action('sitepulse_run_ai_insight_job', 'sitepulse_run_ai_insight_job', 10, 2);
 add_action('wp_ajax_sitepulse_save_ai_history_note', 'sitepulse_ai_save_history_note');
 add_action('admin_notices', 'sitepulse_ai_render_error_notices');
+add_action('admin_notices', 'sitepulse_ai_render_alert_notices');
 add_action('rest_api_init', 'sitepulse_ai_register_rest_routes');
+add_action('sitepulse_ai_job_failed', 'sitepulse_ai_handle_job_failed_alert', 10, 3);
+add_action('sitepulse_ai_quota_warning', 'sitepulse_ai_handle_quota_warning_alert', 10, 2);
 
 if (!defined('SITEPULSE_TRANSIENT_AI_INSIGHT_JOB_PREFIX')) {
     define('SITEPULSE_TRANSIENT_AI_INSIGHT_JOB_PREFIX', 'sitepulse_ai_job_');
@@ -47,6 +50,14 @@ if (!defined('SITEPULSE_OPTION_AI_RETRY_AFTER')) {
 
 if (!defined('SITEPULSE_OPTION_AI_QUEUE_INDEX')) {
     define('SITEPULSE_OPTION_AI_QUEUE_INDEX', 'sitepulse_ai_queue_index');
+}
+
+if (!defined('SITEPULSE_OPTION_AI_JOBS_LOG')) {
+    define('SITEPULSE_OPTION_AI_JOBS_LOG', 'sitepulse_ai_jobs_log');
+}
+
+if (!defined('SITEPULSE_OPTION_AI_ALERT_NOTICES')) {
+    define('SITEPULSE_OPTION_AI_ALERT_NOTICES', 'sitepulse_ai_alert_notices');
 }
 
 /**
@@ -484,6 +495,676 @@ function sitepulse_ai_capture_quota_snapshot() {
 }
 
 /**
+ * Returns the currently selected AI model key.
+ *
+ * @return string
+ */
+function sitepulse_ai_get_selected_model_key() {
+    if (!function_exists('get_option')) {
+        return '';
+    }
+
+    $default_model  = function_exists('sitepulse_get_default_ai_model') ? sitepulse_get_default_ai_model() : '';
+    $selected_model = (string) get_option(SITEPULSE_OPTION_AI_MODEL, $default_model);
+
+    if ('' === $selected_model && '' !== $default_model) {
+        $selected_model = $default_model;
+    }
+
+    return sanitize_text_field($selected_model);
+}
+
+/**
+ * Returns the maximum number of job log entries to retain.
+ *
+ * @return int
+ */
+function sitepulse_ai_get_job_log_max_entries() {
+    $max_entries = (int) apply_filters('sitepulse_ai_job_log_max_entries', 50);
+
+    if ($max_entries <= 0) {
+        $max_entries = 50;
+    }
+
+    return $max_entries;
+}
+
+/**
+ * Returns the rolling window size used when calculating failure rates.
+ *
+ * @return int
+ */
+function sitepulse_ai_get_failure_rate_window() {
+    $window = (int) apply_filters('sitepulse_ai_failure_rate_window', 10);
+
+    if ($window <= 0) {
+        $window = 10;
+    }
+
+    return $window;
+}
+
+/**
+ * Returns the failure rate threshold used for alerts.
+ *
+ * @return float
+ */
+function sitepulse_ai_get_failure_rate_threshold() {
+    $threshold = (float) apply_filters('sitepulse_ai_failure_rate_threshold', 0.5);
+
+    if ($threshold < 0) {
+        $threshold = 0.0;
+    }
+
+    if ($threshold > 1) {
+        $threshold = 1.0;
+    }
+
+    return $threshold;
+}
+
+/**
+ * Returns the maximum cumulative cost allowed before triggering a warning.
+ *
+ * @return float
+ */
+function sitepulse_ai_get_cost_threshold() {
+    $threshold = (float) apply_filters('sitepulse_ai_cost_threshold', 10.0);
+
+    if ($threshold < 0) {
+        $threshold = 0.0;
+    }
+
+    return $threshold;
+}
+
+/**
+ * Returns the time window (in seconds) used for cost aggregation.
+ *
+ * @return int
+ */
+function sitepulse_ai_get_cost_window_seconds() {
+    $default_window = defined('DAY_IN_SECONDS') ? DAY_IN_SECONDS : 86_400;
+    $window         = (int) apply_filters('sitepulse_ai_cost_window_seconds', $default_window);
+
+    if ($window < 0) {
+        $window = $default_window;
+    }
+
+    return $window;
+}
+
+/**
+ * Normalizes a single job log entry.
+ *
+ * @param array<string,mixed> $entry Raw entry.
+ *
+ * @return array<string,mixed>|null
+ */
+function sitepulse_ai_normalize_job_log_entry($entry) {
+    if (!is_array($entry) || !isset($entry['job_id'])) {
+        return null;
+    }
+
+    $job_id = sanitize_key((string) $entry['job_id']);
+
+    if ('' === $job_id) {
+        return null;
+    }
+
+    $status = isset($entry['status']) ? sanitize_key((string) $entry['status']) : 'queued';
+    $attempt = isset($entry['attempt']) ? max(1, (int) $entry['attempt']) : 1;
+    $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : time();
+    $created_at = isset($entry['created_at']) ? (int) $entry['created_at'] : $timestamp;
+    $updated_at = isset($entry['updated_at']) ? (int) $entry['updated_at'] : $timestamp;
+    $latency_ms = null;
+
+    if (isset($entry['latency_ms'])) {
+        $latency_ms = max(0.0, (float) $entry['latency_ms']);
+    }
+
+    $history = [];
+
+    if (isset($entry['history']) && is_array($entry['history'])) {
+        foreach ($entry['history'] as $history_entry) {
+            if (!is_array($history_entry)) {
+                continue;
+            }
+
+            $history[] = [
+                'status'    => isset($history_entry['status']) ? sanitize_key((string) $history_entry['status']) : $status,
+                'attempt'   => isset($history_entry['attempt']) ? max(1, (int) $history_entry['attempt']) : $attempt,
+                'timestamp' => isset($history_entry['timestamp']) ? (int) $history_entry['timestamp'] : $timestamp,
+            ];
+        }
+    }
+
+    if (empty($history)) {
+        $history[] = [
+            'status'    => $status,
+            'attempt'   => $attempt,
+            'timestamp' => $timestamp,
+        ];
+    }
+
+    $usage = [];
+
+    if (isset($entry['usage']) && is_array($entry['usage'])) {
+        $usage = $entry['usage'];
+    }
+
+    $normalized = [
+        'job_id'         => $job_id,
+        'status'         => $status,
+        'status_final'   => isset($entry['status_final']) ? sanitize_key((string) $entry['status_final']) : (in_array($status, ['success', 'failed', 'abandoned'], true) ? $status : ''),
+        'attempt'        => $attempt,
+        'model'          => isset($entry['model']) ? sanitize_text_field((string) $entry['model']) : '',
+        'engine'         => isset($entry['engine']) ? sanitize_key((string) $entry['engine']) : '',
+        'cost_estimated' => isset($entry['cost_estimated']) ? (float) $entry['cost_estimated'] : 0.0,
+        'quota_consumed' => isset($entry['quota_consumed']) ? (float) $entry['quota_consumed'] : (isset($entry['cost_estimated']) ? (float) $entry['cost_estimated'] : 0.0),
+        'latency_ms'     => $latency_ms,
+        'usage'          => $usage,
+        'message'        => isset($entry['message']) ? sanitize_text_field((string) $entry['message']) : '',
+        'timestamp'      => $timestamp,
+        'created_at'     => $created_at,
+        'updated_at'     => $updated_at,
+        'history'        => array_slice($history, -10),
+    ];
+
+    return $normalized;
+}
+
+/**
+ * Retrieves the persisted job log entries.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function sitepulse_ai_get_job_log() {
+    if (!function_exists('get_option')) {
+        return [];
+    }
+
+    $stored = get_option(SITEPULSE_OPTION_AI_JOBS_LOG, []);
+
+    if (!is_array($stored)) {
+        return [];
+    }
+
+    $normalized = [];
+
+    foreach ($stored as $entry) {
+        $normalized_entry = sitepulse_ai_normalize_job_log_entry($entry);
+
+        if (null !== $normalized_entry) {
+            $normalized[] = $normalized_entry;
+        }
+    }
+
+    return $normalized;
+}
+
+/**
+ * Persists the provided job log entries.
+ *
+ * @param array<int,array<string,mixed>> $entries Normalized entries.
+ *
+ * @return void
+ */
+function sitepulse_ai_store_job_log(array $entries) {
+    if (!function_exists('update_option')) {
+        return;
+    }
+
+    update_option(SITEPULSE_OPTION_AI_JOBS_LOG, array_values($entries), false);
+}
+
+/**
+ * Extracts a cost value from a usage array when available.
+ *
+ * @param array<string,mixed> $usage Usage metadata.
+ *
+ * @return float
+ */
+function sitepulse_ai_extract_usage_cost(array $usage) {
+    if (isset($usage['cost']) && is_numeric($usage['cost'])) {
+        return (float) $usage['cost'];
+    }
+
+    if (isset($usage['usage']) && is_numeric($usage['usage'])) {
+        return (float) $usage['usage'];
+    }
+
+    if (isset($usage['tokens']) && is_numeric($usage['tokens'])) {
+        return (float) $usage['tokens'];
+    }
+
+    return 0.0;
+}
+
+/**
+ * Estimates the cost of a job from its queue context.
+ *
+ * @param array<string,mixed> $context Queue context.
+ *
+ * @return float
+ */
+function sitepulse_ai_estimate_job_cost(array $context) {
+    $estimated = 0.0;
+
+    if (isset($context['usage']) && is_array($context['usage'])) {
+        $estimated = sitepulse_ai_extract_usage_cost($context['usage']);
+    }
+
+    /**
+     * Filters the estimated cost recorded for a job.
+     *
+     * @param float $estimated Estimated cost value.
+     * @param array $context   Queue context.
+     */
+    $estimated = (float) apply_filters('sitepulse_ai_estimated_job_cost', $estimated, $context);
+
+    if ($estimated < 0) {
+        $estimated = 0.0;
+    }
+
+    return $estimated;
+}
+
+/**
+ * Records or updates a job log entry.
+ *
+ * @param string              $job_id Job identifier.
+ * @param array<string,mixed> $data   Entry payload.
+ *
+ * @return void
+ */
+function sitepulse_ai_record_job_log($job_id, array $data) {
+    $job_id = sanitize_key((string) $job_id);
+
+    if ('' === $job_id) {
+        return;
+    }
+
+    $timestamp = isset($data['timestamp']) ? (int) $data['timestamp'] : time();
+    $status    = isset($data['status']) ? sanitize_key((string) $data['status']) : 'queued';
+    $attempt   = isset($data['attempt']) ? max(1, (int) $data['attempt']) : 1;
+    $model     = isset($data['model']) ? sanitize_text_field((string) $data['model']) : '';
+    $engine    = isset($data['engine']) ? sanitize_key((string) $data['engine']) : '';
+    $message   = isset($data['message']) ? wp_strip_all_tags((string) $data['message']) : '';
+    $usage     = isset($data['usage']) && is_array($data['usage']) ? $data['usage'] : [];
+    $latency   = null;
+
+    if (isset($data['latency_ms'])) {
+        $latency = max(0.0, (float) $data['latency_ms']);
+    }
+
+    $cost_estimated = isset($data['cost_estimated']) ? (float) $data['cost_estimated'] : sitepulse_ai_extract_usage_cost($usage);
+    $quota_consumed = isset($data['quota_consumed']) ? (float) $data['quota_consumed'] : $cost_estimated;
+    $final_status   = '';
+
+    if (isset($data['status_final'])) {
+        $final_status = sanitize_key((string) $data['status_final']);
+    } elseif (in_array($status, ['success', 'failed', 'abandoned'], true)) {
+        $final_status = $status;
+    }
+
+    $entries      = sitepulse_ai_get_job_log();
+    $updated      = false;
+    $latest_entry = null;
+
+    foreach ($entries as $index => $entry) {
+        if (!isset($entry['job_id']) || $entry['job_id'] !== $job_id) {
+            continue;
+        }
+
+        $history = isset($entry['history']) && is_array($entry['history']) ? $entry['history'] : [];
+        $last_history = end($history);
+
+        if (!is_array($last_history) || $last_history['status'] !== $status || (int) $last_history['attempt'] !== $attempt) {
+            $history[] = [
+                'status'    => $status,
+                'attempt'   => $attempt,
+                'timestamp' => $timestamp,
+            ];
+        }
+
+        $entry['status']         = $status;
+        $entry['attempt']        = $attempt;
+        $entry['model']          = '' !== $model ? $model : (isset($entry['model']) ? $entry['model'] : '');
+        $entry['engine']         = '' !== $engine ? $engine : (isset($entry['engine']) ? $entry['engine'] : '');
+        $entry['cost_estimated'] = $cost_estimated;
+        $entry['quota_consumed'] = $quota_consumed;
+        $entry['latency_ms']     = null !== $latency ? $latency : (isset($entry['latency_ms']) ? $entry['latency_ms'] : null);
+        $entry['usage']          = !empty($usage) ? $usage : (isset($entry['usage']) ? $entry['usage'] : []);
+        $entry['message']        = '' !== $message ? $message : (isset($entry['message']) ? $entry['message'] : '');
+        $entry['timestamp']      = $timestamp;
+        $entry['updated_at']     = $timestamp;
+        $entry['history']        = array_slice($history, -10);
+
+        if ('' !== $final_status) {
+            $entry['status_final'] = $final_status;
+        } elseif (isset($entry['status_final']) && in_array($entry['status_final'], ['success', 'failed', 'abandoned'], true)) {
+            // Keep previous final status.
+        } elseif (in_array($status, ['success', 'failed', 'abandoned'], true)) {
+            $entry['status_final'] = $status;
+        }
+
+        $entries[$index] = $entry;
+        $updated         = true;
+        $latest_entry    = $entry;
+        break;
+    }
+
+    if (!$updated) {
+        $latest_entry = [
+            'job_id'         => $job_id,
+            'status'         => $status,
+            'status_final'   => $final_status,
+            'attempt'        => $attempt,
+            'model'          => $model,
+            'engine'         => $engine,
+            'cost_estimated' => $cost_estimated,
+            'quota_consumed' => $quota_consumed,
+            'latency_ms'     => $latency,
+            'usage'          => $usage,
+            'message'        => $message,
+            'timestamp'      => $timestamp,
+            'created_at'     => $timestamp,
+            'updated_at'     => $timestamp,
+            'history'        => [
+                [
+                    'status'    => $status,
+                    'attempt'   => $attempt,
+                    'timestamp' => $timestamp,
+                ],
+            ],
+        ];
+
+        if ('' === $latest_entry['status_final'] && in_array($status, ['success', 'failed', 'abandoned'], true)) {
+            $latest_entry['status_final'] = $status;
+        }
+
+        $entries[] = $latest_entry;
+    }
+
+    usort($entries, function($a, $b) {
+        $a_created = isset($a['created_at']) ? (int) $a['created_at'] : (isset($a['timestamp']) ? (int) $a['timestamp'] : 0);
+        $b_created = isset($b['created_at']) ? (int) $b['created_at'] : (isset($b['timestamp']) ? (int) $b['timestamp'] : 0);
+
+        if ($a_created === $b_created) {
+            return 0;
+        }
+
+        return ($a_created < $b_created) ? -1 : 1;
+    });
+
+    $max_entries = sitepulse_ai_get_job_log_max_entries();
+
+    if (count($entries) > $max_entries) {
+        $entries = array_slice($entries, -1 * $max_entries);
+    }
+
+    sitepulse_ai_store_job_log($entries);
+
+    if (null !== $latest_entry) {
+        sitepulse_ai_maybe_trigger_job_alerts($entries, $latest_entry);
+    }
+}
+
+/**
+ * Calculates aggregate metrics for the recorded job entries.
+ *
+ * @param array<int,array<string,mixed>> $entries Job log entries.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_ai_calculate_job_metrics(array $entries) {
+    $failure_window    = sitepulse_ai_get_failure_rate_window();
+    $failure_threshold = sitepulse_ai_get_failure_rate_threshold();
+
+    $final_entries = array_values(array_filter($entries, function($entry) {
+        return isset($entry['status_final']) && '' !== $entry['status_final'];
+    }));
+
+    usort($final_entries, function($a, $b) {
+        $a_time = isset($a['updated_at']) ? (int) $a['updated_at'] : (isset($a['timestamp']) ? (int) $a['timestamp'] : 0);
+        $b_time = isset($b['updated_at']) ? (int) $b['updated_at'] : (isset($b['timestamp']) ? (int) $b['timestamp'] : 0);
+
+        if ($a_time === $b_time) {
+            return 0;
+        }
+
+        return ($a_time < $b_time) ? -1 : 1;
+    });
+
+    $window_entries   = $failure_window > 0 ? array_slice($final_entries, -1 * $failure_window) : $final_entries;
+    $total_considered = count($window_entries);
+    $failure_count    = 0;
+
+    foreach ($window_entries as $entry) {
+        if (isset($entry['status_final']) && 'failed' === $entry['status_final']) {
+            $failure_count++;
+        }
+    }
+
+    $failure_rate = $total_considered > 0 ? $failure_count / $total_considered : 0.0;
+
+    $cost_window     = sitepulse_ai_get_cost_window_seconds();
+    $cost_threshold  = sitepulse_ai_get_cost_threshold();
+    $now             = time();
+    $aggregated_cost = 0.0;
+
+    foreach ($entries as $entry) {
+        $updated_at = isset($entry['updated_at']) ? (int) $entry['updated_at'] : (isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0);
+
+        if ($cost_window > 0 && $updated_at < ($now - $cost_window)) {
+            continue;
+        }
+
+        $aggregated_cost += isset($entry['cost_estimated']) ? (float) $entry['cost_estimated'] : 0.0;
+    }
+
+    $latencies = [];
+
+    foreach ($final_entries as $entry) {
+        if (isset($entry['status_final']) && 'success' === $entry['status_final'] && isset($entry['latency_ms']) && null !== $entry['latency_ms']) {
+            $latencies[] = (float) $entry['latency_ms'];
+        }
+    }
+
+    $average_latency = 0.0;
+
+    if (!empty($latencies)) {
+        $average_latency = array_sum($latencies) / count($latencies);
+    }
+
+    $metrics = [
+        'failure_rate' => [
+            'value'     => $failure_rate,
+            'count'     => $failure_count,
+            'total'     => $total_considered,
+            'threshold' => $failure_threshold,
+            'window'    => $failure_window,
+            'breached'  => $total_considered > 0 && $failure_rate >= $failure_threshold,
+        ],
+        'cost' => [
+            'value'          => $aggregated_cost,
+            'threshold'      => $cost_threshold,
+            'window_seconds' => $cost_window,
+            'breached'       => $cost_threshold > 0 && $aggregated_cost >= $cost_threshold,
+        ],
+        'latency' => [
+            'average_ms' => $average_latency,
+        ],
+        'totals' => [
+            'success'   => count(array_filter($final_entries, function($entry) {
+                return isset($entry['status_final']) && 'success' === $entry['status_final'];
+            })),
+            'failed'    => count(array_filter($final_entries, function($entry) {
+                return isset($entry['status_final']) && 'failed' === $entry['status_final'];
+            })),
+            'abandoned' => count(array_filter($final_entries, function($entry) {
+                return isset($entry['status_final']) && 'abandoned' === $entry['status_final'];
+            })),
+        ],
+    ];
+
+    return $metrics;
+}
+
+/**
+ * Dispatches alert hooks after the job log has been updated.
+ *
+ * @param array<int,array<string,mixed>> $entries       All entries.
+ * @param array<string,mixed>            $latest_entry Latest entry.
+ *
+ * @return void
+ */
+function sitepulse_ai_maybe_trigger_job_alerts(array $entries, array $latest_entry) {
+    $metrics = sitepulse_ai_calculate_job_metrics($entries);
+
+    if (isset($latest_entry['status_final']) && 'failed' === $latest_entry['status_final']) {
+        /** @var array<string,mixed> $metrics */
+        do_action('sitepulse_ai_job_failed', $latest_entry['job_id'], $latest_entry, $metrics);
+    }
+
+    if (isset($metrics['cost']['breached']) && $metrics['cost']['breached']) {
+        do_action('sitepulse_ai_quota_warning', $metrics, $latest_entry);
+    }
+}
+
+/**
+ * Handles job failure alerts by surfacing notices and webhooks.
+ *
+ * @param string                     $job_id  Job identifier.
+ * @param array<string,mixed>        $entry   Latest entry data.
+ * @param array<string,mixed>|mixed  $metrics Aggregated metrics.
+ *
+ * @return void
+ */
+function sitepulse_ai_handle_job_failed_alert($job_id, $entry, $metrics = []) {
+    $job_id  = sanitize_key((string) $job_id);
+    $attempt = isset($entry['attempt']) ? (int) $entry['attempt'] : 1;
+    $message = sprintf(
+        /* translators: 1: job identifier, 2: attempt number */
+        esc_html__('Échec du job IA %1$s (tentative %2$d). Consultez l’onglet Observabilité pour plus de détails.', 'sitepulse'),
+        $job_id,
+        max(1, $attempt)
+    );
+
+    if (isset($entry['message']) && '' !== trim((string) $entry['message'])) {
+        $message .= ' ' . sanitize_text_field((string) $entry['message']);
+    }
+
+    sitepulse_ai_queue_admin_alert_notice($message, 'error');
+
+    $failure_rate     = isset($metrics['failure_rate']['value']) ? (float) $metrics['failure_rate']['value'] : 0.0;
+    $failure_threshold = isset($metrics['failure_rate']['threshold']) ? (float) $metrics['failure_rate']['threshold'] : sitepulse_ai_get_failure_rate_threshold();
+    $breached         = isset($metrics['failure_rate']['breached']) ? (bool) $metrics['failure_rate']['breached'] : ($failure_rate >= $failure_threshold);
+
+    if (!$breached || !function_exists('sitepulse_error_alert_dispatch_webhooks')) {
+        return;
+    }
+
+    $cooldown_key = 'sitepulse_ai_failure_alert_cooldown';
+
+    if (function_exists('get_transient') && false !== get_transient($cooldown_key)) {
+        return;
+    }
+
+    if (function_exists('set_transient')) {
+        set_transient($cooldown_key, time(), 10 * MINUTE_IN_SECONDS);
+    }
+
+    $rate_percent      = number_format_i18n($failure_rate * 100, 1);
+    $threshold_percent = number_format_i18n($failure_threshold * 100, 1);
+    $subject = sprintf(__('Alerte SitePulse : taux d’échec IA %s%%', 'sitepulse'), $rate_percent);
+    $body    = sprintf(
+        /* translators: 1: failure rate, 2: threshold, 3: job id, 4: attempt */
+        __('Le taux d’échec des jobs IA atteint %1$s%% (seuil %2$s%%). Dernier job : %3$s (tentative %4$d).', 'sitepulse'),
+        $rate_percent,
+        $threshold_percent,
+        $job_id,
+        max(1, $attempt)
+    );
+
+    sitepulse_error_alert_dispatch_webhooks([
+        'type'      => 'ai_job_failed',
+        'subject'   => $subject,
+        'message'   => $body,
+        'severity'  => 'critical',
+        'timestamp' => current_time('mysql', true),
+        'site_name' => function_exists('get_bloginfo') ? wp_strip_all_tags(get_bloginfo('name')) : '',
+        'site_url'  => function_exists('home_url') ? home_url('/') : '',
+    ]);
+}
+
+/**
+ * Handles quota warnings by dispatching notices and optional webhooks.
+ *
+ * @param array<string,mixed> $metrics Aggregated metrics.
+ * @param array<string,mixed> $entry   Latest job entry.
+ *
+ * @return void
+ */
+function sitepulse_ai_handle_quota_warning_alert($metrics, $entry = []) {
+    if (!isset($metrics['cost']['breached']) || !$metrics['cost']['breached']) {
+        return;
+    }
+
+    $cost_value    = isset($metrics['cost']['value']) ? (float) $metrics['cost']['value'] : 0.0;
+    $cost_threshold = isset($metrics['cost']['threshold']) ? (float) $metrics['cost']['threshold'] : sitepulse_ai_get_cost_threshold();
+    $window_seconds = isset($metrics['cost']['window_seconds']) ? (int) $metrics['cost']['window_seconds'] : sitepulse_ai_get_cost_window_seconds();
+
+    $window_display = $window_seconds > 0 && function_exists('human_time_diff')
+        ? sanitize_text_field(human_time_diff(time() - $window_seconds, time()))
+        : sprintf('%ds', max(1, $window_seconds));
+
+    $message = sprintf(
+        /* translators: 1: cost value, 2: window display, 3: threshold */
+        esc_html__('Consommation IA de %1$s crédits sur %2$s (seuil %3$s).', 'sitepulse'),
+        number_format_i18n($cost_value, 2),
+        esc_html($window_display),
+        number_format_i18n($cost_threshold, 2)
+    );
+
+    sitepulse_ai_queue_admin_alert_notice($message, 'warning');
+
+    if (!function_exists('sitepulse_error_alert_dispatch_webhooks')) {
+        return;
+    }
+
+    $cooldown_key = 'sitepulse_ai_quota_alert_cooldown';
+
+    if (function_exists('get_transient') && false !== get_transient($cooldown_key)) {
+        return;
+    }
+
+    if (function_exists('set_transient')) {
+        set_transient($cooldown_key, time(), 10 * MINUTE_IN_SECONDS);
+    }
+
+    $subject = __('Alerte SitePulse : quota IA élevé', 'sitepulse');
+    $body    = sprintf(
+        /* translators: 1: cost value, 2: threshold, 3: window */
+        __('La consommation IA atteint %1$s crédits (seuil %2$s) sur %3$s.', 'sitepulse'),
+        number_format_i18n($cost_value, 2),
+        number_format_i18n($cost_threshold, 2),
+        $window_display
+    );
+
+    sitepulse_error_alert_dispatch_webhooks([
+        'type'      => 'ai_quota_warning',
+        'subject'   => $subject,
+        'message'   => $body,
+        'severity'  => 'warning',
+        'timestamp' => current_time('mysql', true),
+        'site_name' => function_exists('get_bloginfo') ? wp_strip_all_tags(get_bloginfo('name')) : '',
+        'site_url'  => function_exists('home_url') ? home_url('/') : '',
+    ]);
+}
+
+/**
  * Returns a normalized queue context array without recursive data.
  *
  * @param array<string,mixed> $context Raw context.
@@ -509,6 +1190,12 @@ function sitepulse_ai_normalize_queue_context(array $context, array $job_data = 
     $normalized['engine'] = isset($context['engine'])
         ? sanitize_key((string) $context['engine'])
         : (isset($job_data['queue']['engine']) ? sanitize_key((string) $job_data['queue']['engine']) : 'wp_cron');
+
+    $normalized['model'] = isset($context['model'])
+        ? sanitize_text_field((string) $context['model'])
+        : (isset($job_data['queue']['model'])
+            ? sanitize_text_field((string) $job_data['queue']['model'])
+            : sitepulse_ai_get_selected_model_key());
 
     $normalized['scheduled_at'] = isset($context['scheduled_at'])
         ? (int) $context['scheduled_at']
@@ -722,6 +1409,98 @@ function sitepulse_ai_get_queue_snapshot() {
 }
 
 /**
+ * Renders the observability widget summarizing job executions.
+ *
+ * @return void
+ */
+function sitepulse_ai_render_observability_widget() {
+    $jobs_log       = sitepulse_ai_get_job_log();
+    $metrics        = sitepulse_ai_calculate_job_metrics($jobs_log);
+    $queue_snapshot = sitepulse_ai_get_queue_snapshot();
+    $recent_jobs    = array_slice(array_reverse($jobs_log), 0, 5);
+
+    $queue_count     = count($queue_snapshot);
+    $failure_window  = isset($metrics['failure_rate']['window']) ? (int) $metrics['failure_rate']['window'] : 0;
+    $failure_percent = isset($metrics['failure_rate']['value']) ? number_format_i18n($metrics['failure_rate']['value'] * 100, 1) : '0';
+    $cost_value      = isset($metrics['cost']['value']) ? number_format_i18n((float) $metrics['cost']['value'], 2) : number_format_i18n(0, 2);
+    $cost_threshold  = isset($metrics['cost']['threshold']) ? number_format_i18n((float) $metrics['cost']['threshold'], 2) : number_format_i18n(0, 2);
+    $window_seconds  = isset($metrics['cost']['window_seconds']) ? (int) $metrics['cost']['window_seconds'] : 0;
+    $avg_latency_ms  = isset($metrics['latency']['average_ms']) ? (float) $metrics['latency']['average_ms'] : 0.0;
+    $avg_latency     = $avg_latency_ms > 0
+        ? sprintf(esc_html__('%s ms', 'sitepulse'), number_format_i18n($avg_latency_ms, 0))
+        : esc_html__('n/a', 'sitepulse');
+    $window_label    = $window_seconds > 0 && function_exists('human_time_diff')
+        ? sanitize_text_field(human_time_diff(time() - $window_seconds, time()))
+        : esc_html__('fenêtre continue', 'sitepulse');
+
+    $status_labels = [
+        'queued'    => esc_html__('En attente', 'sitepulse'),
+        'running'   => esc_html__('En cours', 'sitepulse'),
+        'pending'   => esc_html__('En pause', 'sitepulse'),
+        'retrying'  => esc_html__('Nouvelle tentative', 'sitepulse'),
+        'success'   => esc_html__('Succès', 'sitepulse'),
+        'failed'    => esc_html__('Échec', 'sitepulse'),
+        'abandoned' => esc_html__('Abandonné', 'sitepulse'),
+    ];
+
+    echo '<section class="sitepulse-ai-observability">';
+    echo '<h2>' . esc_html__('Observabilité des jobs IA', 'sitepulse') . '</h2>';
+    echo '<ul class="sitepulse-ai-observability-summary">';
+    echo '<li>' . sprintf(esc_html__('Jobs en file : %d', 'sitepulse'), $queue_count) . '</li>';
+    echo '<li>' . sprintf(esc_html__('Taux d’échec (sur %d jobs) : %s%%', 'sitepulse'), $failure_window, $failure_percent) . '</li>';
+    echo '<li>' . sprintf(esc_html__('Coût estimé : %1$s (seuil %2$s, %3$s)', 'sitepulse'), $cost_value, $cost_threshold, esc_html($window_label)) . '</li>';
+    echo '<li>' . sprintf(esc_html__('Latence moyenne : %s', 'sitepulse'), esc_html($avg_latency)) . '</li>';
+    echo '</ul>';
+
+    if (empty($recent_jobs)) {
+        echo '<p>' . esc_html__('Aucun job IA enregistré pour le moment.', 'sitepulse') . '</p>';
+        echo '</section>';
+
+        return;
+    }
+
+    echo '<table class="widefat striped">';
+    echo '<thead><tr>';
+    echo '<th scope="col">' . esc_html__('Job', 'sitepulse') . '</th>';
+    echo '<th scope="col">' . esc_html__('Statut', 'sitepulse') . '</th>';
+    echo '<th scope="col">' . esc_html__('Tentative', 'sitepulse') . '</th>';
+    echo '<th scope="col">' . esc_html__('Modèle', 'sitepulse') . '</th>';
+    echo '<th scope="col">' . esc_html__('Coût', 'sitepulse') . '</th>';
+    echo '<th scope="col">' . esc_html__('Mis à jour', 'sitepulse') . '</th>';
+    echo '</tr></thead><tbody>';
+
+    foreach ($recent_jobs as $job) {
+        $job_id        = isset($job['job_id']) ? (string) $job['job_id'] : '';
+        $status        = isset($job['status']) ? (string) $job['status'] : '';
+        $status_final  = isset($job['status_final']) ? (string) $job['status_final'] : '';
+        $attempt       = isset($job['attempt']) ? (int) $job['attempt'] : 1;
+        $model         = isset($job['model']) ? (string) $job['model'] : '';
+        $cost          = isset($job['cost_estimated']) ? (float) $job['cost_estimated'] : 0.0;
+        $updated_at    = isset($job['updated_at']) ? (int) $job['updated_at'] : (isset($job['timestamp']) ? (int) $job['timestamp'] : 0);
+        $status_key    = '' !== $status_final ? $status_final : $status;
+        $status_label  = isset($status_labels[$status_key]) ? $status_labels[$status_key] : ucfirst($status_key);
+        $updated_value = $updated_at > 0 && function_exists('human_time_diff')
+            ? sanitize_text_field(human_time_diff($updated_at, time()))
+            : '';
+        $updated_label = '' !== $updated_value
+            ? sprintf(esc_html__('il y a %s', 'sitepulse'), $updated_value)
+            : esc_html__('n/a', 'sitepulse');
+
+        echo '<tr>';
+        echo '<td>' . esc_html($job_id) . '</td>';
+        echo '<td>' . esc_html($status_label) . '</td>';
+        echo '<td>' . esc_html(number_format_i18n($attempt)) . '</td>';
+        echo '<td>' . esc_html($model) . '</td>';
+        echo '<td>' . esc_html(number_format_i18n($cost, 2)) . '</td>';
+        echo '<td>' . esc_html($updated_label) . '</td>';
+        echo '</tr>';
+    }
+
+    echo '</tbody></table>';
+    echo '</section>';
+}
+
+/**
  * Formats queue metadata for responses and UI consumption.
  *
  * @param string                      $job_id   Job identifier.
@@ -746,11 +1525,14 @@ function sitepulse_ai_format_queue_payload($job_id, $job_data = null) {
     ];
 
     $status_labels = [
-        'queued'   => esc_html__('En attente', 'sitepulse'),
-        'pending'  => esc_html__('En pause', 'sitepulse'),
-        'running'  => esc_html__('En cours', 'sitepulse'),
-        'failed'   => esc_html__('Échec', 'sitepulse'),
-        'completed'=> esc_html__('Terminé', 'sitepulse'),
+        'queued'    => esc_html__('En attente', 'sitepulse'),
+        'pending'   => esc_html__('En pause', 'sitepulse'),
+        'running'   => esc_html__('En cours', 'sitepulse'),
+        'failed'    => esc_html__('Échec', 'sitepulse'),
+        'completed' => esc_html__('Terminé', 'sitepulse'),
+        'success'   => esc_html__('Succès', 'sitepulse'),
+        'abandoned' => esc_html__('Abandonné', 'sitepulse'),
+        'retrying'  => esc_html__('Nouvelle tentative', 'sitepulse'),
     ];
 
     $engine_labels = [
@@ -758,6 +1540,17 @@ function sitepulse_ai_format_queue_payload($job_id, $job_data = null) {
         'wp_cron'          => esc_html__('WP-Cron', 'sitepulse'),
         'immediate'        => esc_html__('Exécution immédiate', 'sitepulse'),
     ];
+
+    $model_key   = isset($queue_ctx['model']) ? (string) $queue_ctx['model'] : '';
+    $model_label = '';
+
+    if (function_exists('sitepulse_get_ai_models')) {
+        $models = sitepulse_get_ai_models();
+
+        if (isset($models[$model_key]['label'])) {
+            $model_label = (string) $models[$model_key]['label'];
+        }
+    }
 
     $next_attempt_at = isset($queue_ctx['next_attempt_at']) ? (int) $queue_ctx['next_attempt_at'] : 0;
     $next_attempt_display = '';
@@ -830,6 +1623,8 @@ function sitepulse_ai_format_queue_payload($job_id, $job_data = null) {
         'max_attempts'         => $max_attempts,
         'engine'               => $queue_ctx['engine'],
         'engine_label'         => isset($engine_labels[$queue_ctx['engine']]) ? $engine_labels[$queue_ctx['engine']] : $queue_ctx['engine'],
+        'model'                => $model_key,
+        'model_label'          => $model_label,
         'next_attempt_at'      => $next_attempt_at,
         'next_attempt_display' => $next_attempt_display,
         'created_at'           => $created_at,
@@ -909,6 +1704,15 @@ function sitepulse_ai_queue_schedule_action($job_id, array $context, $delay = 0)
         'scheduled_at' => $timestamp,
     ]));
 
+    sitepulse_ai_record_job_log($job_id, [
+        'status'         => $delay > 0 ? 'scheduled' : 'queued',
+        'attempt'        => isset($context['attempt']) ? $context['attempt'] : 1,
+        'model'          => isset($context['model']) ? $context['model'] : '',
+        'engine'         => isset($context['engine']) ? $context['engine'] : '',
+        'timestamp'      => $timestamp,
+        'cost_estimated' => sitepulse_ai_estimate_job_cost($context),
+    ]);
+
     $args = [$job_id, $context];
     $context['args'] = $args;
 
@@ -920,6 +1724,18 @@ function sitepulse_ai_queue_schedule_action($job_id, array $context, $delay = 0)
         }
 
         if (is_wp_error($action_id) || empty($action_id)) {
+            $error_message = is_wp_error($action_id) ? $action_id->get_error_message() : esc_html__('Impossible de planifier la tâche IA via Action Scheduler.', 'sitepulse');
+
+            sitepulse_ai_record_job_log($job_id, [
+                'status'       => 'abandoned',
+                'status_final' => 'abandoned',
+                'attempt'      => isset($context['attempt']) ? $context['attempt'] : 1,
+                'model'        => isset($context['model']) ? $context['model'] : '',
+                'engine'       => 'action_scheduler',
+                'timestamp'    => time(),
+                'message'      => $error_message,
+            ]);
+
             return is_wp_error($action_id)
                 ? $action_id
                 : sitepulse_ai_create_wp_error(
@@ -943,6 +1759,16 @@ function sitepulse_ai_queue_schedule_action($job_id, array $context, $delay = 0)
     $scheduled = wp_schedule_single_event($timestamp, 'sitepulse_run_ai_insight_job', $args);
 
     if (false === $scheduled) {
+        sitepulse_ai_record_job_log($job_id, [
+            'status'       => 'abandoned',
+            'status_final' => 'abandoned',
+            'attempt'      => isset($context['attempt']) ? $context['attempt'] : 1,
+            'model'        => isset($context['model']) ? $context['model'] : '',
+            'engine'       => 'wp_cron',
+            'timestamp'    => time(),
+            'message'      => esc_html__('Impossible de planifier la tâche IA via WP-Cron.', 'sitepulse'),
+        ]);
+
         return sitepulse_ai_create_wp_error(
             'sitepulse_ai_queue_schedule_failed',
             esc_html__('Impossible de planifier la tâche IA via WP-Cron.', 'sitepulse'),
@@ -1005,6 +1831,7 @@ function sitepulse_ai_queue_retry_job($job_id) {
     $job_data['status']      = 'queued';
     $job_data['attempt']     = $attempt;
     unset($job_data['message'], $job_data['retry_after'], $job_data['retry_at']);
+    unset($job_data['final_status']);
 
     $schedule = sitepulse_ai_queue_schedule_action($job_id, $context, 0);
 
@@ -1098,6 +1925,16 @@ function sitepulse_ai_register_rest_routes() {
             ],
         ]
     );
+
+    register_rest_route(
+        'sitepulse/v1',
+        '/ai/jobs',
+        [
+            'methods'             => WP_REST_Server::READABLE,
+            'callback'            => 'sitepulse_ai_rest_list_jobs',
+            'permission_callback' => 'sitepulse_ai_rest_permission_check',
+        ]
+    );
 }
 
 /**
@@ -1118,6 +1955,73 @@ function sitepulse_ai_rest_list_queue() {
     return new WP_REST_Response([
         'jobs' => sitepulse_ai_get_queue_snapshot(),
     ]);
+}
+
+/**
+ * Returns the job log entries over REST.
+ *
+ * @return WP_REST_Response
+ */
+function sitepulse_ai_rest_list_jobs() {
+    $entries = sitepulse_ai_get_job_log();
+
+    return new WP_REST_Response([
+        'jobs'    => sitepulse_ai_prepare_jobs_for_rest($entries),
+        'metrics' => sitepulse_ai_calculate_job_metrics($entries),
+    ]);
+}
+
+/**
+ * Prepares job log entries for REST responses.
+ *
+ * @param array<int,array<string,mixed>> $entries Log entries.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function sitepulse_ai_prepare_jobs_for_rest(array $entries) {
+    $prepared = [];
+
+    foreach ($entries as $entry) {
+        if (!is_array($entry) || !isset($entry['job_id'])) {
+            continue;
+        }
+
+        $history = [];
+
+        if (isset($entry['history']) && is_array($entry['history'])) {
+            foreach ($entry['history'] as $history_entry) {
+                if (!is_array($history_entry) || !isset($history_entry['status'])) {
+                    continue;
+                }
+
+                $history[] = [
+                    'status'    => sanitize_key((string) $history_entry['status']),
+                    'attempt'   => isset($history_entry['attempt']) ? (int) $history_entry['attempt'] : 1,
+                    'timestamp' => isset($history_entry['timestamp']) ? (int) $history_entry['timestamp'] : 0,
+                ];
+            }
+        }
+
+        $prepared[] = [
+            'job_id'         => $entry['job_id'],
+            'status'         => isset($entry['status']) ? $entry['status'] : '',
+            'status_final'   => isset($entry['status_final']) ? $entry['status_final'] : '',
+            'attempt'        => isset($entry['attempt']) ? (int) $entry['attempt'] : 1,
+            'model'          => isset($entry['model']) ? $entry['model'] : '',
+            'engine'         => isset($entry['engine']) ? $entry['engine'] : '',
+            'cost_estimated' => isset($entry['cost_estimated']) ? (float) $entry['cost_estimated'] : 0.0,
+            'quota_consumed' => isset($entry['quota_consumed']) ? (float) $entry['quota_consumed'] : 0.0,
+            'latency_ms'     => isset($entry['latency_ms']) ? (float) $entry['latency_ms'] : null,
+            'timestamp'      => isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0,
+            'created_at'     => isset($entry['created_at']) ? (int) $entry['created_at'] : 0,
+            'updated_at'     => isset($entry['updated_at']) ? (int) $entry['updated_at'] : 0,
+            'message'        => isset($entry['message']) ? $entry['message'] : '',
+            'usage'          => isset($entry['usage']) && is_array($entry['usage']) ? $entry['usage'] : [],
+            'history'        => $history,
+        ];
+    }
+
+    return $prepared;
 }
 
 /**
@@ -1815,6 +2719,116 @@ function sitepulse_ai_get_history_filter_options(array $entries, $key) {
  *
  * @return void
  */
+function sitepulse_ai_queue_admin_alert_notice($message, $type = 'warning') {
+    $message = wp_strip_all_tags((string) $message);
+
+    if ('' === $message) {
+        return;
+    }
+
+    $type = sanitize_key((string) $type);
+    $allowed_types = ['error', 'warning', 'success', 'info'];
+
+    if (!in_array($type, $allowed_types, true)) {
+        $type = 'warning';
+    }
+
+    $entry = [
+        'message'   => $message,
+        'type'      => $type,
+        'timestamp' => time(),
+    ];
+
+    if (!isset($GLOBALS['sitepulse_ai_alert_notices']) || !is_array($GLOBALS['sitepulse_ai_alert_notices'])) {
+        $GLOBALS['sitepulse_ai_alert_notices'] = [];
+    }
+
+    $GLOBALS['sitepulse_ai_alert_notices'][] = $entry;
+
+    if (function_exists('get_option') && function_exists('update_option')) {
+        $stored = get_option(SITEPULSE_OPTION_AI_ALERT_NOTICES, []);
+
+        if (!is_array($stored)) {
+            $stored = [];
+        }
+
+        $stored[] = $entry;
+
+        if (count($stored) > 10) {
+            $stored = array_slice($stored, -10);
+        }
+
+        update_option(SITEPULSE_OPTION_AI_ALERT_NOTICES, $stored, false);
+    }
+}
+
+/**
+ * Renders queued alert notices in the admin area.
+ *
+ * @return void
+ */
+function sitepulse_ai_render_alert_notices() {
+    if (!function_exists('current_user_can') || !current_user_can(sitepulse_get_capability())) {
+        return;
+    }
+
+    $notices = [];
+
+    if (isset($GLOBALS['sitepulse_ai_alert_notices']) && is_array($GLOBALS['sitepulse_ai_alert_notices'])) {
+        $notices = array_merge($notices, $GLOBALS['sitepulse_ai_alert_notices']);
+        $GLOBALS['sitepulse_ai_alert_notices'] = [];
+    }
+
+    if (function_exists('get_option')) {
+        $stored = get_option(SITEPULSE_OPTION_AI_ALERT_NOTICES, []);
+
+        if (is_array($stored)) {
+            $notices = array_merge($notices, $stored);
+        }
+
+        if (!empty($stored) && function_exists('delete_option')) {
+            delete_option(SITEPULSE_OPTION_AI_ALERT_NOTICES);
+        }
+    }
+
+    if (empty($notices)) {
+        return;
+    }
+
+    $seen_messages = [];
+
+    foreach ($notices as $notice) {
+        if (!is_array($notice) || !isset($notice['message'])) {
+            continue;
+        }
+
+        $message = trim((string) $notice['message']);
+
+        if ('' === $message || isset($seen_messages[$message])) {
+            continue;
+        }
+
+        $seen_messages[$message] = true;
+
+        $type  = isset($notice['type']) ? sanitize_key((string) $notice['type']) : 'warning';
+        $class = 'notice notice-warning';
+
+        switch ($type) {
+            case 'error':
+                $class = 'notice notice-error';
+                break;
+            case 'success':
+                $class = 'notice notice-success';
+                break;
+            case 'info':
+                $class = 'notice notice-info';
+                break;
+        }
+
+        printf('<div class="%1$s"><p>%2$s</p></div>', esc_attr($class), esc_html($message));
+    }
+}
+
 function sitepulse_ai_record_critical_error($message, $status_code = null) {
     $normalized_message = trim(wp_strip_all_tags((string) $message));
 
@@ -2762,6 +3776,7 @@ function sitepulse_ai_schedule_generation_job($force_refresh) {
         'force_refresh' => (bool) $force_refresh,
         'quota'         => sitepulse_ai_capture_quota_snapshot(),
         'scheduled_at'  => $now,
+        'model'         => sitepulse_ai_get_selected_model_key(),
     ]);
 
     $job_data = [
@@ -2771,6 +3786,7 @@ function sitepulse_ai_schedule_generation_job($force_refresh) {
         'attempt'       => 1,
         'priority'      => $priority,
         'queue'         => $queue_context,
+        'model'         => $queue_context['model'],
     ];
 
     if (!sitepulse_ai_save_job_data($job_id, $job_data)) {
@@ -2906,6 +3922,16 @@ function sitepulse_ai_schedule_generation_job($force_refresh) {
                 sitepulse_ai_queue_clear_scheduled_action($job_id, $job_data['queue']);
                 sitepulse_ai_delete_job_data($job_id);
 
+                sitepulse_ai_record_job_log($job_id, [
+                    'status'       => 'abandoned',
+                    'status_final' => 'abandoned',
+                    'attempt'      => isset($job_data['attempt']) ? (int) $job_data['attempt'] : 1,
+                    'model'        => isset($job_data['model']) ? $job_data['model'] : (isset($job_data['queue']['model']) ? $job_data['queue']['model'] : ''),
+                    'engine'       => isset($job_data['queue']['engine']) ? $job_data['queue']['engine'] : '',
+                    'timestamp'    => time(),
+                    'message'      => $user_message,
+                ]);
+
                 return sitepulse_ai_create_wp_error(
                     'sitepulse_ai_job_async_trigger_failed',
                     $user_message,
@@ -2955,6 +3981,14 @@ function sitepulse_run_ai_insight_job($job_id, $queue_context = []) {
 
     sitepulse_ai_save_job_data($job_id, $job_data);
 
+    sitepulse_ai_record_job_log($job_id, [
+        'status'    => 'running',
+        'attempt'   => $attempt,
+        'model'     => isset($queue_context['model']) ? $queue_context['model'] : '',
+        'engine'    => isset($queue_context['engine']) ? $queue_context['engine'] : '',
+        'timestamp' => $job_data['started_at'],
+    ]);
+
     try {
         $environment = sitepulse_ai_prepare_environment();
 
@@ -2964,10 +3998,21 @@ function sitepulse_run_ai_insight_job($job_id, $queue_context = []) {
 
             sitepulse_ai_save_job_data($job_id, array_merge($job_data, [
                 'status'  => 'failed',
+                'final_status' => 'failed',
                 'message' => $error_message,
                 'code'    => $status_code,
                 'finished'=> time(),
             ]));
+
+            sitepulse_ai_record_job_log($job_id, [
+                'status'       => 'failed',
+                'status_final' => 'failed',
+                'attempt'      => $attempt,
+                'model'        => isset($queue_context['model']) ? $queue_context['model'] : '',
+                'engine'       => isset($queue_context['engine']) ? $queue_context['engine'] : '',
+                'timestamp'    => time(),
+                'message'      => $error_message,
+            ]);
 
             return;
         }
@@ -2993,12 +4038,13 @@ function sitepulse_run_ai_insight_job($job_id, $queue_context = []) {
                 $retry_at = $calculated_retry_at;
             }
 
-            $job_failure = array_merge($job_data, [
-                'status'   => 'failed',
-                'message'  => $error_message,
-                'code'     => $status_code,
-                'finished' => time(),
-            ]);
+        $job_failure = array_merge($job_data, [
+            'status'       => 'failed',
+            'final_status' => 'failed',
+            'message'      => $error_message,
+            'code'         => $status_code,
+            'finished'     => time(),
+        ]);
 
             if ($retry_after > 0) {
                 $job_failure['retry_after'] = (int) $retry_after;
@@ -3031,20 +4077,41 @@ function sitepulse_run_ai_insight_job($job_id, $queue_context = []) {
 
                 if (!is_wp_error($schedule_retry) && isset($schedule_retry['context'])) {
                     $job_failure['status'] = 'pending';
+                    unset($job_failure['final_status']);
                     $job_failure['queue']  = $schedule_retry['context'];
                     $job_failure['queue']['next_attempt_at'] = isset($schedule_retry['timestamp']) ? (int) $schedule_retry['timestamp'] : $next_attempt_at;
 
                     sitepulse_ai_save_job_data($job_id, $job_failure);
+
+                    sitepulse_ai_record_job_log($job_id, [
+                        'status'    => 'retrying',
+                        'attempt'   => $attempt,
+                        'model'     => isset($queue_context['model']) ? $queue_context['model'] : '',
+                        'engine'    => isset($queue_context['engine']) ? $queue_context['engine'] : '',
+                        'timestamp' => time(),
+                        'message'   => $error_message,
+                    ]);
 
                     return;
                 }
 
                 if (is_wp_error($schedule_retry)) {
                     sitepulse_ai_record_critical_error($schedule_retry->get_error_message(), sitepulse_ai_get_error_status_code($schedule_retry, 500));
+                    $job_failure['message'] = $schedule_retry->get_error_message();
                 }
             }
 
             sitepulse_ai_save_job_data($job_id, $job_failure);
+
+            sitepulse_ai_record_job_log($job_id, [
+                'status'       => 'failed',
+                'status_final' => 'failed',
+                'attempt'      => $attempt,
+                'model'        => isset($queue_context['model']) ? $queue_context['model'] : '',
+                'engine'       => isset($queue_context['engine']) ? $queue_context['engine'] : '',
+                'timestamp'    => time(),
+                'message'      => $job_failure['message'],
+            ]);
 
             return;
         }
@@ -3088,11 +4155,14 @@ function sitepulse_run_ai_insight_job($job_id, $queue_context = []) {
         $job_data['queue']['next_attempt_at'] = 0;
         $job_data['queue']['usage'] = isset($result['usage']) && is_array($result['usage']) ? $result['usage'] : [];
 
+        $finished_time = time();
+
         sitepulse_ai_save_job_data($job_id, array_merge($job_data, [
-            'status'     => 'completed',
-            'result'     => $result_with_context,
-            'finished'   => time(),
-            'queue'      => $job_data['queue'],
+            'status'       => 'completed',
+            'final_status' => 'success',
+            'result'       => $result_with_context,
+            'finished'     => $finished_time,
+            'queue'        => $job_data['queue'],
         ]));
 
         sitepulse_ai_record_history_entry($history_entry);
@@ -3100,10 +4170,24 @@ function sitepulse_run_ai_insight_job($job_id, $queue_context = []) {
         update_option(SITEPULSE_OPTION_AI_LAST_RUN, absint(current_time('timestamp', true)));
         sitepulse_ai_set_retry_after_timestamp(0);
 
+        $usage_data = isset($result['usage']) && is_array($result['usage']) ? $result['usage'] : [];
+
         sitepulse_ai_log_execution_metrics($job_id, array_merge($job_data, [
             'result'   => $result_with_context,
-            'finished' => time(),
-        ]), isset($result['usage']) && is_array($result['usage']) ? $result['usage'] : []);
+            'finished' => $finished_time,
+        ]), $usage_data);
+
+        sitepulse_ai_record_job_log($job_id, [
+            'status'         => 'success',
+            'status_final'   => 'success',
+            'attempt'        => $attempt,
+            'model'          => isset($queue_context['model']) ? $queue_context['model'] : (isset($history_entry['model']['key']) ? $history_entry['model']['key'] : ''),
+            'engine'         => isset($queue_context['engine']) ? $queue_context['engine'] : '',
+            'timestamp'      => $finished_time,
+            'usage'          => $usage_data,
+            'cost_estimated' => sitepulse_ai_extract_usage_cost($usage_data),
+            'latency_ms'     => isset($job_data['started_at']) ? max(0, ($finished_time - (int) $job_data['started_at']) * 1000) : null,
+        ]);
     } catch (Throwable $throwable) {
         $message = sprintf(
             /* translators: %s: error message */
@@ -3117,8 +4201,19 @@ function sitepulse_run_ai_insight_job($job_id, $queue_context = []) {
             'status'   => 'failed',
             'message'  => $message,
             'code'     => (int) $throwable->getCode(),
+            'final_status' => 'failed',
             'finished' => time(),
         ]));
+
+        sitepulse_ai_record_job_log($job_id, [
+            'status'       => 'failed',
+            'status_final' => 'failed',
+            'attempt'      => $attempt,
+            'model'        => isset($queue_context['model']) ? $queue_context['model'] : '',
+            'engine'       => isset($queue_context['engine']) ? $queue_context['engine'] : '',
+            'timestamp'    => time(),
+            'message'      => $message,
+        ]);
     }
 }
 
@@ -3357,6 +4452,9 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
     $site_name            = wp_strip_all_tags(get_bloginfo('name', 'display'));
     $site_url             = home_url('/');
     $queue_snapshot       = sitepulse_ai_get_queue_snapshot();
+    $jobs_log_entries     = sitepulse_ai_get_job_log();
+    $jobs_log_payload     = sitepulse_ai_prepare_jobs_for_rest($jobs_log_entries);
+    $jobs_metrics         = sitepulse_ai_calculate_job_metrics($jobs_log_entries);
 
     wp_localize_script(
         'sitepulse-ai-insights',
@@ -3391,6 +4489,8 @@ function sitepulse_ai_insights_enqueue_assets($hook_suffix) {
                 'siteUrl'  => esc_url_raw($site_url),
             ],
             'initialQueue'      => $queue_snapshot,
+            'jobsLog'           => $jobs_log_payload,
+            'jobsMetrics'       => $jobs_metrics,
             'noteAction'        => 'sitepulse_save_ai_history_note',
             'strings'           => [
                 'defaultError'    => esc_html__('Une erreur inattendue est survenue. Veuillez réessayer.', 'sitepulse'),
@@ -3521,6 +4621,9 @@ function sitepulse_ai_insights_page() {
             </div>
             <div class="sitepulse-ai-insight-text"></div>
             <p class="sitepulse-ai-insight-timestamp"></p>
+        </div>
+        <div class="sitepulse-ai-observability-card">
+            <?php sitepulse_ai_render_observability_widget(); ?>
         </div>
         <div id="sitepulse-ai-history" class="sitepulse-ai-history">
             <h2><?php esc_html_e('Historique des recommandations', 'sitepulse'); ?></h2>
