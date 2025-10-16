@@ -37,6 +37,18 @@ if (!defined('SITEPULSE_OPTION_UPTIME_MAINTENANCE_NOTICES')) {
     define('SITEPULSE_OPTION_UPTIME_MAINTENANCE_NOTICES', 'sitepulse_uptime_maintenance_notices');
 }
 
+if (!defined('SITEPULSE_OPTION_UPTIME_SLA_REPORTS')) {
+    define('SITEPULSE_OPTION_UPTIME_SLA_REPORTS', 'sitepulse_uptime_sla_reports');
+}
+
+if (!defined('SITEPULSE_OPTION_UPTIME_SLA_AUTOMATION')) {
+    define('SITEPULSE_OPTION_UPTIME_SLA_AUTOMATION', 'sitepulse_uptime_sla_automation');
+}
+
+if (!defined('SITEPULSE_UPTIME_SLA_DIRECTORY')) {
+    define('SITEPULSE_UPTIME_SLA_DIRECTORY', 'sitepulse-uptime-reports');
+}
+
 if (!defined('SITEPULSE_OPTION_UPTIME_HISTORY_RETENTION_DAYS')) {
     define('SITEPULSE_OPTION_UPTIME_HISTORY_RETENTION_DAYS', 'sitepulse_uptime_history_retention_days');
 }
@@ -81,6 +93,8 @@ if (!empty($sitepulse_uptime_cron_hook)) {
 
 add_action('init', 'sitepulse_uptime_register_remote_worker_hooks');
 add_action('admin_post_sitepulse_export_sla', 'sitepulse_uptime_handle_sla_export');
+add_action('admin_post_sitepulse_generate_uptime_report', 'sitepulse_uptime_handle_manual_report_generation');
+add_action('admin_post_sitepulse_save_sla_settings', 'sitepulse_uptime_handle_sla_settings_save');
 
 /**
  * Registers custom cron schedules used by the uptime tracker.
@@ -744,6 +758,57 @@ function sitepulse_uptime_get_agents() {
 function sitepulse_uptime_get_agent($agent_id) {
     $agent_id = sitepulse_uptime_normalize_agent_id($agent_id);
     $agents = sitepulse_uptime_get_agents();
+    $sla_snapshot = sitepulse_uptime_build_sla_windows($uptime_log, [7, 30], $agents);
+    $sla_reports = sitepulse_uptime_get_sla_reports();
+    $sla_settings = sitepulse_uptime_get_sla_automation_settings();
+    $sla_report_status = isset($_GET['sitepulse_sla_report_status'])
+        ? sanitize_key(wp_unslash($_GET['sitepulse_sla_report_status']))
+        : '';
+    $sla_report_id = isset($_GET['sitepulse_sla_report_id'])
+        ? sanitize_text_field(wp_unslash($_GET['sitepulse_sla_report_id']))
+        : '';
+    $sla_settings_status = isset($_GET['sitepulse_sla_settings'])
+        ? sanitize_key(wp_unslash($_GET['sitepulse_sla_settings']))
+        : '';
+    $latest_generated_report = null;
+
+    if (!empty($sla_reports)) {
+        foreach ($sla_reports as $report_entry) {
+            if (isset($report_entry['id']) && $report_entry['id'] === $sla_report_id) {
+                $latest_generated_report = $report_entry;
+                break;
+            }
+        }
+
+        if (null === $latest_generated_report) {
+            $latest_generated_report = $sla_reports[0];
+        }
+    }
+    $sla_next_run_label = '';
+    $sla_next_run_relative = '';
+
+    if (!empty($sla_settings['enabled']) && !empty($sla_settings['next_run'])) {
+        $next_run_timestamp = (int) $sla_settings['next_run'];
+        $sla_next_run_label = function_exists('wp_date')
+            ? wp_date(get_option('date_format', 'Y-m-d') . ' ' . get_option('time_format', 'H:i'), $next_run_timestamp)
+            : date(get_option('date_format', 'Y-m-d') . ' ' . get_option('time_format', 'H:i'), $next_run_timestamp);
+        $sla_next_run_relative = sitepulse_uptime_format_relative_time($next_run_timestamp, (int) current_time('timestamp'));
+    }
+    $sla_report_error_messages = [
+        'sitepulse_upload_unsupported'  => __('Impossible de générer le rapport : répertoire d’upload indisponible.', 'sitepulse'),
+        'sitepulse_upload_error'        => __('Impossible de générer le rapport : vérifiez les permissions du dossier d’upload.', 'sitepulse'),
+        'sitepulse_upload_permission'   => __('Impossible de créer le dossier de rapports SLA.', 'sitepulse'),
+        'sitepulse_report_csv'          => __('Impossible de générer le fichier CSV du rapport.', 'sitepulse'),
+        'sitepulse_report_pdf'          => __('Impossible de générer le PDF du rapport.', 'sitepulse'),
+        'sitepulse_report_write_failed' => __('Impossible d’enregistrer les métadonnées du rapport.', 'sitepulse'),
+    ];
+    $sla_report_notice_message = '';
+
+    if ($sla_report_status && 'success' !== $sla_report_status) {
+        $sla_report_notice_message = isset($sla_report_error_messages[$sla_report_status])
+            ? $sla_report_error_messages[$sla_report_status]
+            : sprintf(__('Impossible de générer le rapport SLA (%s).', 'sitepulse'), $sla_report_status);
+    }
 
     if (!isset($agents[$agent_id])) {
         return [
@@ -2076,6 +2141,23 @@ function sitepulse_uptime_process_remote_queue() {
             continue;
         }
 
+        if (isset($payload['task']) && 'uptime_sla_report' === $payload['task']) {
+            $windows = isset($payload['windows']) && is_array($payload['windows']) ? $payload['windows'] : [7, 30];
+            sitepulse_uptime_generate_sla_report('automation', $windows);
+
+            if (!empty($payload['automation'])) {
+                $settings = sitepulse_uptime_get_sla_automation_settings();
+
+                if (!empty($settings['enabled'])) {
+                    $settings['next_run'] = (int) current_time('timestamp', true);
+                    update_option(SITEPULSE_OPTION_UPTIME_SLA_AUTOMATION, $settings, false);
+                    sitepulse_uptime_schedule_automation_job($settings, true);
+                }
+            }
+
+            continue;
+        }
+
         sitepulse_run_uptime_check($agent, $payload);
     }
 
@@ -2477,6 +2559,1074 @@ function sitepulse_trim_uptime_log($log) {
     }
 
     return array_values($filtered);
+}
+
+/**
+ * Builds aggregated availability windows based on the raw uptime log.
+ *
+ * @param array<int,array<string,mixed>>|null $log     Optional log entries to aggregate.
+ * @param array<int,int>|null                 $windows Optional window sizes in days.
+ * @param array<string,array<string,mixed>>|null $agents Optional agent map.
+ * @return array<string,mixed>
+ */
+function sitepulse_uptime_build_sla_windows($log = null, $windows = null, $agents = null) {
+    if (null === $log) {
+        $raw_log = get_option(SITEPULSE_OPTION_UPTIME_LOG, []);
+        $log = sitepulse_normalize_uptime_log($raw_log);
+    } elseif (!empty($log)) {
+        $first_entry = reset($log);
+
+        if (!is_array($first_entry) || !array_key_exists('timestamp', $first_entry)) {
+            $log = sitepulse_normalize_uptime_log($log);
+        }
+    }
+
+    $log = sitepulse_trim_uptime_log($log);
+
+    $default_windows = [7, 30];
+    $windows = null === $windows ? $default_windows : (array) $windows;
+    $windows = array_values(array_filter(array_map('intval', $windows), function ($value) {
+        return $value > 0;
+    }));
+
+    if (empty($windows)) {
+        $windows = $default_windows;
+    }
+
+    $now = (int) current_time('timestamp');
+    $window_map = [];
+
+    foreach ($windows as $days) {
+        $key = $days . 'd';
+        $window_map[$key] = [
+            'label' => sprintf(_n('%s jour', '%s jours', $days, 'sitepulse'), number_format_i18n($days)),
+            'days'  => (int) $days,
+            'start' => $now - ($days * DAY_IN_SECONDS),
+            'end'   => $now,
+        ];
+    }
+
+    if (null === $agents) {
+        $agents = sitepulse_uptime_get_agents();
+    }
+
+    $agents_from_log = [];
+
+    foreach ($log as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+
+        $agent = isset($entry['agent']) ? sitepulse_uptime_normalize_agent_id($entry['agent']) : 'default';
+        $agents_from_log[$agent] = true;
+    }
+
+    $all_agent_ids = array_unique(array_merge(array_keys($agents_from_log), array_keys((array) $agents), ['default']));
+    $agent_profiles = [];
+
+    foreach ($all_agent_ids as $agent_id) {
+        $agent_config = isset($agents[$agent_id]) ? $agents[$agent_id] : sitepulse_uptime_get_agent($agent_id);
+
+        $agent_profiles[$agent_id] = [
+            'id'      => $agent_id,
+            'label'   => isset($agent_config['label']) && is_string($agent_config['label']) && '' !== $agent_config['label']
+                ? $agent_config['label']
+                : ($agent_id === 'default' ? __('Agent principal', 'sitepulse') : $agent_id),
+            'region'  => isset($agent_config['region']) ? sanitize_key($agent_config['region']) : 'global',
+            'weight'  => sitepulse_uptime_get_agent_weight($agent_id, $agent_config),
+            'active'  => sitepulse_uptime_agent_is_active($agent_id, $agent_config),
+        ];
+    }
+
+    $entries_per_agent = [];
+
+    foreach ($log as $entry) {
+        if (!is_array($entry) || !isset($entry['timestamp'])) {
+            continue;
+        }
+
+        $agent_id = isset($entry['agent']) ? sitepulse_uptime_normalize_agent_id($entry['agent']) : 'default';
+
+        if (!isset($entries_per_agent[$agent_id])) {
+            $entries_per_agent[$agent_id] = [];
+        }
+
+        $entries_per_agent[$agent_id][] = $entry;
+    }
+
+    $windows_payload = [];
+    $overall_start = $now;
+
+    foreach ($window_map as $window_key => $window_data) {
+        $window_start = (int) $window_data['start'];
+        $window_end = (int) $window_data['end'];
+
+        if ($window_start < $overall_start) {
+            $overall_start = $window_start;
+        }
+
+        $window_agents = [];
+        $global_totals = [
+            'availability'      => 100.0,
+            'total_checks'      => 0,
+            'up_checks'         => 0,
+            'down_checks'       => 0,
+            'unknown_checks'    => 0,
+            'maintenance_checks'=> 0,
+            'effective_checks'  => 0,
+            'downtime_total'    => 0,
+            'maintenance_total' => 0,
+            'incident_count'    => 0,
+            'maintenance_count' => 0,
+        ];
+        $weighted_total = 0.0;
+        $weighted_up = 0.0;
+
+        foreach ($agent_profiles as $agent_id => $profile) {
+            if (!$profile['active'] && !isset($entries_per_agent[$agent_id])) {
+                continue;
+            }
+
+            $agent_entries = isset($entries_per_agent[$agent_id]) ? $entries_per_agent[$agent_id] : [];
+            $breakdown = sitepulse_uptime_calculate_agent_window_breakdown($agent_entries, $window_start, $window_end);
+
+            if (empty($agent_entries) && 0 === $breakdown['total_checks'] && 0 === $breakdown['maintenance_checks']) {
+                if (!$profile['active']) {
+                    continue;
+                }
+            }
+
+            $window_agents[$agent_id] = $breakdown;
+
+            $global_totals['total_checks'] += $breakdown['total_checks'];
+            $global_totals['up_checks'] += $breakdown['up_checks'];
+            $global_totals['down_checks'] += $breakdown['down_checks'];
+            $global_totals['unknown_checks'] += $breakdown['unknown_checks'];
+            $global_totals['maintenance_checks'] += $breakdown['maintenance_checks'];
+            $global_totals['effective_checks'] += $breakdown['effective_checks'];
+            $global_totals['downtime_total'] += isset($breakdown['downtime']['total_duration'])
+                ? (float) $breakdown['downtime']['total_duration']
+                : 0.0;
+            $global_totals['maintenance_total'] += isset($breakdown['maintenance']['total_duration'])
+                ? (float) $breakdown['maintenance']['total_duration']
+                : 0.0;
+            $global_totals['incident_count'] += isset($breakdown['downtime']['incidents'])
+                ? count($breakdown['downtime']['incidents'])
+                : 0;
+            $global_totals['maintenance_count'] += isset($breakdown['maintenance']['windows'])
+                ? count($breakdown['maintenance']['windows'])
+                : 0;
+
+            if ($profile['weight'] > 0 && $breakdown['effective_checks'] > 0) {
+                $weighted_total += $breakdown['effective_checks'] * $profile['weight'];
+                $weighted_up += $breakdown['up_checks'] * $profile['weight'];
+            }
+        }
+
+        if ($weighted_total > 0) {
+            $global_totals['availability'] = ($weighted_up / $weighted_total) * 100;
+        } elseif ($global_totals['effective_checks'] > 0) {
+            $global_totals['availability'] = ($global_totals['up_checks'] / max(1, $global_totals['effective_checks'])) * 100;
+        }
+
+        $windows_payload[$window_key] = array_merge($window_data, [
+            'agents' => $window_agents,
+            'global' => $global_totals,
+        ]);
+    }
+
+    return [
+        'generated_at' => $now,
+        'period'       => [
+            'start' => $overall_start,
+            'end'   => $now,
+        ],
+        'windows'      => $windows_payload,
+        'agents'       => $agent_profiles,
+        'entries'      => count($log),
+    ];
+}
+
+/**
+ * Computes detailed availability statistics for a single agent within a time window.
+ *
+ * @param array<int,array<string,mixed>> $entries      Agent-specific entries.
+ * @param int                            $window_start Window start timestamp.
+ * @param int                            $window_end   Window end timestamp.
+ * @return array<string,mixed>
+ */
+function sitepulse_uptime_calculate_agent_window_breakdown($entries, $window_start, $window_end) {
+    $window_start = (int) $window_start;
+    $window_end = (int) $window_end;
+
+    $result = [
+        'start'              => $window_start,
+        'end'                => $window_end,
+        'availability'       => 100.0,
+        'total_checks'       => 0,
+        'up_checks'          => 0,
+        'down_checks'        => 0,
+        'unknown_checks'     => 0,
+        'maintenance_checks' => 0,
+        'effective_checks'   => 0,
+        'downtime'           => [
+            'total_duration' => 0.0,
+            'incidents'      => [],
+        ],
+        'maintenance'        => [
+            'total_duration' => 0.0,
+            'windows'        => [],
+        ],
+    ];
+
+    if (empty($entries) || $window_end <= $window_start) {
+        return $result;
+    }
+
+    $entries = array_values($entries);
+    $previous_entry = null;
+
+    foreach ($entries as $entry) {
+        if (!is_array($entry) || !isset($entry['timestamp'])) {
+            continue;
+        }
+
+        $entry_timestamp = (int) $entry['timestamp'];
+
+        if ($entry_timestamp < $window_start) {
+            $previous_entry = $entry;
+            continue;
+        }
+
+        break;
+    }
+
+    $current_state = 'unknown';
+    $current_incident = null;
+    $current_maintenance = null;
+
+    if (null !== $previous_entry) {
+        $state = isset($previous_entry['status'])
+            ? sitepulse_uptime_normalize_status_value($previous_entry['status'])
+            : null;
+
+        if (null === $state) {
+            $state = 'unknown';
+        }
+
+        $current_state = $state;
+
+        if (false === $state) {
+            $incident_start = isset($previous_entry['incident_start'])
+                ? (int) $previous_entry['incident_start']
+                : (int) $previous_entry['timestamp'];
+
+            if ($incident_start < $window_start) {
+                $incident_start = $window_start;
+            }
+
+            $current_incident = ['start' => $incident_start];
+        } elseif ('maintenance' === $state) {
+            $current_maintenance = ['start' => $window_start];
+        }
+    }
+
+    $previous_timestamp = $window_start;
+
+    foreach ($entries as $entry) {
+        if (!is_array($entry) || !isset($entry['timestamp'])) {
+            continue;
+        }
+
+        $original_timestamp = (int) $entry['timestamp'];
+
+        if ($original_timestamp < $window_start) {
+            continue;
+        }
+
+        $timestamp = $original_timestamp;
+
+        if ($timestamp > $window_end) {
+            $timestamp = $window_end;
+        }
+
+        if ($timestamp < $previous_timestamp) {
+            $timestamp = $previous_timestamp;
+        }
+
+        $delta = $timestamp - $previous_timestamp;
+
+        if ($delta > 0) {
+            if (false === $current_state) {
+                $result['downtime']['total_duration'] += $delta;
+            } elseif ('maintenance' === $current_state) {
+                $result['maintenance']['total_duration'] += $delta;
+            }
+        }
+
+        if ($original_timestamp > $window_end) {
+            $previous_timestamp = $timestamp;
+            break;
+        }
+
+        $status = isset($entry['status']) ? sitepulse_uptime_normalize_status_value($entry['status']) : null;
+
+        if (null === $status) {
+            $status = 'unknown';
+        }
+
+        if ($current_incident && false !== $status) {
+            $incident_end = $timestamp;
+
+            if ($incident_end < $current_incident['start']) {
+                $incident_end = $current_incident['start'];
+            }
+
+            $result['downtime']['incidents'][] = [
+                'start'    => $current_incident['start'],
+                'end'      => $incident_end,
+                'duration' => max(0, $incident_end - $current_incident['start']),
+            ];
+
+            $current_incident = null;
+        }
+
+        if ($current_maintenance && 'maintenance' !== $status) {
+            $maintenance_end = $timestamp;
+
+            if ($maintenance_end < $current_maintenance['start']) {
+                $maintenance_end = $current_maintenance['start'];
+            }
+
+            $result['maintenance']['windows'][] = [
+                'start'    => $current_maintenance['start'],
+                'end'      => $maintenance_end,
+                'duration' => max(0, $maintenance_end - $current_maintenance['start']),
+            ];
+
+            $current_maintenance = null;
+        }
+
+        if ('maintenance' === $status) {
+            $result['maintenance_checks']++;
+        } else {
+            $result['total_checks']++;
+
+            if (true === $status) {
+                $result['up_checks']++;
+            } elseif (false === $status) {
+                $result['down_checks']++;
+            } else {
+                $result['unknown_checks']++;
+            }
+        }
+
+        $previous_timestamp = $timestamp;
+        $current_state = $status;
+
+        if (false === $status) {
+            $incident_start = isset($entry['incident_start']) ? (int) $entry['incident_start'] : $timestamp;
+
+            if ($incident_start < $window_start) {
+                $incident_start = $window_start;
+            } elseif ($incident_start > $timestamp) {
+                $incident_start = $timestamp;
+            }
+
+            $current_incident = ['start' => $incident_start];
+        } elseif ('maintenance' === $status) {
+            $current_maintenance = ['start' => max($window_start, $timestamp)];
+        }
+    }
+
+    $final_delta = $window_end - $previous_timestamp;
+
+    if ($final_delta > 0) {
+        if (false === $current_state) {
+            $result['downtime']['total_duration'] += $final_delta;
+        } elseif ('maintenance' === $current_state) {
+            $result['maintenance']['total_duration'] += $final_delta;
+        }
+    }
+
+    if ($current_incident) {
+        $incident_end = $window_end;
+
+        if ($incident_end < $current_incident['start']) {
+            $incident_end = $current_incident['start'];
+        }
+
+        $result['downtime']['incidents'][] = [
+            'start'    => $current_incident['start'],
+            'end'      => $incident_end,
+            'duration' => max(0, $incident_end - $current_incident['start']),
+        ];
+    }
+
+    if ($current_maintenance) {
+        $maintenance_end = $window_end;
+
+        if ($maintenance_end < $current_maintenance['start']) {
+            $maintenance_end = $current_maintenance['start'];
+        }
+
+        $result['maintenance']['windows'][] = [
+            'start'    => $current_maintenance['start'],
+            'end'      => $maintenance_end,
+            'duration' => max(0, $maintenance_end - $current_maintenance['start']),
+        ];
+    }
+
+    $result['downtime']['incidents'] = array_values($result['downtime']['incidents']);
+    $result['maintenance']['windows'] = array_values($result['maintenance']['windows']);
+    $result['downtime']['total_duration'] = (float) $result['downtime']['total_duration'];
+    $result['maintenance']['total_duration'] = (float) $result['maintenance']['total_duration'];
+    $result['effective_checks'] = $result['total_checks'];
+
+    if ($result['effective_checks'] > 0) {
+        $result['availability'] = ($result['up_checks'] / max(1, $result['effective_checks'])) * 100;
+    }
+
+    return $result;
+}
+
+/**
+ * Returns the directory used to persist SLA report artifacts.
+ *
+ * @return array<string,string>|WP_Error
+ */
+function sitepulse_uptime_get_sla_reports_directory() {
+    if (!function_exists('wp_upload_dir')) {
+        return new WP_Error('sitepulse_upload_unsupported', __('Le répertoire d’upload est indisponible.', 'sitepulse'));
+    }
+
+    $uploads = wp_upload_dir();
+
+    if (!is_array($uploads) || !empty($uploads['error'])) {
+        $message = isset($uploads['error']) ? $uploads['error'] : __('Impossible de déterminer le répertoire d’upload.', 'sitepulse');
+
+        return new WP_Error('sitepulse_upload_error', $message);
+    }
+
+    $base_dir = trailingslashit($uploads['basedir']);
+    $base_url = trailingslashit($uploads['baseurl']);
+    $reports_dir = $base_dir . SITEPULSE_UPTIME_SLA_DIRECTORY;
+    $reports_url = $base_url . SITEPULSE_UPTIME_SLA_DIRECTORY;
+
+    if (!wp_mkdir_p($reports_dir)) {
+        return new WP_Error('sitepulse_upload_permission', __('Impossible de créer le dossier des rapports SLA.', 'sitepulse'));
+    }
+
+    return [
+        'path' => trailingslashit($reports_dir),
+        'url'  => trailingslashit($reports_url),
+    ];
+}
+
+/**
+ * Persists a consolidated SLA report and returns its metadata.
+ *
+ * @param string $trigger  Report trigger (manual, automation, queue...).
+ * @param array<int,int>|null $windows Optional windows in days.
+ * @return array<string,mixed>|WP_Error
+ */
+function sitepulse_uptime_generate_sla_report($trigger = 'manual', $windows = null) {
+    $aggregation = sitepulse_uptime_build_sla_windows(null, $windows, sitepulse_uptime_get_agents());
+    $directory = sitepulse_uptime_get_sla_reports_directory();
+
+    if (is_wp_error($directory)) {
+        return $directory;
+    }
+
+    $timestamp_utc = (int) current_time('timestamp', true);
+    $report_id = gmdate('Ymd-His', $timestamp_utc);
+    $base_filename = sprintf('sitepulse-uptime-sla-%s', $report_id);
+    $csv_path = $directory['path'] . $base_filename . '.csv';
+    $pdf_path = $directory['path'] . $base_filename . '.pdf';
+    $json_path = $directory['path'] . $base_filename . '.json';
+
+    $csv_result = sitepulse_uptime_write_sla_csv($aggregation, $csv_path);
+
+    if (is_wp_error($csv_result)) {
+        return $csv_result;
+    }
+
+    $pdf_result = sitepulse_uptime_write_sla_pdf($aggregation, $pdf_path);
+
+    if (is_wp_error($pdf_result)) {
+        return $pdf_result;
+    }
+
+    $json_payload = function_exists('wp_json_encode')
+        ? wp_json_encode($aggregation, JSON_PRETTY_PRINT)
+        : json_encode($aggregation, JSON_PRETTY_PRINT);
+
+    if (!is_string($json_payload)) {
+        $json_payload = '{}';
+    }
+
+    if (false === file_put_contents($json_path, $json_payload)) {
+        return new WP_Error('sitepulse_report_write_failed', __('Impossible d’écrire les métadonnées du rapport SLA.', 'sitepulse'));
+    }
+
+    $agents_included = [];
+
+    foreach ($aggregation['agents'] as $agent_id => $agent_profile) {
+        if (!isset($aggregation['windows'])) {
+            continue;
+        }
+
+        foreach ($aggregation['windows'] as $window_details) {
+            if (isset($window_details['agents'][$agent_id])) {
+                $agents_included[$agent_id] = $agent_profile['label'];
+                break;
+            }
+        }
+    }
+
+    $metadata = [
+        'id'           => $report_id,
+        'trigger'      => sanitize_key($trigger),
+        'generated_at' => (int) $aggregation['generated_at'],
+        'period'       => $aggregation['period'],
+        'windows'      => array_keys($aggregation['windows']),
+        'agents'       => $agents_included,
+        'files'        => [
+            'csv'  => [
+                'path' => $csv_path,
+                'url'  => $directory['url'] . basename($csv_path),
+            ],
+            'pdf'  => [
+                'path' => $pdf_path,
+                'url'  => $directory['url'] . basename($pdf_path),
+            ],
+            'json' => [
+                'path' => $json_path,
+                'url'  => $directory['url'] . basename($json_path),
+            ],
+        ],
+        'summary'      => [],
+    ];
+
+    foreach ($aggregation['windows'] as $window_key => $window_details) {
+        $metadata['summary'][$window_key] = [
+            'availability'   => isset($window_details['global']['availability']) ? (float) $window_details['global']['availability'] : 100.0,
+            'downtime'       => isset($window_details['global']['downtime_total']) ? (float) $window_details['global']['downtime_total'] : 0.0,
+            'maintenance'    => isset($window_details['global']['maintenance_total']) ? (float) $window_details['global']['maintenance_total'] : 0.0,
+            'incident_count' => isset($window_details['global']['incident_count']) ? (int) $window_details['global']['incident_count'] : 0,
+        ];
+    }
+
+    sitepulse_uptime_store_sla_report_metadata($metadata);
+
+    /**
+     * Fires when a SLA report has been generated and stored.
+     *
+     * @param array<string,mixed> $metadata    Stored metadata.
+     * @param array<string,mixed> $aggregation Full aggregation payload.
+     */
+    do_action('sitepulse_uptime_sla_report_generated', $metadata, $aggregation);
+
+    sitepulse_uptime_send_report_notifications($metadata, $aggregation);
+
+    return $metadata;
+}
+
+/**
+ * Writes the CSV representation of the SLA report.
+ *
+ * @param array<string,mixed> $aggregation Aggregated data.
+ * @param string              $destination Destination path.
+ * @return true|WP_Error
+ */
+function sitepulse_uptime_write_sla_csv($aggregation, $destination) {
+    $handle = fopen($destination, 'wb');
+
+    if (false === $handle) {
+        return new WP_Error('sitepulse_report_csv', __('Impossible de créer le fichier CSV du rapport SLA.', 'sitepulse'));
+    }
+
+    fwrite($handle, "\xEF\xBB\xBF");
+
+    $date_format = get_option('date_format', 'Y-m-d');
+    $time_format = get_option('time_format', 'H:i');
+    $generated_at = isset($aggregation['generated_at']) ? (int) $aggregation['generated_at'] : (int) current_time('timestamp');
+    $period = isset($aggregation['period']) ? $aggregation['period'] : ['start' => $generated_at, 'end' => $generated_at];
+    $generated_label = function_exists('wp_date')
+        ? wp_date($date_format . ' ' . $time_format, $generated_at)
+        : date($date_format . ' ' . $time_format, $generated_at);
+    $period_label = sitepulse_uptime_format_report_period($period, $date_format, $time_format);
+
+    fputcsv($handle, ['SitePulse SLA Report']);
+    fputcsv($handle, [__('Période couverte', 'sitepulse'), $period_label]);
+    fputcsv($handle, [__('Généré le', 'sitepulse'), $generated_label]);
+    fputcsv($handle, []);
+
+    foreach ($aggregation['windows'] as $window_key => $window_details) {
+        $window_label = isset($window_details['label']) ? $window_details['label'] : $window_key;
+        $availability = isset($window_details['global']['availability'])
+            ? number_format_i18n((float) $window_details['global']['availability'], 2)
+            : '100.00';
+        $downtime = isset($window_details['global']['downtime_total']) ? (float) $window_details['global']['downtime_total'] : 0.0;
+        $maintenance = isset($window_details['global']['maintenance_total']) ? (float) $window_details['global']['maintenance_total'] : 0.0;
+        $incidents = isset($window_details['global']['incident_count']) ? (int) $window_details['global']['incident_count'] : 0;
+
+        fputcsv($handle, [sprintf(__('Fenêtre %s', 'sitepulse'), $window_label)]);
+        fputcsv($handle, [
+            __('Disponibilité moyenne (%)', 'sitepulse'),
+            $availability,
+            __('Incidents', 'sitepulse'),
+            number_format_i18n($incidents),
+            __('Durée indisponibilité (s)', 'sitepulse'),
+            number_format_i18n($downtime, 2),
+            __('Fenêtres de maintenance (s)', 'sitepulse'),
+            number_format_i18n($maintenance, 2),
+        ]);
+
+        $header = [
+            __('Agent', 'sitepulse'),
+            __('Région', 'sitepulse'),
+            __('Disponibilité (%)', 'sitepulse'),
+            __('Contrôles', 'sitepulse'),
+            __('Incidents', 'sitepulse'),
+            __('Durée incidents (s)', 'sitepulse'),
+            __('Maintenance (s)', 'sitepulse'),
+        ];
+        fputcsv($handle, $header);
+
+        foreach ($window_details['agents'] as $agent_id => $agent_breakdown) {
+            $profile = isset($aggregation['agents'][$agent_id]) ? $aggregation['agents'][$agent_id] : ['label' => $agent_id, 'region' => 'global'];
+            $agent_availability = isset($agent_breakdown['availability']) ? number_format_i18n((float) $agent_breakdown['availability'], 2) : '100.00';
+            $incident_count = isset($agent_breakdown['downtime']['incidents']) ? count($agent_breakdown['downtime']['incidents']) : 0;
+            $downtime_total = isset($agent_breakdown['downtime']['total_duration']) ? (float) $agent_breakdown['downtime']['total_duration'] : 0.0;
+            $maintenance_total = isset($agent_breakdown['maintenance']['total_duration']) ? (float) $agent_breakdown['maintenance']['total_duration'] : 0.0;
+            $effective_checks = isset($agent_breakdown['effective_checks']) ? (int) $agent_breakdown['effective_checks'] : 0;
+
+            fputcsv($handle, [
+                $profile['label'],
+                isset($profile['region']) ? $profile['region'] : 'global',
+                $agent_availability,
+                number_format_i18n($effective_checks),
+                number_format_i18n($incident_count),
+                number_format_i18n($downtime_total, 2),
+                number_format_i18n($maintenance_total, 2),
+            ]);
+        }
+
+        fputcsv($handle, []);
+    }
+
+    fclose($handle);
+
+    return true;
+}
+
+/**
+ * Writes a minimal PDF report summarising SLA metrics.
+ *
+ * @param array<string,mixed> $aggregation Aggregated data.
+ * @param string              $destination File path.
+ * @return true|WP_Error
+ */
+function sitepulse_uptime_write_sla_pdf($aggregation, $destination) {
+    $lines = [];
+    $lines[] = 'SitePulse SLA Report';
+    $period = isset($aggregation['period']) ? $aggregation['period'] : ['start' => $aggregation['generated_at'], 'end' => $aggregation['generated_at']];
+    $lines[] = sprintf(__('Période : %s', 'sitepulse'), sitepulse_uptime_format_report_period($period));
+    $lines[] = sprintf(__('Généré le : %s', 'sitepulse'), date_i18n(get_option('date_format', 'Y-m-d') . ' ' . get_option('time_format', 'H:i'), $aggregation['generated_at']));
+    $lines[] = '';
+
+    foreach ($aggregation['windows'] as $window_key => $window_details) {
+        $window_label = isset($window_details['label']) ? $window_details['label'] : $window_key;
+        $lines[] = sprintf(__('Fenêtre %s', 'sitepulse'), $window_label);
+        $lines[] = sprintf('  %s: %s%%', __('Disponibilité', 'sitepulse'), number_format_i18n((float) $window_details['global']['availability'], 2));
+        $lines[] = sprintf('  %s: %s', __('Incidents', 'sitepulse'), number_format_i18n((int) $window_details['global']['incident_count']));
+        $lines[] = sprintf('  %s: %s', __('Indisponibilité', 'sitepulse'), sitepulse_uptime_format_duration_i18n($window_details['global']['downtime_total']));
+        $lines[] = sprintf('  %s: %s', __('Maintenance', 'sitepulse'), sitepulse_uptime_format_duration_i18n($window_details['global']['maintenance_total']));
+
+        foreach ($window_details['agents'] as $agent_id => $agent_breakdown) {
+            if (!isset($aggregation['agents'][$agent_id])) {
+                continue;
+            }
+
+            $profile = $aggregation['agents'][$agent_id];
+            $lines[] = sprintf('    • %s (%s) — %s%%', $profile['label'], isset($profile['region']) ? $profile['region'] : 'global', number_format_i18n((float) $agent_breakdown['availability'], 2));
+        }
+
+        $lines[] = '';
+    }
+
+    return sitepulse_uptime_generate_simple_pdf($lines, $destination);
+}
+
+/**
+ * Generates a minimalist PDF file from text lines.
+ *
+ * @param array<int,string> $lines Text lines.
+ * @param string            $destination File path.
+ * @return true|WP_Error
+ */
+function sitepulse_uptime_generate_simple_pdf($lines, $destination) {
+    $content_stream = "BT\n/F1 12 Tf\n1 0 0 1 72 770 Tm\n";
+    $first_line = true;
+
+    foreach ($lines as $line) {
+        $escaped = str_replace(['\\', '(', ')'], ['\\\\', '\\(', '\\)'], (string) $line);
+
+        if (!$first_line) {
+            $content_stream .= "0 -16 Td\n";
+        }
+
+        $content_stream .= '(' . $escaped . ") Tj\n";
+        $first_line = false;
+    }
+
+    $content_stream .= "ET\n";
+    $content_length = strlen($content_stream);
+
+    $objects = [];
+    $objects[] = "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj";
+    $objects[] = "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj";
+    $objects[] = "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj";
+    $objects[] = sprintf("4 0 obj << /Length %d >> stream\n%s\nendstream endobj", $content_length, $content_stream);
+    $objects[] = "5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj";
+
+    $pdf = "%PDF-1.4\n";
+    $offsets = [];
+
+    foreach ($objects as $object) {
+        $offsets[] = strlen($pdf);
+        $pdf .= $object . "\n";
+    }
+
+    $xref_position = strlen($pdf);
+    $pdf .= 'xref' . "\n";
+    $pdf .= '0 ' . (count($objects) + 1) . "\n";
+    $pdf .= "0000000000 65535 f \n";
+
+    foreach ($offsets as $offset) {
+        $pdf .= sprintf("%010d 00000 n \n", $offset);
+    }
+
+    $pdf .= "trailer << /Size " . (count($objects) + 1) . " /Root 1 0 R >>\n";
+    $pdf .= "startxref\n" . $xref_position . "\n";
+    $pdf .= "%%EOF";
+
+    if (false === file_put_contents($destination, $pdf)) {
+        return new WP_Error('sitepulse_report_pdf', __('Impossible de générer le PDF du rapport SLA.', 'sitepulse'));
+    }
+
+    return true;
+}
+
+/**
+ * Stores the last generated reports metadata in the dedicated option.
+ *
+ * @param array<string,mixed> $metadata Report metadata.
+ * @return void
+ */
+function sitepulse_uptime_store_sla_report_metadata($metadata) {
+    $existing = get_option(SITEPULSE_OPTION_UPTIME_SLA_REPORTS, []);
+
+    if (!is_array($existing)) {
+        $existing = [];
+    }
+
+    array_unshift($existing, $metadata);
+    $existing = array_slice($existing, 0, 10);
+
+    update_option(SITEPULSE_OPTION_UPTIME_SLA_REPORTS, array_values($existing), false);
+}
+
+/**
+ * Retrieves the persisted SLA report metadata entries.
+ *
+ * @param int $limit Maximum entries to return.
+ * @return array<int,array<string,mixed>>
+ */
+function sitepulse_uptime_get_sla_reports($limit = 10) {
+    $reports = get_option(SITEPULSE_OPTION_UPTIME_SLA_REPORTS, []);
+
+    if (!is_array($reports) || empty($reports)) {
+        return [];
+    }
+
+    return array_slice($reports, 0, max(1, (int) $limit));
+}
+
+/**
+ * Sends notifications (email/webhook) after a report generation.
+ *
+ * @param array<string,mixed> $metadata    Report metadata.
+ * @param array<string,mixed> $aggregation Aggregation payload.
+ * @return void
+ */
+function sitepulse_uptime_send_report_notifications($metadata, $aggregation) {
+    $settings = sitepulse_uptime_get_sla_automation_settings();
+
+    if (empty($settings['email_enabled']) && empty($settings['webhook_enabled'])) {
+        return;
+    }
+
+    $subject = sprintf(__('Rapport SLA SitePulse (%s)', 'sitepulse'), sitepulse_uptime_format_report_period($metadata['period']));
+    $body_lines = [];
+    $body_lines[] = __('Bonjour,', 'sitepulse');
+    $body_lines[] = '';
+    $body_lines[] = sprintf(__('Votre rapport SLA vient d’être généré (%s).', 'sitepulse'), sitepulse_uptime_format_report_period($metadata['period']));
+
+    foreach ($metadata['summary'] as $window_key => $window_summary) {
+        $body_lines[] = sprintf(
+            '- %s : %s%% (%s incidents, %s indisponibilité)',
+            $window_key,
+            number_format_i18n($window_summary['availability'], 2),
+            number_format_i18n($window_summary['incident_count']),
+            sitepulse_uptime_format_duration_i18n($window_summary['downtime'])
+        );
+    }
+
+    $body_lines[] = '';
+    $body_lines[] = __('Les rapports CSV et PDF sont disponibles en pièce jointe.', 'sitepulse');
+    $body_lines[] = __('— Équipe SitePulse', 'sitepulse');
+    $body = implode("\n", $body_lines);
+
+    if (!empty($settings['email_enabled']) && !empty($settings['recipients'])) {
+        $attachments = [];
+
+        if (isset($metadata['files']['csv']['path']) && file_exists($metadata['files']['csv']['path'])) {
+            $attachments[] = $metadata['files']['csv']['path'];
+        }
+
+        if (isset($metadata['files']['pdf']['path']) && file_exists($metadata['files']['pdf']['path'])) {
+            $attachments[] = $metadata['files']['pdf']['path'];
+        }
+
+        $headers = ['Content-Type: text/plain; charset=UTF-8'];
+        wp_mail($settings['recipients'], $subject, $body, $headers, $attachments);
+    }
+
+    if (!empty($settings['webhook_enabled']) && !empty($settings['webhook_url'])) {
+        sitepulse_uptime_dispatch_report_webhook($settings['webhook_url'], $metadata, $aggregation);
+    }
+}
+
+/**
+ * Dispatches a webhook request containing report metadata.
+ *
+ * @param string $url        Webhook URL.
+ * @param array  $metadata   Metadata to send.
+ * @param array  $aggregation Aggregated data.
+ * @return void
+ */
+function sitepulse_uptime_dispatch_report_webhook($url, $metadata, $aggregation) {
+    if (!function_exists('wp_remote_post')) {
+        return;
+    }
+
+    $payload = [
+        'report'      => $metadata,
+        'aggregation' => $aggregation,
+        'site'        => get_bloginfo('name'),
+        'generated'   => gmdate('c', (int) $metadata['generated_at']),
+    ];
+
+    $args = [
+        'headers' => ['Content-Type' => 'application/json'],
+        'body'    => function_exists('wp_json_encode') ? wp_json_encode($payload) : json_encode($payload),
+        'timeout' => 15,
+    ];
+
+    $response = wp_remote_post($url, $args);
+
+    if (is_wp_error($response) && function_exists('sitepulse_log')) {
+        sitepulse_log(sprintf('Webhook SLA report failed: %s', $response->get_error_message()), 'WARNING');
+    }
+}
+
+/**
+ * Retrieves and sanitizes SLA automation settings.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_uptime_get_sla_automation_settings() {
+    $defaults = [
+        'enabled'        => false,
+        'frequency'      => 'monthly',
+        'email_enabled'  => false,
+        'recipients'     => [],
+        'webhook_enabled'=> false,
+        'webhook_url'    => '',
+        'windows'        => [7, 30],
+        'next_run'       => 0,
+    ];
+
+    $stored = get_option(SITEPULSE_OPTION_UPTIME_SLA_AUTOMATION, []);
+
+    if (!is_array($stored)) {
+        $stored = [];
+    }
+
+    $settings = array_merge($defaults, $stored);
+    $settings['enabled'] = (bool) $settings['enabled'];
+    $settings['email_enabled'] = (bool) $settings['email_enabled'];
+    $settings['webhook_enabled'] = (bool) $settings['webhook_enabled'];
+    $settings['frequency'] = in_array($settings['frequency'], ['weekly', 'monthly'], true) ? $settings['frequency'] : 'monthly';
+    $settings['next_run'] = isset($settings['next_run']) ? (int) $settings['next_run'] : 0;
+
+    if (!is_array($settings['windows']) || empty($settings['windows'])) {
+        $settings['windows'] = [7, 30];
+    } else {
+        $settings['windows'] = array_values(array_filter(array_map('intval', $settings['windows']), function ($value) {
+            return $value > 0;
+        }));
+
+        if (empty($settings['windows'])) {
+            $settings['windows'] = [7, 30];
+        }
+    }
+
+    if (!is_array($settings['recipients'])) {
+        $settings['recipients'] = [];
+    }
+
+    $settings['recipients'] = array_values(array_filter(array_map('sanitize_email', $settings['recipients'])));
+
+    if (!$settings['webhook_enabled'] || empty($settings['webhook_url']) || !wp_http_validate_url($settings['webhook_url'])) {
+        $settings['webhook_enabled'] = false;
+        $settings['webhook_url'] = '';
+    }
+
+    if ($settings['email_enabled'] && empty($settings['recipients'])) {
+        $settings['email_enabled'] = false;
+    }
+
+    return $settings;
+}
+
+/**
+ * Schedules the next automated SLA report generation through the remote queue.
+ *
+ * @param array<string,mixed> $settings Automation settings.
+ * @param bool                $force    Force recalculation of the next run.
+ * @return void
+ */
+function sitepulse_uptime_schedule_automation_job($settings, $force = false) {
+    if (empty($settings['enabled'])) {
+        return;
+    }
+
+    $interval = sitepulse_uptime_get_automation_interval($settings['frequency']);
+    $now = (int) current_time('timestamp', true);
+    $next_run = isset($settings['next_run']) ? (int) $settings['next_run'] : 0;
+
+    if ($force || $next_run <= $now) {
+        $next_run = $now + $interval;
+    }
+
+    $payload = [
+        'task'       => 'uptime_sla_report',
+        'windows'    => $settings['windows'],
+        'automation' => true,
+        'frequency'  => $settings['frequency'],
+    ];
+
+    $queue = get_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, []);
+
+    if (!is_array($queue)) {
+        $queue = [];
+    }
+
+    $queue[] = [
+        'agent'       => 'sitepulse-reports',
+        'payload'     => $payload,
+        'scheduled_at'=> $next_run,
+        'created_at'  => $now,
+        'priority'    => 1,
+    ];
+
+    $queue = sitepulse_uptime_normalize_remote_queue($queue, $now);
+    update_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, $queue, false);
+    sitepulse_uptime_maybe_schedule_queue_processor($next_run);
+
+    $settings['next_run'] = $next_run;
+    update_option(SITEPULSE_OPTION_UPTIME_SLA_AUTOMATION, $settings, false);
+}
+
+/**
+ * Removes pending SLA automation jobs from the remote queue.
+ *
+ * @return void
+ */
+function sitepulse_uptime_cancel_automation_job() {
+    $queue = get_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, []);
+
+    if (!is_array($queue) || empty($queue)) {
+        return;
+    }
+
+    $filtered = [];
+
+    foreach ($queue as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+
+        $payload = isset($item['payload']) && is_array($item['payload']) ? $item['payload'] : [];
+
+        if (isset($payload['task']) && 'uptime_sla_report' === $payload['task']) {
+            continue;
+        }
+
+        $filtered[] = $item;
+    }
+
+    if (count($filtered) === count($queue)) {
+        return;
+    }
+
+    $filtered = sitepulse_uptime_normalize_remote_queue($filtered);
+    update_option(SITEPULSE_OPTION_UPTIME_REMOTE_QUEUE, $filtered, false);
+}
+
+/**
+ * Converts an automation frequency into seconds.
+ *
+ * @param string $frequency Frequency identifier.
+ * @return int
+ */
+function sitepulse_uptime_get_automation_interval($frequency) {
+    $day = defined('DAY_IN_SECONDS') ? DAY_IN_SECONDS : 86400;
+
+    if ('weekly' === $frequency) {
+        return 7 * $day;
+    }
+
+    return 30 * $day;
+}
+
+/**
+ * Formats the report period as a human readable string.
+ *
+ * @param array<string,int> $period      Period metadata.
+ * @param string            $date_format Optional date format.
+ * @param string            $time_format Optional time format.
+ * @return string
+ */
+function sitepulse_uptime_format_report_period($period, $date_format = null, $time_format = null) {
+    $date_format = null === $date_format ? get_option('date_format', 'Y-m-d') : $date_format;
+    $time_format = null === $time_format ? get_option('time_format', 'H:i') : $time_format;
+
+    $start = isset($period['start']) ? (int) $period['start'] : 0;
+    $end = isset($period['end']) ? (int) $period['end'] : 0;
+
+    if ($start <= 0 || $end <= 0) {
+        return '—';
+    }
+
+    $format = $date_format . ' ' . $time_format;
+    $start_label = function_exists('wp_date') ? wp_date($format, $start) : date($format, $start);
+    $end_label = function_exists('wp_date') ? wp_date($format, $end) : date($format, $end);
+
+    return sprintf('%s → %s', $start_label, $end_label);
 }
 
 /**
@@ -3249,6 +4399,133 @@ function sitepulse_uptime_handle_sla_export() {
 }
 
 /**
+ * Handles manual SLA report generation from the admin interface.
+ *
+ * @return void
+ */
+function sitepulse_uptime_handle_manual_report_generation() {
+    if (!current_user_can(function_exists('sitepulse_get_capability') ? sitepulse_get_capability() : 'manage_options')) {
+        wp_die(__('Vous n’avez pas l’autorisation de générer ce rapport.', 'sitepulse'));
+    }
+
+    check_admin_referer('sitepulse_generate_uptime_report');
+
+    $windows = isset($_POST['sitepulse_uptime_windows']) ? wp_unslash($_POST['sitepulse_uptime_windows']) : [7, 30];
+
+    if (!is_array($windows)) {
+        $windows = [$windows];
+    }
+
+    $windows = array_values(array_filter(array_map('intval', $windows), function ($value) {
+        return $value > 0;
+    }));
+
+    if (empty($windows)) {
+        $windows = [7, 30];
+    }
+
+    $result = sitepulse_uptime_generate_sla_report('manual', $windows);
+
+    if (is_wp_error($result)) {
+        $redirect = add_query_arg([
+            'page'                        => 'sitepulse-uptime',
+            'sitepulse_sla_report_status' => $result->get_error_code(),
+        ], admin_url('admin.php'));
+
+        wp_safe_redirect($redirect);
+        exit;
+    }
+
+    $redirect = add_query_arg([
+        'page'                        => 'sitepulse-uptime',
+        'sitepulse_sla_report_status' => 'success',
+        'sitepulse_sla_report_id'     => $result['id'],
+    ], admin_url('admin.php'));
+
+    wp_safe_redirect($redirect);
+    exit;
+}
+
+/**
+ * Saves the automation preferences for SLA reports.
+ *
+ * @return void
+ */
+function sitepulse_uptime_handle_sla_settings_save() {
+    if (!current_user_can(function_exists('sitepulse_get_capability') ? sitepulse_get_capability() : 'manage_options')) {
+        wp_die(__('Vous n’avez pas l’autorisation de modifier ces réglages.', 'sitepulse'));
+    }
+
+    check_admin_referer('sitepulse_save_sla_settings');
+
+    $settings = sitepulse_uptime_get_sla_automation_settings();
+
+    $settings['enabled'] = isset($_POST['sitepulse_sla_enabled']);
+    $settings['frequency'] = isset($_POST['sitepulse_sla_frequency'])
+        ? sanitize_key(wp_unslash($_POST['sitepulse_sla_frequency']))
+        : 'monthly';
+    $settings['frequency'] = in_array($settings['frequency'], ['weekly', 'monthly'], true) ? $settings['frequency'] : 'monthly';
+
+    $windows_input = isset($_POST['sitepulse_sla_windows']) ? wp_unslash($_POST['sitepulse_sla_windows']) : $settings['windows'];
+
+    if (!is_array($windows_input)) {
+        $windows_input = [$windows_input];
+    }
+
+    $parsed_windows = array_values(array_filter(array_map('intval', $windows_input), function ($value) {
+        return $value > 0;
+    }));
+
+    if (!empty($parsed_windows)) {
+        $settings['windows'] = $parsed_windows;
+    }
+
+    $recipients = [];
+
+    if (isset($_POST['sitepulse_sla_recipients'])) {
+        $recipients_raw = wp_unslash($_POST['sitepulse_sla_recipients']);
+        $recipients_split = preg_split('/[\n,]+/', $recipients_raw);
+
+        if (is_array($recipients_split)) {
+            $recipients = array_values(array_filter(array_map('sanitize_email', $recipients_split)));
+        }
+    }
+
+    $settings['email_enabled'] = isset($_POST['sitepulse_sla_email_enabled']) && !empty($recipients);
+    $settings['recipients'] = $settings['email_enabled'] ? $recipients : [];
+
+    $settings['webhook_enabled'] = isset($_POST['sitepulse_sla_webhook_enabled']);
+    $settings['webhook_url'] = '';
+
+    if ($settings['webhook_enabled'] && isset($_POST['sitepulse_sla_webhook_url'])) {
+        $candidate = esc_url_raw(wp_unslash($_POST['sitepulse_sla_webhook_url']));
+
+        if (wp_http_validate_url($candidate)) {
+            $settings['webhook_url'] = $candidate;
+        } else {
+            $settings['webhook_enabled'] = false;
+        }
+    }
+
+    if (!$settings['enabled']) {
+        $settings['next_run'] = 0;
+        update_option(SITEPULSE_OPTION_UPTIME_SLA_AUTOMATION, $settings, false);
+        sitepulse_uptime_cancel_automation_job();
+    } else {
+        update_option(SITEPULSE_OPTION_UPTIME_SLA_AUTOMATION, $settings, false);
+        sitepulse_uptime_schedule_automation_job($settings, true);
+    }
+
+    $redirect = add_query_arg([
+        'page'                   => 'sitepulse-uptime',
+        'sitepulse_sla_settings' => 'updated',
+    ], admin_url('admin.php'));
+
+    wp_safe_redirect($redirect);
+    exit;
+}
+
+/**
  * Redirects back to the uptime page with a contextual notice.
  *
  * @param string $code  Error code identifier.
@@ -3718,6 +4995,40 @@ function sitepulse_uptime_tracker_page() {
     }
     ?>
     <div class="wrap">
+        <?php if ('success' === $sla_report_status && $latest_generated_report) :
+            $csv_url = isset($latest_generated_report['files']['csv']['url']) ? $latest_generated_report['files']['csv']['url'] : '';
+            $pdf_url = isset($latest_generated_report['files']['pdf']['url']) ? $latest_generated_report['files']['pdf']['url'] : '';
+            $report_label = isset($latest_generated_report['period']) ? sitepulse_uptime_format_report_period($latest_generated_report['period']) : '';
+        ?>
+            <div class="notice notice-success is-dismissible">
+                <p>
+                    <?php
+                    printf(
+                        esc_html__('Rapport SLA généré avec succès (%s).', 'sitepulse'),
+                        esc_html($report_label !== '' ? $report_label : $latest_generated_report['id'])
+                    );
+                    ?>
+                    <?php if ($csv_url || $pdf_url) : ?>
+                        <?php esc_html_e('Téléchargements :', 'sitepulse'); ?>
+                        <?php if ($csv_url) : ?>
+                            <a href="<?php echo esc_url($csv_url); ?>" class="button-link">CSV</a>
+                        <?php endif; ?>
+                        <?php if ($pdf_url) : ?>
+                            <a href="<?php echo esc_url($pdf_url); ?>" class="button-link">PDF</a>
+                        <?php endif; ?>
+                    <?php endif; ?>
+                </p>
+            </div>
+        <?php elseif ($sla_report_notice_message !== '') : ?>
+            <div class="notice notice-error is-dismissible">
+                <p><?php echo esc_html($sla_report_notice_message); ?></p>
+            </div>
+        <?php endif; ?>
+        <?php if ('updated' === $sla_settings_status) : ?>
+            <div class="notice notice-success is-dismissible">
+                <p><?php esc_html_e('Les préférences d’automatisation des rapports ont été mises à jour.', 'sitepulse'); ?></p>
+            </div>
+        <?php endif; ?>
         <h1><span class="dashicons-before dashicons-chart-bar"></span> <?php esc_html_e('Suivi de Disponibilité', 'sitepulse'); ?></h1>
         <p>
             <?php
@@ -3828,6 +5139,118 @@ function sitepulse_uptime_tracker_page() {
                     echo esc_html($latency_threshold_text . ' • ' . $latency_measurements_text);
                 ?></p>
             </div>
+        </div>
+        <div class="card">
+            <h2><?php esc_html_e('Rapports SLA consolidés', 'sitepulse'); ?></h2>
+            <div class="sitepulse-sla-actions">
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="sitepulse-sla-actions__form">
+                    <?php wp_nonce_field('sitepulse_generate_uptime_report'); ?>
+                    <input type="hidden" name="action" value="sitepulse_generate_uptime_report" />
+                    <p><?php esc_html_e('Générez un rapport SLA multi-agents sur les fenêtres suivantes :', 'sitepulse'); ?></p>
+                    <ul class="sitepulse-sla-actions__windows">
+                        <?php foreach ($sla_snapshot['windows'] as $window_key => $window_details) :
+                            $days = isset($window_details['days']) ? (int) $window_details['days'] : 0;
+                            $availability = isset($window_details['global']['availability']) ? (float) $window_details['global']['availability'] : 100.0;
+                            $downtime = isset($window_details['global']['downtime_total']) ? (float) $window_details['global']['downtime_total'] : 0.0;
+                        ?>
+                            <li>
+                                <label>
+                                    <input type="checkbox" name="sitepulse_uptime_windows[]" value="<?php echo esc_attr($days); ?>" checked />
+                                    <?php
+                                    printf(
+                                        esc_html__('%1$s — %2$s%% de disponibilité (%3$s d’indisponibilité)', 'sitepulse'),
+                                        esc_html(isset($window_details['label']) ? $window_details['label'] : $window_key),
+                                        esc_html(number_format_i18n($availability, 2)),
+                                        esc_html(sitepulse_uptime_format_duration_i18n($downtime))
+                                    );
+                                    ?>
+                                </label>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
+                    <?php submit_button(__('Générer le rapport', 'sitepulse'), 'primary', 'submit', false); ?>
+                </form>
+                <div class="sitepulse-sla-actions__reports">
+                    <h3><?php esc_html_e('Derniers rapports disponibles', 'sitepulse'); ?></h3>
+                    <?php if (!empty($sla_reports)) : ?>
+                        <ul>
+                            <?php foreach ($sla_reports as $report_entry) :
+                                $report_period = isset($report_entry['period']) ? sitepulse_uptime_format_report_period($report_entry['period']) : '';
+                                $csv_url = isset($report_entry['files']['csv']['url']) ? $report_entry['files']['csv']['url'] : '';
+                                $pdf_url = isset($report_entry['files']['pdf']['url']) ? $report_entry['files']['pdf']['url'] : '';
+                                $generated_on = isset($report_entry['generated_at']) ? date_i18n(get_option('date_format', 'Y-m-d') . ' ' . get_option('time_format', 'H:i'), (int) $report_entry['generated_at']) : '';
+                            ?>
+                                <li>
+                                    <strong><?php echo esc_html($report_period !== '' ? $report_period : $report_entry['id']); ?></strong>
+                                    <?php if ($generated_on !== '') : ?>
+                                        <span class="description">— <?php echo esc_html($generated_on); ?></span>
+                                    <?php endif; ?>
+                                    <?php if ($csv_url) : ?>
+                                        <a href="<?php echo esc_url($csv_url); ?>" class="button-link"><?php esc_html_e('CSV', 'sitepulse'); ?></a>
+                                    <?php endif; ?>
+                                    <?php if ($pdf_url) : ?>
+                                        <a href="<?php echo esc_url($pdf_url); ?>" class="button-link"><?php esc_html_e('PDF', 'sitepulse'); ?></a>
+                                    <?php endif; ?>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    <?php else : ?>
+                        <p><?php esc_html_e('Aucun rapport généré pour le moment.', 'sitepulse'); ?></p>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <h2><?php esc_html_e('Automatisation des rapports SLA', 'sitepulse'); ?></h2>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="sitepulse-sla-settings">
+                <?php wp_nonce_field('sitepulse_save_sla_settings'); ?>
+                <input type="hidden" name="action" value="sitepulse_save_sla_settings" />
+                <p>
+                    <label>
+                        <input type="checkbox" name="sitepulse_sla_enabled" value="1" <?php checked(!empty($sla_settings['enabled'])); ?> />
+                        <?php esc_html_e('Activer la génération automatique', 'sitepulse'); ?>
+                    </label>
+                </p>
+                <p>
+                    <label for="sitepulse-sla-frequency"><?php esc_html_e('Fréquence', 'sitepulse'); ?></label>
+                    <select id="sitepulse-sla-frequency" name="sitepulse_sla_frequency">
+                        <option value="weekly" <?php selected(isset($sla_settings['frequency']) ? $sla_settings['frequency'] : '', 'weekly'); ?>><?php esc_html_e('Hebdomadaire', 'sitepulse'); ?></option>
+                        <option value="monthly" <?php selected(isset($sla_settings['frequency']) ? $sla_settings['frequency'] : 'monthly', 'monthly'); ?>><?php esc_html_e('Mensuelle', 'sitepulse'); ?></option>
+                    </select>
+                </p>
+                <p>
+                    <label>
+                        <input type="checkbox" name="sitepulse_sla_email_enabled" value="1" <?php checked(!empty($sla_settings['email_enabled'])); ?> />
+                        <?php esc_html_e('Envoyer un email avec le rapport (CSV & PDF)', 'sitepulse'); ?>
+                    </label>
+                </p>
+                <p>
+                    <label for="sitepulse-sla-recipients"><?php esc_html_e('Destinataires (séparés par une virgule ou un retour à la ligne)', 'sitepulse'); ?></label>
+                    <textarea id="sitepulse-sla-recipients" name="sitepulse_sla_recipients" rows="3" class="large-text"><?php echo esc_textarea(implode("\n", (array) $sla_settings['recipients'])); ?></textarea>
+                </p>
+                <p>
+                    <label>
+                        <input type="checkbox" name="sitepulse_sla_webhook_enabled" value="1" <?php checked(!empty($sla_settings['webhook_enabled'])); ?> />
+                        <?php esc_html_e('Notifier un webhook (JSON)', 'sitepulse'); ?>
+                    </label>
+                </p>
+                <p>
+                    <label for="sitepulse-sla-webhook-url"><?php esc_html_e('URL du webhook', 'sitepulse'); ?></label>
+                    <input type="url" id="sitepulse-sla-webhook-url" name="sitepulse_sla_webhook_url" class="large-text" value="<?php echo esc_attr(isset($sla_settings['webhook_url']) ? $sla_settings['webhook_url'] : ''); ?>" />
+                </p>
+                <?php if (!empty($sla_settings['enabled']) && $sla_next_run_label !== '') : ?>
+                    <p class="description">
+                        <?php
+                        printf(
+                            esc_html__('Prochaine exécution planifiée : %1$s (%2$s).', 'sitepulse'),
+                            esc_html($sla_next_run_label),
+                            esc_html($sla_next_run_relative)
+                        );
+                        ?>
+                    </p>
+                <?php endif; ?>
+                <?php submit_button(__('Enregistrer les préférences', 'sitepulse')); ?>
+            </form>
         </div>
         <section class="sitepulse-uptime-remote-metrics" aria-labelledby="sitepulse-uptime-remote-metrics-title">
             <div class="sitepulse-uptime-remote-metrics__header">
