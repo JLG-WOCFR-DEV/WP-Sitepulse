@@ -9,6 +9,30 @@ if (!defined('SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY_LOCK')) {
     define('SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY_LOCK', 'sitepulse_resource_monitor_history_lock');
 }
 
+if (!defined('SITEPULSE_TRANSIENT_RESOURCE_MONITOR_HISTORY_CACHE_PREFIX')) {
+    define('SITEPULSE_TRANSIENT_RESOURCE_MONITOR_HISTORY_CACHE_PREFIX', 'sitepulse_resource_monitor_rest_history_');
+}
+
+if (!defined('SITEPULSE_TRANSIENT_RESOURCE_MONITOR_AGGREGATE_CACHE_PREFIX')) {
+    define('SITEPULSE_TRANSIENT_RESOURCE_MONITOR_AGGREGATE_CACHE_PREFIX', 'sitepulse_resource_monitor_aggregates_');
+}
+
+if (!defined('SITEPULSE_TRANSIENT_RESOURCE_MONITOR_LAST_REPORT')) {
+    define('SITEPULSE_TRANSIENT_RESOURCE_MONITOR_LAST_REPORT', 'sitepulse_resource_monitor_last_report');
+}
+
+if (!defined('SITEPULSE_OPTION_RESOURCE_MONITOR_CACHE_KEYS')) {
+    define('SITEPULSE_OPTION_RESOURCE_MONITOR_CACHE_KEYS', 'sitepulse_resource_monitor_cache_keys');
+}
+
+if (!defined('SITEPULSE_AS_GROUP_RESOURCE_MONITOR')) {
+    define('SITEPULSE_AS_GROUP_RESOURCE_MONITOR', 'sitepulse_resource_monitor');
+}
+
+if (!defined('SITEPULSE_ACTION_RESOURCE_MONITOR_REPORTS')) {
+    define('SITEPULSE_ACTION_RESOURCE_MONITOR_REPORTS', 'sitepulse_resource_monitor_generate_reports');
+}
+
 add_action('admin_menu', function() {
     add_submenu_page(
         'sitepulse-dashboard',
@@ -23,6 +47,9 @@ add_action('admin_menu', function() {
 add_action('admin_enqueue_scripts', 'sitepulse_resource_monitor_enqueue_assets');
 add_action('rest_api_init', 'sitepulse_resource_monitor_register_rest_routes');
 add_action('plugins_loaded', 'sitepulse_resource_monitor_bootstrap_storage', 9);
+add_action('init', 'sitepulse_resource_monitor_schedule_report_generation');
+add_action(SITEPULSE_ACTION_RESOURCE_MONITOR_REPORTS, 'sitepulse_resource_monitor_run_scheduled_reports');
+add_action('admin_post_sitepulse_resource_monitor_trigger_report', 'sitepulse_resource_monitor_handle_report_trigger');
 
 /**
  * Ensures the resource monitor datastore is ready.
@@ -456,6 +483,35 @@ function sitepulse_resource_monitor_register_rest_routes() {
                     'required'    => false,
                     'default'     => false,
                 ],
+                'granularity' => [
+                    'description' => __('Agrégation des points (raw, 15m, 1h, 1d).', 'sitepulse'),
+                    'type'        => 'string',
+                    'required'    => false,
+                    'default'     => 'raw',
+                ],
+            ],
+        ]
+    );
+
+    register_rest_route(
+        'sitepulse/v1',
+        '/resources/aggregates',
+        [
+            'methods'             => defined('WP_REST_Server::READABLE') ? WP_REST_Server::READABLE : 'GET',
+            'callback'            => 'sitepulse_resource_monitor_rest_aggregates',
+            'permission_callback' => 'sitepulse_resource_monitor_rest_permission_check',
+            'args'                => [
+                'since' => [
+                    'description' => __('Filtrer les relevés depuis un horodatage ou une date ISO 8601.', 'sitepulse'),
+                    'type'        => 'string',
+                    'required'    => false,
+                ],
+                'granularity' => [
+                    'description' => __('Granularité des agrégations (raw, 15m, 1h, 1d).', 'sitepulse'),
+                    'type'        => 'string',
+                    'required'    => false,
+                    'default'     => 'raw',
+                ],
             ],
         ]
     );
@@ -536,16 +592,95 @@ function sitepulse_resource_monitor_rest_history($request) {
         $include_snapshot = false;
     }
 
-    $history_query = sitepulse_resource_monitor_get_history([
-        'per_page' => $per_page,
-        'page'     => $page,
-        'since'    => $since_timestamp,
-        'order'    => 'ASC',
-    ]);
+    $granularity = sitepulse_resource_monitor_rest_normalize_granularity($request->get_param('granularity'));
 
-    $history_entries = isset($history_query['entries']) && is_array($history_query['entries'])
-        ? $history_query['entries']
-        : [];
+    $cache_args = [
+        'per_page'         => $per_page,
+        'page'             => $page,
+        'since'            => $since_timestamp,
+        'include_snapshot' => (bool) $include_snapshot,
+        'granularity'      => $granularity,
+    ];
+
+    $cached_response = sitepulse_resource_monitor_get_cached_rest_response('rest_history', $cache_args);
+    if ($cached_response !== null) {
+        return rest_ensure_response($cached_response);
+    }
+
+    $history_entries = [];
+    $history_query = [];
+    $history_total_available = 0;
+    $filtered_total = 0;
+    $granularity_seconds = sitepulse_resource_monitor_get_granularity_seconds($granularity);
+    $history_entries_for_cron = [];
+
+    if ($granularity === 'raw') {
+        $history_query = sitepulse_resource_monitor_get_history([
+            'per_page' => $per_page,
+            'page'     => $page,
+            'since'    => $since_timestamp,
+            'order'    => 'ASC',
+        ]);
+
+        $history_entries = isset($history_query['entries']) && is_array($history_query['entries'])
+            ? $history_query['entries']
+            : [];
+
+        $history_total_available = isset($history_query['total']) ? (int) $history_query['total'] : count($history_entries);
+        $filtered_total = isset($history_query['filtered']) ? (int) $history_query['filtered'] : count($history_entries);
+        $history_entries_for_cron = $history_entries;
+    } else {
+        $history_all = sitepulse_resource_monitor_get_history([
+            'per_page' => 0,
+            'page'     => 1,
+            'since'    => $since_timestamp,
+            'order'    => 'ASC',
+        ]);
+
+        $all_entries = isset($history_all['entries']) && is_array($history_all['entries'])
+            ? $history_all['entries']
+            : [];
+
+        $history_entries_for_cron = $all_entries;
+        $history_total_available = isset($history_all['total']) ? (int) $history_all['total'] : count($all_entries);
+
+        $grouped_entries = sitepulse_resource_monitor_group_history_entries($all_entries, $granularity);
+        $filtered_total = count($grouped_entries);
+
+        if ($per_page > 0) {
+            $pages = $filtered_total > 0 ? (int) ceil($filtered_total / $per_page) : 0;
+
+            if ($pages > 0) {
+                $page = max(1, min($page, $pages));
+            } else {
+                $page = 1;
+            }
+
+            $offset = max(0, ($page - 1) * $per_page);
+            $history_entries = array_slice($grouped_entries, $offset, $per_page);
+            $history_query = [
+                'entries'  => $history_entries,
+                'total'    => $history_total_available,
+                'filtered' => $filtered_total,
+                'page'     => $page,
+                'per_page' => $per_page,
+                'pages'    => $pages,
+                'order'    => 'ASC',
+            ];
+        } else {
+            $history_entries = $grouped_entries;
+            $history_query = [
+                'entries'  => $history_entries,
+                'total'    => $history_total_available,
+                'filtered' => $filtered_total,
+                'page'     => 1,
+                'per_page' => 0,
+                'pages'    => $filtered_total > 0 ? 1 : 0,
+                'order'    => 'ASC',
+            ];
+            $page = 1;
+        }
+    }
 
     $returned_count = count($history_entries);
 
@@ -559,7 +694,7 @@ function sitepulse_resource_monitor_rest_history($request) {
         : null;
 
     $last_cron_overall = sitepulse_resource_monitor_get_last_cron_timestamp();
-    $last_cron_included = sitepulse_resource_monitor_get_last_cron_timestamp($history_entries);
+    $last_cron_included = sitepulse_resource_monitor_get_last_cron_timestamp($history_entries_for_cron);
 
     $required_consecutive = sitepulse_resource_monitor_get_required_consecutive_snapshots();
 
@@ -572,10 +707,11 @@ function sitepulse_resource_monitor_rest_history($request) {
             'page'             => isset($history_query['page']) ? (int) $history_query['page'] : $page,
             'since'            => $since_timestamp,
             'include_snapshot' => (bool) $include_snapshot,
+            'granularity'      => $granularity,
         ],
         'history'      => [
-            'total_available'      => isset($history_query['total']) ? (int) $history_query['total'] : $returned_count,
-            'filtered_count'       => isset($history_query['filtered']) ? (int) $history_query['filtered'] : $returned_count,
+            'total_available'      => $history_total_available,
+            'filtered_count'       => $filtered_total,
             'returned_count'       => $returned_count,
             'page'                 => isset($history_query['page']) ? (int) $history_query['page'] : $page,
             'per_page'             => isset($history_query['per_page']) ? (int) $history_query['per_page'] : $per_page,
@@ -588,6 +724,11 @@ function sitepulse_resource_monitor_rest_history($request) {
             'summary_text'         => $history_summary_text,
             'entries'              => $history_prepared,
             'latest_entry'         => $latest_entry,
+            'granularity'          => $granularity,
+            'granularity_seconds'  => $granularity_seconds,
+            'aggregated_source_count' => $granularity === 'raw'
+                ? $returned_count
+                : count($history_entries_for_cron),
         ],
         'thresholds'   => sitepulse_resource_monitor_get_threshold_configuration(),
     ];
@@ -624,6 +765,137 @@ function sitepulse_resource_monitor_rest_history($request) {
             $all_entries
         );
     }
+
+    sitepulse_resource_monitor_cache_rest_response('rest_history', $cache_args, $response);
+
+    return rest_ensure_response($response);
+}
+
+/**
+ * Handles the REST request returning aggregated resource metrics.
+ *
+ * @param WP_REST_Request $request Incoming request instance.
+ * @return WP_REST_Response|WP_Error
+ */
+function sitepulse_resource_monitor_rest_aggregates($request) {
+    $module_active = function_exists('sitepulse_is_module_active')
+        ? sitepulse_is_module_active('resource_monitor')
+        : true;
+
+    if (!$module_active) {
+        return new WP_Error(
+            'sitepulse_resource_monitor_inactive',
+            __('Le module Resource Monitor est désactivé.', 'sitepulse'),
+            ['status' => 404]
+        );
+    }
+
+    $raw_since = $request->get_param('since');
+    $since_parse = sitepulse_resource_monitor_rest_parse_since_param($raw_since);
+
+    if (isset($since_parse['error'])) {
+        return new WP_Error(
+            'sitepulse_resource_monitor_invalid_since',
+            $since_parse['error'],
+            ['status' => 400]
+        );
+    }
+
+    $since_timestamp = isset($since_parse['timestamp']) ? (int) $since_parse['timestamp'] : null;
+    $granularity = sitepulse_resource_monitor_rest_normalize_granularity($request->get_param('granularity'));
+
+    $cache_args = [
+        'since'       => $since_timestamp,
+        'granularity' => $granularity,
+    ];
+
+    $cached = sitepulse_resource_monitor_get_cached_rest_response('aggregates', $cache_args);
+    if ($cached !== null) {
+        return rest_ensure_response($cached);
+    }
+
+    $history_query = sitepulse_resource_monitor_get_history([
+        'per_page' => 0,
+        'page'     => 1,
+        'since'    => $since_timestamp,
+        'order'    => 'ASC',
+    ]);
+
+    $raw_entries = isset($history_query['entries']) && is_array($history_query['entries'])
+        ? $history_query['entries']
+        : [];
+
+    $entries = $granularity === 'raw'
+        ? $raw_entries
+        : sitepulse_resource_monitor_group_history_entries($raw_entries, $granularity);
+
+    $granularity_seconds = sitepulse_resource_monitor_get_granularity_seconds($granularity);
+    $samples_count = count($entries);
+    $raw_count = count($raw_entries);
+
+    $first_timestamp = null;
+    $last_timestamp = null;
+    $span = 0;
+
+    if ($samples_count > 0) {
+        $first_timestamp = (int) $entries[0]['timestamp'];
+        $last_timestamp = (int) $entries[$samples_count - 1]['timestamp'];
+        $span = max(0, $last_timestamp - $first_timestamp);
+    }
+
+    $metrics = sitepulse_resource_monitor_calculate_aggregate_metrics($entries);
+    $summary = sitepulse_resource_monitor_calculate_history_summary($entries);
+    $summary_text = sitepulse_resource_monitor_format_history_summary($summary);
+
+    $source_counts = [];
+    foreach ($raw_entries as $entry) {
+        $source = isset($entry['source']) ? (string) $entry['source'] : 'manual';
+        if ($source === '') {
+            $source = 'manual';
+        }
+        if (!isset($source_counts[$source])) {
+            $source_counts[$source] = 0;
+        }
+        $source_counts[$source]++;
+    }
+    ksort($source_counts);
+
+    $latest_entry = null;
+    if (!empty($entries)) {
+        $prepared_latest = sitepulse_resource_monitor_prepare_history_for_rest([
+            $entries[$samples_count - 1],
+        ]);
+        $latest_entry = !empty($prepared_latest) ? $prepared_latest[0] : null;
+    }
+
+    $response = [
+        'generated_at' => function_exists('current_time')
+            ? (int) current_time('timestamp', true)
+            : time(),
+        'request'      => [
+            'since'       => $since_timestamp,
+            'granularity' => $granularity,
+        ],
+        'samples'      => [
+            'count'               => $samples_count,
+            'raw_count'           => $raw_count,
+            'span'                => $span,
+            'first_timestamp'     => $first_timestamp,
+            'last_timestamp'      => $last_timestamp,
+            'granularity_seconds' => $granularity_seconds,
+            'sources'             => $source_counts,
+        ],
+        'metrics'      => $metrics,
+        'summary'      => $summary,
+        'summary_text' => $summary_text,
+        'latest_entry' => $latest_entry,
+    ];
+
+    if ($since_timestamp !== null) {
+        $response['request']['since_iso'] = gmdate('c', $since_timestamp);
+    }
+
+    sitepulse_resource_monitor_cache_rest_response('aggregates', $cache_args, $response);
 
     return rest_ensure_response($response);
 }
@@ -672,6 +944,1128 @@ function sitepulse_resource_monitor_rest_parse_since_param($value) {
     return [
         'error' => __('Le paramètre since doit être un horodatage Unix positif ou une date valide.', 'sitepulse'),
     ];
+}
+
+/**
+ * Normalizes the `granularity` REST parameter.
+ *
+ * @param string|null $value Raw granularity value.
+ * @return string One of 'raw', '15m', '1h', '1d'.
+ */
+function sitepulse_resource_monitor_rest_normalize_granularity($value) {
+    $default = 'raw';
+
+    if (!is_string($value) || $value === '') {
+        return $default;
+    }
+
+    $candidate = strtolower(trim($value));
+
+    $aliases = [
+        'raw'  => ['raw', 'none', 'brut'],
+        '15m'  => ['15m', '15min', '15 minutes', 'quarter'],
+        '1h'   => ['1h', '60m', 'hour', '1 hour'],
+        '1d'   => ['1d', '24h', 'day', '1 day'],
+    ];
+
+    foreach ($aliases as $normalized => $list) {
+        if (in_array($candidate, $list, true)) {
+            return $normalized;
+        }
+    }
+
+    return $default;
+}
+
+/**
+ * Retrieves the number of seconds represented by a granularity slug.
+ *
+ * @param string $granularity Granularity identifier.
+ * @return int|null Number of seconds or null when using raw data.
+ */
+function sitepulse_resource_monitor_get_granularity_seconds($granularity) {
+    switch ($granularity) {
+        case '15m':
+            return 15 * MINUTE_IN_SECONDS;
+        case '1h':
+            return HOUR_IN_SECONDS;
+        case '1d':
+            return DAY_IN_SECONDS;
+        default:
+            return null;
+    }
+}
+
+/**
+ * Groups history entries according to the requested granularity.
+ *
+ * @param array<int, array> $entries History entries sorted chronologically.
+ * @param string            $granularity Requested granularity slug.
+ * @return array<int, array> Aggregated entries.
+ */
+function sitepulse_resource_monitor_group_history_entries(array $entries, $granularity) {
+    $seconds = sitepulse_resource_monitor_get_granularity_seconds($granularity);
+
+    if ($seconds === null || $seconds <= 0) {
+        return $entries;
+    }
+
+    $buckets = [];
+
+    foreach ($entries as $entry) {
+        $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+
+        if ($timestamp <= 0) {
+            continue;
+        }
+
+        $bucket_key = (int) floor($timestamp / $seconds) * $seconds;
+
+        if (!isset($buckets[$bucket_key])) {
+            $buckets[$bucket_key] = [
+                'count'        => 0,
+                'load_1'       => [],
+                'load_5'       => [],
+                'load_15'      => [],
+                'memory_usage' => [],
+                'memory_limit' => [],
+                'disk_free'    => [],
+                'disk_total'   => [],
+                'sources'      => [],
+            ];
+        }
+
+        $buckets[$bucket_key]['count']++;
+
+        if (isset($entry['load'][0]) && is_numeric($entry['load'][0])) {
+            $buckets[$bucket_key]['load_1'][] = (float) $entry['load'][0];
+        }
+
+        if (isset($entry['load'][1]) && is_numeric($entry['load'][1])) {
+            $buckets[$bucket_key]['load_5'][] = (float) $entry['load'][1];
+        }
+
+        if (isset($entry['load'][2]) && is_numeric($entry['load'][2])) {
+            $buckets[$bucket_key]['load_15'][] = (float) $entry['load'][2];
+        }
+
+        if (isset($entry['memory']['usage']) && is_numeric($entry['memory']['usage'])) {
+            $buckets[$bucket_key]['memory_usage'][] = (float) $entry['memory']['usage'];
+        }
+
+        if (isset($entry['memory']['limit']) && is_numeric($entry['memory']['limit'])) {
+            $buckets[$bucket_key]['memory_limit'][] = (float) $entry['memory']['limit'];
+        }
+
+        if (isset($entry['disk']['free']) && is_numeric($entry['disk']['free'])) {
+            $buckets[$bucket_key]['disk_free'][] = (float) $entry['disk']['free'];
+        }
+
+        if (isset($entry['disk']['total']) && is_numeric($entry['disk']['total'])) {
+            $buckets[$bucket_key]['disk_total'][] = (float) $entry['disk']['total'];
+        }
+
+        $source = isset($entry['source']) ? (string) $entry['source'] : 'manual';
+        if ($source === '') {
+            $source = 'manual';
+        }
+        $buckets[$bucket_key]['sources'][$source] = true;
+    }
+
+    if (empty($buckets)) {
+        return [];
+    }
+
+    ksort($buckets);
+
+    $aggregated = [];
+
+    foreach ($buckets as $bucket_timestamp => $bucket) {
+        $load_1 = sitepulse_resource_monitor_calculate_average($bucket['load_1']);
+        $load_5 = sitepulse_resource_monitor_calculate_average($bucket['load_5']);
+        $load_15 = sitepulse_resource_monitor_calculate_average($bucket['load_15']);
+
+        $memory_usage = sitepulse_resource_monitor_calculate_average($bucket['memory_usage']);
+        $memory_limit = sitepulse_resource_monitor_calculate_average($bucket['memory_limit']);
+        $disk_free = sitepulse_resource_monitor_calculate_average($bucket['disk_free']);
+        $disk_total = sitepulse_resource_monitor_calculate_average($bucket['disk_total']);
+
+        $aggregated[] = [
+            'timestamp'        => $bucket_timestamp,
+            'load'             => [
+                $load_1 !== null ? (float) $load_1 : null,
+                $load_5 !== null ? (float) $load_5 : null,
+                $load_15 !== null ? (float) $load_15 : null,
+            ],
+            'memory'           => [
+                'usage' => $memory_usage !== null ? (int) round($memory_usage) : null,
+                'limit' => $memory_limit !== null ? (int) round($memory_limit) : null,
+            ],
+            'disk'             => [
+                'free'  => $disk_free !== null ? (int) round($disk_free) : null,
+                'total' => $disk_total !== null ? (int) round($disk_total) : null,
+            ],
+            'source'           => 'aggregate',
+            'aggregated_from'  => (int) $bucket['count'],
+            'granularity'      => $granularity,
+            'sources'          => array_keys($bucket['sources']),
+        ];
+    }
+
+    return $aggregated;
+}
+
+/**
+ * Generates a cache key for a given cache group and arguments.
+ *
+ * @param string               $group Cache group identifier.
+ * @param array<string, mixed> $args  Arguments influencing the cache entry.
+ * @return string|null Cache key or null on failure.
+ */
+function sitepulse_resource_monitor_build_cache_key($group, array $args) {
+    switch ($group) {
+        case 'rest_history':
+            $prefix = defined('SITEPULSE_TRANSIENT_RESOURCE_MONITOR_HISTORY_CACHE_PREFIX')
+                ? SITEPULSE_TRANSIENT_RESOURCE_MONITOR_HISTORY_CACHE_PREFIX
+                : 'sitepulse_resource_monitor_rest_history_';
+            break;
+        case 'aggregates':
+            $prefix = defined('SITEPULSE_TRANSIENT_RESOURCE_MONITOR_AGGREGATE_CACHE_PREFIX')
+                ? SITEPULSE_TRANSIENT_RESOURCE_MONITOR_AGGREGATE_CACHE_PREFIX
+                : 'sitepulse_resource_monitor_aggregates_';
+            break;
+        default:
+            return null;
+    }
+
+    if ($prefix === '') {
+        return null;
+    }
+
+    $encoded = function_exists('wp_json_encode') ? wp_json_encode($args) : json_encode($args);
+
+    if (!is_string($encoded) || $encoded === '') {
+        return null;
+    }
+
+    return $prefix . md5($encoded);
+}
+
+/**
+ * Retrieves the cache registry option used to invalidate analytics caches.
+ *
+ * @return array<string, array<int, string>>
+ */
+function sitepulse_resource_monitor_get_cache_registry() {
+    $registry = function_exists('get_option')
+        ? get_option(SITEPULSE_OPTION_RESOURCE_MONITOR_CACHE_KEYS, [])
+        : [];
+
+    return is_array($registry) ? $registry : [];
+}
+
+/**
+ * Stores the cache registry option.
+ *
+ * @param array<string, array<int, string>> $registry Cache registry map.
+ * @return void
+ */
+function sitepulse_resource_monitor_set_cache_registry(array $registry) {
+    if (!function_exists('update_option')) {
+        return;
+    }
+
+    update_option(SITEPULSE_OPTION_RESOURCE_MONITOR_CACHE_KEYS, $registry, false);
+}
+
+/**
+ * Tracks a cache key under the specified group for later invalidation.
+ *
+ * @param string $group Cache group identifier.
+ * @param string $key   Cache key to track.
+ * @return void
+ */
+function sitepulse_resource_monitor_register_cache_key($group, $key) {
+    if ($key === '') {
+        return;
+    }
+
+    $registry = sitepulse_resource_monitor_get_cache_registry();
+
+    if (!isset($registry[$group]) || !is_array($registry[$group])) {
+        $registry[$group] = [];
+    }
+
+    if (!in_array($key, $registry[$group], true)) {
+        $registry[$group][] = $key;
+        sitepulse_resource_monitor_set_cache_registry($registry);
+    }
+}
+
+/**
+ * Deletes the cached entries for the provided cache group.
+ *
+ * @param string|null $group Cache group to invalidate. When null, flushes all tracked groups.
+ * @return void
+ */
+function sitepulse_resource_monitor_clear_cache_group($group = null) {
+    if (!function_exists('delete_transient')) {
+        return;
+    }
+
+    $registry = sitepulse_resource_monitor_get_cache_registry();
+
+    $groups = $group !== null ? [$group] : array_keys($registry);
+
+    foreach ($groups as $group_key) {
+        if (!isset($registry[$group_key]) || !is_array($registry[$group_key])) {
+            continue;
+        }
+
+        foreach ($registry[$group_key] as $cache_key) {
+            delete_transient($cache_key);
+        }
+
+        $registry[$group_key] = [];
+    }
+
+    sitepulse_resource_monitor_set_cache_registry($registry);
+}
+
+/**
+ * Retrieves a cached REST response when available.
+ *
+ * @param string               $group Cache group identifier.
+ * @param array<string, mixed> $args  Cache arguments.
+ * @return array|null Cached response or null.
+ */
+function sitepulse_resource_monitor_get_cached_rest_response($group, array $args) {
+    if (!function_exists('get_transient')) {
+        return null;
+    }
+
+    $key = sitepulse_resource_monitor_build_cache_key($group, $args);
+
+    if ($key === null) {
+        return null;
+    }
+
+    $cached = get_transient($key);
+
+    if ($cached === false || !is_array($cached)) {
+        return null;
+    }
+
+    return $cached;
+}
+
+/**
+ * Stores a REST response in the transient cache and registers the key.
+ *
+ * @param string               $group    Cache group identifier.
+ * @param array<string, mixed> $args     Cache arguments.
+ * @param array<string, mixed> $response Response payload.
+ * @return void
+ */
+function sitepulse_resource_monitor_cache_rest_response($group, array $args, array $response) {
+    if (!function_exists('set_transient')) {
+        return;
+    }
+
+    $key = sitepulse_resource_monitor_build_cache_key($group, $args);
+
+    if ($key === null) {
+        return;
+    }
+
+    $default_ttl = $group === 'rest_history' ? 60 : 120;
+
+    if (function_exists('apply_filters')) {
+        $filter = $group === 'rest_history'
+            ? 'sitepulse_resource_monitor_rest_history_cache_ttl'
+            : 'sitepulse_resource_monitor_rest_aggregates_cache_ttl';
+
+        $default_ttl = (int) apply_filters($filter, $default_ttl, $args, $response);
+    }
+
+    $ttl = $default_ttl > 0 ? $default_ttl : 60;
+
+    set_transient($key, $response, $ttl);
+    sitepulse_resource_monitor_register_cache_key($group, $key);
+}
+
+/**
+ * Clears all caches related to REST analytics endpoints.
+ *
+ * @return void
+ */
+function sitepulse_resource_monitor_invalidate_analytics_cache() {
+    sitepulse_resource_monitor_clear_cache_group('rest_history');
+    sitepulse_resource_monitor_clear_cache_group('aggregates');
+}
+
+/**
+ * Calculates percentiles for a numeric dataset.
+ *
+ * @param array<int, float> $values Numeric values.
+ * @param array<int, float> $percentiles Percentile thresholds (0-100).
+ * @return array<string, float|null>
+ */
+function sitepulse_resource_monitor_calculate_percentiles(array $values, array $percentiles) {
+    $values = array_values(array_filter($values, static function ($value) {
+        return is_numeric($value);
+    }));
+
+    sort($values);
+
+    $results = [];
+
+    if (empty($values)) {
+        foreach ($percentiles as $percentile) {
+            $key = 'p' . (int) round($percentile);
+            $results[$key] = null;
+        }
+
+        return $results;
+    }
+
+    $count = count($values);
+
+    foreach ($percentiles as $percentile) {
+        $percentile = max(0.0, min(100.0, (float) $percentile));
+        $rank = ($percentile / 100) * ($count - 1);
+        $lower_index = (int) floor($rank);
+        $upper_index = (int) ceil($rank);
+        $weight = $rank - $lower_index;
+
+        $lower_value = $values[$lower_index];
+        $upper_value = $values[$upper_index] ?? $lower_value;
+
+        $interpolated = $lower_value + ($upper_value - $lower_value) * $weight;
+        $key = 'p' . (int) round($percentile);
+
+        $results[$key] = (float) $interpolated;
+    }
+
+    return $results;
+}
+
+/**
+ * Calculates the trend of a metric using linear regression.
+ *
+ * @param array<int, array> $entries History entries.
+ * @param callable          $value_callback Callback returning the metric value for an entry.
+ * @return array<string, mixed>
+ */
+function sitepulse_resource_monitor_calculate_metric_trend(array $entries, callable $value_callback) {
+    $points = [];
+
+    foreach ($entries as $entry) {
+        if (!isset($entry['timestamp'])) {
+            continue;
+        }
+
+        $value = $value_callback($entry);
+
+        if ($value === null) {
+            continue;
+        }
+
+        $points[] = [
+            'timestamp' => (int) $entry['timestamp'],
+            'value'     => (float) $value,
+        ];
+    }
+
+    $count = count($points);
+
+    if ($count < 2) {
+        return [
+            'direction'      => 'flat',
+            'slope_per_hour' => 0.0,
+            'absolute_change'=> 0.0,
+            'percent_change' => null,
+            'start'          => $count === 1 ? $points[0] : null,
+            'end'            => $count === 1 ? $points[0] : null,
+            'sample_size'    => $count,
+        ];
+    }
+
+    $origin = $points[0]['timestamp'];
+    $sum_x = 0.0;
+    $sum_y = 0.0;
+    $sum_xy = 0.0;
+    $sum_x2 = 0.0;
+
+    foreach ($points as $point) {
+        $x = ($point['timestamp'] - $origin) / 60.0; // minutes to limit floating errors.
+        $y = $point['value'];
+
+        $sum_x += $x;
+        $sum_y += $y;
+        $sum_xy += $x * $y;
+        $sum_x2 += $x * $x;
+    }
+
+    $denominator = ($count * $sum_x2) - ($sum_x * $sum_x);
+    $slope_per_minute = $denominator !== 0.0
+        ? (($count * $sum_xy) - ($sum_x * $sum_y)) / $denominator
+        : 0.0;
+
+    $slope_per_hour = $slope_per_minute * 60.0;
+
+    $first = $points[0];
+    $last = $points[$count - 1];
+    $absolute_change = $last['value'] - $first['value'];
+    $percent_change = $first['value'] != 0.0
+        ? ($absolute_change / $first['value']) * 100.0
+        : null;
+
+    $direction = 'flat';
+
+    if ($slope_per_hour > 0.01) {
+        $direction = 'up';
+    } elseif ($slope_per_hour < -0.01) {
+        $direction = 'down';
+    }
+
+    return [
+        'direction'       => $direction,
+        'slope_per_hour'  => $slope_per_hour,
+        'absolute_change' => $absolute_change,
+        'percent_change'  => $percent_change,
+        'start'           => $first,
+        'end'             => $last,
+        'sample_size'     => $count,
+    ];
+}
+
+/**
+ * Retrieves the most recent numeric value for a given metric.
+ *
+ * @param array<int, array> $entries History entries.
+ * @param callable          $value_callback Callback returning the metric value.
+ * @return float|null Latest value or null.
+ */
+function sitepulse_resource_monitor_get_latest_metric_value(array $entries, callable $value_callback) {
+    for ($index = count($entries) - 1; $index >= 0; $index--) {
+        $value = $value_callback($entries[$index]);
+
+        if ($value !== null) {
+            return (float) $value;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Calculates aggregated metrics (averages, percentiles, trends) for key indicators.
+ *
+ * @param array<int, array> $entries History entries.
+ * @return array<string, array<string, mixed>>
+ */
+function sitepulse_resource_monitor_calculate_aggregate_metrics(array $entries) {
+    $series = [
+        'load_1'         => [],
+        'load_5'         => [],
+        'load_15'        => [],
+        'memory_percent' => [],
+        'disk_used'      => [],
+    ];
+
+    foreach ($entries as $entry) {
+        if (isset($entry['load'][0]) && is_numeric($entry['load'][0])) {
+            $series['load_1'][] = (float) $entry['load'][0];
+        }
+
+        if (isset($entry['load'][1]) && is_numeric($entry['load'][1])) {
+            $series['load_5'][] = (float) $entry['load'][1];
+        }
+
+        if (isset($entry['load'][2]) && is_numeric($entry['load'][2])) {
+            $series['load_15'][] = (float) $entry['load'][2];
+        }
+
+        $memory_percent = sitepulse_resource_monitor_calculate_percentage(
+            $entry['memory']['usage'] ?? null,
+            $entry['memory']['limit'] ?? null
+        );
+
+        if ($memory_percent !== null) {
+            $series['memory_percent'][] = (float) $memory_percent;
+        }
+
+        $disk_percent_free = sitepulse_resource_monitor_calculate_percentage(
+            $entry['disk']['free'] ?? null,
+            $entry['disk']['total'] ?? null
+        );
+
+        if ($disk_percent_free !== null) {
+            $series['disk_used'][] = max(0.0, min(100.0, 100.0 - $disk_percent_free));
+        }
+    }
+
+    $percentile_thresholds = [50, 90, 95, 99];
+
+    $metric_map = [
+        'load_1' => function ($entry) {
+            return isset($entry['load'][0]) && is_numeric($entry['load'][0]) ? (float) $entry['load'][0] : null;
+        },
+        'load_5' => function ($entry) {
+            return isset($entry['load'][1]) && is_numeric($entry['load'][1]) ? (float) $entry['load'][1] : null;
+        },
+        'load_15' => function ($entry) {
+            return isset($entry['load'][2]) && is_numeric($entry['load'][2]) ? (float) $entry['load'][2] : null;
+        },
+        'memory_percent' => function ($entry) {
+            return sitepulse_resource_monitor_calculate_percentage(
+                $entry['memory']['usage'] ?? null,
+                $entry['memory']['limit'] ?? null
+            );
+        },
+        'disk_used' => function ($entry) {
+            $disk_percent_free = sitepulse_resource_monitor_calculate_percentage(
+                $entry['disk']['free'] ?? null,
+                $entry['disk']['total'] ?? null
+            );
+
+            if ($disk_percent_free === null) {
+                return null;
+            }
+
+            return max(0.0, min(100.0, 100.0 - $disk_percent_free));
+        },
+    ];
+
+    $results = [];
+
+    foreach ($series as $key => $values) {
+        $average = sitepulse_resource_monitor_calculate_average($values);
+        $latest = sitepulse_resource_monitor_get_latest_metric_value($entries, $metric_map[$key]);
+        $max = !empty($values) ? max($values) : null;
+        $percentiles = sitepulse_resource_monitor_calculate_percentiles($values, $percentile_thresholds);
+        $trend = sitepulse_resource_monitor_calculate_metric_trend($entries, $metric_map[$key]);
+
+        $results[$key] = [
+            'average'     => $average !== null ? (float) $average : null,
+            'latest'      => $latest,
+            'max'         => $max !== null ? (float) $max : null,
+            'percentiles' => $percentiles,
+            'trend'       => $trend,
+            'samples'     => count($values),
+        ];
+    }
+
+    return $results;
+}
+
+/**
+ * Builds a heatmap dataset (date/hour buckets) from history entries.
+ *
+ * @param array<int, array> $entries History entries.
+ * @return array<int, array<string, mixed>>
+ */
+function sitepulse_resource_monitor_build_heatmap_data(array $entries) {
+    $buckets = [];
+
+    foreach ($entries as $entry) {
+        $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+
+        if ($timestamp <= 0) {
+            continue;
+        }
+
+        $day = gmdate('Y-m-d', $timestamp);
+        $hour = (int) gmdate('G', $timestamp);
+
+        if (!isset($buckets[$day])) {
+            $buckets[$day] = [];
+        }
+
+        if (!isset($buckets[$day][$hour])) {
+            $buckets[$day][$hour] = [
+                'samples'          => 0,
+                'load_1'           => [],
+                'memory_percent'   => [],
+                'disk_used_percent'=> [],
+            ];
+        }
+
+        if (isset($entry['load'][0]) && is_numeric($entry['load'][0])) {
+            $buckets[$day][$hour]['load_1'][] = (float) $entry['load'][0];
+        }
+
+        $memory_percent = sitepulse_resource_monitor_calculate_percentage(
+            $entry['memory']['usage'] ?? null,
+            $entry['memory']['limit'] ?? null
+        );
+        if ($memory_percent !== null) {
+            $buckets[$day][$hour]['memory_percent'][] = (float) $memory_percent;
+        }
+
+        $disk_percent_free = sitepulse_resource_monitor_calculate_percentage(
+            $entry['disk']['free'] ?? null,
+            $entry['disk']['total'] ?? null
+        );
+        if ($disk_percent_free !== null) {
+            $buckets[$day][$hour]['disk_used_percent'][] = max(0.0, min(100.0, 100.0 - $disk_percent_free));
+        }
+
+        $buckets[$day][$hour]['samples']++;
+    }
+
+    if (empty($buckets)) {
+        return [];
+    }
+
+    ksort($buckets);
+
+    $heatmap = [];
+
+    foreach ($buckets as $day => $hours) {
+        ksort($hours);
+
+        $hour_rows = [];
+
+        foreach ($hours as $hour => $bucket) {
+            $hour_rows[] = [
+                'hour'              => (int) $hour,
+                'load_1'            => !empty($bucket['load_1']) ? (float) sitepulse_resource_monitor_calculate_average($bucket['load_1']) : null,
+                'memory_percent'    => !empty($bucket['memory_percent']) ? (float) sitepulse_resource_monitor_calculate_average($bucket['memory_percent']) : null,
+                'disk_used_percent' => !empty($bucket['disk_used_percent']) ? (float) sitepulse_resource_monitor_calculate_average($bucket['disk_used_percent']) : null,
+                'samples'           => (int) $bucket['samples'],
+            ];
+        }
+
+        $heatmap[] = [
+            'date'  => $day,
+            'hours' => $hour_rows,
+        ];
+    }
+
+    return $heatmap;
+}
+
+/**
+ * Extracts drift information from the aggregated metrics.
+ *
+ * @param array<string, array<string, mixed>> $metrics Aggregated metrics including trend data.
+ * @return array<string, array<string, mixed>>
+ */
+function sitepulse_resource_monitor_calculate_drift_summary(array $metrics) {
+    $drift = [];
+
+    foreach ($metrics as $key => $metric) {
+        $trend = isset($metric['trend']) && is_array($metric['trend']) ? $metric['trend'] : [];
+
+        $drift[$key] = [
+            'direction'       => $trend['direction'] ?? 'flat',
+            'absolute_change' => isset($trend['absolute_change']) ? (float) $trend['absolute_change'] : 0.0,
+            'percent_change'  => isset($trend['percent_change']) ? (float) $trend['percent_change'] : null,
+            'slope_per_hour'  => isset($trend['slope_per_hour']) ? (float) $trend['slope_per_hour'] : 0.0,
+            'start'           => isset($trend['start']) ? $trend['start'] : null,
+            'end'             => isset($trend['end']) ? $trend['end'] : null,
+        ];
+    }
+
+    return $drift;
+}
+
+/**
+ * Builds CSV and JSON exports for scheduled reports.
+ *
+ * @param array<string, mixed> $report Report payload (generated_at, metrics, heatmap, drift, summary).
+ * @return array<string, string>
+ */
+function sitepulse_resource_monitor_prepare_report_exports(array $report) {
+    $generated_at = isset($report['generated_at']) ? (int) $report['generated_at'] : (function_exists('current_time') ? (int) current_time('timestamp', true) : time());
+    $heatmap = isset($report['heatmap']) && is_array($report['heatmap']) ? $report['heatmap'] : [];
+    $drift = isset($report['drift']) && is_array($report['drift']) ? $report['drift'] : [];
+    $metrics = isset($report['metrics']) && is_array($report['metrics']) ? $report['metrics'] : [];
+    $summary = isset($report['summary']) && is_array($report['summary']) ? $report['summary'] : [];
+
+    $csv_stream = fopen('php://temp', 'r+');
+
+    if (is_resource($csv_stream)) {
+        fputcsv($csv_stream, [
+            __('Date', 'sitepulse'),
+            __('Heure', 'sitepulse'),
+            __('Charge (1 min)', 'sitepulse'),
+            __('Mémoire (%)', 'sitepulse'),
+            __('Disque utilisé (%)', 'sitepulse'),
+            __('Échantillons', 'sitepulse'),
+        ], ';');
+
+        foreach ($heatmap as $day_bucket) {
+            $date = isset($day_bucket['date']) ? (string) $day_bucket['date'] : '';
+            $hours = isset($day_bucket['hours']) && is_array($day_bucket['hours']) ? $day_bucket['hours'] : [];
+
+            foreach ($hours as $hour_row) {
+                $hour_label = isset($hour_row['hour']) ? sprintf('%02d:00', (int) $hour_row['hour']) : '';
+                $load_value = isset($hour_row['load_1']) && is_numeric($hour_row['load_1']) ? number_format_i18n((float) $hour_row['load_1'], 2) : '';
+                $memory_value = isset($hour_row['memory_percent']) && is_numeric($hour_row['memory_percent']) ? number_format_i18n((float) $hour_row['memory_percent'], 1) : '';
+                $disk_value = isset($hour_row['disk_used_percent']) && is_numeric($hour_row['disk_used_percent']) ? number_format_i18n((float) $hour_row['disk_used_percent'], 1) : '';
+                $samples_value = isset($hour_row['samples']) ? (int) $hour_row['samples'] : 0;
+
+                fputcsv($csv_stream, [$date, $hour_label, $load_value, $memory_value, $disk_value, $samples_value], ';');
+            }
+        }
+    }
+
+    $csv = '';
+
+    if (is_resource($csv_stream)) {
+        rewind($csv_stream);
+        $csv_contents = stream_get_contents($csv_stream);
+        if (is_string($csv_contents)) {
+            $csv = $csv_contents;
+        }
+        fclose($csv_stream);
+    }
+
+    $json_payload = [
+        'generated_at' => $generated_at,
+        'metrics'      => $metrics,
+        'heatmap'      => $heatmap,
+        'drift'        => $drift,
+        'summary'      => $summary,
+    ];
+
+    $json = function_exists('wp_json_encode')
+        ? wp_json_encode($json_payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
+        : json_encode($json_payload, JSON_PRETTY_PRINT);
+
+    if (!is_string($json)) {
+        $json = '{}';
+    }
+
+    return [
+        'csv'  => $csv,
+        'json' => $json,
+    ];
+}
+
+/**
+ * Generates a comprehensive report payload from history entries.
+ *
+ * @param array<int, array> $entries History entries.
+ * @return array<string, mixed>
+ */
+function sitepulse_resource_monitor_generate_report_payload(array $entries) {
+    $generated_at = function_exists('current_time')
+        ? (int) current_time('timestamp', true)
+        : time();
+
+    $metrics = sitepulse_resource_monitor_calculate_aggregate_metrics($entries);
+    $heatmap = sitepulse_resource_monitor_build_heatmap_data($entries);
+    $drift = sitepulse_resource_monitor_calculate_drift_summary($metrics);
+    $summary = sitepulse_resource_monitor_calculate_history_summary($entries);
+    $summary_text = sitepulse_resource_monitor_format_history_summary($summary);
+
+    $samples_count = count($entries);
+    $first_timestamp = $samples_count > 0 ? (int) $entries[0]['timestamp'] : null;
+    $last_timestamp = $samples_count > 0 ? (int) $entries[$samples_count - 1]['timestamp'] : null;
+
+    $report = [
+        'generated_at' => $generated_at,
+        'metrics'      => $metrics,
+        'heatmap'      => $heatmap,
+        'drift'        => $drift,
+        'summary'      => $summary,
+        'summary_text' => $summary_text,
+        'samples'      => [
+            'count'           => $samples_count,
+            'first_timestamp' => $first_timestamp,
+            'last_timestamp'  => $last_timestamp,
+        ],
+    ];
+
+    $report['exports'] = sitepulse_resource_monitor_prepare_report_exports($report);
+
+    return $report;
+}
+
+/**
+ * Ensures a recurring Action Scheduler job generates resource reports.
+ *
+ * @return void
+ */
+function sitepulse_resource_monitor_schedule_report_generation() {
+    if (!function_exists('as_schedule_recurring_action') || !function_exists('as_has_scheduled_action')) {
+        return;
+    }
+
+    if (function_exists('sitepulse_is_module_active') && !sitepulse_is_module_active('resource_monitor')) {
+        return;
+    }
+
+    $hook = SITEPULSE_ACTION_RESOURCE_MONITOR_REPORTS;
+    $group = SITEPULSE_AS_GROUP_RESOURCE_MONITOR;
+    $default_interval = DAY_IN_SECONDS;
+
+    if (function_exists('apply_filters')) {
+        $default_interval = (int) apply_filters('sitepulse_resource_monitor_report_interval', $default_interval);
+    }
+
+    $interval = $default_interval > 0 ? $default_interval : DAY_IN_SECONDS;
+    $start_delay = function_exists('apply_filters')
+        ? (int) apply_filters('sitepulse_resource_monitor_report_start_delay', 10 * MINUTE_IN_SECONDS)
+        : 10 * MINUTE_IN_SECONDS;
+    $start_timestamp = time() + max(5, $start_delay);
+
+    try {
+        if (!as_has_scheduled_action($hook, [], $group)) {
+            as_schedule_recurring_action($start_timestamp, $interval, $hook, [], $group);
+        }
+    } catch (Throwable $throwable) {
+        if (function_exists('sitepulse_log')) {
+            sitepulse_log('Resource monitor report scheduling failed: ' . $throwable->getMessage(), 'WARNING');
+        }
+    }
+}
+
+/**
+ * Queues a one-off report generation via Action Scheduler or runs it immediately.
+ *
+ * @param int $delay_seconds Delay before the action runs.
+ * @return bool True if queued, false when executed synchronously.
+ */
+function sitepulse_resource_monitor_queue_report_generation($delay_seconds = 5) {
+    $hook = SITEPULSE_ACTION_RESOURCE_MONITOR_REPORTS;
+    $group = SITEPULSE_AS_GROUP_RESOURCE_MONITOR;
+
+    if (!function_exists('as_schedule_single_action') || !function_exists('as_next_scheduled_action')) {
+        sitepulse_resource_monitor_run_scheduled_reports();
+
+        return false;
+    }
+
+    try {
+        $next = as_next_scheduled_action($hook, [], $group);
+
+        if ($next && $next <= (time() + 300)) {
+            return true;
+        }
+
+        as_schedule_single_action(time() + max(1, (int) $delay_seconds), $hook, [], $group);
+
+        return true;
+    } catch (Throwable $throwable) {
+        if (function_exists('sitepulse_log')) {
+            sitepulse_log('Resource monitor report queueing failed: ' . $throwable->getMessage(), 'WARNING');
+        }
+
+        sitepulse_resource_monitor_run_scheduled_reports();
+
+        return false;
+    }
+}
+
+/**
+ * Generates and dispatches scheduled resource monitor reports.
+ *
+ * @return void
+ */
+function sitepulse_resource_monitor_run_scheduled_reports() {
+    if (function_exists('sitepulse_is_module_active') && !sitepulse_is_module_active('resource_monitor')) {
+        return;
+    }
+
+    $history_query = sitepulse_resource_monitor_get_history([
+        'per_page' => 0,
+        'order'    => 'ASC',
+    ]);
+
+    $entries = isset($history_query['entries']) && is_array($history_query['entries'])
+        ? $history_query['entries']
+        : [];
+
+    $report = sitepulse_resource_monitor_generate_report_payload($entries);
+
+    $last_report_ttl = function_exists('apply_filters')
+        ? (int) apply_filters('sitepulse_resource_monitor_last_report_ttl', DAY_IN_SECONDS)
+        : DAY_IN_SECONDS;
+
+    if (function_exists('set_transient')) {
+        set_transient(
+            SITEPULSE_TRANSIENT_RESOURCE_MONITOR_LAST_REPORT,
+            $report,
+            $last_report_ttl > 0 ? $last_report_ttl : DAY_IN_SECONDS
+        );
+    }
+
+    sitepulse_resource_monitor_deliver_report($report);
+
+    if (function_exists('do_action')) {
+        do_action('sitepulse_resource_monitor_report_ready', $report);
+    }
+}
+
+/**
+ * Creates a temporary file for email attachments.
+ *
+ * @param string $contents File contents.
+ * @param string $filename Desired filename.
+ * @return string|null Path to the temporary file.
+ */
+function sitepulse_resource_monitor_create_temporary_export($contents, $filename) {
+    if (!is_string($contents) || $contents === '') {
+        return null;
+    }
+
+    if (function_exists('wp_tempnam')) {
+        $path = wp_tempnam($filename);
+    } else {
+        $path = tempnam(sys_get_temp_dir(), 'sitepulse');
+    }
+
+    if (!is_string($path) || $path === '') {
+        return null;
+    }
+
+    $written = file_put_contents($path, $contents);
+
+    if ($written === false) {
+        return null;
+    }
+
+    return $path;
+}
+
+/**
+ * Sends the report via email and optional webhooks.
+ *
+ * @param array<string, mixed> $report Report payload.
+ * @return void
+ */
+function sitepulse_resource_monitor_deliver_report(array $report) {
+    $exports = isset($report['exports']) && is_array($report['exports']) ? $report['exports'] : [];
+    $csv_export = isset($exports['csv']) ? $exports['csv'] : '';
+    $json_export = isset($exports['json']) ? $exports['json'] : '';
+
+    $recipients = [get_option('admin_email')];
+
+    if (function_exists('apply_filters')) {
+        $recipients = apply_filters('sitepulse_resource_monitor_report_recipients', $recipients, $report);
+    }
+
+    $recipients = array_filter(array_map('sanitize_email', is_array($recipients) ? $recipients : []));
+
+    $attachments = [];
+
+    if (!empty($csv_export)) {
+        $csv_path = sitepulse_resource_monitor_create_temporary_export($csv_export, 'sitepulse-resource-report.csv');
+        if ($csv_path) {
+            $attachments[] = $csv_path;
+        }
+    }
+
+    if (!empty($json_export)) {
+        $json_path = sitepulse_resource_monitor_create_temporary_export($json_export, 'sitepulse-resource-report.json');
+        if ($json_path) {
+            $attachments[] = $json_path;
+        }
+    }
+
+    if (!empty($recipients) && function_exists('wp_mail')) {
+        $site_name = function_exists('get_bloginfo') ? get_bloginfo('name', 'display') : 'WordPress';
+        $subject = sprintf(__('Rapport ressources SitePulse – %s', 'sitepulse'), $site_name);
+
+        $summary_text = isset($report['summary_text']) ? (string) $report['summary_text'] : '';
+        $generated_at = isset($report['generated_at']) ? (int) $report['generated_at'] : time();
+        $generated_label = wp_date(get_option('date_format') . ' ' . get_option('time_format'), $generated_at);
+
+        $lines = [
+            sprintf(__('Rapport généré le %s.', 'sitepulse'), $generated_label),
+        ];
+
+        if ($summary_text !== '') {
+            $lines[] = $summary_text;
+        }
+
+        if (isset($report['metrics']['load_1']['average'])) {
+            $lines[] = sprintf(
+                __('Charge CPU moyenne (1 min) : %s', 'sitepulse'),
+                number_format_i18n((float) $report['metrics']['load_1']['average'], 2)
+            );
+        }
+
+        if (isset($report['metrics']['memory_percent']['average'])) {
+            $lines[] = sprintf(
+                __('Mémoire utilisée moyenne : %s %%', 'sitepulse'),
+                number_format_i18n((float) $report['metrics']['memory_percent']['average'], 1)
+            );
+        }
+
+        if (isset($report['metrics']['disk_used']['average'])) {
+            $lines[] = sprintf(
+                __('Stockage utilisé moyen : %s %%', 'sitepulse'),
+                number_format_i18n((float) $report['metrics']['disk_used']['average'], 1)
+            );
+        }
+
+        $message = implode("\n", $lines);
+
+        wp_mail($recipients, $subject, $message, '', $attachments);
+    }
+
+    $webhooks = [];
+
+    if (function_exists('apply_filters')) {
+        $webhooks = apply_filters('sitepulse_resource_monitor_report_webhooks', $webhooks, $report);
+    }
+
+    if (!empty($webhooks) && function_exists('wp_remote_post') && !empty($json_export)) {
+        foreach ((array) $webhooks as $url) {
+            if (!is_string($url) || $url === '') {
+                continue;
+            }
+
+            try {
+                wp_remote_post($url, [
+                    'timeout' => 10,
+                    'headers' => ['Content-Type' => 'application/json'],
+                    'body'    => $json_export,
+                ]);
+            } catch (Throwable $throwable) {
+                if (function_exists('sitepulse_log')) {
+                    sitepulse_log('Resource monitor webhook failed: ' . $throwable->getMessage(), 'WARNING');
+                }
+            }
+        }
+    }
+
+    foreach ($attachments as $attachment) {
+        if (is_string($attachment) && $attachment !== '' && file_exists($attachment)) {
+            @unlink($attachment);
+        }
+    }
+}
+
+/**
+ * Handles manual report triggers from the admin UI.
+ *
+ * @return void
+ */
+function sitepulse_resource_monitor_handle_report_trigger() {
+    if (!function_exists('sitepulse_get_capability') || !current_user_can(sitepulse_get_capability())) {
+        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
+    }
+
+    check_admin_referer('sitepulse_resource_monitor_trigger_report');
+
+    $queued = sitepulse_resource_monitor_queue_report_generation();
+
+    $status = $queued ? 'queued' : 'executed';
+
+    $redirect = wp_get_referer();
+    if (!$redirect) {
+        $redirect = admin_url('admin.php?page=sitepulse-resources');
+    }
+
+    wp_safe_redirect(add_query_arg('sitepulse_report', $status, $redirect));
+    exit;
 }
 
 /**
@@ -1361,6 +2755,27 @@ function sitepulse_resource_monitor_page() {
         $refresh_feedback = esc_html__('Les mesures et l’historique ont été actualisés.', 'sitepulse');
     }
 
+    if (isset($_GET['sitepulse_report'])) {
+        $report_status = sanitize_key((string) $_GET['sitepulse_report']);
+
+        if ($report_status === 'queued') {
+            $resource_monitor_notices[] = [
+                'type'    => 'success',
+                'message' => esc_html__('Le rapport a été planifié et sera envoyé sous peu.', 'sitepulse'),
+            ];
+        } elseif ($report_status === 'executed') {
+            $resource_monitor_notices[] = [
+                'type'    => 'success',
+                'message' => esc_html__('Le rapport a été généré avec succès.', 'sitepulse'),
+            ];
+        } elseif ($report_status === 'failed') {
+            $resource_monitor_notices[] = [
+                'type'    => 'error',
+                'message' => esc_html__('Le rapport n’a pas pu être généré. Consultez les journaux pour plus de détails.', 'sitepulse'),
+            ];
+        }
+    }
+
     $snapshot = sitepulse_resource_monitor_get_snapshot();
 
     $history_result = sitepulse_resource_monitor_get_history([
@@ -1378,58 +2793,133 @@ function sitepulse_resource_monitor_page() {
     $history_for_js = sitepulse_resource_monitor_prepare_history_for_js($history_entries);
     $last_cron_timestamp = sitepulse_resource_monitor_get_last_cron_timestamp($history_entries);
 
-    $export_endpoint = admin_url('admin-post.php');
-    $export_csv_url = wp_nonce_url(add_query_arg([
-        'action' => 'sitepulse_resource_monitor_export',
-        'format' => 'csv',
-    ], $export_endpoint), SITEPULSE_NONCE_ACTION_RESOURCE_MONITOR_EXPORT);
-    $export_json_url = wp_nonce_url(add_query_arg([
-        'action' => 'sitepulse_resource_monitor_export',
-        'format' => 'json',
-    ], $export_endpoint), SITEPULSE_NONCE_ACTION_RESOURCE_MONITOR_EXPORT);
+    $aggregated_metrics = sitepulse_resource_monitor_calculate_aggregate_metrics($history_entries);
+
+    $granularity_choices = [
+        ['value' => 'raw', 'label' => __('Données brutes (5 min)', 'sitepulse')],
+        ['value' => '15m', 'label' => __('Moyenne 15 minutes', 'sitepulse')],
+        ['value' => '1h', 'label' => __('Moyenne horaire', 'sitepulse')],
+        ['value' => '1d', 'label' => __('Moyenne quotidienne', 'sitepulse')],
+    ];
+
+    $history_initial = [
+        'entries' => $history_for_js,
+        'summary' => [
+            'count'                 => (int) $history_summary['count'],
+            'span'                  => (int) $history_summary['span'],
+            'firstTimestamp'        => $history_summary['first_timestamp'],
+            'lastTimestamp'         => $history_summary['last_timestamp'],
+            'averageLoad'           => $history_summary['average_load'],
+            'latestLoad'            => $history_summary['latest_load'],
+            'averageMemoryPercent'  => $history_summary['average_memory_percent'],
+            'latestMemoryPercent'   => $history_summary['latest_memory_percent'],
+            'averageDiskUsedPercent'=> $history_summary['average_disk_used_percent'],
+            'latestDiskUsedPercent' => $history_summary['latest_disk_used_percent'],
+        ],
+        'summaryText' => $history_summary_text,
+        'granularity' => 'raw',
+    ];
+
+    $snapshot_meta = [
+        'generatedAt' => isset($snapshot['generated_at']) ? (int) $snapshot['generated_at'] : null,
+        'source'      => isset($snapshot['source']) ? (string) $snapshot['source'] : 'manual',
+    ];
+
+    $rest_history_endpoint = function_exists('rest_url') ? rest_url('sitepulse/v1/resources/history') : '';
+    $rest_aggregates_endpoint = function_exists('rest_url') ? rest_url('sitepulse/v1/resources/aggregates') : '';
+    $rest_nonce = wp_create_nonce('wp_rest');
+
+    $last_report_raw = get_transient(SITEPULSE_TRANSIENT_RESOURCE_MONITOR_LAST_REPORT);
+    $last_report_for_js = null;
+    $last_report_display = null;
+
+    if (is_array($last_report_raw)) {
+        $last_generated_at = isset($last_report_raw['generated_at']) ? (int) $last_report_raw['generated_at'] : 0;
+        $last_summary_text = isset($last_report_raw['summary_text']) ? (string) $last_report_raw['summary_text'] : '';
+        $last_samples = isset($last_report_raw['samples']) && is_array($last_report_raw['samples']) ? $last_report_raw['samples'] : [];
+
+        $last_report_for_js = [
+            'generated_at' => $last_generated_at,
+            'summary_text' => $last_summary_text,
+            'samples'      => $last_samples,
+        ];
+
+        if (isset($last_report_raw['metrics']) && is_array($last_report_raw['metrics'])) {
+            $last_report_for_js['metrics'] = $last_report_raw['metrics'];
+        }
+
+        $last_label = $last_generated_at > 0
+            ? wp_date(get_option('date_format') . ' ' . get_option('time_format'), $last_generated_at)
+            : '';
+
+        $last_report_display = [
+            'label'   => $last_label,
+            'summary' => $last_summary_text,
+        ];
+    }
+
+    $sitepulse_localized = [
+        'initialHistory' => $history_initial,
+        'snapshot'       => $snapshot_meta,
+        'lastAutomaticTimestamp' => $last_cron_timestamp,
+        'locale'         => get_user_locale(),
+        'dateFormat'     => get_option('date_format'),
+        'timeFormat'     => get_option('time_format'),
+        'rest'           => [
+            'history'    => esc_url_raw($rest_history_endpoint),
+            'aggregates' => esc_url_raw($rest_aggregates_endpoint),
+            'nonce'      => $rest_nonce,
+        ],
+        'granularity'    => [
+            'default' => 'raw',
+            'choices' => $granularity_choices,
+        ],
+        'aggregates'     => [
+            'metrics'      => $aggregated_metrics,
+            'summary'      => $history_summary,
+            'summaryText'  => $history_summary_text,
+        ],
+        'reporting'      => [
+            'lastReport' => $last_report_for_js,
+        ],
+        'request'        => [
+            'perPage' => 288,
+            'since'   => null,
+        ],
+        'i18n'           => [
+            'loadLabel'         => esc_html__('Charge CPU (1 min)', 'sitepulse'),
+            'memoryLabel'       => esc_html__('Mémoire utilisée (%)', 'sitepulse'),
+            'diskLabel'         => esc_html__('Stockage utilisé (%)', 'sitepulse'),
+            'percentAxisLabel'  => esc_html__('% d’utilisation', 'sitepulse'),
+            'noHistory'         => esc_html__("Aucun historique disponible pour le moment.", 'sitepulse'),
+            'timestamp'         => esc_html__('Horodatage', 'sitepulse'),
+            'unavailable'       => esc_html__('N/A', 'sitepulse'),
+            'memoryUsage'       => esc_html__('Mémoire utilisée', 'sitepulse'),
+            'diskUsage'         => esc_html__('Stockage utilisé', 'sitepulse'),
+            'diskFree'          => esc_html__('Stockage libre', 'sitepulse'),
+            'cronPoint'         => esc_html__('Collecte automatique', 'sitepulse'),
+            'manualPoint'       => esc_html__('Collecte manuelle', 'sitepulse'),
+            'granularityLabel'  => esc_html__('Agrégation', 'sitepulse'),
+            'aggregatesTitle'   => esc_html__('Statistiques avancées', 'sitepulse'),
+            'aggregatesEmpty'   => esc_html__('Aucune donnée agrégée disponible pour cette sélection.', 'sitepulse'),
+            'averageLabel'      => esc_html__('Moyenne', 'sitepulse'),
+            'maxLabel'          => esc_html__('Max', 'sitepulse'),
+            'p95Label'          => esc_html__('P95', 'sitepulse'),
+            'trendLabel'        => esc_html__('Tendance (par heure)', 'sitepulse'),
+            'trendUp'           => esc_html__('Hausse', 'sitepulse'),
+            'trendDown'         => esc_html__('Baisse', 'sitepulse'),
+            'trendFlat'         => esc_html__('Stable', 'sitepulse'),
+            'reportQueued'      => esc_html__('Le rapport a été planifié et sera envoyé sous peu.', 'sitepulse'),
+            'reportExecuted'    => esc_html__('Le rapport a été généré avec succès.', 'sitepulse'),
+        ],
+        'refreshFeedback' => $refresh_feedback,
+        'refreshStatusId' => 'sitepulse-resource-refresh-status',
+    ];
 
     wp_localize_script(
         'sitepulse-resource-monitor',
         'SitePulseResourceMonitor',
-        [
-            'history' => $history_for_js,
-            'summary' => [
-                'count'                 => (int) $history_summary['count'],
-                'span'                  => (int) $history_summary['span'],
-                'firstTimestamp'        => $history_summary['first_timestamp'],
-                'lastTimestamp'         => $history_summary['last_timestamp'],
-                'averageLoad'           => $history_summary['average_load'],
-                'latestLoad'            => $history_summary['latest_load'],
-                'averageMemoryPercent'  => $history_summary['average_memory_percent'],
-                'latestMemoryPercent'   => $history_summary['latest_memory_percent'],
-                'averageDiskUsedPercent'=> $history_summary['average_disk_used_percent'],
-                'latestDiskUsedPercent' => $history_summary['latest_disk_used_percent'],
-            ],
-            'snapshot' => [
-                'generatedAt' => isset($snapshot['generated_at']) ? (int) $snapshot['generated_at'] : null,
-                'source'      => isset($snapshot['source']) ? (string) $snapshot['source'] : 'manual',
-            ],
-            'lastAutomaticTimestamp' => $last_cron_timestamp,
-            'locale' => get_user_locale(),
-            'dateFormat' => get_option('date_format'),
-            'timeFormat' => get_option('time_format'),
-            'i18n' => [
-                'loadLabel'         => esc_html__('Charge CPU (1 min)', 'sitepulse'),
-                'memoryLabel'       => esc_html__('Mémoire utilisée (%)', 'sitepulse'),
-                'diskLabel'         => esc_html__('Stockage utilisé (%)', 'sitepulse'),
-                'percentAxisLabel'  => esc_html__('% d’utilisation', 'sitepulse'),
-                'noHistory'         => esc_html__("Aucun historique disponible pour le moment.", 'sitepulse'),
-                'timestamp'         => esc_html__('Horodatage', 'sitepulse'),
-                'unavailable'       => esc_html__('N/A', 'sitepulse'),
-                'memoryUsage'       => esc_html__('Mémoire utilisée', 'sitepulse'),
-                'diskUsage'         => esc_html__('Stockage utilisé', 'sitepulse'),
-                'diskFree'          => esc_html__('Stockage libre', 'sitepulse'),
-                'cronPoint'         => esc_html__('Collecte automatique', 'sitepulse'),
-                'manualPoint'       => esc_html__('Collecte manuelle', 'sitepulse'),
-            ],
-            'refreshFeedback' => $refresh_feedback,
-            'refreshStatusId' => 'sitepulse-resource-refresh-status',
-        ]
+        $sitepulse_localized
     );
 
     if (!empty($snapshot['notices']) && is_array($snapshot['notices'])) {
@@ -1446,6 +2936,7 @@ function sitepulse_resource_monitor_page() {
     if ($generated_at > 0) {
         $age = human_time_diff($generated_at, (int) current_time('timestamp', true));
     }
+
     $last_automatic_notice = '';
     $now_utc = (int) current_time('timestamp', true);
 
@@ -1466,6 +2957,85 @@ function sitepulse_resource_monitor_page() {
         $last_automatic_notice = esc_html__('Aucune collecte automatique enregistrée pour le moment.', 'sitepulse');
     }
 
+    $export_endpoint = admin_url('admin-post.php');
+    $export_csv_url = wp_nonce_url(add_query_arg([
+        'action' => 'sitepulse_resource_monitor_export',
+        'format' => 'csv',
+    ], $export_endpoint), SITEPULSE_NONCE_ACTION_RESOURCE_MONITOR_EXPORT);
+    $export_json_url = wp_nonce_url(add_query_arg([
+        'action' => 'sitepulse_resource_monitor_export',
+        'format' => 'json',
+    ], $export_endpoint), SITEPULSE_NONCE_ACTION_RESOURCE_MONITOR_EXPORT);
+
+    $report_action_url = admin_url('admin-post.php');
+    $unavailable_label = __('N/A', 'sitepulse');
+
+    $metric_cards = [
+        'load_1' => [
+            'label'    => __('Charge CPU (1 min)', 'sitepulse'),
+            'metric'   => $aggregated_metrics['load_1'] ?? [],
+            'decimals' => 2,
+            'suffix'   => '',
+        ],
+        'memory_percent' => [
+            'label'    => __('Mémoire utilisée (%)', 'sitepulse'),
+            'metric'   => $aggregated_metrics['memory_percent'] ?? [],
+            'decimals' => 1,
+            'suffix'   => '%',
+        ],
+        'disk_used' => [
+            'label'    => __('Stockage utilisé (%)', 'sitepulse'),
+            'metric'   => $aggregated_metrics['disk_used'] ?? [],
+            'decimals' => 1,
+            'suffix'   => '%',
+        ],
+    ];
+
+    $metric_display = [];
+
+    foreach ($metric_cards as $key => $card) {
+        $metric = $card['metric'];
+        $average_display = $unavailable_label;
+        $max_display = $unavailable_label;
+        $p95_display = $unavailable_label;
+        $trend_display = $unavailable_label;
+        $trend_direction = 'flat';
+
+        if (isset($metric['average']) && $metric['average'] !== null) {
+            $average_display = number_format_i18n((float) $metric['average'], $card['decimals']) . $card['suffix'];
+        }
+
+        if (isset($metric['max']) && $metric['max'] !== null) {
+            $max_display = number_format_i18n((float) $metric['max'], $card['decimals']) . $card['suffix'];
+        }
+
+        if (isset($metric['percentiles']['p95']) && $metric['percentiles']['p95'] !== null) {
+            $p95_display = number_format_i18n((float) $metric['percentiles']['p95'], $card['decimals']) . $card['suffix'];
+        }
+
+        if (isset($metric['trend']) && is_array($metric['trend'])) {
+            $trend = $metric['trend'];
+            $trend_direction = isset($trend['direction']) ? (string) $trend['direction'] : 'flat';
+            if (isset($trend['slope_per_hour']) && is_numeric($trend['slope_per_hour'])) {
+                $slope_value = number_format_i18n((float) $trend['slope_per_hour'], $card['decimals']) . $card['suffix'];
+                $symbol = '→';
+                if ($trend_direction === 'up') {
+                    $symbol = '↑';
+                } elseif ($trend_direction === 'down') {
+                    $symbol = '↓';
+                }
+                $trend_display = sprintf('%s %s/h', $symbol, $slope_value);
+            }
+        }
+
+        $metric_display[$key] = [
+            'average'         => $average_display,
+            'max'             => $max_display,
+            'p95'             => $p95_display,
+            'trend_value'     => $trend_display,
+            'trend_direction' => $trend_direction,
+        ];
+    }
     ?>
     <?php
     if (function_exists('sitepulse_render_module_selector')) {
@@ -1475,21 +3045,13 @@ function sitepulse_resource_monitor_page() {
     <div class="wrap sitepulse-resource-monitor">
         <h1><span class="dashicons-before dashicons-performance"></span> <?php esc_html_e('Moniteur de Ressources', 'sitepulse'); ?></h1>
         <?php if (!empty($resource_monitor_notices)) : ?>
-            <?php foreach ($resource_monitor_notices as $notice) : ?>
-                <?php
-                $type = isset($notice['type']) ? (string) $notice['type'] : 'warning';
-                $allowed_types = ['error', 'warning', 'info', 'success'];
-                if (!in_array($type, $allowed_types, true)) {
-                    $type = 'warning';
-                }
-
-                $message = isset($notice['message']) ? $notice['message'] : '';
-                if ($message === '') {
-                    continue;
-                }
-                ?>
-                <div class="<?php echo esc_attr('notice notice-' . $type); ?>"><p><?php echo esc_html($message); ?></p></div>
-            <?php endforeach; ?>
+            <div class="sitepulse-notices">
+                <?php foreach ($resource_monitor_notices as $notice) : ?>
+                    <div class="notice notice-<?php echo esc_attr($notice['type']); ?>">
+                        <p><?php echo esc_html($notice['message']); ?></p>
+                    </div>
+                <?php endforeach; ?>
+            </div>
         <?php endif; ?>
         <div class="sitepulse-resource-grid">
             <div class="sitepulse-resource-card">
@@ -1497,7 +3059,7 @@ function sitepulse_resource_monitor_page() {
                 <?php
                 $load_display_output = isset($snapshot['load']) && is_array($snapshot['load'])
                     ? sitepulse_resource_monitor_format_load_display($snapshot['load'])
-                    : (string) $snapshot['load_display'];
+                    : (string) ($snapshot['load_display'] ?? '');
                 ?>
                 <p class="sitepulse-resource-value"><?php echo esc_html($load_display_output); ?></p>
             </div>
@@ -1512,7 +3074,7 @@ function sitepulse_resource_monitor_page() {
                     if ($memory_percent_display !== null) {
                         printf(esc_html__('%s %% utilisés', 'sitepulse'), esc_html($memory_percent_display));
                     } else {
-                        echo esc_html((string) $snapshot['memory_usage']);
+                        echo esc_html((string) ($snapshot['memory_usage'] ?? ''));
                     }
                     ?>
                 </p>
@@ -1524,14 +3086,14 @@ function sitepulse_resource_monitor_page() {
                         printf(
                             /* translators: 1: memory used, 2: memory limit. */
                             esc_html__('Utilisation : %1$s / Limite : %2$s', 'sitepulse'),
-                            esc_html((string) $snapshot['memory_usage']),
+                            esc_html((string) ($snapshot['memory_usage'] ?? '')),
                             esc_html($memory_limit_label)
                         );
                     } else {
                         printf(
                             /* translators: %s: memory used. */
                             esc_html__('Utilisation : %s', 'sitepulse'),
-                            esc_html((string) $snapshot['memory_usage'])
+                            esc_html((string) ($snapshot['memory_usage'] ?? ''))
                         );
                     }
                     ?>
@@ -1548,7 +3110,7 @@ function sitepulse_resource_monitor_page() {
                     if ($disk_used_percent_display !== null) {
                         printf(esc_html__('%s %% utilisés', 'sitepulse'), esc_html($disk_used_percent_display));
                     } else {
-                        echo esc_html((string) $snapshot['disk_used']);
+                        echo esc_html((string) ($snapshot['disk_used'] ?? ''));
                     }
                     ?>
                 </p>
@@ -1557,9 +3119,9 @@ function sitepulse_resource_monitor_page() {
                     printf(
                         /* translators: 1: used disk, 2: free disk, 3: total disk. */
                         esc_html__('Utilisé : %1$s — Libre : %2$s (Total : %3$s)', 'sitepulse'),
-                        esc_html((string) $snapshot['disk_used']),
-                        esc_html((string) $snapshot['disk_free']),
-                        esc_html((string) $snapshot['disk_total'])
+                        esc_html((string) ($snapshot['disk_used'] ?? '')),
+                        esc_html((string) ($snapshot['disk_free'] ?? '')),
+                        esc_html((string) ($snapshot['disk_total'] ?? ''))
                     );
                     ?>
                 </p>
@@ -1598,12 +3160,74 @@ function sitepulse_resource_monitor_page() {
             </form>
         </div>
         <div class="sitepulse-resource-history" id="sitepulse-resource-history">
-            <h2><?php esc_html_e('Historique des ressources', 'sitepulse'); ?></h2>
+            <div class="sitepulse-resource-history-header">
+                <h2><?php esc_html_e('Historique des ressources', 'sitepulse'); ?></h2>
+                <div class="sitepulse-resource-history-controls">
+                    <label for="sitepulse-resource-history-granularity"><?php esc_html_e('Agrégation', 'sitepulse'); ?></label>
+                    <select id="sitepulse-resource-history-granularity">
+                        <?php foreach ($granularity_choices as $choice) : ?>
+                            <option value="<?php echo esc_attr($choice['value']); ?>"><?php echo esc_html($choice['label']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
             <div class="sitepulse-resource-history-chart">
                 <canvas id="sitepulse-resource-history-chart" aria-describedby="sitepulse-resource-history-summary"></canvas>
             </div>
             <p class="sitepulse-resource-history-empty" role="status" aria-live="polite" data-empty<?php if (!empty($history_entries)) { echo ' hidden'; } ?>>
                 <?php esc_html_e("Aucun historique disponible pour le moment.", 'sitepulse'); ?>
+            </p>
+            <p id="sitepulse-resource-history-summary" class="sitepulse-resource-history-summary" role="status" aria-live="polite">
+                <?php echo esc_html($history_summary_text); ?>
+            </p>
+            <div class="sitepulse-resource-history-actions">
+                <a class="button button-secondary" href="<?php echo esc_url($export_csv_url); ?>"><?php esc_html_e('Exporter en CSV', 'sitepulse'); ?></a>
+                <a class="button button-secondary" href="<?php echo esc_url($export_json_url); ?>"><?php esc_html_e('Exporter en JSON', 'sitepulse'); ?></a>
+            </div>
+        </div>
+<div class="sitepulse-resource-aggregates" id="sitepulse-resource-aggregates">
+            <h2><?php esc_html_e('Statistiques avancées', 'sitepulse'); ?></h2>
+            <p id="sitepulse-resource-aggregates-summary" class="sitepulse-resource-aggregates-summary">
+                <?php echo esc_html($history_summary_text); ?>
+            </p>
+            <div class="sitepulse-resource-aggregate-grid" data-aggregates>
+                <?php foreach ($metric_cards as $key => $card) :
+                    $display = $metric_display[$key];
+                    $direction = $display['trend_direction'];
+                    ?>
+                    <div class="sitepulse-resource-aggregate-card is-<?php echo esc_attr($direction); ?>" data-metric="<?php echo esc_attr($key); ?>">
+                        <h3><?php echo esc_html($card['label']); ?></h3>
+                        <p class="sitepulse-resource-aggregate-line"><strong><?php esc_html_e('Moyenne', 'sitepulse'); ?> :</strong> <span data-metric-average><?php echo esc_html($display['average']); ?></span></p>
+                        <p class="sitepulse-resource-aggregate-line"><strong><?php esc_html_e('Max', 'sitepulse'); ?> :</strong> <span data-metric-max><?php echo esc_html($display['max']); ?></span></p>
+                        <p class="sitepulse-resource-aggregate-line"><strong><?php esc_html_e('P95', 'sitepulse'); ?> :</strong> <span data-metric-percentiles><?php echo esc_html($display['p95']); ?></span></p>
+                        <p class="sitepulse-resource-aggregate-line"><strong><?php esc_html_e('Tendance (par heure)', 'sitepulse'); ?> :</strong> <span data-metric-trend><?php echo esc_html($display['trend_value']); ?></span></p>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+        <div class="sitepulse-resource-report-actions">
+            <h2><?php esc_html_e('Rapports programmés', 'sitepulse'); ?></h2>
+            <form method="post" action="<?php echo esc_url($report_action_url); ?>" class="sitepulse-resource-report-form">
+                <?php wp_nonce_field('sitepulse_resource_monitor_trigger_report'); ?>
+                <input type="hidden" name="action" value="sitepulse_resource_monitor_trigger_report">
+                <button type="submit" class="button button-primary">
+                    <?php esc_html_e('Générer un rapport maintenant', 'sitepulse'); ?>
+                </button>
+            </form>
+            <?php if ($last_report_display) : ?>
+                <p class="sitepulse-resource-report-meta">
+                    <?php if ($last_report_display['label']) : ?>
+                        <?php printf(/* translators: %s: report generated date. */ esc_html__('Dernier rapport généré le %s.', 'sitepulse'), esc_html($last_report_display['label'])); ?>
+                    <?php endif; ?>
+                    <?php if ($last_report_display['summary']) : ?>
+                        <span><?php echo esc_html($last_report_display['summary']); ?></span>
+                    <?php endif; ?>
+                </p>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php
+}
             </p>
             <p id="sitepulse-resource-history-summary" class="sitepulse-resource-history-summary" role="status" aria-live="polite">
                 <?php echo esc_html($history_summary_text); ?>
@@ -1700,6 +3324,8 @@ function sitepulse_resource_monitor_append_history(array $snapshot) {
 
             update_option($option_name, $history, false);
         }
+
+        sitepulse_resource_monitor_invalidate_analytics_cache();
     } finally {
         sitepulse_resource_monitor_release_history_lock($lock_token);
     }
@@ -2209,6 +3835,8 @@ function sitepulse_resource_monitor_get_last_cron_timestamp($history_entries = n
  */
 function sitepulse_resource_monitor_clear_history() {
     delete_option(SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY);
+
+    sitepulse_resource_monitor_invalidate_analytics_cache();
 
     sitepulse_resource_monitor_maybe_upgrade_schema();
 

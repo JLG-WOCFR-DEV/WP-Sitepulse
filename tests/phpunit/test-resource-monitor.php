@@ -24,7 +24,10 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
         parent::set_up();
 
         delete_transient(SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT);
+        delete_transient(SITEPULSE_TRANSIENT_RESOURCE_MONITOR_LAST_REPORT);
         sitepulse_resource_monitor_clear_history();
+        delete_option(SITEPULSE_OPTION_RESOURCE_MONITOR_CACHE_KEYS);
+        sitepulse_resource_monitor_invalidate_analytics_cache();
         $GLOBALS['sitepulse_logger'] = [];
 
         add_filter('sitepulse_resource_monitor_enable_disk_cache', '__return_false');
@@ -32,12 +35,58 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
 
     protected function tear_down(): void {
         delete_transient(SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT);
+        delete_transient(SITEPULSE_TRANSIENT_RESOURCE_MONITOR_LAST_REPORT);
         sitepulse_resource_monitor_clear_history();
+        delete_option(SITEPULSE_OPTION_RESOURCE_MONITOR_CACHE_KEYS);
+        sitepulse_resource_monitor_invalidate_analytics_cache();
         $GLOBALS['sitepulse_logger'] = [];
 
         remove_filter('sitepulse_resource_monitor_enable_disk_cache', '__return_false');
 
         parent::tear_down();
+    }
+
+    /**
+     * Seeds deterministic history entries for REST analytics tests.
+     *
+     * @param int      $count    Number of samples to generate.
+     * @param int|null $start    Base timestamp. Defaults to 2023-01-01 00:00:00 UTC.
+     * @param int      $interval Interval between samples in seconds.
+     * @return array<int, array<string, mixed>> Generated history entries.
+     */
+    protected function seed_sample_history($count = 6, $start = null, $interval = 300) {
+        if ($start === null) {
+            $start = gmmktime(0, 0, 0, 1, 1, 2023);
+        }
+
+        $entries = [];
+
+        for ($i = 0; $i < $count; $i++) {
+            $timestamp = $start + ($i * $interval);
+
+            $entries[] = [
+                'timestamp' => $timestamp,
+                'load'      => [
+                    1.0 + $i,
+                    2.0 + $i,
+                    3.0 + $i,
+                ],
+                'memory'    => [
+                    'usage' => (int) (1000000 * ($i + 1)),
+                    'limit' => 10000000,
+                ],
+                'disk'      => [
+                    'free'  => 5000000 - (int) (10000 * $i),
+                    'total' => 10000000,
+                ],
+                'source'    => ($i % 2 === 0) ? 'manual' : 'cron',
+            ];
+        }
+
+        update_option(SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY, $entries, false);
+        sitepulse_resource_monitor_invalidate_analytics_cache();
+
+        return $entries;
     }
 
     public function test_returns_cached_snapshot_when_transient_exists() {
@@ -419,5 +468,97 @@ class Sitepulse_Resource_Monitor_Test extends WP_UnitTestCase {
 
         $expected_display = sitepulse_resource_monitor_format_load_display($override);
         $this->assertSame($expected_display, $snapshot['load_display'], 'Load display should reflect the overridden values.');
+    }
+
+    public function test_rest_history_supports_granularity() {
+        $start = gmmktime(0, 0, 0, 1, 1, 2023);
+        $this->seed_sample_history(6, $start, 300);
+
+        $raw_request = new WP_REST_Request('GET', '/sitepulse/v1/resources/history');
+        $raw_request->set_param('granularity', 'raw');
+        $raw_request->set_param('per_page', 0);
+
+        $raw_response = sitepulse_resource_monitor_rest_history($raw_request);
+
+        $this->assertInstanceOf(WP_REST_Response::class, $raw_response, 'Raw granularity should return a REST response.');
+
+        $raw_data = $raw_response->get_data();
+
+        $this->assertSame('raw', $raw_data['history']['granularity'], 'History granularity should default to raw.');
+        $this->assertCount(6, $raw_data['history']['entries'], 'Raw history should expose each snapshot.');
+        $this->assertSame(6, $raw_data['history']['returned_count'], 'Returned count should reflect the number of raw entries.');
+
+        $hour_request = new WP_REST_Request('GET', '/sitepulse/v1/resources/history');
+        $hour_request->set_param('granularity', '1h');
+        $hour_request->set_param('per_page', 10);
+
+        $hour_response = sitepulse_resource_monitor_rest_history($hour_request);
+
+        $this->assertInstanceOf(WP_REST_Response::class, $hour_response, 'Hourly granularity should return a REST response.');
+
+        $hour_data = $hour_response->get_data();
+
+        $this->assertSame('1h', $hour_data['history']['granularity'], 'Response should echo the requested granularity.');
+        $this->assertSame(3600, $hour_data['history']['granularity_seconds'], 'Hourly granularity should report 3600 seconds.');
+        $this->assertSame(1, $hour_data['history']['returned_count'], 'Hourly aggregation should collapse into a single bucket.');
+        $this->assertCount(1, $hour_data['history']['entries'], 'Hourly history should include a single aggregated entry.');
+        $this->assertSame(6, $hour_data['history']['aggregated_source_count'], 'Aggregated source count should include every raw entry.');
+        $this->assertSame(1, $hour_data['history']['summary']['count'], 'Summary count should match the aggregated entry count.');
+
+        $bucket = $hour_data['history']['entries'][0];
+
+        $this->assertSame($start, $bucket['timestamp'], 'Aggregated bucket should align to the first hour boundary.');
+        $this->assertSame('aggregate', $bucket['source'], 'Aggregated entries should flag the aggregate source.');
+        $this->assertEqualsWithDelta(3.5, $bucket['load_averages'][0], 0.0001, 'Aggregated load should reflect the average load.');
+        $this->assertEqualsWithDelta(35.0, $bucket['memory']['percent'], 0.0001, 'Aggregated memory percent should average raw samples.');
+        $this->assertEqualsWithDelta(50.25, $bucket['disk']['percent_used'], 0.0001, 'Aggregated disk usage should average raw samples.');
+    }
+
+    public function test_rest_aggregates_returns_metrics() {
+        $start = gmmktime(0, 0, 0, 2, 1, 2023);
+        $this->seed_sample_history(6, $start, 300);
+
+        $request = new WP_REST_Request('GET', '/sitepulse/v1/resources/aggregates');
+        $request->set_param('granularity', 'raw');
+
+        $response = sitepulse_resource_monitor_rest_aggregates($request);
+
+        $this->assertInstanceOf(WP_REST_Response::class, $response, 'Aggregates endpoint should return a REST response.');
+
+        $data = $response->get_data();
+
+        $this->assertSame('raw', $data['request']['granularity'], 'Granularity should default to raw.');
+        $this->assertSame(6, $data['samples']['count'], 'Sample count should match the seeded entries.');
+        $this->assertSame(6, $data['samples']['raw_count'], 'Raw count should reflect total raw entries.');
+        $this->assertSame($start, $data['samples']['first_timestamp'], 'First timestamp should match the first entry.');
+        $this->assertSame($start + (5 * 300), $data['samples']['last_timestamp'], 'Last timestamp should match the last entry.');
+        $this->assertSame(1500, $data['samples']['span'], 'Sample span should match the seeded interval.');
+
+        $load_metrics = $data['metrics']['load_1'];
+        $this->assertEqualsWithDelta(3.5, $load_metrics['average'], 0.0001, 'Average load should be computed from raw samples.');
+        $this->assertEqualsWithDelta(6.0, $load_metrics['max'], 0.0001, 'Max load should reflect the highest sample.');
+        $this->assertEqualsWithDelta(6.0, $load_metrics['latest'], 0.0001, 'Latest load should match the most recent value.');
+        $this->assertEqualsWithDelta(5.75, $load_metrics['percentiles']['p95'], 0.0001, 'Percentiles should be calculated.');
+        $this->assertSame(6, $load_metrics['samples'], 'Sample counter should equal the dataset size.');
+        $this->assertIsArray($load_metrics['trend'], 'Trend metadata should be provided.');
+        $this->assertSame('up', $load_metrics['trend']['direction'], 'Trend direction should indicate increasing load.');
+        $this->assertSame(6, $load_metrics['trend']['sample_size'], 'Trend should include every sample.');
+
+        $memory_metrics = $data['metrics']['memory_percent'];
+        $this->assertEqualsWithDelta(35.0, $memory_metrics['average'], 0.0001, 'Average memory usage should be computed.');
+        $this->assertEqualsWithDelta(60.0, $memory_metrics['max'], 0.0001, 'Max memory percentage should match the latest entry.');
+        $this->assertEqualsWithDelta(60.0, $memory_metrics['latest'], 0.0001, 'Latest memory percentage should match the last sample.');
+        $this->assertEqualsWithDelta(57.5, $memory_metrics['percentiles']['p95'], 0.0001, 'Memory percentiles should be calculated.');
+
+        $disk_metrics = $data['metrics']['disk_used'];
+        $this->assertEqualsWithDelta(50.25, $disk_metrics['average'], 0.0001, 'Average disk usage should be computed from raw data.');
+        $this->assertEqualsWithDelta(50.5, $disk_metrics['max'], 0.0001, 'Max disk usage should reflect the largest sample.');
+        $this->assertEqualsWithDelta(50.5, $disk_metrics['latest'], 0.0001, 'Latest disk usage should match the last sample.');
+
+        $this->assertSame(6, $data['summary']['count'], 'Summary should reflect the sample count.');
+        $this->assertSame($data['samples']['last_timestamp'], $data['summary']['last_timestamp'], 'Summary should expose the last timestamp.');
+        $this->assertNotEmpty($data['summary_text'], 'Summary text should be generated.');
+        $this->assertIsArray($data['latest_entry'], 'Latest entry snapshot should be returned.');
+        $this->assertEqualsWithDelta(6.0, $data['latest_entry']['load_averages'][0], 0.0001, 'Latest entry load should match the raw data.');
     }
 }
