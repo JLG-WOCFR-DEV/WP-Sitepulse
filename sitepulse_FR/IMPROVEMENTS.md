@@ -2,6 +2,13 @@
 
 Ce document répertorie les fonctions de SitePulse qui gagneraient à être alignées sur les standards observés dans les solutions professionnelles de monitoring WordPress/SaaS. Les propositions tiennent compte des attentes en matière de résilience, d'observabilité et d'expérience utilisateur premium.
 
+## Priorités de développement recommandées
+
+1. **Rapports SLA multi-agents** : capitaliser sur l’historique conservé entre 30 et 365 jours pour automatiser des exports SLA (CSV/PDF) et des tableaux de bord consolidés, plutôt que de simplement tronquer les journaux après rétention.【F:sitepulse_FR/modules/uptime_tracker.php†L2404-L2459】
+2. **Alerting multi-canal et escalade** : enrichir le moteur d’alertes au-delà du duo e-mail/webhook afin de prendre en charge des destinations incident management (Opsgenie, PagerDuty, SMS) avec suivi d’accusé de réception et modes d’escalade.【F:sitepulse_FR/modules/error_alerts.php†L320-L356】
+3. **Orchestration IA instrumentée** : fiabiliser la planification (persistence des jobs, retries, coût/quota journalisé) plutôt que de se reposer exclusivement sur Action Scheduler ou WP-Cron sans télémétrie dédiée.【F:sitepulse_FR/modules/ai_insights.php†L901-L959】
+4. **Agrégations Resource Monitor** : compléter l’endpoint REST paginé (288 points par défaut) par des séries agrégées, des moyennes glissantes et des exports programmés adaptés aux analyses longue durée.【F:sitepulse_FR/modules/resource_monitor.php†L424-L520】
+
 ## `sitepulse_delete_transients_by_prefix()`
 
 - **Statut :** ✅ Support du cache persistant (groupes `transient`/`site-transient`), purge en lots, télémétrie via les hooks `sitepulse_transient_deletion_batch`/`completed` (avec indication du scope) et historisation des purges exposée dans les réglages ainsi qu’un widget du tableau de bord WordPress.【F:sitepulse_FR/includes/functions.php†L12-L260】【F:sitepulse_FR/includes/admin-settings.php†L3208-L3268】
