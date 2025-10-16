@@ -28,32 +28,45 @@
         }
     }
 
-    var history = Array.isArray(settings.history) ? settings.history : [];
-    var container = document.getElementById('sitepulse-resource-history');
-    var emptyMessage = container ? container.querySelector('[data-empty]') : null;
-    var canvas = document.getElementById('sitepulse-resource-history-chart');
+    var i18n = settings.i18n || {};
+    var restConfig = settings.rest || {};
+    var restHeaders = {};
 
-    if (emptyMessage) {
-        emptyMessage.hidden = history.length > 0;
-    }
-
-    if (!canvas || typeof window.Chart === 'undefined') {
-        return;
-    }
-
-    if (!history.length) {
-        return;
+    if (restConfig.nonce) {
+        restHeaders['X-WP-Nonce'] = restConfig.nonce;
     }
 
     var locale = typeof settings.locale === 'string' && settings.locale ? settings.locale : undefined;
-    var i18n = settings.i18n || {};
+    var percentAxisLabel = typeof i18n.percentAxisLabel === 'string' ? i18n.percentAxisLabel : '%';
+    var unavailableLabel = typeof i18n.unavailable === 'string' ? i18n.unavailable : 'N/A';
     var loadLabel = typeof i18n.loadLabel === 'string' ? i18n.loadLabel : 'CPU';
     var memoryLabel = typeof i18n.memoryLabel === 'string' ? i18n.memoryLabel : 'Memory';
     var diskLabel = typeof i18n.diskLabel === 'string' ? i18n.diskLabel : 'Disk';
-    var percentAxisLabel = typeof i18n.percentAxisLabel === 'string' ? i18n.percentAxisLabel : '%';
-    var unavailableLabel = typeof i18n.unavailable === 'string' ? i18n.unavailable : 'N/A';
-    var cronPointLabel = typeof i18n.cronPoint === 'string' ? i18n.cronPoint : 'Cron';
-    var manualPointLabel = typeof i18n.manualPoint === 'string' ? i18n.manualPoint : 'Manual';
+    var trendTexts = {
+        up: typeof i18n.trendUp === 'string' ? i18n.trendUp : 'Up',
+        down: typeof i18n.trendDown === 'string' ? i18n.trendDown : 'Down',
+        flat: typeof i18n.trendFlat === 'string' ? i18n.trendFlat : 'Flat',
+    };
+
+    var historyContainer = document.getElementById('sitepulse-resource-history');
+    var historySummaryElement = document.getElementById('sitepulse-resource-history-summary');
+    var emptyMessage = historyContainer ? historyContainer.querySelector('[data-empty]') : null;
+    var canvas = document.getElementById('sitepulse-resource-history-chart');
+    var granularitySelect = document.getElementById('sitepulse-resource-history-granularity');
+    var aggregatesContainer = document.querySelector('[data-aggregates]');
+    var aggregatesSummary = document.getElementById('sitepulse-resource-aggregates-summary');
+
+    var chartInstance = null;
+    var currentChartData = null;
+    var currentGranularity = settings.granularity && typeof settings.granularity.default === 'string'
+        ? settings.granularity.default
+        : 'raw';
+    var pendingGranularity = null;
+
+    var initialHistory = settings.initialHistory || {
+        entries: Array.isArray(settings.history) ? settings.history : [],
+        summaryText: '',
+    };
 
     function formatDate(timestamp) {
         var date = new Date(timestamp * 1000);
@@ -69,201 +82,485 @@
         }
     }
 
-    function toFixed(value, precision) {
+    function formatNumber(value, precision, suffix) {
         if (typeof value !== 'number' || !isFinite(value)) {
             return unavailableLabel;
         }
 
-        return value.toFixed(precision);
-    }
+        var formatted = value.toFixed(precision);
 
-    var labels = [];
-    var loadDataset = [];
-    var memoryPercentDataset = [];
-    var diskPercentDataset = [];
-    var pointRadius = [];
-    var pointHoverRadius = [];
-    var pointStyles = [];
-    var pointBorderWidth = [];
-
-    for (var index = 0; index < history.length; index++) {
-        var entry = history[index];
-        var timestamp = typeof entry.timestamp === 'number' ? entry.timestamp : null;
-
-        labels.push(timestamp ? formatDate(timestamp) : unavailableLabel);
-
-        var isCron = entry && entry.isCron ? true : false;
-        pointRadius.push(isCron ? 5 : 3);
-        pointHoverRadius.push(isCron ? 7 : 5);
-        pointStyles.push(isCron ? 'rectRounded' : 'circle');
-        pointBorderWidth.push(isCron ? 2 : 1);
-
-        if (entry.load && Array.isArray(entry.load) && typeof entry.load[0] === 'number') {
-            loadDataset.push(entry.load[0]);
-        } else {
-            loadDataset.push(null);
+        if (suffix) {
+            formatted += suffix;
         }
 
-        var memoryPercent = entry.memory && typeof entry.memory.percentUsage === 'number'
-            ? entry.memory.percentUsage
+        return formatted;
+    }
+
+    var metricPrecision = {
+        load_1: { decimals: 2, suffix: '' },
+        load_5: { decimals: 2, suffix: '' },
+        load_15: { decimals: 2, suffix: '' },
+        memory_percent: { decimals: 1, suffix: '%' },
+        disk_used: { decimals: 1, suffix: '%' },
+    };
+
+    function formatMetricValue(metric, key) {
+        if (!metric) {
+            return unavailableLabel;
+        }
+
+        var config = metricPrecision[key] || { decimals: 2, suffix: '' };
+
+        if (typeof metric !== 'number' || !isFinite(metric)) {
+            return unavailableLabel;
+        }
+
+        return formatNumber(metric, config.decimals, config.suffix);
+    }
+
+    function formatTrend(trend, key) {
+        if (!trend || typeof trend !== 'object') {
+            return unavailableLabel;
+        }
+
+        var config = metricPrecision[key] || { decimals: 2, suffix: '' };
+        var slope = typeof trend.slope_per_hour === 'number' && isFinite(trend.slope_per_hour)
+            ? trend.slope_per_hour
             : null;
-        var diskPercent = null;
+        var direction = typeof trend.direction === 'string' ? trend.direction : 'flat';
+        var symbol = '→';
 
-        if (entry.disk) {
-            if (typeof entry.disk.percentUsed === 'number') {
-                diskPercent = entry.disk.percentUsed;
-            } else if (typeof entry.disk.percentFree === 'number') {
-                diskPercent = Math.max(0, Math.min(100, 100 - entry.disk.percentFree));
-            }
+        if (direction === 'up') {
+            symbol = '↑';
+        } else if (direction === 'down') {
+            symbol = '↓';
         }
 
-        memoryPercentDataset.push(memoryPercent !== null ? memoryPercent : null);
-        diskPercentDataset.push(diskPercent !== null ? diskPercent : null);
+        if (slope === null) {
+            return trendTexts[direction] || unavailableLabel;
+        }
+
+        var suffix = config.suffix ? config.suffix + '/h' : '/h';
+        var value = formatNumber(slope, config.decimals, suffix);
+
+        if (value === unavailableLabel) {
+            return unavailableLabel;
+        }
+
+        return symbol + ' ' + value;
     }
 
-    var chartContext = canvas.getContext('2d');
+    function setEmptyState(entries) {
+        if (!emptyMessage) {
+            return;
+        }
 
-    if (!chartContext) {
-        return;
+        emptyMessage.hidden = Array.isArray(entries) && entries.length > 0;
     }
 
-    new window.Chart(chartContext, {
-        type: 'line',
-        data: {
+    function buildChartData(entries) {
+        if (!Array.isArray(entries) || !entries.length) {
+            return null;
+        }
+
+        var labels = [];
+        var loadDataset = [];
+        var memoryDataset = [];
+        var diskDataset = [];
+        var pointRadius = [];
+        var pointHoverRadius = [];
+        var pointStyles = [];
+        var pointBorderWidth = [];
+        var cronFlags = [];
+
+        for (var index = 0; index < entries.length; index++) {
+            var entry = entries[index] || {};
+            var timestamp = typeof entry.timestamp === 'number' ? entry.timestamp : null;
+            labels.push(timestamp ? formatDate(timestamp) : unavailableLabel);
+
+            var isCron = !!entry.isCron;
+            cronFlags.push(isCron);
+            pointRadius.push(isCron ? 5 : 3);
+            pointHoverRadius.push(isCron ? 7 : 5);
+            pointStyles.push(isCron ? 'rectRounded' : 'circle');
+            pointBorderWidth.push(isCron ? 2 : 1);
+
+            if (entry.load && Array.isArray(entry.load) && typeof entry.load[0] === 'number') {
+                loadDataset.push(entry.load[0]);
+            } else {
+                loadDataset.push(null);
+            }
+
+            var memoryPercent = entry.memory && typeof entry.memory.percentUsage === 'number'
+                ? entry.memory.percentUsage
+                : null;
+            var diskPercent = null;
+
+            if (entry.disk) {
+                if (typeof entry.disk.percentUsed === 'number') {
+                    diskPercent = entry.disk.percentUsed;
+                } else if (typeof entry.disk.percentFree === 'number') {
+                    diskPercent = Math.max(0, Math.min(100, 100 - entry.disk.percentFree));
+                }
+            }
+
+            memoryDataset.push(memoryPercent !== null ? memoryPercent : null);
+            diskDataset.push(diskPercent !== null ? diskPercent : null);
+        }
+
+        return {
             labels: labels,
-            datasets: [
-                {
-                    label: loadLabel,
-                    data: loadDataset,
-                    borderColor: '#1d4ed8',
-                    backgroundColor: 'rgba(29, 78, 216, 0.1)',
-                    tension: 0.3,
-                    spanGaps: true,
-                    yAxisID: 'y',
-                    pointRadius: pointRadius,
-                    pointHoverRadius: pointHoverRadius,
-                    pointStyle: pointStyles,
-                    pointBorderWidth: pointBorderWidth,
-                    pointBorderColor: '#1d4ed8',
-                    pointBackgroundColor: function(context) {
-                        var idx = typeof context.dataIndex === 'number' ? context.dataIndex : 0;
-                        return history[idx] && history[idx].isCron ? '#1d4ed8' : '#ffffff';
-                    },
-                },
-                {
-                    label: memoryLabel,
-                    data: memoryPercentDataset,
-                    borderColor: '#16a34a',
-                    backgroundColor: 'rgba(22, 163, 74, 0.1)',
-                    tension: 0.3,
-                    spanGaps: true,
-                    yAxisID: 'yPercent',
-                    pointRadius: pointRadius,
-                    pointHoverRadius: pointHoverRadius,
-                    pointStyle: pointStyles,
-                    pointBorderWidth: pointBorderWidth,
-                    pointBorderColor: '#16a34a',
-                    pointBackgroundColor: function(context) {
-                        var idx = typeof context.dataIndex === 'number' ? context.dataIndex : 0;
-                        return history[idx] && history[idx].isCron ? '#16a34a' : '#ffffff';
-                    },
-                },
-                {
-                    label: diskLabel,
-                    data: diskPercentDataset,
-                    borderColor: '#f97316',
-                    backgroundColor: 'rgba(249, 115, 22, 0.1)',
-                    tension: 0.3,
-                    spanGaps: true,
-                    yAxisID: 'yPercent',
-                    pointRadius: pointRadius,
-                    pointHoverRadius: pointHoverRadius,
-                    pointStyle: pointStyles,
-                    pointBorderWidth: pointBorderWidth,
-                    pointBorderColor: '#f97316',
-                    pointBackgroundColor: function(context) {
-                        var idx = typeof context.dataIndex === 'number' ? context.dataIndex : 0;
-                        return history[idx] && history[idx].isCron ? '#f97316' : '#ffffff';
-                    },
-                },
-            ],
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: {
-                intersect: false,
-                mode: 'index',
-            },
-            plugins: {
-                legend: {
-                    position: 'top',
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            var datasetLabel = context.dataset.label || '';
-                            var value = context.parsed.y;
-                            var precision = context.dataset.yAxisID === 'y' ? 2 : 1;
-                            var suffix = context.dataset.yAxisID === 'y' ? '' : '%';
+            load: loadDataset,
+            memory: memoryDataset,
+            disk: diskDataset,
+            pointRadius: pointRadius,
+            pointHoverRadius: pointHoverRadius,
+            pointStyles: pointStyles,
+            pointBorderWidth: pointBorderWidth,
+            cronFlags: cronFlags,
+        };
+    }
 
-                            return datasetLabel + ': ' + toFixed(value, precision) + suffix;
+    function renderChart(data) {
+        if (!canvas || typeof window.Chart === 'undefined') {
+            return;
+        }
+
+        if (!data) {
+            if (chartInstance) {
+                chartInstance.destroy();
+                chartInstance = null;
+                currentChartData = null;
+            }
+
+            return;
+        }
+
+        currentChartData = data;
+
+        if (!chartInstance) {
+            var context = canvas.getContext('2d');
+
+            if (!context) {
+                return;
+            }
+
+            chartInstance = new window.Chart(context, {
+                type: 'line',
+                data: {
+                    labels: data.labels,
+                    datasets: [
+                        {
+                            label: loadLabel,
+                            data: data.load,
+                            borderColor: '#1d4ed8',
+                            backgroundColor: 'rgba(29, 78, 216, 0.1)',
+                            tension: 0.3,
+                            spanGaps: true,
+                            yAxisID: 'y',
+                            pointRadius: data.pointRadius,
+                            pointHoverRadius: data.pointHoverRadius,
+                            pointStyle: data.pointStyles,
+                            pointBorderWidth: data.pointBorderWidth,
+                            pointBorderColor: '#1d4ed8',
+                            pointBackgroundColor: function(context) {
+                                var idx = typeof context.dataIndex === 'number' ? context.dataIndex : 0;
+                                return currentChartData && currentChartData.cronFlags[idx] ? '#1d4ed8' : '#ffffff';
+                            },
                         },
-                        title: function(context) {
-                            if (!context.length) {
-                                return '';
-                            }
-
-                            var first = context[0];
-                            var idx = typeof first.dataIndex === 'number' ? first.dataIndex : 0;
-                            var entry = history[idx];
-
-                            if (!entry || typeof entry.timestamp !== 'number') {
-                                return first.label;
-                            }
-
-                            return (i18n.timestamp ? i18n.timestamp + ': ' : '') + formatDate(entry.timestamp);
+                        {
+                            label: memoryLabel,
+                            data: data.memory,
+                            borderColor: '#16a34a',
+                            backgroundColor: 'rgba(22, 163, 74, 0.1)',
+                            tension: 0.3,
+                            spanGaps: true,
+                            yAxisID: 'yPercent',
+                            pointRadius: data.pointRadius,
+                            pointHoverRadius: data.pointHoverRadius,
+                            pointStyle: data.pointStyles,
+                            pointBorderWidth: data.pointBorderWidth,
+                            pointBorderColor: '#16a34a',
+                            pointBackgroundColor: function(context) {
+                                var idx = typeof context.dataIndex === 'number' ? context.dataIndex : 0;
+                                return currentChartData && currentChartData.cronFlags[idx] ? '#16a34a' : '#ffffff';
+                            },
                         },
-                        footer: function(context) {
-                            if (!context.length) {
-                                return '';
-                            }
-
-                            var idx = typeof context[0].dataIndex === 'number' ? context[0].dataIndex : 0;
-                            var entry = history[idx];
-
-                            if (!entry) {
-                                return '';
-                            }
-
-                            return entry.isCron ? cronPointLabel : manualPointLabel;
+                        {
+                            label: diskLabel,
+                            data: data.disk,
+                            borderColor: '#f97316',
+                            backgroundColor: 'rgba(249, 115, 22, 0.1)',
+                            tension: 0.3,
+                            spanGaps: true,
+                            yAxisID: 'yPercent',
+                            pointRadius: data.pointRadius,
+                            pointHoverRadius: data.pointHoverRadius,
+                            pointStyle: data.pointStyles,
+                            pointBorderWidth: data.pointBorderWidth,
+                            pointBorderColor: '#f97316',
+                            pointBackgroundColor: function(context) {
+                                var idx = typeof context.dataIndex === 'number' ? context.dataIndex : 0;
+                                return currentChartData && currentChartData.cronFlags[idx] ? '#f97316' : '#ffffff';
+                            },
                         },
-                    },
+                    ],
                 },
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: loadLabel,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index',
                     },
-                },
-                yPercent: {
-                    position: 'right',
-                    min: 0,
-                    max: 100,
-                    title: {
-                        display: true,
-                        text: percentAxisLabel,
-                    },
-                    ticks: {
-                        callback: function(value) {
-                            return value + '%';
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    var label = context.dataset.label || '';
+                                    var value = context.parsed.y;
+                                    if (typeof value !== 'number') {
+                                        return label;
+                                    }
+                                    return label + ': ' + value.toFixed(2);
+                                },
+                            },
                         },
                     },
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            position: 'left',
+                            ticks: {
+                                callback: function(value) {
+                                    return typeof value === 'number' ? value.toFixed(2) : value;
+                                },
+                            },
+                        },
+                        yPercent: {
+                            type: 'linear',
+                            position: 'right',
+                            suggestedMin: 0,
+                            suggestedMax: 100,
+                            title: {
+                                display: true,
+                                text: percentAxisLabel,
+                            },
+                        },
+                    },
                 },
-            },
-        },
-    });
-})(window, document);
+            });
+        } else {
+            chartInstance.data.labels = data.labels;
+            chartInstance.data.datasets[0].data = data.load;
+            chartInstance.data.datasets[1].data = data.memory;
+            chartInstance.data.datasets[2].data = data.disk;
+            chartInstance.data.datasets.forEach(function(dataset) {
+                dataset.pointRadius = data.pointRadius;
+                dataset.pointHoverRadius = data.pointHoverRadius;
+                dataset.pointStyle = data.pointStyles;
+                dataset.pointBorderWidth = data.pointBorderWidth;
+            });
+            chartInstance.update();
+        }
+    }
+
+    function renderHistory(historyData) {
+        var entries = [];
+        var summaryText = '';
+
+        if (Array.isArray(historyData)) {
+            entries = historyData;
+        } else if (historyData && typeof historyData === 'object') {
+            entries = Array.isArray(historyData.entries) ? historyData.entries : [];
+            summaryText = typeof historyData.summaryText === 'string' ? historyData.summaryText : '';
+        }
+
+        setEmptyState(entries);
+        renderChart(buildChartData(entries));
+
+        if (historySummaryElement && summaryText) {
+            historySummaryElement.textContent = summaryText;
+        }
+    }
+
+    function updateAggregates(aggregatesData) {
+        if (!aggregatesContainer) {
+            return;
+        }
+
+        var metrics = aggregatesData && aggregatesData.metrics ? aggregatesData.metrics : {};
+        var summaryText = aggregatesData && typeof aggregatesData.summaryText === 'string'
+            ? aggregatesData.summaryText
+            : '';
+
+        if (aggregatesSummary && summaryText) {
+            aggregatesSummary.textContent = summaryText;
+        }
+
+        var cards = aggregatesContainer.querySelectorAll('[data-metric]');
+
+        for (var index = 0; index < cards.length; index++) {
+            var card = cards[index];
+            var metricKey = card.getAttribute('data-metric');
+            var metric = metrics && metrics[metricKey] ? metrics[metricKey] : null;
+
+            var averageEl = card.querySelector('[data-metric-average]');
+            var maxEl = card.querySelector('[data-metric-max]');
+            var percentileEl = card.querySelector('[data-metric-percentiles]');
+            var trendEl = card.querySelector('[data-metric-trend]');
+
+            if (averageEl) {
+                averageEl.textContent = metric && metric.average !== null
+                    ? formatMetricValue(metric.average, metricKey)
+                    : unavailableLabel;
+            }
+
+            if (maxEl) {
+                maxEl.textContent = metric && metric.max !== null
+                    ? formatMetricValue(metric.max, metricKey)
+                    : unavailableLabel;
+            }
+
+            if (percentileEl) {
+                var p95 = metric && metric.percentiles && metric.percentiles.p95 !== null
+                    ? metric.percentiles.p95
+                    : null;
+                percentileEl.textContent = p95 !== null
+                    ? formatMetricValue(p95, metricKey)
+                    : unavailableLabel;
+            }
+
+            if (trendEl) {
+                trendEl.textContent = formatTrend(metric && metric.trend, metricKey);
+            }
+
+            card.classList.remove('is-up', 'is-down', 'is-flat');
+            var direction = metric && metric.trend && typeof metric.trend.direction === 'string'
+                ? metric.trend.direction
+                : 'flat';
+            card.classList.add('is-' + direction);
+        }
+    }
+
+    function fetchJson(url) {
+        return fetch(url, { headers: restHeaders }).then(function(response) {
+            if (!response.ok) {
+                throw new Error('Request failed with status ' + response.status);
+            }
+
+            return response.json();
+        });
+    }
+
+    function buildHistoryUrl(granularity) {
+        if (!restConfig.history) {
+            return null;
+        }
+
+        var params = new URLSearchParams();
+
+        if (settings.request && settings.request.perPage) {
+            params.set('per_page', settings.request.perPage);
+        }
+
+        if (settings.request && settings.request.since) {
+            params.set('since', settings.request.since);
+        }
+
+        params.set('granularity', granularity || 'raw');
+        params.set('include_snapshot', 'false');
+
+        return restConfig.history + '?' + params.toString();
+    }
+
+    function buildAggregatesUrl(granularity) {
+        if (!restConfig.aggregates) {
+            return null;
+        }
+
+        var params = new URLSearchParams();
+
+        if (settings.request && settings.request.since) {
+            params.set('since', settings.request.since);
+        }
+
+        params.set('granularity', granularity || 'raw');
+
+        return restConfig.aggregates + '?' + params.toString();
+    }
+
+    function loadHistory(granularity) {
+        var url = buildHistoryUrl(granularity);
+
+        if (!url) {
+            return;
+        }
+
+        pendingGranularity = granularity;
+
+        fetchJson(url).then(function(response) {
+            if (!response || !response.history) {
+                return;
+            }
+
+            if (pendingGranularity !== granularity) {
+                return;
+            }
+
+            renderHistory({
+                entries: Array.isArray(response.history.entries) ? response.history.entries : [],
+                summaryText: typeof response.history.summary_text === 'string' ? response.history.summary_text : '',
+            });
+        }).catch(function(error) {
+            if (console && console.error) {
+                console.error('SitePulse history request failed:', error);
+            }
+        });
+    }
+
+    function loadAggregates(granularity) {
+        var url = buildAggregatesUrl(granularity);
+
+        if (!url) {
+            return;
+        }
+
+        fetchJson(url).then(function(response) {
+            if (!response) {
+                return;
+            }
+
+            updateAggregates({
+                metrics: response.metrics || {},
+                summaryText: typeof response.summary_text === 'string' ? response.summary_text : '',
+            });
+        }).catch(function(error) {
+            if (console && console.error) {
+                console.error('SitePulse aggregates request failed:', error);
+            }
+        });
+    }
+
+    renderHistory(initialHistory);
+    updateAggregates(settings.aggregates || {});
+
+    if (granularitySelect) {
+        granularitySelect.value = currentGranularity;
+        granularitySelect.addEventListener('change', function() {
+            var selected = granularitySelect.value || 'raw';
+            currentGranularity = selected;
+            loadHistory(selected);
+            loadAggregates(selected);
+        });
+    }
+
+    // Ensure initial data matches the configured granularity when it differs from the default dataset.
+    if (currentGranularity !== 'raw') {
+        loadHistory(currentGranularity);
+        loadAggregates(currentGranularity);
+    }
+})();
