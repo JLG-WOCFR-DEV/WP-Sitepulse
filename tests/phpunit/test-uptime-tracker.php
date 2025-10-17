@@ -237,6 +237,17 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
                             ],
                             'effective_checks' => 12,
                         ],
+                        'agent_special' => [
+                            'availability'     => 100.0,
+                            'downtime'         => [
+                                'incidents'      => [],
+                                'total_duration' => 0.0,
+                            ],
+                            'maintenance'      => [
+                                'total_duration' => 0.0,
+                            ],
+                            'effective_checks' => 8,
+                        ],
                     ],
                 ],
             ],
@@ -244,6 +255,10 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
                 'agent_formula' => [
                     'label'  => '=1+1',
                     'region' => '+Region',
+                ],
+                'agent_special' => [
+                    'label'  => '@danger',
+                    'region' => '-Region',
                 ],
             ],
         ];
@@ -263,6 +278,8 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
 
         $this->assertStringContainsString("'=1+1", $contents);
         $this->assertStringContainsString("'+Region", $contents);
+        $this->assertStringContainsString("'@danger", $contents);
+        $this->assertStringContainsString("'-Region", $contents);
     }
 
     public function test_impact_export_rows_apply_csv_helper() {
