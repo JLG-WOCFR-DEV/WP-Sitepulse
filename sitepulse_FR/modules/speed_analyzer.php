@@ -1,6 +1,22 @@
 <?php
 if (!defined('ABSPATH')) exit;
 
+require_once SITEPULSE_PATH . 'includes/request-profiler.php';
+
+if (function_exists('sitepulse_request_profiler_bootstrap')) {
+    sitepulse_request_profiler_bootstrap();
+}
+
+$rum_module_path = SITEPULSE_PATH . 'modules/speed-analyzer/rum.php';
+
+if (file_exists($rum_module_path)) {
+    require_once $rum_module_path;
+}
+
+if (function_exists('sitepulse_rum_bootstrap')) {
+    sitepulse_rum_bootstrap();
+}
+
 // Add admin submenu
 add_action('admin_menu', function() {
     add_submenu_page(
@@ -15,11 +31,14 @@ add_action('admin_menu', function() {
 
 add_action('admin_enqueue_scripts', 'sitepulse_speed_analyzer_enqueue_assets');
 add_action('wp_ajax_sitepulse_run_speed_scan', 'sitepulse_ajax_run_speed_scan');
+add_action('wp_ajax_sitepulse_start_trace', 'sitepulse_speed_analyzer_ajax_start_trace');
+add_action('wp_ajax_sitepulse_get_trace', 'sitepulse_speed_analyzer_ajax_get_trace');
 add_action('init', 'sitepulse_speed_analyzer_bootstrap_cron');
 add_filter('cron_schedules', 'sitepulse_speed_analyzer_register_cron_schedules');
 add_action(sitepulse_speed_analyzer_get_cron_hook(), 'sitepulse_speed_analyzer_run_cron');
 add_action(sitepulse_speed_analyzer_get_queue_hook(), 'sitepulse_speed_analyzer_run_queue');
 add_action('admin_post_sitepulse_save_speed_schedule', 'sitepulse_speed_analyzer_handle_schedule_post');
+add_action('admin_post_sitepulse_save_rum_settings', 'sitepulse_speed_analyzer_handle_rum_settings');
 
 /**
  * Returns the cron hook used for scheduled speed scans.
@@ -1766,6 +1785,74 @@ function sitepulse_speed_analyzer_handle_schedule_post() {
 }
 
 /**
+ * Handles updates to the RUM collection settings.
+ *
+ * @return void
+ */
+function sitepulse_speed_analyzer_handle_rum_settings() {
+    if (!current_user_can(sitepulse_get_capability())) {
+        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour modifier cette configuration.", 'sitepulse'));
+    }
+
+    $nonce_action = defined('SITEPULSE_NONCE_ACTION_RUM_SETTINGS') ? SITEPULSE_NONCE_ACTION_RUM_SETTINGS : 'sitepulse_rum_settings';
+    check_admin_referer($nonce_action);
+
+    $enabled = isset($_POST['sitepulse_rum_enabled']); // phpcs:ignore WordPress.Security.NonceVerification.Missing
+    $require_consent = isset($_POST['sitepulse_rum_require_consent']); // phpcs:ignore WordPress.Security.NonceVerification.Missing
+
+    $sample_rate_input = isset($_POST['sitepulse_rum_sample_rate']) // phpcs:ignore WordPress.Security.NonceVerification.Missing
+        ? floatval(wp_unslash($_POST['sitepulse_rum_sample_rate']))
+        : 100.0;
+    $sample_rate_input = max(0.0, min(100.0, $sample_rate_input));
+    $sample_rate = $sample_rate_input / 100.0;
+
+    $range_days = isset($_POST['sitepulse_rum_range_days']) // phpcs:ignore WordPress.Security.NonceVerification.Missing
+        ? absint($_POST['sitepulse_rum_range_days'])
+        : 7;
+
+    if ($range_days < 1) {
+        $range_days = 7;
+    }
+
+    $settings_option = defined('SITEPULSE_OPTION_RUM_SETTINGS') ? SITEPULSE_OPTION_RUM_SETTINGS : 'sitepulse_rum_settings';
+
+    $settings = [
+        'enabled'         => $enabled,
+        'require_consent' => $require_consent,
+        'sample_rate'     => $sample_rate,
+        'range_days'      => $range_days,
+    ];
+
+    update_option($settings_option, $settings, false);
+
+    if (isset($_POST['sitepulse_rum_retention_days'])) { // phpcs:ignore WordPress.Security.NonceVerification.Missing
+        $retention_days = absint($_POST['sitepulse_rum_retention_days']);
+        if ($retention_days >= 1) {
+            $retention_option = defined('SITEPULSE_OPTION_RUM_RETENTION_DAYS') ? SITEPULSE_OPTION_RUM_RETENTION_DAYS : 'sitepulse_rum_retention_days';
+            update_option($retention_option, $retention_days, false);
+        }
+    }
+
+    $regenerate_token = isset($_POST['sitepulse_rum_regenerate_token']); // phpcs:ignore WordPress.Security.NonceVerification.Missing
+
+    if ($regenerate_token) {
+        sitepulse_rum_get_ingest_token(true);
+    }
+
+    $redirect_url = add_query_arg(
+        [
+            'page'                  => 'sitepulse-speed',
+            'sitepulse_rum_updated' => '1',
+            'rum_token_refreshed'   => $regenerate_token ? '1' : '0',
+        ],
+        admin_url('admin.php')
+    );
+
+    wp_safe_redirect($redirect_url);
+    exit;
+}
+
+/**
  * Determines the status badge class for a metric value.
  *
  * @param float|null $value      Metric value.
@@ -2245,6 +2332,40 @@ function sitepulse_ajax_run_speed_scan() {
  * @param string $hook_suffix Current admin page identifier.
  * @return void
  */
+/**
+ * Builds the profiler payload for the Speed Analyzer script.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_speed_analyzer_get_profiler_payload() {
+    if (!function_exists('sitepulse_request_profiler_is_available') || !sitepulse_request_profiler_is_available()) {
+        return ['enabled' => false];
+    }
+
+    $nonce_action = defined('SITEPULSE_NONCE_ACTION_REQUEST_TRACE') ? SITEPULSE_NONCE_ACTION_REQUEST_TRACE : 'sitepulse_request_trace';
+
+    return [
+        'enabled'      => true,
+        'nonce'        => wp_create_nonce($nonce_action),
+        'startAction'  => 'sitepulse_start_trace',
+        'fetchAction'  => 'sitepulse_get_trace',
+        'pollInterval' => 2000,
+        'timeout'      => 30000,
+        'i18n'         => [
+            'buttonIdle'      => esc_html__('Profiler cette page', 'sitepulse'),
+            'buttonRunning'   => esc_html__('Profilage en cours…', 'sitepulse'),
+            'buttonRetry'     => esc_html__('Relancer le profilage', 'sitepulse'),
+            'statusTrigger'   => esc_html__('Initialisation du profilage…', 'sitepulse'),
+            'statusPending'   => esc_html__('Collecte des mesures en cours…', 'sitepulse'),
+            'statusCompleted' => esc_html__('Profilage terminé.', 'sitepulse'),
+            'statusFailed'    => esc_html__('Profilage impossible. Réessayez dans quelques instants.', 'sitepulse'),
+            'errorInvalidUrl' => esc_html__('URL de profilage invalide.', 'sitepulse'),
+            'noHooks'         => esc_html__('Aucun hook lent détecté.', 'sitepulse'),
+            'noQueries'       => esc_html__('Aucune requête SQL lente détectée.', 'sitepulse'),
+        ],
+    ];
+}
+
 function sitepulse_speed_analyzer_enqueue_assets($hook_suffix) {
     if ($hook_suffix !== 'sitepulse-dashboard_page_sitepulse-speed') {
         return;
@@ -2268,6 +2389,23 @@ function sitepulse_speed_analyzer_enqueue_assets($hook_suffix) {
     $manual_profile = isset($thresholds['profile']) ? sitepulse_speed_analyzer_normalize_profile($thresholds['profile']) : 'default';
     $manual_profile_label = isset($profiles_for_js[$manual_profile]['label']) ? $profiles_for_js[$manual_profile]['label'] : ucfirst($manual_profile);
     $manual_profile_description = isset($profiles_for_js[$manual_profile]['description']) ? $profiles_for_js[$manual_profile]['description'] : '';
+    $profiler_payload = sitepulse_speed_analyzer_get_profiler_payload();
+
+    $rum_payload = null;
+
+    if (function_exists('sitepulse_rum_get_settings')) {
+        $rum_settings = sitepulse_rum_get_settings();
+        $rum_range = isset($rum_settings['range_days']) ? (int) $rum_settings['range_days'] : 7;
+        $rum_payload = [
+            'enabled'    => function_exists('sitepulse_rum_is_enabled') ? sitepulse_rum_is_enabled() : false,
+            'rangeDays'  => $rum_range,
+            'endpoint'   => rest_url('sitepulse/v1/rum/aggregates'),
+            'nonce'      => wp_create_nonce('wp_rest'),
+            'aggregates' => function_exists('sitepulse_rum_calculate_aggregates')
+                ? sitepulse_rum_calculate_aggregates(['range_days' => $rum_range])
+                : null,
+        ];
+    }
 
     wp_enqueue_style(
         'sitepulse-speed-analyzer',
@@ -2341,6 +2479,8 @@ function sitepulse_speed_analyzer_enqueue_assets($hook_suffix) {
                 'label'       => $manual_profile_label,
                 'description' => $manual_profile_description,
             ],
+            'profiler'      => $profiler_payload,
+            'rum'           => $rum_payload,
             'i18n'           => [
                 'running'        => esc_html__('Analyse en cours…', 'sitepulse'),
                 'retry'          => esc_html__('Relancer un test', 'sitepulse'),
@@ -2375,6 +2515,152 @@ function sitepulse_speed_analyzer_enqueue_assets($hook_suffix) {
 }
 
 /**
+ * Handles the AJAX request that initializes a profiling session.
+ *
+ * @return void
+ */
+function sitepulse_speed_analyzer_ajax_start_trace() {
+    if (!current_user_can(sitepulse_get_capability())) {
+        wp_send_json_error(['message' => esc_html__('Accès refusé.', 'sitepulse')], 403);
+    }
+
+    $nonce_action = defined('SITEPULSE_NONCE_ACTION_REQUEST_TRACE') ? SITEPULSE_NONCE_ACTION_REQUEST_TRACE : 'sitepulse_request_trace';
+    check_ajax_referer($nonce_action, 'nonce');
+
+    $target = isset($_POST['target']) ? wp_unslash($_POST['target']) : '';
+    $target = sitepulse_request_profiler_sanitize_target_url($target);
+
+    if ($target === '') {
+        wp_send_json_error(['message' => esc_html__('URL de profilage invalide.', 'sitepulse')], 400);
+    }
+
+    $session = sitepulse_request_profiler_create_session(get_current_user_id(), $target);
+
+    if ($session === null) {
+        wp_send_json_error(['message' => esc_html__('Impossible de créer la session de profilage.', 'sitepulse')], 500);
+    }
+
+    $trace_url = add_query_arg(
+        [
+            'sitepulse_trace' => $session['token'],
+            '_wpnonce'        => wp_create_nonce($nonce_action),
+        ],
+        $session['target']
+    );
+
+    wp_send_json_success([
+        'token' => $session['token'],
+        'url'   => esc_url_raw($trace_url),
+    ]);
+}
+
+/**
+ * Handles the AJAX request that fetches the latest profiling result.
+ *
+ * @return void
+ */
+function sitepulse_speed_analyzer_ajax_get_trace() {
+    if (!current_user_can(sitepulse_get_capability())) {
+        wp_send_json_error(['message' => esc_html__('Accès refusé.', 'sitepulse')], 403);
+    }
+
+    $nonce_action = defined('SITEPULSE_NONCE_ACTION_REQUEST_TRACE') ? SITEPULSE_NONCE_ACTION_REQUEST_TRACE : 'sitepulse_request_trace';
+    check_ajax_referer($nonce_action, 'nonce');
+
+    $token = isset($_POST['token']) ? wp_unslash($_POST['token']) : '';
+    $token = sitepulse_request_profiler_normalize_token($token);
+
+    if ($token === '') {
+        wp_send_json_error(['message' => esc_html__('Jeton de profilage invalide.', 'sitepulse')], 400);
+    }
+
+    $result = sitepulse_request_profiler_get_result($token);
+
+    if ($result === null) {
+        wp_send_json_error(['message' => esc_html__('Profilage introuvable.', 'sitepulse')], 404);
+    }
+
+    if ((int) $result['user_id'] !== get_current_user_id()) {
+        wp_send_json_error(['message' => esc_html__('Ce profilage appartient à un autre utilisateur.', 'sitepulse')], 403);
+    }
+
+    $status = isset($result['status']) ? (string) $result['status'] : 'pending';
+
+    if ($status === 'pending') {
+        wp_send_json_success(['status' => 'pending']);
+    }
+
+    if ($status === 'failed' || empty($result['trace_id'])) {
+        wp_send_json_success(['status' => 'failed']);
+    }
+
+    $trace = sitepulse_request_profiler_get_trace((int) $result['trace_id']);
+
+    if ($trace === null) {
+        wp_send_json_success(['status' => 'failed']);
+    }
+
+    $hooks = [];
+
+    foreach ($trace['hooks'] as $entry) {
+        if (!is_array($entry) || empty($entry['hook'])) {
+            continue;
+        }
+
+        $count = isset($entry['count']) ? (int) $entry['count'] : 0;
+        $total = isset($entry['total_time']) ? (float) $entry['total_time'] : 0.0;
+        $avg = isset($entry['avg_time']) ? (float) $entry['avg_time'] : 0.0;
+        $max = isset($entry['max_time']) ? (float) $entry['max_time'] : 0.0;
+
+        $hooks[] = [
+            'hook'      => (string) $entry['hook'],
+            'count'     => $count,
+            'total_ms'  => round($total * 1000, 2),
+            'avg_ms'    => round($avg * 1000, 2),
+            'max_ms'    => round($max * 1000, 2),
+        ];
+    }
+
+    $queries = [];
+
+    foreach ($trace['queries'] as $entry) {
+        if (!is_array($entry) || empty($entry['sql'])) {
+            continue;
+        }
+
+        $total = isset($entry['total_time']) ? (float) $entry['total_time'] : 0.0;
+        $avg = isset($entry['avg_time']) ? (float) $entry['avg_time'] : 0.0;
+        $count = isset($entry['count']) ? (int) $entry['count'] : 0;
+        $callers = isset($entry['callers']) && is_array($entry['callers']) ? array_values($entry['callers']) : [];
+
+        $queries[] = [
+            'sql'       => (string) $entry['sql'],
+            'count'     => $count,
+            'total_ms'  => round($total * 1000, 2),
+            'avg_ms'    => round($avg * 1000, 2),
+            'callers'   => array_slice($callers, 0, 5),
+        ];
+    }
+
+    $summary = [
+        'duration_ms' => round(((float) $trace['total_duration']) * 1000, 2),
+        'hook_count'  => (int) $trace['hook_count'],
+        'query_count' => (int) $trace['query_count'],
+        'recorded_at' => isset($trace['recorded_at']) ? (string) $trace['recorded_at'] : '',
+        'method'      => isset($trace['request_method']) ? (string) $trace['request_method'] : 'GET',
+        'url'         => isset($trace['request_url']) ? (string) $trace['request_url'] : '',
+        'memory_peak' => isset($trace['memory_peak']) ? (int) $trace['memory_peak'] : 0,
+    ];
+
+    wp_send_json_success([
+        'status'  => 'completed',
+        'summary' => $summary,
+        'hooks'   => $hooks,
+        'queries' => $queries,
+    ]);
+}
+
+/**
  * Renders the Speed Analyzer page.
  * The analysis is now based on internal WordPress timers for better reliability.
  */
@@ -2384,6 +2670,47 @@ function sitepulse_speed_analyzer_page() {
     }
 
     global $wpdb;
+
+    $rum_settings = function_exists('sitepulse_rum_get_settings') ? sitepulse_rum_get_settings() : [
+        'enabled'         => false,
+        'require_consent' => false,
+        'sample_rate'     => 1.0,
+        'range_days'      => 7,
+    ];
+    $rum_retention_days = function_exists('sitepulse_rum_get_retention_days') ? sitepulse_rum_get_retention_days() : 30;
+    $rum_token = function_exists('sitepulse_rum_get_ingest_token') ? sitepulse_rum_get_ingest_token() : '';
+    $rum_aggregates = function_exists('sitepulse_rum_calculate_aggregates')
+        ? sitepulse_rum_calculate_aggregates([
+            'range_days' => isset($rum_settings['range_days']) ? (int) $rum_settings['range_days'] : 7,
+        ])
+        : [
+            'sample_count'   => 0,
+            'page_count'     => 0,
+            'last_sample_at' => null,
+            'summary'        => [],
+            'pages'          => [],
+        ];
+
+    if (!is_array($rum_aggregates)) {
+        $rum_aggregates = [
+            'sample_count'   => 0,
+            'page_count'     => 0,
+            'last_sample_at' => null,
+            'summary'        => [],
+            'pages'          => [],
+        ];
+    }
+
+    $rum_summary_metrics = isset($rum_aggregates['summary']) && is_array($rum_aggregates['summary'])
+        ? $rum_aggregates['summary']
+        : [];
+    $rum_sample_count = isset($rum_aggregates['sample_count']) ? (int) $rum_aggregates['sample_count'] : 0;
+    $rum_page_breakdown = isset($rum_aggregates['pages']) && is_array($rum_aggregates['pages'])
+        ? $rum_aggregates['pages']
+        : [];
+    $rum_sample_percent = isset($rum_settings['sample_rate'])
+        ? round((float) $rum_settings['sample_rate'] * 100, 1)
+        : 100.0;
 
     // --- Server Performance Metrics ---
 
@@ -2477,6 +2804,15 @@ function sitepulse_speed_analyzer_page() {
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-performance"></span> <?php esc_html_e('Analyseur de Vitesse', 'sitepulse'); ?></h1>
         <p><?php esc_html_e('Cet outil analyse la performance interne de votre serveur et de votre base de données à chaque chargement de page.', 'sitepulse'); ?></p>
+
+        <?php if (isset($_GET['sitepulse_rum_updated'])) : // phpcs:ignore WordPress.Security.NonceVerification.Recommended ?>
+            <div class="notice notice-success is-dismissible">
+                <p><?php esc_html_e('Paramètres RUM enregistrés avec succès.', 'sitepulse'); ?></p>
+                <?php if (!empty($_GET['rum_token_refreshed'])) : // phpcs:ignore WordPress.Security.NonceVerification.Recommended ?>
+                    <p><?php esc_html_e('Le jeton de collecte a été régénéré. Mettez à jour les intégrations externes si nécessaire.', 'sitepulse'); ?></p>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
 
         <div class="speed-scan-actions">
             <button type="button" class="button button-primary" id="sitepulse-speed-rescan">
@@ -2596,6 +2932,160 @@ function sitepulse_speed_analyzer_page() {
                 <?php endforeach; ?>
             </div>
             <p class="description" id="sitepulse-speed-summary-note" aria-live="polite"><?php echo esc_html($summary_note); ?></p>
+        </div>
+
+        <div id="sitepulse-speed-rum" class="speed-rum">
+            <h2><?php esc_html_e('Web Vitals réels (RUM)', 'sitepulse'); ?></h2>
+            <p class="description"><?php esc_html_e('Mesurez les Web Vitals réels observés chez vos visiteurs pour compléter les audits synthétiques.', 'sitepulse'); ?></p>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="speed-rum-form">
+                <?php
+                $rum_nonce_action = defined('SITEPULSE_NONCE_ACTION_RUM_SETTINGS') ? SITEPULSE_NONCE_ACTION_RUM_SETTINGS : 'sitepulse_rum_settings';
+                wp_nonce_field($rum_nonce_action);
+                ?>
+                <input type="hidden" name="action" value="sitepulse_save_rum_settings">
+                <fieldset>
+                    <legend class="screen-reader-text"><?php esc_html_e('Activation RUM', 'sitepulse'); ?></legend>
+                    <label>
+                        <input type="checkbox" name="sitepulse_rum_enabled" value="1" <?php checked(!empty($rum_settings['enabled'])); ?> />
+                        <?php esc_html_e('Activer la collecte Web Vitals sur le front-end', 'sitepulse'); ?>
+                    </label>
+                    <label>
+                        <input type="checkbox" name="sitepulse_rum_require_consent" value="1" <?php checked(!empty($rum_settings['require_consent'])); ?> />
+                        <?php esc_html_e('Ne charger le script qu’après consentement explicite (cookie sitepulse_rum_consent=1).', 'sitepulse'); ?>
+                    </label>
+                </fieldset>
+                <div class="speed-rum-fields">
+                    <label>
+                        <span><?php esc_html_e('Échantillonnage', 'sitepulse'); ?></span>
+                        <input type="number" name="sitepulse_rum_sample_rate" min="1" max="100" step="1" value="<?php echo esc_attr($rum_sample_percent); ?>" />
+                        <span class="description"><?php esc_html_e('Pourcentage de visites instrumentées (100 = toutes les pages).', 'sitepulse'); ?></span>
+                    </label>
+                    <label>
+                        <span><?php esc_html_e('Fenêtre d’analyse (jours)', 'sitepulse'); ?></span>
+                        <input type="number" name="sitepulse_rum_range_days" min="1" max="90" step="1" value="<?php echo esc_attr((int) $rum_settings['range_days']); ?>" />
+                    </label>
+                    <label>
+                        <span><?php esc_html_e('Rétention des données (jours)', 'sitepulse'); ?></span>
+                        <input type="number" name="sitepulse_rum_retention_days" min="7" max="365" step="1" value="<?php echo esc_attr((int) $rum_retention_days); ?>" />
+                    </label>
+                </div>
+                <div class="speed-rum-token">
+                    <p><strong><?php esc_html_e('Endpoint REST', 'sitepulse'); ?>:</strong> <code><?php echo esc_html(rest_url('sitepulse/v1/rum')); ?></code></p>
+                    <p><strong><?php esc_html_e('Jeton actuel', 'sitepulse'); ?>:</strong> <code><?php echo esc_html($rum_token); ?></code></p>
+                    <label>
+                        <input type="checkbox" name="sitepulse_rum_regenerate_token" value="1" />
+                        <?php esc_html_e('Régénérer le jeton après enregistrement (nécessite de mettre à jour vos intégrations).', 'sitepulse'); ?>
+                    </label>
+                </div>
+                <p class="submit">
+                    <button type="submit" class="button button-secondary"><?php esc_html_e('Enregistrer les paramètres RUM', 'sitepulse'); ?></button>
+                </p>
+            </form>
+
+            <div class="speed-rum-summary">
+                <h3><?php esc_html_e('Synthèse des mesures collectées', 'sitepulse'); ?></h3>
+                <?php if ($rum_sample_count > 0) : ?>
+                    <table class="widefat fixed">
+                        <thead>
+                            <tr>
+                                <th scope="col"><?php esc_html_e('Métrique', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('p75', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('p95', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('Moyenne', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('Bonnes sessions', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('Échantillons', 'sitepulse'); ?></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach (['LCP', 'FID', 'CLS'] as $metric_slug) :
+                                $metric = isset($rum_summary_metrics[$metric_slug]) ? $rum_summary_metrics[$metric_slug] : null;
+                                $decimals = $metric_slug === 'CLS' ? 3 : 0;
+                                $unit = $metric_slug === 'CLS' ? '' : 'ms';
+                                $p75 = $metric && isset($metric['p75']) ? (float) $metric['p75'] : null;
+                                $p95 = $metric && isset($metric['p95']) ? (float) $metric['p95'] : null;
+                                $avg = $metric && isset($metric['average']) ? (float) $metric['average'] : null;
+                                $ratings = $metric && isset($metric['ratings']) && is_array($metric['ratings']) ? $metric['ratings'] : ['good' => 0];
+                                $count = $metric && isset($metric['count']) ? (int) $metric['count'] : 0;
+                                $formatted_p75 = $p75 !== null ? number_format_i18n($p75, $decimals) : null;
+                                $formatted_p95 = $p95 !== null ? number_format_i18n($p95, $decimals) : null;
+                                $formatted_avg = $avg !== null ? number_format_i18n($avg, $decimals) : null;
+                                $formatted_p75_text = $formatted_p75 !== null
+                                    ? ($unit === '' ? $formatted_p75 : sprintf(__('%s ms', 'sitepulse'), $formatted_p75))
+                                    : null;
+                                $formatted_p95_text = $formatted_p95 !== null
+                                    ? ($unit === '' ? $formatted_p95 : sprintf(__('%s ms', 'sitepulse'), $formatted_p95))
+                                    : null;
+                                $formatted_avg_text = $formatted_avg !== null
+                                    ? ($unit === '' ? $formatted_avg : sprintf(__('%s ms', 'sitepulse'), $formatted_avg))
+                                    : null;
+                                ?>
+                                <tr>
+                                    <th scope="row"><?php echo esc_html($metric_slug); ?></th>
+                                    <td>
+                                        <?php if ($formatted_p75_text !== null) : ?>
+                                            <?php echo esc_html($formatted_p75_text); ?>
+                                        <?php else : ?>
+                                            &mdash;
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <?php if ($formatted_p95_text !== null) : ?>
+                                            <?php echo esc_html($formatted_p95_text); ?>
+                                        <?php else : ?>
+                                            &mdash;
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <?php if ($formatted_avg_text !== null) : ?>
+                                            <?php echo esc_html($formatted_avg_text); ?>
+                                        <?php else : ?>
+                                            &mdash;
+                                        <?php endif; ?>
+                                    </td>
+                                    <td><?php echo esc_html(number_format_i18n(isset($ratings['good']) ? (int) $ratings['good'] : 0)); ?></td>
+                                    <td><?php echo esc_html(number_format_i18n($count)); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                    <p class="description">
+                        <?php
+                        printf(
+                            /* translators: 1: sample count, 2: page count. */
+                            esc_html(_n('%1$s mesure sur %2$s page.', '%1$s mesures sur %2$s pages.', $rum_aggregates['page_count'], 'sitepulse')),
+                            esc_html(number_format_i18n($rum_sample_count)),
+                            esc_html(number_format_i18n((int) $rum_aggregates['page_count']))
+                        );
+                        ?>
+                    </p>
+                    <?php if (!empty($rum_page_breakdown)) : ?>
+                        <h4><?php esc_html_e('Pages principales', 'sitepulse'); ?></h4>
+                        <ul class="speed-rum-pages">
+                            <?php foreach (array_slice($rum_page_breakdown, 0, 5) as $page_entry) :
+                                $page_label = isset($page_entry['path']) ? (string) $page_entry['path'] : '/';
+                                $page_samples = isset($page_entry['samples']) ? (int) $page_entry['samples'] : 0;
+                                $device_label = isset($page_entry['device']) ? (string) $page_entry['device'] : 'unknown';
+                                ?>
+                                <li>
+                                    <strong><?php echo esc_html($page_label); ?></strong>
+                                    <span class="description">
+                                        <?php
+                                        printf(
+                                            /* translators: 1: device label, 2: sample count. */
+                                            esc_html__('%1$s · %2$s mesures', 'sitepulse'),
+                                            esc_html($device_label),
+                                            esc_html(number_format_i18n($page_samples))
+                                        );
+                                        ?>
+                                    </span>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    <?php endif; ?>
+                <?php else : ?>
+                    <p><?php esc_html_e('Aucune mesure RUM n’a encore été collectée. Activez la collecte puis laissez quelques visiteurs parcourir le site.', 'sitepulse'); ?></p>
+                <?php endif; ?>
+            </div>
         </div>
 
         <div class="speed-automation" id="sitepulse-speed-automation">
@@ -2779,6 +3269,44 @@ function sitepulse_speed_analyzer_page() {
                     </li>
                 </ul>
             </div>
+
+            <?php if (function_exists('sitepulse_request_profiler_is_available') && sitepulse_request_profiler_is_available()) : ?>
+            <div class="speed-card speed-card--profiler">
+                <h3><span class="dashicons dashicons-admin-generic"></span> <?php esc_html_e('Traçage applicatif (hooks & SQL)', 'sitepulse'); ?></h3>
+                <p><?php esc_html_e('Lancez un profilage ponctuel pour identifier les hooks et requêtes SQL les plus coûteux sur cette page.', 'sitepulse'); ?></p>
+                <button type="button" class="button button-secondary" id="sitepulse-speed-profiler-run"><?php esc_html_e('Profiler cette page', 'sitepulse'); ?></button>
+                <p class="description"><?php esc_html_e('Une requête secondaire est exécutée en arrière-plan pour collecter les métriques détaillées.', 'sitepulse'); ?></p>
+                <div class="sitepulse-speed-profiler__status" id="sitepulse-speed-profiler-status" role="status" aria-live="polite"></div>
+                <div class="sitepulse-speed-profiler__results" id="sitepulse-speed-profiler-results" hidden>
+                    <h4><?php esc_html_e('Hooks les plus lents', 'sitepulse'); ?></h4>
+                    <table class="widefat fixed">
+                        <thead>
+                            <tr>
+                                <th scope="col"><?php esc_html_e('Hook', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('Appels', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('Total (ms)', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('Moyenne (ms)', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('Pic (ms)', 'sitepulse'); ?></th>
+                            </tr>
+                        </thead>
+                        <tbody data-role="profiler-hooks"></tbody>
+                    </table>
+                    <h4><?php esc_html_e('Requêtes SQL les plus coûteuses', 'sitepulse'); ?></h4>
+                    <table class="widefat fixed">
+                        <thead>
+                            <tr>
+                                <th scope="col"><?php esc_html_e('Requête', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('Appels', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('Total (ms)', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('Moyenne (ms)', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('Origines', 'sitepulse'); ?></th>
+                            </tr>
+                        </thead>
+                        <tbody data-role="profiler-queries"></tbody>
+                    </table>
+                </div>
+            </div>
+            <?php endif; ?>
 
             <!-- Database Performance Card -->
             <div class="speed-card">
