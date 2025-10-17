@@ -2383,7 +2383,6 @@ function sitepulse_speed_analyzer_enqueue_assets($hook_suffix) {
     $automation_payload = sitepulse_speed_analyzer_build_automation_payload($thresholds);
     $frequency_choices = sitepulse_speed_analyzer_get_frequency_choices();
     $profiles_catalog = sitepulse_speed_analyzer_get_profile_catalog();
-    $profiles_catalog = sitepulse_speed_analyzer_get_profile_catalog();
     $profiles_for_js = sitepulse_speed_analyzer_prepare_profiles_for_js($profiles_catalog);
 
     $manual_profile = isset($thresholds['profile']) ? sitepulse_speed_analyzer_normalize_profile($thresholds['profile']) : 'default';
