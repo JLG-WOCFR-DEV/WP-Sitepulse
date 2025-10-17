@@ -85,4 +85,18 @@ return [
     SITEPULSE_OPTION_RESOURCE_MONITOR_EXPORT_MAX_ROWS => [
         'value' => SITEPULSE_DEFAULT_RESOURCE_MONITOR_EXPORT_MAX_ROWS,
     ],
+    SITEPULSE_OPTION_RUM_SETTINGS => [
+        'value' => [
+            'enabled'         => false,
+            'require_consent' => false,
+            'sample_rate'     => 1.0,
+            'range_days'      => 7,
+        ],
+    ],
+    SITEPULSE_OPTION_RUM_RETENTION_DAYS => [
+        'value' => SITEPULSE_DEFAULT_RUM_RETENTION_DAYS,
+    ],
+    SITEPULSE_OPTION_RUM_SCHEMA_VERSION => [
+        'value' => 0,
+    ],
 ];
