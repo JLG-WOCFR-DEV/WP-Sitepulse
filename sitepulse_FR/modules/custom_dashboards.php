@@ -3868,6 +3868,16 @@ function sitepulse_custom_dashboard_format_impact_export_rows($impact, $range_la
         ];
     }
 
+    if (function_exists('sitepulse_uptime_escape_csv_field')) {
+        foreach ($rows as $index => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $rows[$index] = array_map('sitepulse_uptime_escape_csv_field', $row);
+        }
+    }
+
     return $rows;
 }
 

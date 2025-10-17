@@ -111,6 +111,16 @@ Un harnais PHPUnit/WP-Unit est disponible dans `tests/phpunit/` (configuré via 
 
 Ce flux peut être réutilisé en CI pour éviter les régressions sur les fonctionnalités critiques.【F:tests/phpunit/test-uptime-tracker.php†L1-L200】
 
+## Audits automatisés
+Pour compléter les tests d'intégration, le dépôt embarque une batterie d'audits statiques et d'accessibilité :
+
+- **Standards WordPress/PHP** : `composer lint:php` vérifie les règles WordPress-Core/Docs/Extra via PHP_CodeSniffer, tandis que `composer lint:php:report` produit un rapport détaillé.【F:composer.json†L8-L22】【F:phpcs.xml†L1-L22】
+- **Analyse statique** : `composer analyse:php` exécute PHPStan niveau 5 avec un bootstrap minimal couvrant les helpers WordPress spécifiques au projet.【F:composer.json†L8-L22】【F:phpstan.neon.dist†L1-L17】【F:phpstan-bootstrap.php†L1-L18】
+- **Accessibilité** : `npm run audit:accessibility` utilise Pa11y pour scanner par défaut le tableau de bord SitePulse (URL surchargeable via `SITEPULSE_DASHBOARD_URL`).【F:package.json†L1-L17】【F:scripts/run-pa11y.mjs†L1-L28】
+- **Hygiène sécurité** : `npm run audit:security` déclenche un scan PHP rapide des motifs à haut risque (`eval`, `shell_exec`, superglobales non filtrées, etc.).【F:package.json†L1-L17】【F:tools/security-scan.php†L1-L74】
+
+Les commandes npm nécessitent l'installation préalable des dépendances (`npm install`). Les scripts Composer peuvent être intégrés tels quels dans une CI (GitHub Actions, GitLab CI, etc.).
+
 ## Filtres disponibles
 - `sitepulse_uptime_request_args` : ajuste les arguments passés à `wp_remote_get()` lors de la vérification d'uptime. Peut être utilisé pour désactiver `sslverify`, modifier le `timeout` ou définir une clé `url` pointant vers une adresse de test dédiée.【F:sitepulse_FR/modules/uptime_tracker.php†L1020-L1109】
 - `sitepulse_debug_log_base_dir` : permet de modifier le répertoire racine qui accueillera `sitepulse-debug.log` afin de le déplacer hors du webroot ou vers un volume dédié (le troisième argument indique si le serveur gère les protections).【F:sitepulse_FR/sitepulse.php†L333-L347】
