@@ -1165,6 +1165,82 @@ function sitepulse_ai_handle_quota_warning_alert($metrics, $entry = []) {
 }
 
 /**
+ * Normalizes quota metadata by sanitizing scalar values.
+ *
+ * @param array<string,mixed> $quota Raw quota context.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_ai_normalize_quota_metadata(array $quota) {
+    $normalized = [];
+
+    foreach ($quota as $key => $value) {
+        if (is_array($value)) {
+            $normalized[$key] = sitepulse_ai_normalize_quota_metadata($value);
+
+            continue;
+        }
+
+        if ('label' === $key) {
+            $normalized[$key] = sanitize_text_field((string) $value);
+
+            continue;
+        }
+
+        if ('value' === $key) {
+            $normalized[$key] = (float) $value;
+
+            continue;
+        }
+
+        if (in_array($key, ['window', 'window_seconds', 'retry_after', 'retry_window'], true)) {
+            $normalized[$key] = (int) $value;
+
+            continue;
+        }
+
+        if (is_bool($value)) {
+            $normalized[$key] = (bool) $value;
+        } elseif (is_numeric($value)) {
+            $normalized[$key] = 0 + $value;
+        } elseif (is_scalar($value)) {
+            $normalized[$key] = sanitize_text_field((string) $value);
+        }
+    }
+
+    return $normalized;
+}
+
+/**
+ * Normalizes usage metadata by sanitizing scalar values.
+ *
+ * @param array<string,mixed> $usage Raw usage context.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_ai_normalize_usage_metadata(array $usage) {
+    $normalized = [];
+
+    foreach ($usage as $key => $value) {
+        if (is_array($value)) {
+            $normalized[$key] = sitepulse_ai_normalize_usage_metadata($value);
+
+            continue;
+        }
+
+        if (is_bool($value)) {
+            $normalized[$key] = (bool) $value;
+        } elseif (is_numeric($value)) {
+            $normalized[$key] = 0 + $value;
+        } elseif (is_scalar($value)) {
+            $normalized[$key] = sanitize_text_field((string) $value);
+        }
+    }
+
+    return $normalized;
+}
+
+/**
  * Returns a normalized queue context array without recursive data.
  *
  * @param array<string,mixed> $context Raw context.
@@ -1218,17 +1294,17 @@ function sitepulse_ai_normalize_queue_context(array $context, array $job_data = 
     }
 
     if (isset($context['quota']) && is_array($context['quota'])) {
-        $normalized['quota'] = $context['quota'];
+        $normalized['quota'] = sitepulse_ai_normalize_quota_metadata($context['quota']);
     } elseif (isset($job_data['queue']['quota']) && is_array($job_data['queue']['quota'])) {
-        $normalized['quota'] = $job_data['queue']['quota'];
+        $normalized['quota'] = sitepulse_ai_normalize_quota_metadata($job_data['queue']['quota']);
     } else {
-        $normalized['quota'] = sitepulse_ai_capture_quota_snapshot();
+        $normalized['quota'] = sitepulse_ai_normalize_quota_metadata(sitepulse_ai_capture_quota_snapshot());
     }
 
     if (isset($context['usage']) && is_array($context['usage'])) {
-        $normalized['usage'] = $context['usage'];
+        $normalized['usage'] = sitepulse_ai_normalize_usage_metadata($context['usage']);
     } elseif (isset($job_data['queue']['usage']) && is_array($job_data['queue']['usage'])) {
-        $normalized['usage'] = $job_data['queue']['usage'];
+        $normalized['usage'] = sitepulse_ai_normalize_usage_metadata($job_data['queue']['usage']);
     }
 
     if (isset($context['args']) && is_array($context['args'])) {
@@ -1580,7 +1656,7 @@ function sitepulse_ai_format_queue_payload($job_id, $job_data = null) {
             $quota_label = sprintf(
                 /* translators: %s: quota label */
                 esc_html__('Quota : %s', 'sitepulse'),
-                $quota_value
+                esc_html($quota_value)
             );
         }
     }
@@ -1592,7 +1668,13 @@ function sitepulse_ai_format_queue_payload($job_id, $job_data = null) {
 
         foreach ($queue_ctx['usage'] as $key => $value) {
             if (is_scalar($value) && '' !== (string) $value) {
-                $usage_parts[] = sanitize_text_field(sprintf('%s=%s', $key, (string) $value));
+                $key_label = is_string($key) ? sanitize_key($key) : (string) $key;
+
+                if ('' === $key_label) {
+                    $key_label = sanitize_text_field((string) $key);
+                }
+
+                $usage_parts[] = sanitize_text_field(sprintf('%s=%s', $key_label, (string) $value));
             }
         }
 
@@ -2234,7 +2316,7 @@ function sitepulse_ai_log_execution_metrics($job_id, array $job_data, array $usa
     );
 
     if (!empty($queue_context['quota']) && isset($queue_context['quota']['label'])) {
-        $message .= ' — quota=' . $queue_context['quota']['label'];
+        $message .= ' — quota=' . sanitize_text_field((string) $queue_context['quota']['label']);
     }
 
     if (!empty($usage)) {

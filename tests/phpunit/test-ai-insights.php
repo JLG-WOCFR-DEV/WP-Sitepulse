@@ -876,6 +876,71 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
     }
 
     /**
+     * Ensures queue quota metadata is sanitized before being returned by the status endpoint.
+     */
+    public function test_status_sanitizes_quota_label_in_queue_payload() {
+        $job_id = 'job-quota-sanitized';
+
+        $saved = sitepulse_ai_save_job_data($job_id, [
+            'status' => 'queued',
+            'queue'  => [
+                'quota' => [
+                    'label'  => '<strong>VIP</strong>',
+                    'value'  => '42.5',
+                    'window' => '3600',
+                ],
+                'usage' => [
+                    'input_tokens' => '2048',
+                    'notes'        => '<em>Peak load</em>',
+                ],
+            ],
+        ]);
+
+        $this->assertTrue($saved, 'Job metadata with quota information should be stored.');
+
+        $_POST['nonce']  = wp_create_nonce(SITEPULSE_NONCE_ACTION_AI_INSIGHT);
+        $_POST['job_id'] = $job_id;
+
+        try {
+            $this->_handleAjax('sitepulse_get_ai_insight_status');
+        } catch (WPAjaxDieStopException $exception) {
+            // Expected.
+        }
+
+        $response = json_decode($this->_last_response, true);
+
+        $this->assertIsArray($response);
+        $this->assertTrue($response['success'], 'Status request should succeed for queued jobs.');
+        $this->assertArrayHasKey('data', $response);
+
+        $data = $response['data'];
+
+        $this->assertArrayHasKey('queue', $data);
+
+        $queue_payload = $data['queue'];
+
+        $this->assertArrayHasKey('quota', $queue_payload);
+        $this->assertArrayHasKey('label', $queue_payload['quota']);
+        $this->assertSame('VIP', $queue_payload['quota']['label'], 'Quota label should be stripped of HTML.');
+        $this->assertArrayHasKey('value', $queue_payload['quota']);
+        $this->assertSame(42.5, $queue_payload['quota']['value']);
+        $this->assertArrayHasKey('window', $queue_payload['quota']);
+        $this->assertSame(3600, $queue_payload['quota']['window']);
+
+        $this->assertArrayHasKey('quota_label', $queue_payload);
+        $this->assertSame('Quota : VIP', $queue_payload['quota_label']);
+        $this->assertStringNotContainsString('<', $queue_payload['quota_label']);
+
+        $this->assertArrayHasKey('usage', $queue_payload);
+        $this->assertArrayHasKey('notes', $queue_payload['usage']);
+        $this->assertSame('Peak load', $queue_payload['usage']['notes']);
+        $this->assertStringNotContainsString('<', $queue_payload['usage']['notes']);
+
+        sitepulse_ai_delete_job_data($job_id);
+        $_POST = [];
+    }
+
+    /**
      * Ensures the status endpoint reports an error when metadata is missing or expired.
      */
     public function test_status_returns_error_when_job_metadata_is_missing() {
