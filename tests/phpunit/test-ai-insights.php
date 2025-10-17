@@ -928,13 +928,23 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->assertSame(3600, $queue_payload['quota']['window']);
 
         $this->assertArrayHasKey('quota_label', $queue_payload);
-        $this->assertSame('Quota : VIP', $queue_payload['quota_label']);
+        $this->assertSame(
+            sprintf(esc_html__('Quota : %s', 'sitepulse'), 'VIP'),
+            $queue_payload['quota_label']
+        );
         $this->assertStringNotContainsString('<', $queue_payload['quota_label']);
 
         $this->assertArrayHasKey('usage', $queue_payload);
         $this->assertArrayHasKey('notes', $queue_payload['usage']);
         $this->assertSame('Peak load', $queue_payload['usage']['notes']);
         $this->assertStringNotContainsString('<', $queue_payload['usage']['notes']);
+
+        $this->assertArrayHasKey('usage_label', $queue_payload);
+        $this->assertSame(
+            sprintf(esc_html__('Consommation : %s', 'sitepulse'), 'input_tokens=2048, notes=Peak load'),
+            $queue_payload['usage_label']
+        );
+        $this->assertStringNotContainsString('<', $queue_payload['usage_label']);
 
         sitepulse_ai_delete_job_data($job_id);
         $_POST = [];
