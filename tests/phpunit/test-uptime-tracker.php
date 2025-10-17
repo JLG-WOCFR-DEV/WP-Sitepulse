@@ -209,6 +209,61 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         $this->assertSame(2, $archive[$day_key]['total']);
     }
 
+    public function test_sla_csv_export_escapes_formula_like_values() {
+        $aggregation = [
+            'generated_at' => 1700000000,
+            'period'       => ['start' => 1700000000, 'end' => 1700003600],
+            'windows'      => [
+                'monthly' => [
+                    'label'  => '=1+1',
+                    'global' => [
+                        'availability'      => 99.5,
+                        'downtime_total'    => 120.0,
+                        'maintenance_total' => 60.0,
+                        'incident_count'    => 2,
+                    ],
+                    'agents' => [
+                        'agent_formula' => [
+                            'availability'     => 97.5,
+                            'downtime'         => [
+                                'incidents'      => [
+                                    ['start' => 1, 'end' => 2],
+                                ],
+                                'total_duration' => 30.5,
+                            ],
+                            'maintenance'      => [
+                                'total_duration' => 15.25,
+                            ],
+                            'effective_checks' => 12,
+                        ],
+                    ],
+                ],
+            ],
+            'agents'       => [
+                'agent_formula' => [
+                    'label'  => '=1+1',
+                    'region' => '+Region',
+                ],
+            ],
+        ];
+
+        $destination = tempnam(sys_get_temp_dir(), 'sla');
+        $this->assertNotFalse($destination);
+
+        $result = sitepulse_uptime_write_sla_csv($aggregation, $destination);
+        $this->assertTrue($result);
+
+        $contents = file_get_contents($destination);
+        $this->assertNotFalse($contents);
+
+        if (false !== $destination && file_exists($destination)) {
+            unlink($destination);
+        }
+
+        $this->assertStringContainsString("'=1+1", $contents);
+        $this->assertStringContainsString("'+Region", $contents);
+    }
+
     public function test_normalize_log_uses_five_minute_schedule_interval() {
         update_option(SITEPULSE_OPTION_UPTIME_FREQUENCY, 'sitepulse_uptime_five_minutes');
         wp_get_schedules();
