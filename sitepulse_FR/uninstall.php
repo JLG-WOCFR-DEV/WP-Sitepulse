@@ -55,6 +55,11 @@ $sitepulse_constants = [
     'SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX' => 'sitepulse_error_alert_',
     'SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX' => '_lock',
     'SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX'  => 'sitepulse_plugin_dir_size_',
+    'SITEPULSE_OPTION_REQUEST_TRACE_RETENTION_DAYS' => 'sitepulse_request_trace_retention_days',
+    'SITEPULSE_OPTION_REQUEST_TRACE_SCHEMA_VERSION' => 'sitepulse_request_trace_schema_version',
+    'SITEPULSE_TABLE_REQUEST_TRACES'              => 'sitepulse_request_traces',
+    'SITEPULSE_TRANSIENT_REQUEST_TRACE_SESSION_PREFIX' => 'sitepulse_request_trace_session_',
+    'SITEPULSE_TRANSIENT_REQUEST_TRACE_RESULT_PREFIX'  => 'sitepulse_request_trace_result_',
     'SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER'    => 'sitepulse_error_alert_log_pointer',
     'SITEPULSE_OPTION_CRON_WARNINGS'              => 'sitepulse_cron_warnings',
     'SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT' => 'sitepulse_resource_monitor_snapshot',
@@ -135,6 +140,8 @@ $options = [
     SITEPULSE_OPTION_SPEED_AUTOMATION_CONFIG,
     SITEPULSE_OPTION_SPEED_AUTOMATION_HISTORY,
     SITEPULSE_OPTION_SPEED_AUTOMATION_QUEUE,
+    SITEPULSE_OPTION_REQUEST_TRACE_RETENTION_DAYS,
+    SITEPULSE_OPTION_REQUEST_TRACE_SCHEMA_VERSION,
     SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS,
     SITEPULSE_OPTION_CPU_ALERT_THRESHOLD,
     SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD,
@@ -174,7 +181,11 @@ $transients = [
     SITEPULSE_TRANSIENT_SPEED_SCAN_LOCK,
 ];
 
-$transient_prefixes = [SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX];
+$transient_prefixes = [
+    SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX,
+    SITEPULSE_TRANSIENT_REQUEST_TRACE_SESSION_PREFIX,
+    SITEPULSE_TRANSIENT_REQUEST_TRACE_RESULT_PREFIX,
+];
 
 $transient_prefixes = array_values(array_unique(array_filter($transient_prefixes, 'strlen')));
 
@@ -288,6 +299,29 @@ if (!function_exists('sitepulse_uninstall_drop_resource_monitor_table')) {
     }
 }
 
+if (!function_exists('sitepulse_uninstall_drop_request_trace_table')) {
+    /**
+     * Drops the request trace table for the current blog.
+     *
+     * @return void
+     */
+    function sitepulse_uninstall_drop_request_trace_table() {
+        if (!defined('SITEPULSE_TABLE_REQUEST_TRACES')) {
+            return;
+        }
+
+        global $wpdb;
+
+        if (!($wpdb instanceof wpdb)) {
+            return;
+        }
+
+        $table = $wpdb->prefix . SITEPULSE_TABLE_REQUEST_TRACES;
+
+        $wpdb->query("DROP TABLE IF EXISTS {$table}");
+    }
+}
+
 /**
  * Removes plugin data for a single site.
  *
@@ -318,6 +352,7 @@ function sitepulse_uninstall_cleanup_blog($options, $transients, $cron_hooks, $t
     sitepulse_remove_administrator_capability();
 
     sitepulse_uninstall_drop_resource_monitor_table();
+    sitepulse_uninstall_drop_request_trace_table();
 }
 
 if (is_multisite()) {
