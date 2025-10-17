@@ -1297,7 +1297,7 @@ function sitepulse_ai_normalize_queue_context(array $context, array $job_data = 
         $normalized['message'] = sanitize_text_field((string) $job_data['message']);
     }
 
-    $quota_source = [];
+    $quota_source = null;
 
     if (isset($context['quota']) && is_array($context['quota'])) {
         $quota_source = $context['quota'];
@@ -1309,10 +1309,16 @@ function sitepulse_ai_normalize_queue_context(array $context, array $job_data = 
 
     $normalized['quota'] = sitepulse_ai_normalize_quota_metadata(is_array($quota_source) ? $quota_source : []);
 
+    $usage_source = null;
+
     if (isset($context['usage']) && is_array($context['usage'])) {
-        $normalized['usage'] = sitepulse_ai_normalize_usage_metadata($context['usage']);
+        $usage_source = $context['usage'];
     } elseif (isset($job_data['queue']['usage']) && is_array($job_data['queue']['usage'])) {
-        $normalized['usage'] = sitepulse_ai_normalize_usage_metadata($job_data['queue']['usage']);
+        $usage_source = $job_data['queue']['usage'];
+    }
+
+    if (is_array($usage_source)) {
+        $normalized['usage'] = sitepulse_ai_normalize_usage_metadata($usage_source);
     }
 
     if (isset($context['args']) && is_array($context['args'])) {
@@ -1653,13 +1659,17 @@ function sitepulse_ai_format_queue_payload($job_id, $job_data = null) {
     $started_at = isset($job_data['started_at']) ? (int) $job_data['started_at'] : 0;
     $finished_at = isset($job_data['finished']) ? (int) $job_data['finished'] : 0;
 
+    $quota_data = isset($queue_ctx['quota']) && is_array($queue_ctx['quota'])
+        ? sitepulse_ai_normalize_quota_metadata($queue_ctx['quota'])
+        : [];
+
     $quota_label = '';
 
-    if (!empty($queue_ctx['quota']) && is_array($queue_ctx['quota'])) {
-        $quota_value = isset($queue_ctx['quota']['label']) ? (string) $queue_ctx['quota']['label'] : '';
+    if (!empty($quota_data)) {
+        $quota_value = isset($quota_data['label']) ? (string) $quota_data['label'] : '';
 
-        if ('' === $quota_value && isset($queue_ctx['quota']['value'])) {
-            $quota_value = (string) $queue_ctx['quota']['value'];
+        if ('' === $quota_value && isset($quota_data['value'])) {
+            $quota_value = (string) $quota_data['value'];
         }
 
         if ('' !== $quota_value) {
@@ -1671,12 +1681,16 @@ function sitepulse_ai_format_queue_payload($job_id, $job_data = null) {
         }
     }
 
+    $usage_data = isset($queue_ctx['usage']) && is_array($queue_ctx['usage'])
+        ? sitepulse_ai_normalize_usage_metadata($queue_ctx['usage'])
+        : [];
+
     $usage_label = '';
 
-    if (!empty($queue_ctx['usage']) && is_array($queue_ctx['usage'])) {
+    if (!empty($usage_data)) {
         $usage_parts = [];
 
-        foreach ($queue_ctx['usage'] as $key => $value) {
+        foreach ($usage_data as $key => $value) {
             if (is_scalar($value) && '' !== (string) $value) {
                 $key_label = is_string($key) ? sanitize_key($key) : (string) $key;
 
@@ -1692,7 +1706,7 @@ function sitepulse_ai_format_queue_payload($job_id, $job_data = null) {
             $usage_label = sprintf(
                 /* translators: %s: usage metrics */
                 esc_html__('Consommation : %s', 'sitepulse'),
-                implode(', ', $usage_parts)
+                esc_html(implode(', ', $usage_parts))
             );
         }
     }
@@ -1723,9 +1737,9 @@ function sitepulse_ai_format_queue_payload($job_id, $job_data = null) {
         'started_at'           => $started_at,
         'finished_at'          => $finished_at,
         'message'              => isset($job_data['message']) ? (string) $job_data['message'] : (isset($queue_ctx['message']) ? $queue_ctx['message'] : ''),
-        'quota'                => $queue_ctx['quota'],
+        'quota'                => $quota_data,
         'quota_label'          => $quota_label,
-        'usage'                => isset($queue_ctx['usage']) ? $queue_ctx['usage'] : [],
+        'usage'                => $usage_data,
         'usage_label'          => $usage_label,
         'force_refresh'        => isset($queue_ctx['force_refresh']) ? (bool) $queue_ctx['force_refresh'] : (isset($job_data['force_refresh']) ? (bool) $job_data['force_refresh'] : false),
     ];
