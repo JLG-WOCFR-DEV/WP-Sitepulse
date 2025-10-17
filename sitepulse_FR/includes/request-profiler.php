@@ -487,11 +487,12 @@ if (!function_exists('sitepulse_request_profiler_bootstrap')) {
 
         global $sitepulse_request_profiler_state;
         $sitepulse_request_profiler_state = [
-            'token'      => $token,
-            'user_id'    => isset($session['user_id']) ? (int) $session['user_id'] : 0,
-            'started_at' => microtime(true),
-            'hooks'      => [],
-            'stack'      => [],
+            'token'           => $token,
+            'user_id'         => isset($session['user_id']) ? (int) $session['user_id'] : 0,
+            'started_at'      => microtime(true),
+            'hooks'           => [],
+            'stack'           => [],
+            'registered_stop' => [],
         ];
 
         global $wpdb;
@@ -505,7 +506,6 @@ if (!function_exists('sitepulse_request_profiler_bootstrap')) {
         }
 
         add_filter('all', 'sitepulse_request_profiler_handle_hook_start', 0);
-        add_filter('all', 'sitepulse_request_profiler_handle_hook_stop', PHP_INT_MAX);
         add_action('shutdown', 'sitepulse_request_profiler_finalize', PHP_INT_MAX);
     }
 }
@@ -529,6 +529,11 @@ if (!function_exists('sitepulse_request_profiler_handle_hook_start')) {
         }
 
         $sitepulse_request_profiler_state['stack'][$tag][] = microtime(true);
+
+        if (empty($sitepulse_request_profiler_state['registered_stop'][$tag])) {
+            add_filter($tag, 'sitepulse_request_profiler_handle_hook_stop', PHP_INT_MAX, 99);
+            $sitepulse_request_profiler_state['registered_stop'][$tag] = true;
+        }
     }
 }
 
@@ -536,24 +541,30 @@ if (!function_exists('sitepulse_request_profiler_handle_hook_stop')) {
     /**
      * Records the completion of a hook execution.
      *
-     * @param string $tag Hook identifier.
-     * @return void
+     * @param mixed ...$args Hook arguments (ignored, returned unchanged for filters).
+     * @return mixed|null
      */
-    function sitepulse_request_profiler_handle_hook_stop($tag) {
+    function sitepulse_request_profiler_handle_hook_stop(...$args) {
         global $sitepulse_request_profiler_state;
 
-        if (!is_array($sitepulse_request_profiler_state) || empty($tag) || $tag === 'all') {
-            return;
+        if (!is_array($sitepulse_request_profiler_state)) {
+            return isset($args[0]) ? $args[0] : null;
+        }
+
+        $tag = current_filter();
+
+        if (!is_string($tag) || $tag === '') {
+            return isset($args[0]) ? $args[0] : null;
         }
 
         if (empty($sitepulse_request_profiler_state['stack'][$tag])) {
-            return;
+            return isset($args[0]) ? $args[0] : null;
         }
 
         $start = array_pop($sitepulse_request_profiler_state['stack'][$tag]);
 
         if (!is_numeric($start)) {
-            return;
+            return isset($args[0]) ? $args[0] : null;
         }
 
         $duration = microtime(true) - (float) $start;
@@ -572,6 +583,8 @@ if (!function_exists('sitepulse_request_profiler_handle_hook_stop')) {
         if ($duration > $sitepulse_request_profiler_state['hooks'][$tag]['max']) {
             $sitepulse_request_profiler_state['hooks'][$tag]['max'] = $duration;
         }
+
+        return isset($args[0]) ? $args[0] : null;
     }
 }
 
