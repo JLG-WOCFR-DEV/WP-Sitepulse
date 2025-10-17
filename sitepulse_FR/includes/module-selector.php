@@ -482,6 +482,45 @@ function sitepulse_render_module_navigation($current_page = '', $items = null) {
 
     sitepulse_enqueue_module_navigation_assets();
 
+    $category_counts  = [];
+    $category_labels  = [];
+    $ordered_categories = [];
+    $current_category = 'all';
+
+    foreach ($items as $group) {
+        if (empty($group['items']) || !is_array($group['items'])) {
+            continue;
+        }
+
+        $group_slug = isset($group['slug']) ? (string) $group['slug'] : '';
+
+        if ($group_slug === '') {
+            continue;
+        }
+
+        if (!in_array($group_slug, $ordered_categories, true)) {
+            $ordered_categories[] = $group_slug;
+        }
+
+        $category_counts[$group_slug] = count($group['items']);
+        $category_labels[$group_slug] = isset($group['label']) ? (string) $group['label'] : '';
+
+        if ($current_category !== 'all') {
+            continue;
+        }
+
+        foreach ($group['items'] as $group_item) {
+            if (!empty($group_item['current'])) {
+                $current_category = $group_slug;
+                break;
+            }
+        }
+    }
+
+    if ($current_category === '' || $current_category === null) {
+        $current_category = 'all';
+    }
+
     $nav_list_id = function_exists('wp_unique_id')
         ? wp_unique_id('sitepulse-module-nav-list-')
         : 'sitepulse-module-nav-list-' . uniqid('', true);
@@ -508,8 +547,45 @@ function sitepulse_render_module_navigation($current_page = '', $items = null) {
 
     $total_items = count($flat_items);
 
+    $nav_default_category = $current_category !== 'all' ? $current_category : 'all';
+
     ?>
-    <nav class="sitepulse-module-nav" aria-label="<?php esc_attr_e('SitePulse sections', 'sitepulse'); ?>">
+    <nav
+        class="sitepulse-module-nav"
+        aria-label="<?php esc_attr_e('SitePulse sections', 'sitepulse'); ?>"
+        data-sitepulse-nav-default-category="<?php echo esc_attr($nav_default_category); ?>"
+    >
+        <?php if (!empty($ordered_categories)) : ?>
+            <div class="sitepulse-module-nav__categories" role="toolbar" aria-label="<?php esc_attr_e('Filter modules by category', 'sitepulse'); ?>">
+                <button
+                    type="button"
+                    class="sitepulse-module-nav__category-button<?php echo $nav_default_category === 'all' ? ' is-active' : ''; ?>"
+                    data-sitepulse-nav-category="all"
+                    aria-pressed="<?php echo $nav_default_category === 'all' ? 'true' : 'false'; ?>"
+                >
+                    <span class="sitepulse-module-nav__category-label"><?php esc_html_e('All modules', 'sitepulse'); ?></span>
+                    <span class="sitepulse-module-nav__category-count"><?php echo (int) $total_items; ?></span>
+                </button>
+                <?php foreach ($ordered_categories as $category_slug) :
+                    $category_label = isset($category_labels[$category_slug]) ? $category_labels[$category_slug] : '';
+                    $category_count = isset($category_counts[$category_slug]) ? (int) $category_counts[$category_slug] : 0;
+
+                    if ($category_label === '' || $category_count <= 0) {
+                        continue;
+                    }
+                    ?>
+                    <button
+                        type="button"
+                        class="sitepulse-module-nav__category-button<?php echo $nav_default_category === $category_slug ? ' is-active' : ''; ?>"
+                        data-sitepulse-nav-category="<?php echo esc_attr($category_slug); ?>"
+                        aria-pressed="<?php echo $nav_default_category === $category_slug ? 'true' : 'false'; ?>"
+                    >
+                        <span class="sitepulse-module-nav__category-label"><?php echo esc_html($category_label); ?></span>
+                        <span class="sitepulse-module-nav__category-count"><?php echo (int) $category_count; ?></span>
+                    </button>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
         <div class="sitepulse-module-nav__search" role="search">
             <label class="sitepulse-module-nav__search-label" for="<?php echo esc_attr($nav_search_id); ?>"><?php esc_html_e('Search modules', 'sitepulse'); ?></label>
             <div class="sitepulse-module-nav__search-field">
@@ -601,8 +677,9 @@ function sitepulse_render_module_navigation($current_page = '', $items = null) {
                         }
 
                         $group_label = isset($group['label']) ? (string) $group['label'] : '';
+                        $group_slug  = isset($group['slug']) ? (string) $group['slug'] : '';
                     ?>
-                        <li class="sitepulse-module-nav__group" role="presentation">
+                        <li class="sitepulse-module-nav__group" role="presentation" data-sitepulse-nav-group="<?php echo esc_attr($group_slug); ?>">
                             <span class="sitepulse-module-nav__group-label"><?php echo esc_html($group_label); ?></span>
                             <ul class="sitepulse-module-nav__group-list">
                                 <?php foreach ($group['items'] as $item) :
