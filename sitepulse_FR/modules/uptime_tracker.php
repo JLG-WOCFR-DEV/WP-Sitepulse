@@ -5,6 +5,34 @@ if (!defined('SITEPULSE_OPTION_UPTIME_FAILURE_STREAK')) {
     define('SITEPULSE_OPTION_UPTIME_FAILURE_STREAK', 'sitepulse_uptime_failure_streak');
 }
 
+/**
+ * Escapes a CSV field to prevent spreadsheet formula injection.
+ *
+ * @param mixed $value Field value.
+ * @return mixed Escaped field when relevant.
+ */
+function sitepulse_uptime_escape_csv_field($value) {
+    if (is_string($value) && $value !== '' && preg_match('/^[=+\-@]/', $value)) {
+        return "'" . $value;
+    }
+
+    return $value;
+}
+
+/**
+ * Escapes all textual values within a CSV row.
+ *
+ * @param array<int|string,mixed> $row CSV row.
+ * @return array<int|string,mixed> Escaped row.
+ */
+function sitepulse_uptime_escape_csv_row($row) {
+    if (!is_array($row)) {
+        return $row;
+    }
+
+    return array_map('sitepulse_uptime_escape_csv_field', $row);
+}
+
 if (!defined('SITEPULSE_OPTION_UPTIME_ARCHIVE')) {
     define('SITEPULSE_OPTION_UPTIME_ARCHIVE', 'sitepulse_uptime_archive');
 }
@@ -3157,10 +3185,10 @@ function sitepulse_uptime_write_sla_csv($aggregation, $destination) {
         : date($date_format . ' ' . $time_format, $generated_at);
     $period_label = sitepulse_uptime_format_report_period($period, $date_format, $time_format);
 
-    fputcsv($handle, ['SitePulse SLA Report']);
-    fputcsv($handle, [__('Période couverte', 'sitepulse'), $period_label]);
-    fputcsv($handle, [__('Généré le', 'sitepulse'), $generated_label]);
-    fputcsv($handle, []);
+    fputcsv($handle, sitepulse_uptime_escape_csv_row(['SitePulse SLA Report']));
+    fputcsv($handle, sitepulse_uptime_escape_csv_row([__('Période couverte', 'sitepulse'), $period_label]));
+    fputcsv($handle, sitepulse_uptime_escape_csv_row([__('Généré le', 'sitepulse'), $generated_label]));
+    fputcsv($handle, sitepulse_uptime_escape_csv_row([]));
 
     foreach ($aggregation['windows'] as $window_key => $window_details) {
         $window_label = isset($window_details['label']) ? $window_details['label'] : $window_key;
@@ -3171,8 +3199,8 @@ function sitepulse_uptime_write_sla_csv($aggregation, $destination) {
         $maintenance = isset($window_details['global']['maintenance_total']) ? (float) $window_details['global']['maintenance_total'] : 0.0;
         $incidents = isset($window_details['global']['incident_count']) ? (int) $window_details['global']['incident_count'] : 0;
 
-        fputcsv($handle, [sprintf(__('Fenêtre %s', 'sitepulse'), $window_label)]);
-        fputcsv($handle, [
+        fputcsv($handle, sitepulse_uptime_escape_csv_row([sprintf(__('Fenêtre %s', 'sitepulse'), $window_label)]));
+        fputcsv($handle, sitepulse_uptime_escape_csv_row([
             __('Disponibilité moyenne (%)', 'sitepulse'),
             $availability,
             __('Incidents', 'sitepulse'),
@@ -3181,7 +3209,7 @@ function sitepulse_uptime_write_sla_csv($aggregation, $destination) {
             number_format_i18n($downtime, 2),
             __('Fenêtres de maintenance (s)', 'sitepulse'),
             number_format_i18n($maintenance, 2),
-        ]);
+        ]));
 
         $header = [
             __('Agent', 'sitepulse'),
@@ -3192,7 +3220,7 @@ function sitepulse_uptime_write_sla_csv($aggregation, $destination) {
             __('Durée incidents (s)', 'sitepulse'),
             __('Maintenance (s)', 'sitepulse'),
         ];
-        fputcsv($handle, $header);
+        fputcsv($handle, sitepulse_uptime_escape_csv_row($header));
 
         foreach ($window_details['agents'] as $agent_id => $agent_breakdown) {
             $profile = isset($aggregation['agents'][$agent_id]) ? $aggregation['agents'][$agent_id] : ['label' => $agent_id, 'region' => 'global'];
@@ -3202,7 +3230,7 @@ function sitepulse_uptime_write_sla_csv($aggregation, $destination) {
             $maintenance_total = isset($agent_breakdown['maintenance']['total_duration']) ? (float) $agent_breakdown['maintenance']['total_duration'] : 0.0;
             $effective_checks = isset($agent_breakdown['effective_checks']) ? (int) $agent_breakdown['effective_checks'] : 0;
 
-            fputcsv($handle, [
+            fputcsv($handle, sitepulse_uptime_escape_csv_row([
                 $profile['label'],
                 isset($profile['region']) ? $profile['region'] : 'global',
                 $agent_availability,
@@ -3210,10 +3238,10 @@ function sitepulse_uptime_write_sla_csv($aggregation, $destination) {
                 number_format_i18n($incident_count),
                 number_format_i18n($downtime_total, 2),
                 number_format_i18n($maintenance_total, 2),
-            ]);
+            ]));
         }
 
-        fputcsv($handle, []);
+        fputcsv($handle, sitepulse_uptime_escape_csv_row([]));
     }
 
     fclose($handle);
@@ -4293,9 +4321,9 @@ function sitepulse_uptime_handle_sla_export() {
     $report_period_label = isset($selected_month['label']) ? $selected_month['label'] : $month;
     $generated_label = function_exists('wp_date') ? wp_date('Y-m-d H:i', current_time('timestamp')) : date('Y-m-d H:i');
 
-    fputcsv($output, ['SitePulse SLA Report', $report_period_label]);
-    fputcsv($output, [__('Généré le', 'sitepulse'), $generated_label]);
-    fputcsv($output, []);
+    fputcsv($output, sitepulse_uptime_escape_csv_row(['SitePulse SLA Report', $report_period_label]));
+    fputcsv($output, sitepulse_uptime_escape_csv_row([__('Généré le', 'sitepulse'), $generated_label]));
+    fputcsv($output, sitepulse_uptime_escape_csv_row([]));
 
     $impact_rows = [];
 
@@ -4337,10 +4365,10 @@ function sitepulse_uptime_handle_sla_export() {
 
     if (!empty($impact_rows)) {
         foreach ($impact_rows as $impact_row) {
-            fputcsv($output, $impact_row);
+            fputcsv($output, sitepulse_uptime_escape_csv_row($impact_row));
         }
 
-        fputcsv($output, []);
+        fputcsv($output, sitepulse_uptime_escape_csv_row([]));
     }
 
     $header = [
@@ -4355,7 +4383,7 @@ function sitepulse_uptime_handle_sla_export() {
         __('Latence moyenne (ms)', 'sitepulse'),
         __('Violations', 'sitepulse'),
     ];
-    fputcsv($output, $header);
+    fputcsv($output, sitepulse_uptime_escape_csv_row($header));
 
     foreach ($metrics['agents'] as $agent_id => $agent_totals) {
         $agent = isset($agents[$agent_id]) ? $agents[$agent_id] : sitepulse_uptime_get_agent($agent_id);
@@ -4380,7 +4408,7 @@ function sitepulse_uptime_handle_sla_export() {
         $latency_avg_ms = $latency_count > 0 ? ($latency_sum / $latency_count) * 1000 : null;
         $ttfb_avg_ms = $ttfb_count > 0 ? ($ttfb_sum / $ttfb_count) * 1000 : null;
 
-        fputcsv($output, [
+        fputcsv($output, sitepulse_uptime_escape_csv_row([
             isset($agent['label']) ? $agent['label'] : ucfirst(str_replace('_', ' ', $agent_id)),
             isset($agent['region']) ? $agent['region'] : 'global',
             number_format((float) $agent_weight, 2, '.', ''),
@@ -4391,7 +4419,7 @@ function sitepulse_uptime_handle_sla_export() {
             null === $ttfb_avg_ms ? '' : number_format((float) $ttfb_avg_ms, 1, '.', ''),
             null === $latency_avg_ms ? '' : number_format((float) $latency_avg_ms, 1, '.', ''),
             $violations,
-        ]);
+        ]));
     }
 
     fclose($output);
