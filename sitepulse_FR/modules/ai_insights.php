@@ -650,7 +650,7 @@ function sitepulse_ai_normalize_job_log_entry($entry) {
     $usage = [];
 
     if (isset($entry['usage']) && is_array($entry['usage'])) {
-        $usage = $entry['usage'];
+        $usage = sitepulse_ai_normalize_usage_metadata($entry['usage']);
     }
 
     $normalized = [
@@ -791,7 +791,11 @@ function sitepulse_ai_record_job_log($job_id, array $data) {
     $model     = isset($data['model']) ? sanitize_text_field((string) $data['model']) : '';
     $engine    = isset($data['engine']) ? sanitize_key((string) $data['engine']) : '';
     $message   = isset($data['message']) ? wp_strip_all_tags((string) $data['message']) : '';
-    $usage     = isset($data['usage']) && is_array($data['usage']) ? $data['usage'] : [];
+    $usage     = [];
+
+    if (isset($data['usage']) && is_array($data['usage'])) {
+        $usage = sitepulse_ai_normalize_usage_metadata($data['usage']);
+    }
     $latency   = null;
 
     if (isset($data['latency_ms'])) {
@@ -1293,13 +1297,17 @@ function sitepulse_ai_normalize_queue_context(array $context, array $job_data = 
         $normalized['message'] = sanitize_text_field((string) $job_data['message']);
     }
 
+    $quota_source = [];
+
     if (isset($context['quota']) && is_array($context['quota'])) {
-        $normalized['quota'] = sitepulse_ai_normalize_quota_metadata($context['quota']);
+        $quota_source = $context['quota'];
     } elseif (isset($job_data['queue']['quota']) && is_array($job_data['queue']['quota'])) {
-        $normalized['quota'] = sitepulse_ai_normalize_quota_metadata($job_data['queue']['quota']);
+        $quota_source = $job_data['queue']['quota'];
     } else {
-        $normalized['quota'] = sitepulse_ai_normalize_quota_metadata(sitepulse_ai_capture_quota_snapshot());
+        $quota_source = sitepulse_ai_capture_quota_snapshot();
     }
+
+    $normalized['quota'] = sitepulse_ai_normalize_quota_metadata(is_array($quota_source) ? $quota_source : []);
 
     if (isset($context['usage']) && is_array($context['usage'])) {
         $normalized['usage'] = sitepulse_ai_normalize_usage_metadata($context['usage']);
@@ -1355,7 +1363,9 @@ function sitepulse_ai_get_queue_index() {
             'next_attempt_at'=> isset($entry['next_attempt_at']) ? (int) $entry['next_attempt_at'] : 0,
             'message'        => isset($entry['message']) ? sanitize_text_field((string) $entry['message']) : '',
             'engine'         => isset($entry['engine']) ? sanitize_key((string) $entry['engine']) : 'wp_cron',
-            'quota'          => isset($entry['quota']) && is_array($entry['quota']) ? $entry['quota'] : sitepulse_ai_capture_quota_snapshot(),
+            'quota'          => isset($entry['quota']) && is_array($entry['quota'])
+                ? sitepulse_ai_normalize_quota_metadata($entry['quota'])
+                : sitepulse_ai_normalize_quota_metadata(sitepulse_ai_capture_quota_snapshot()),
         ];
     }
 
@@ -1922,7 +1932,7 @@ function sitepulse_ai_queue_retry_job($job_id) {
     }
 
     if (isset($schedule['context'])) {
-        $job_data['queue'] = $schedule['context'];
+        $job_data['queue'] = sitepulse_ai_normalize_queue_context($schedule['context'], $job_data);
     }
 
     sitepulse_ai_save_job_data($job_id, $job_data);
@@ -2281,7 +2291,7 @@ function sitepulse_ai_parse_response_usage($headers) {
         }
     }
 
-    return $usage;
+    return sitepulse_ai_normalize_usage_metadata($usage);
 }
 
 /**
@@ -2299,6 +2309,7 @@ function sitepulse_ai_log_execution_metrics($job_id, array $job_data, array $usa
     }
 
     $queue_context = isset($job_data['queue']) ? sitepulse_ai_normalize_queue_context($job_data['queue'], $job_data) : sitepulse_ai_normalize_queue_context([], $job_data);
+    $usage = sitepulse_ai_normalize_usage_metadata($usage);
     $duration = 0;
 
     if (isset($job_data['started_at'], $job_data['finished'])) {
@@ -3927,7 +3938,7 @@ function sitepulse_ai_schedule_generation_job($force_refresh) {
     }
 
     if (isset($schedule['context'])) {
-        $job_data['queue'] = $schedule['context'];
+        $job_data['queue'] = sitepulse_ai_normalize_queue_context($schedule['context'], $job_data);
         sitepulse_ai_save_job_data($job_id, $job_data);
     }
 
@@ -4235,7 +4246,11 @@ function sitepulse_run_ai_insight_job($job_id, $queue_context = []) {
         ]);
 
         $job_data['queue']['next_attempt_at'] = 0;
-        $job_data['queue']['usage'] = isset($result['usage']) && is_array($result['usage']) ? $result['usage'] : [];
+        $usage_data = isset($result['usage']) && is_array($result['usage'])
+            ? sitepulse_ai_normalize_usage_metadata($result['usage'])
+            : [];
+
+        $job_data['queue']['usage'] = $usage_data;
 
         $finished_time = time();
 
@@ -4251,8 +4266,6 @@ function sitepulse_run_ai_insight_job($job_id, $queue_context = []) {
 
         update_option(SITEPULSE_OPTION_AI_LAST_RUN, absint(current_time('timestamp', true)));
         sitepulse_ai_set_retry_after_timestamp(0);
-
-        $usage_data = isset($result['usage']) && is_array($result['usage']) ? $result['usage'] : [];
 
         sitepulse_ai_log_execution_metrics($job_id, array_merge($job_data, [
             'result'   => $result_with_context,

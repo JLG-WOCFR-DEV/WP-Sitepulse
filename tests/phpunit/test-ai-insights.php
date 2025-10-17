@@ -921,7 +921,8 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
 
         $this->assertArrayHasKey('quota', $queue_payload);
         $this->assertArrayHasKey('label', $queue_payload['quota']);
-        $this->assertSame('VIP', $queue_payload['quota']['label'], 'Quota label should be stripped of HTML.');
+        $this->assertSame(sanitize_text_field('<strong>VIP</strong>'), $queue_payload['quota']['label'], 'Quota label should be stripped of HTML.');
+        $this->assertStringNotContainsString('<', $queue_payload['quota']['label']);
         $this->assertArrayHasKey('value', $queue_payload['quota']);
         $this->assertSame(42.5, $queue_payload['quota']['value']);
         $this->assertArrayHasKey('window', $queue_payload['quota']);
@@ -933,7 +934,7 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
 
         $this->assertArrayHasKey('usage', $queue_payload);
         $this->assertArrayHasKey('notes', $queue_payload['usage']);
-        $this->assertSame('Peak load', $queue_payload['usage']['notes']);
+        $this->assertSame(sanitize_text_field('<em>Peak load</em>'), $queue_payload['usage']['notes']);
         $this->assertStringNotContainsString('<', $queue_payload['usage']['notes']);
 
         sitepulse_ai_delete_job_data($job_id);
