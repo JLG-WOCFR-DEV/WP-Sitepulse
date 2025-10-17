@@ -1,0 +1,17 @@
+includes:
+    - vendor/phpstan/phpstan/conf/bleedingEdge.neon
+
+parameters:
+    level: 5
+    paths:
+        - sitepulse_FR/includes
+        - sitepulse_FR/modules
+        - sitepulse_FR/blocks
+        - sitepulse_FR/tests
+        - tests
+    bootstrapFiles:
+        - phpstan-bootstrap.php
+    excludePaths:
+        - */vendor/*
+        - */node_modules/*
+    tmpDir: build/phpstan
