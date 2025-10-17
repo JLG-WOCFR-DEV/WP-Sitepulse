@@ -1435,6 +1435,55 @@ function sitepulse_custom_dashboard_format_speed_card_view($speed, $is_active, $
         );
     }
 
+    $rum_enabled_flag = isset($speed['rum_enabled']) ? (bool) $speed['rum_enabled'] : false;
+    $rum_data = isset($speed['rum']) && is_array($speed['rum']) ? $speed['rum'] : null;
+    $rum_detail_rows = [];
+
+    if ($rum_enabled_flag && is_array($rum_data)) {
+        $rum_samples = isset($rum_data['sample_count']) ? (int) $rum_data['sample_count'] : 0;
+        $rum_summary = isset($rum_data['summary']) && is_array($rum_data['summary']) ? $rum_data['summary'] : [];
+        $rum_lcp = isset($rum_summary['LCP']['p75']) ? (float) $rum_summary['LCP']['p75'] : null;
+        $rum_fid = isset($rum_summary['FID']['p75']) ? (float) $rum_summary['FID']['p75'] : null;
+        $rum_cls = isset($rum_summary['CLS']['p75']) ? (float) $rum_summary['CLS']['p75'] : null;
+
+        if ($rum_samples > 0) {
+            $summary_parts[] = sprintf(
+                /* translators: %s: number of RUM samples. */
+                _n('%s RUM sample', '%s RUM samples', $rum_samples, 'sitepulse'),
+                number_format_i18n($rum_samples)
+            );
+        }
+
+        $rum_detail_rows[] = [
+            'label' => __('RUM LCP p75', 'sitepulse'),
+            'value' => ($rum_lcp !== null)
+                ? sprintf(__('%s ms', 'sitepulse'), number_format_i18n($rum_lcp, 0))
+                : __('N/A', 'sitepulse'),
+        ];
+        $rum_detail_rows[] = [
+            'label' => __('RUM FID p75', 'sitepulse'),
+            'value' => ($rum_fid !== null)
+                ? sprintf(__('%s ms', 'sitepulse'), number_format_i18n($rum_fid, 0))
+                : __('N/A', 'sitepulse'),
+        ];
+        $rum_detail_rows[] = [
+            'label' => __('RUM CLS p75', 'sitepulse'),
+            'value' => ($rum_cls !== null)
+                ? number_format_i18n($rum_cls, 3)
+                : __('N/A', 'sitepulse'),
+        ];
+    } elseif ($rum_enabled_flag) {
+        $rum_detail_rows[] = [
+            'label' => __('RUM', 'sitepulse'),
+            'value' => __('No RUM samples recorded for this period.', 'sitepulse'),
+        ];
+    } else {
+        $rum_detail_rows[] = [
+            'label' => __('RUM', 'sitepulse'),
+            'value' => __('Collection disabled', 'sitepulse'),
+        ];
+    }
+
     if (!empty($summary_parts)) {
         $card['summary'] = implode(' · ', $summary_parts);
     }
@@ -1455,6 +1504,10 @@ function sitepulse_custom_dashboard_format_speed_card_view($speed, $is_active, $
                 : __('N/A', 'sitepulse'),
         ],
     ];
+
+    if (!empty($rum_detail_rows)) {
+        $card['details'] = array_merge($card['details'], $rum_detail_rows);
+    }
 
     $card['trend'] = sitepulse_custom_dashboard_format_trend(
         isset($speed['trend']) ? $speed['trend'] : null,
@@ -2687,6 +2740,17 @@ function sitepulse_custom_dashboard_prepare_metrics_payload($range) {
         $logs['enabled'] = function_exists('sitepulse_is_module_active')
             ? sitepulse_is_module_active('log_analyzer')
             : true;
+    }
+
+    if (is_array($speed)) {
+        $rum_range = isset($config['days']) ? (int) $config['days'] : 7;
+        $speed['rum_enabled'] = function_exists('sitepulse_rum_is_enabled') ? sitepulse_rum_is_enabled() : false;
+
+        if (function_exists('sitepulse_rum_calculate_aggregates')) {
+            $speed['rum'] = sitepulse_rum_calculate_aggregates([
+                'range_days' => $rum_range,
+            ]);
+        }
     }
 
     $modules_status = [
