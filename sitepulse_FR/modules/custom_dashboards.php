@@ -3804,6 +3804,10 @@ function sitepulse_custom_dashboard_format_impact_export_rows($impact, $range_la
         ];
     }
 
+    if (function_exists('sitepulse_uptime_escape_csv_row')) {
+        $rows = array_map('sitepulse_uptime_escape_csv_row', $rows);
+    }
+
     return $rows;
 }
 
