@@ -30,7 +30,9 @@
 
     var i18n = settings.i18n || {};
     var restConfig = settings.rest || {};
+    var httpConfig = settings.httpMonitor || {};
     var restHeaders = {};
+    var httpEndpoint = typeof restConfig.http === 'string' ? restConfig.http : '';
 
     if (restConfig.nonce) {
         restHeaders['X-WP-Nonce'] = restConfig.nonce;
@@ -55,6 +57,15 @@
     var granularitySelect = document.getElementById('sitepulse-resource-history-granularity');
     var aggregatesContainer = document.querySelector('[data-aggregates]');
     var aggregatesSummary = document.getElementById('sitepulse-resource-aggregates-summary');
+
+    var httpMonitorContainer = document.querySelector('[data-http-monitor]');
+    var httpMonitorDescription = httpMonitorContainer ? httpMonitorContainer.querySelector('[data-http-monitor-description]') : null;
+    var httpMonitorSummary = httpMonitorContainer ? httpMonitorContainer.querySelector('[data-http-monitor-summary]') : null;
+    var httpMonitorThresholdLatency = httpMonitorContainer ? httpMonitorContainer.querySelector('[data-http-monitor-threshold-latency]') : null;
+    var httpMonitorThresholdErrors = httpMonitorContainer ? httpMonitorContainer.querySelector('[data-http-monitor-threshold-errors]') : null;
+    var httpMonitorTableBody = httpMonitorContainer ? httpMonitorContainer.querySelector('[data-http-monitor-table-body]') : null;
+    var httpMonitorSamplesList = httpMonitorContainer ? httpMonitorContainer.querySelector('[data-http-monitor-sample-list]') : null;
+    var httpMonitorRefreshButton = httpMonitorContainer ? httpMonitorContainer.querySelector('[data-http-monitor-refresh]') : null;
 
     var chartInstance = null;
     var currentChartData = null;
@@ -543,6 +554,293 @@
                 console.error('SitePulse aggregates request failed:', error);
             }
         });
+    }
+
+    function clearElement(element) {
+        if (!element) {
+            return;
+        }
+
+        while (element.firstChild) {
+            element.removeChild(element.firstChild);
+        }
+    }
+
+    function formatMilliseconds(value) {
+        if (typeof value !== 'number' || !isFinite(value)) {
+            return unavailableLabel;
+        }
+
+        return formatNumber(value, 0, 'ms');
+    }
+
+    function formatPercentageValue(value) {
+        if (typeof value !== 'number' || !isFinite(value)) {
+            return unavailableLabel;
+        }
+
+        return formatNumber(value, 2, '%');
+    }
+
+    var httpMonitorLoading = false;
+
+    function setHttpMonitorLoading(isLoading) {
+        httpMonitorLoading = isLoading;
+
+        if (!httpMonitorContainer) {
+            return;
+        }
+
+        if (isLoading) {
+            httpMonitorContainer.classList.add('is-loading');
+            if (httpMonitorDescription && typeof i18n.httpMonitorLoading === 'string') {
+                httpMonitorDescription.textContent = i18n.httpMonitorLoading;
+            }
+        } else {
+            httpMonitorContainer.classList.remove('is-loading');
+        }
+    }
+
+    function renderHttpMonitor(stats) {
+        if (!httpMonitorContainer) {
+            return;
+        }
+
+        var summary = stats && stats.summary ? stats.summary : {};
+        var thresholds = stats && stats.thresholds ? stats.thresholds : {};
+        var services = Array.isArray(stats && stats.services) ? stats.services : [];
+        var samples = Array.isArray(stats && stats.samples) ? stats.samples : [];
+
+        if (httpMonitorDescription && typeof i18n.httpMonitorSummary === 'string') {
+            httpMonitorDescription.textContent = i18n.httpMonitorSummary;
+        }
+
+        if (httpMonitorThresholdLatency) {
+            if (thresholds && typeof thresholds.latency === 'number' && thresholds.latency > 0) {
+                httpMonitorThresholdLatency.textContent = (i18n.httpMonitorThresholdLatency || '') + ': '
+                    + formatMilliseconds(thresholds.latency);
+            } else {
+                httpMonitorThresholdLatency.textContent = '';
+            }
+        }
+
+        if (httpMonitorThresholdErrors) {
+            if (thresholds && typeof thresholds.errorRate === 'number' && thresholds.errorRate > 0) {
+                httpMonitorThresholdErrors.textContent = (i18n.httpMonitorThresholdErrors || '') + ': '
+                    + formatPercentageValue(thresholds.errorRate);
+            } else {
+                httpMonitorThresholdErrors.textContent = '';
+            }
+        }
+
+        if (httpMonitorSummary) {
+            clearElement(httpMonitorSummary);
+
+            var summaryFragment = document.createDocumentFragment();
+            var totalRequests = typeof summary.total === 'number' ? summary.total : 0;
+            var errorRateDisplay = summary.errorRate !== null && summary.errorRate !== undefined
+                ? formatPercentageValue(summary.errorRate)
+                : unavailableLabel;
+            var latencyDisplay = [
+                formatMilliseconds(summary.averageDuration),
+                formatMilliseconds(summary.maxDuration),
+                formatMilliseconds(summary.p95Duration),
+            ].join(' / ');
+
+            var summaryItems = [
+                { label: i18n.httpMonitorRequests || 'Requests', value: totalRequests.toString() },
+                { label: i18n.httpMonitorErrors || 'Error rate', value: errorRateDisplay },
+                { label: i18n.httpMonitorLatency || 'Latency', value: latencyDisplay },
+            ];
+
+            summaryItems.forEach(function(item) {
+                var wrapper = document.createElement('div');
+                wrapper.className = 'sitepulse-http-monitor-metric';
+
+                var labelEl = document.createElement('span');
+                labelEl.className = 'sitepulse-http-monitor-metric-label';
+                labelEl.textContent = item.label;
+
+                var valueEl = document.createElement('span');
+                valueEl.className = 'sitepulse-http-monitor-metric-value';
+                valueEl.textContent = item.value;
+
+                wrapper.appendChild(labelEl);
+                wrapper.appendChild(valueEl);
+                summaryFragment.appendChild(wrapper);
+            });
+
+            httpMonitorSummary.appendChild(summaryFragment);
+        }
+
+        if (httpMonitorTableBody) {
+            clearElement(httpMonitorTableBody);
+
+            if (!services.length) {
+                var emptyRow = document.createElement('tr');
+                var emptyCell = document.createElement('td');
+                emptyCell.colSpan = 6;
+                emptyCell.textContent = i18n.httpMonitorEmpty || unavailableLabel;
+                emptyRow.appendChild(emptyCell);
+                httpMonitorTableBody.appendChild(emptyRow);
+            } else {
+                services.forEach(function(service) {
+                    if (!service) {
+                        return;
+                    }
+
+                    var row = document.createElement('tr');
+
+                    var hostCell = document.createElement('td');
+                    hostCell.textContent = service.host || '';
+
+                    var pathCell = document.createElement('td');
+                    pathCell.textContent = service.path || '';
+
+                    var methodCell = document.createElement('td');
+                    methodCell.textContent = service.method || '';
+
+                    var countCell = document.createElement('td');
+                    countCell.textContent = typeof service.total === 'number' ? service.total.toString() : '0';
+
+                    var latencyCell = document.createElement('td');
+                    var avgDisplay = formatMilliseconds(service.average);
+                    var maxDisplay = formatMilliseconds(service.max);
+                    latencyCell.textContent = avgDisplay + ' / ' + maxDisplay;
+
+                    var errorCell = document.createElement('td');
+                    errorCell.textContent = formatPercentageValue(service.errorRate);
+
+                    if (service.errorRate && service.errorRate >= 50) {
+                        row.classList.add('has-high-error-rate');
+                    }
+
+                    row.appendChild(hostCell);
+                    row.appendChild(pathCell);
+                    row.appendChild(methodCell);
+                    row.appendChild(countCell);
+                    row.appendChild(latencyCell);
+                    row.appendChild(errorCell);
+                    httpMonitorTableBody.appendChild(row);
+                });
+            }
+        }
+
+        if (httpMonitorSamplesList) {
+            clearElement(httpMonitorSamplesList);
+
+            if (!samples.length) {
+                var emptyItem = document.createElement('li');
+                emptyItem.textContent = i18n.httpMonitorEmpty || unavailableLabel;
+                httpMonitorSamplesList.appendChild(emptyItem);
+            } else {
+                samples.forEach(function(sample) {
+                    if (!sample) {
+                        return;
+                    }
+
+                    var item = document.createElement('li');
+                    var parts = [];
+
+                    if (sample.timestamp) {
+                        parts.push(formatDate(sample.timestamp));
+                    }
+
+                    var methodLabel = sample.method || 'GET';
+                    var endpointLabel = (sample.host || '') + (sample.path || '');
+                    parts.push(methodLabel + ' ' + endpointLabel);
+
+                    if (sample.status !== null && sample.status !== undefined) {
+                        parts.push((i18n.httpMonitorStatus || 'Status') + ': ' + sample.status);
+                    }
+
+                    if (sample.duration !== null && sample.duration !== undefined) {
+                        parts.push((i18n.httpMonitorDuration || 'Duration') + ': ' + formatMilliseconds(sample.duration));
+                    }
+
+                    item.textContent = parts.join(' — ');
+
+                    if (sample.isError) {
+                        item.classList.add('has-error');
+                    }
+
+                    httpMonitorSamplesList.appendChild(item);
+                });
+            }
+        }
+    }
+
+    function buildHttpMonitorUrl() {
+        if (!httpEndpoint) {
+            return null;
+        }
+
+        var params = new URLSearchParams();
+        var windowSeconds = parseInt(httpConfig.windowSeconds, 10);
+
+        if (windowSeconds && windowSeconds > 0) {
+            var nowSeconds = Math.floor(Date.now() / 1000);
+            var since = Math.max(0, nowSeconds - windowSeconds);
+            params.set('since', since.toString());
+        }
+
+        if (httpConfig.limit) {
+            params.set('limit', parseInt(httpConfig.limit, 10));
+        }
+
+        var query = params.toString();
+
+        if (!query) {
+            return httpEndpoint;
+        }
+
+        return httpEndpoint + (httpEndpoint.indexOf('?') === -1 ? '?' : '&') + query;
+    }
+
+    function loadHttpMonitor() {
+        if (!httpEndpoint || httpMonitorLoading) {
+            return;
+        }
+
+        var url = buildHttpMonitorUrl();
+
+        if (!url) {
+            return;
+        }
+
+        setHttpMonitorLoading(true);
+
+        fetchJson(url).then(function(response) {
+            if (!response) {
+                return;
+            }
+
+            renderHttpMonitor(response);
+        }).catch(function(error) {
+            if (console && console.error) {
+                console.error('SitePulse HTTP monitor request failed:', error);
+            }
+
+            if (httpMonitorDescription && typeof i18n.httpMonitorError === 'string') {
+                httpMonitorDescription.textContent = i18n.httpMonitorError;
+            }
+        }).finally(function() {
+            setHttpMonitorLoading(false);
+        });
+    }
+
+    if (httpMonitorContainer) {
+        renderHttpMonitor(httpConfig.initial || {});
+
+        if (httpMonitorRefreshButton) {
+            httpMonitorRefreshButton.addEventListener('click', function() {
+                loadHttpMonitor();
+            });
+        }
+
+        if (httpEndpoint) {
+            loadHttpMonitor();
+        }
     }
 
     renderHistory(initialHistory);
