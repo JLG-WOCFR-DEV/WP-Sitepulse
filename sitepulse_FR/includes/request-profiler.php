@@ -868,6 +868,184 @@ if (!function_exists('sitepulse_request_profiler_get_trace')) {
     }
 }
 
+if (!function_exists('sitepulse_request_profiler_format_recorded_at')) {
+    /**
+     * Normalizes a recorded_at value into multiple representations.
+     *
+     * @param string|int $recorded_at Raw value stored in the database.
+     * @param array       $context     Optional. Decoded context payload.
+     * @return array{timestamp:int,mysql:string,display:string}
+     */
+    function sitepulse_request_profiler_format_recorded_at($recorded_at, $context = []) {
+        $timestamp = 0;
+
+        if (is_int($recorded_at) || ctype_digit((string) $recorded_at)) {
+            $timestamp = (int) $recorded_at;
+        } elseif (is_string($recorded_at) && $recorded_at !== '') {
+            $parsed = strtotime($recorded_at . ' UTC');
+
+            if ($parsed !== false) {
+                $timestamp = (int) $parsed;
+            }
+        }
+
+        if ($timestamp <= 0 && is_array($context) && isset($context['timestamp'])) {
+            $context_timestamp = (int) $context['timestamp'];
+
+            if ($context_timestamp > 0) {
+                $timestamp = $context_timestamp;
+            }
+        }
+
+        if ($timestamp <= 0) {
+            $timestamp = time();
+        }
+
+        $mysql_value = gmdate('Y-m-d H:i:s', $timestamp);
+
+        if (function_exists('wp_date')) {
+            $date_format = get_option('date_format');
+            $time_format = get_option('time_format');
+            $display = wp_date(trim($date_format . ' ' . $time_format), $timestamp);
+        } else {
+            $display = gmdate('Y-m-d H:i:s', $timestamp);
+        }
+
+        return [
+            'timestamp' => $timestamp,
+            'mysql'     => $mysql_value,
+            'display'   => $display,
+        ];
+    }
+}
+
+if (!function_exists('sitepulse_request_profiler_build_history_entry')) {
+    /**
+     * Builds a normalized history entry from a database row or trace payload.
+     *
+     * @param array<string,mixed> $data Trace data.
+     * @return array<string,mixed>
+     */
+    function sitepulse_request_profiler_build_history_entry(array $data) {
+        $context = [];
+
+        if (isset($data['context'])) {
+            if (is_array($data['context'])) {
+                $context = $data['context'];
+            } else {
+                $decoded = json_decode((string) $data['context'], true);
+
+                if (is_array($decoded)) {
+                    $context = $decoded;
+                }
+            }
+        }
+
+        $formatted = sitepulse_request_profiler_format_recorded_at($data['recorded_at'] ?? '', $context);
+
+        $duration = isset($data['total_duration']) ? (float) $data['total_duration'] : 0.0;
+
+        return [
+            'id'           => isset($data['id']) ? (int) $data['id'] : 0,
+            'method'       => isset($data['request_method']) ? (string) $data['request_method'] : 'GET',
+            'url'          => isset($data['request_url']) ? (string) $data['request_url'] : '',
+            'duration_ms'  => round($duration * 1000, 2),
+            'hook_count'   => isset($data['hook_count']) ? (int) $data['hook_count'] : 0,
+            'query_count'  => isset($data['query_count']) ? (int) $data['query_count'] : 0,
+            'recorded_at'  => $formatted['mysql'],
+            'display_date' => $formatted['display'],
+            'timestamp'    => $formatted['timestamp'],
+        ];
+    }
+}
+
+if (!function_exists('sitepulse_request_profiler_get_recent_traces')) {
+    /**
+     * Retrieves the most recent traces for display in the UI.
+     *
+     * @param array<string,mixed> $args {
+     *     Optional. Arguments controlling the query.
+     *
+     *     @type int $limit   Maximum number of traces to return. Default 5.
+     *     @type int $user_id Restrict the results to a specific user when possible.
+     * }
+     * @return array<int,array<string,mixed>>
+     */
+    function sitepulse_request_profiler_get_recent_traces($args = []) {
+        $defaults = [
+            'limit'   => 5,
+            'user_id' => 0,
+        ];
+
+        $args = wp_parse_args($args, $defaults);
+
+        $limit = isset($args['limit']) ? (int) $args['limit'] : 5;
+        $limit = max(1, min(50, $limit));
+        $user_filter = isset($args['user_id']) ? (int) $args['user_id'] : 0;
+
+        $table = sitepulse_request_profiler_get_table_name();
+
+        if ($table === '') {
+            return [];
+        }
+
+        global $wpdb;
+
+        if (!($wpdb instanceof wpdb)) {
+            return [];
+        }
+
+        $fetch_limit = min(100, max($limit * 2, $limit + 5));
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT id, recorded_at, request_url, request_method, total_duration, hook_count, query_count, context
+                FROM {$table}
+                ORDER BY recorded_at DESC
+                LIMIT %d",
+                $fetch_limit
+            ),
+            ARRAY_A
+        );
+
+        if (!is_array($rows)) {
+            return [];
+        }
+
+        $entries = [];
+
+        foreach ($rows as $row) {
+            $context = [];
+
+            if (isset($row['context'])) {
+                $decoded = json_decode((string) $row['context'], true);
+
+                if (is_array($decoded)) {
+                    $context = $decoded;
+                }
+            }
+
+            $row['context'] = $context;
+
+            if ($user_filter > 0 && isset($context['user_id'])) {
+                $row_user = (int) $context['user_id'];
+
+                if ($row_user > 0 && $row_user !== $user_filter) {
+                    continue;
+                }
+            }
+
+            $entries[] = sitepulse_request_profiler_build_history_entry($row);
+
+            if (count($entries) >= $limit) {
+                break;
+            }
+        }
+
+        return $entries;
+    }
+}
+
 if (!function_exists('sitepulse_request_profiler_is_available')) {
     /**
      * Checks if the profiler can be used in the current context.

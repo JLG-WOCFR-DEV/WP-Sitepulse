@@ -2343,6 +2343,14 @@ function sitepulse_speed_analyzer_get_profiler_payload() {
     }
 
     $nonce_action = defined('SITEPULSE_NONCE_ACTION_REQUEST_TRACE') ? SITEPULSE_NONCE_ACTION_REQUEST_TRACE : 'sitepulse_request_trace';
+    $history = [];
+
+    if (function_exists('sitepulse_request_profiler_get_recent_traces')) {
+        $history = sitepulse_request_profiler_get_recent_traces([
+            'limit'   => 5,
+            'user_id' => get_current_user_id(),
+        ]);
+    }
 
     return [
         'enabled'      => true,
@@ -2351,6 +2359,7 @@ function sitepulse_speed_analyzer_get_profiler_payload() {
         'fetchAction'  => 'sitepulse_get_trace',
         'pollInterval' => 2000,
         'timeout'      => 30000,
+        'history'      => $history,
         'i18n'         => [
             'buttonIdle'      => esc_html__('Profiler cette page', 'sitepulse'),
             'buttonRunning'   => esc_html__('Profilage en cours…', 'sitepulse'),
@@ -2362,6 +2371,7 @@ function sitepulse_speed_analyzer_get_profiler_payload() {
             'errorInvalidUrl' => esc_html__('URL de profilage invalide.', 'sitepulse'),
             'noHooks'         => esc_html__('Aucun hook lent détecté.', 'sitepulse'),
             'noQueries'       => esc_html__('Aucune requête SQL lente détectée.', 'sitepulse'),
+            'historyEmpty'    => esc_html__('Aucun profilage récent pour le moment.', 'sitepulse'),
         ],
     ];
 }
@@ -2651,11 +2661,28 @@ function sitepulse_speed_analyzer_ajax_get_trace() {
         'memory_peak' => isset($trace['memory_peak']) ? (int) $trace['memory_peak'] : 0,
     ];
 
+    $history_entry = null;
+
+    if (function_exists('sitepulse_request_profiler_build_history_entry')) {
+        $history_entry = sitepulse_request_profiler_build_history_entry(array_merge($trace, [
+            'id' => (int) $result['trace_id'],
+        ]));
+
+        if (is_array($history_entry)) {
+            $summary['trace_id'] = $history_entry['id'];
+            $summary['display_date'] = $history_entry['display_date'];
+            $summary['timestamp'] = $history_entry['timestamp'];
+        }
+    } else {
+        $summary['trace_id'] = (int) $result['trace_id'];
+    }
+
     wp_send_json_success([
         'status'  => 'completed',
         'summary' => $summary,
         'hooks'   => $hooks,
         'queries' => $queries,
+        'history' => $history_entry,
     ]);
 }
 
@@ -3303,6 +3330,22 @@ function sitepulse_speed_analyzer_page() {
                         </thead>
                         <tbody data-role="profiler-queries"></tbody>
                     </table>
+                </div>
+                <div class="sitepulse-speed-profiler__history" id="sitepulse-speed-profiler-history">
+                    <h4><?php esc_html_e('Profilages récents', 'sitepulse'); ?></h4>
+                    <table class="widefat fixed">
+                        <thead>
+                            <tr>
+                                <th scope="col"><?php esc_html_e('Horodatage', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('Durée totale (ms)', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('Hooks', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('Requêtes', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('URL', 'sitepulse'); ?></th>
+                            </tr>
+                        </thead>
+                        <tbody data-role="profiler-history-body"></tbody>
+                    </table>
+                    <p class="description" data-role="profiler-history-empty"><?php esc_html_e('Aucun profilage récent pour le moment.', 'sitepulse'); ?></p>
                 </div>
             </div>
             <?php endif; ?>

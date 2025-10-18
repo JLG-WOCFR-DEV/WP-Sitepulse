@@ -859,21 +859,10 @@ function sitepulse_resource_monitor_register_cron_schedule($schedules) {
 
     return $schedules;
 }
-/**
- * Defers the registration of the resource monitor cron schedule until init.
- *
- * The schedule callback calls translation functions which require the
- * textdomain to be loaded. Loading happens on the "init" hook to comply with
- * WordPress core expectations introduced in WP 6.7, so we wait until the same
- * hook before attaching the filter.
- *
- * @return void
- */
-function sitepulse_defer_resource_monitor_cron_schedule_registration() {
+function sitepulse_resource_monitor_bootstrap_cron_schedule() {
     add_filter('cron_schedules', 'sitepulse_resource_monitor_register_cron_schedule');
 }
-
-add_action('init', 'sitepulse_defer_resource_monitor_cron_schedule_registration', 5);
+add_action('init', 'sitepulse_resource_monitor_bootstrap_cron_schedule', 20);
 
 /**
  * Ensures the resource monitor cron event is scheduled when the module is active.

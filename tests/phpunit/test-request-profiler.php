@@ -106,4 +106,63 @@ class Sitepulse_Request_Profiler_Test extends WP_UnitTestCase {
         $this->assertSame('SELECT * FROM wp_posts', $trace['queries'][0]['sql']);
         $this->assertSame('admin', $trace['context']['referrer']);
     }
+
+    public function test_get_recent_traces_respects_limit_and_user(): void {
+        $now = time();
+
+        $first_id = sitepulse_request_profiler_store_trace([
+            'recorded_at'    => gmdate('Y-m-d H:i:s', $now - 60),
+            'request_url'    => 'https://example.com/page-one',
+            'request_method' => 'GET',
+            'total_duration' => 0.45,
+            'hook_count'     => 3,
+            'query_count'    => 4,
+            'context'        => [
+                'user_id'  => 1,
+                'timestamp'=> $now - 60,
+            ],
+        ]);
+
+        $second_id = sitepulse_request_profiler_store_trace([
+            'recorded_at'    => gmdate('Y-m-d H:i:s', $now - 30),
+            'request_url'    => 'https://example.com/page-two',
+            'request_method' => 'POST',
+            'total_duration' => 0.80,
+            'hook_count'     => 5,
+            'query_count'    => 6,
+            'context'        => [
+                'user_id'  => 2,
+                'timestamp'=> $now - 30,
+            ],
+        ]);
+
+        $third_id = sitepulse_request_profiler_store_trace([
+            'recorded_at'    => gmdate('Y-m-d H:i:s', $now - 10),
+            'request_url'    => 'https://example.com/page-three',
+            'request_method' => 'GET',
+            'total_duration' => 0.32,
+            'hook_count'     => 7,
+            'query_count'    => 1,
+            'context'        => [
+                'user_id'  => 1,
+                'timestamp'=> $now - 10,
+            ],
+        ]);
+
+        $this->assertGreaterThan(0, $first_id);
+        $this->assertGreaterThan(0, $second_id);
+        $this->assertGreaterThan(0, $third_id);
+
+        $history = sitepulse_request_profiler_get_recent_traces([
+            'limit'   => 2,
+            'user_id' => 1,
+        ]);
+
+        $this->assertCount(2, $history);
+        $this->assertSame('https://example.com/page-three', $history[0]['url']);
+        $this->assertSame('https://example.com/page-one', $history[1]['url']);
+        $this->assertGreaterThan($history[1]['timestamp'], $history[0]['timestamp']);
+        $this->assertSame('GET', $history[0]['method']);
+        $this->assertNotEmpty($history[0]['display_date']);
+    }
 }
