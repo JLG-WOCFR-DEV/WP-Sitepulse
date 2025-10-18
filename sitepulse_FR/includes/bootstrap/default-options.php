@@ -49,6 +49,9 @@ return [
     SITEPULSE_OPTION_ALERT_ACTIVITY => [
         'value' => [],
     ],
+    SITEPULSE_OPTION_REQUEST_PROFILER_HISTORY => [
+        'value' => [],
+    ],
     SITEPULSE_OPTION_CRON_WARNINGS => [
         'value' => [],
     ],
