@@ -12,14 +12,31 @@ if (!defined('ABSPATH')) {
 sitepulse_http_monitor_init();
 
 /**
+ * Legacy bootstrapper for the HTTP monitor.
+ *
+ * @return void
+ */
+function sitepulse_http_monitor_bootstrap() {
+    sitepulse_http_monitor_init();
+}
+
+/**
  * Bootstraps the HTTP monitor hooks.
  *
  * @return void
  */
 function sitepulse_http_monitor_init() {
+    static $initialized = false;
+
+    if ($initialized) {
+        return;
+    }
+
     if (!function_exists('add_action')) {
         return;
     }
+
+    $initialized = true;
 
     add_action('plugins_loaded', 'sitepulse_http_monitor_bootstrap_storage', 11);
     add_action('http_api_debug', 'sitepulse_http_monitor_handle_http_api_debug', 10, 5);
