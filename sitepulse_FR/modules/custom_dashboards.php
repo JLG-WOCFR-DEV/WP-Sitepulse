@@ -610,7 +610,7 @@ function sitepulse_render_chart_summary($chart_id, $chart_data) {
  * @return string[]
  */
 function sitepulse_get_dashboard_card_keys() {
-    return ['speed', 'uptime', 'database', 'logs', 'resource', 'plugins'];
+    return ['speed', 'experience', 'uptime', 'database', 'logs', 'resource', 'plugins'];
 }
 
 /**
@@ -1537,6 +1537,201 @@ function sitepulse_custom_dashboard_format_speed_card_view($speed, $is_active, $
 }
 
 /**
+ * Formats the Real User Monitoring card for the dashboard.
+ *
+ * @param array<string,mixed>|null $rum          Aggregated RUM metrics.
+ * @param bool                     $module_active Whether the Speed module is active.
+ * @param bool                     $rum_enabled   Whether RUM collection is currently enabled.
+ * @param string                   $range_label   Human readable range label.
+ * @return array<string,mixed>
+ */
+function sitepulse_custom_dashboard_format_rum_card_view($rum, $module_active, $rum_enabled, $range_label) {
+    $status_meta = sitepulse_custom_dashboard_resolve_status_meta('status-warn');
+
+    $card = [
+        'label'             => __('Real user experience', 'sitepulse'),
+        'status'            => array_merge($status_meta, ['class' => 'status-warn']),
+        'value'             => ['text' => __('N/A', 'sitepulse'), 'unit' => ''],
+        'summary'           => __('Waiting for field data.', 'sitepulse'),
+        'trend'             => sitepulse_custom_dashboard_format_trend(null),
+        'details'           => [],
+        'description'       => __('Activate Web Vitals collection to populate this metric.', 'sitepulse'),
+        'inactive'          => !$module_active,
+        'inactive_message'  => __('Activate the Speed Analyzer module to unlock RUM insights.', 'sitepulse'),
+    ];
+
+    if ($card['inactive']) {
+        return $card;
+    }
+
+    if (!$rum_enabled) {
+        $idle_status = sitepulse_custom_dashboard_resolve_status_meta('status-idle');
+        $idle_status['class'] = 'status-idle';
+        $card['status'] = $idle_status;
+        $card['summary'] = __('Real user monitoring is disabled.', 'sitepulse');
+        $card['description'] = __('Enable RUM collection from the Speed Analyzer settings.', 'sitepulse');
+
+        return $card;
+    }
+
+    if (!is_array($rum)) {
+        $rum = [];
+    }
+
+    $samples = isset($rum['window']['samples']) ? (int) $rum['window']['samples'] : 0;
+    $metrics = isset($rum['metrics']) && is_array($rum['metrics']) ? $rum['metrics'] : [];
+    $pages   = isset($rum['pages']) && is_array($rum['pages']) ? $rum['pages'] : [];
+
+    if ($samples <= 0 || empty($metrics)) {
+        $card['summary'] = __('No RUM samples collected for the selected range.', 'sitepulse');
+        $card['description'] = __('Once visitors interact with the site, Web Vitals will appear here.', 'sitepulse');
+
+        return $card;
+    }
+
+    $labels = [
+        'LCP' => __('Largest Contentful Paint', 'sitepulse'),
+        'FID' => __('First Input Delay', 'sitepulse'),
+        'CLS' => __('Cumulative Layout Shift', 'sitepulse'),
+    ];
+
+    $primary_key = isset($metrics['LCP']) ? 'LCP' : (key($metrics) ?: 'LCP');
+    $primary = isset($metrics[$primary_key]) && is_array($metrics[$primary_key]) ? $metrics[$primary_key] : [];
+
+    $extract_value = static function ($metric_key, $metric_data, $field) {
+        if (!is_array($metric_data)) {
+            return null;
+        }
+
+        if (isset($metric_data[$field]) && is_numeric($metric_data[$field])) {
+            return (float) $metric_data[$field];
+        }
+
+        if ($field !== 'average' && isset($metric_data['average']) && is_numeric($metric_data['average'])) {
+            return (float) $metric_data['average'];
+        }
+
+        return null;
+    };
+
+    $format_value = static function ($metric_key, $value) {
+        $unit = '';
+        $precision = 2;
+
+        if ($value === null) {
+            return ['formatted' => __('N/A', 'sitepulse'), 'unit' => '', 'raw' => null];
+        }
+
+        if ($metric_key === 'LCP') {
+            $unit = 's';
+            $value = $value / 1000;
+            $precision = 2;
+        } elseif ($metric_key === 'FID') {
+            $unit = 'ms';
+            $precision = $value >= 100 ? 0 : 1;
+        } elseif ($metric_key === 'CLS') {
+            $unit = '';
+            $precision = 3;
+        }
+
+        return [
+            'formatted' => number_format_i18n($value, $precision),
+            'unit'      => $unit,
+            'raw'       => $value,
+        ];
+    };
+
+    $primary_value = $extract_value($primary_key, $primary, 'p75');
+    $value_meta = $format_value($primary_key, $primary_value);
+
+    $ratings = isset($primary['ratings']) && is_array($primary['ratings']) ? $primary['ratings'] : [];
+    $good_count  = isset($ratings['good']) ? (int) $ratings['good'] : 0;
+    $ni_count    = isset($ratings['needs_improvement']) ? (int) $ratings['needs_improvement'] : 0;
+    $poor_count  = isset($ratings['poor']) ? (int) $ratings['poor'] : 0;
+    $rating_total = max(1, $good_count + $ni_count + $poor_count);
+
+    $good_ratio = $rating_total > 0 ? $good_count / $rating_total : 0.0;
+    $ni_ratio   = $rating_total > 0 ? $ni_count / $rating_total : 0.0;
+    $poor_ratio = $rating_total > 0 ? $poor_count / $rating_total : 0.0;
+
+    if ($poor_ratio >= 0.3) {
+        $status_key = 'status-bad';
+    } elseif ($good_ratio < 0.5 || $ni_ratio >= 0.3) {
+        $status_key = 'status-warn';
+    } else {
+        $status_key = 'status-ok';
+    }
+
+    $status_meta = sitepulse_custom_dashboard_resolve_status_meta($status_key);
+    $status_meta['class'] = $status_key;
+    $card['status'] = $status_meta;
+
+    $metric_label = isset($labels[$primary_key]) ? $labels[$primary_key] : $primary_key;
+    $card['value'] = [
+        'text' => $value_meta['formatted'],
+        'unit' => $value_meta['unit'],
+    ];
+
+    $card['summary'] = sprintf(
+        __('p75 %1$s: %2$s%3$s · %4$s%% good', 'sitepulse'),
+        $metric_label,
+        $value_meta['formatted'],
+        $value_meta['unit'] !== '' ? ' ' . $value_meta['unit'] : '',
+        number_format_i18n(round($good_ratio * 100))
+    );
+
+    $card['description'] = sprintf(
+        __('Based on %1$s samples collected over %2$s.', 'sitepulse'),
+        number_format_i18n($samples),
+        $range_label
+    );
+
+    $details = [];
+
+    foreach (['LCP', 'FID', 'CLS'] as $metric_key) {
+        if (!isset($metrics[$metric_key]) || !is_array($metrics[$metric_key])) {
+            continue;
+        }
+
+        $metric_data = $metrics[$metric_key];
+        $p95_value = $extract_value($metric_key, $metric_data, 'p95');
+        $detail_value = $format_value($metric_key, $p95_value);
+        $metric_ratings = isset($metric_data['ratings']) && is_array($metric_data['ratings']) ? $metric_data['ratings'] : [];
+        $metric_good = isset($metric_ratings['good']) ? (int) $metric_ratings['good'] : 0;
+        $metric_total = max(1, $metric_good + (isset($metric_ratings['needs_improvement']) ? (int) $metric_ratings['needs_improvement'] : 0) + (isset($metric_ratings['poor']) ? (int) $metric_ratings['poor'] : 0));
+
+        $details[] = [
+            'label' => isset($labels[$metric_key]) ? $labels[$metric_key] : $metric_key,
+            'value' => sprintf(
+                __('p95 %1$s%2$s · %3$s%% good', 'sitepulse'),
+                $detail_value['formatted'],
+                $detail_value['unit'] !== '' ? ' ' . $detail_value['unit'] : '',
+                number_format_i18n(round(($metric_good / $metric_total) * 100))
+            ),
+        ];
+    }
+
+    if (!empty($pages)) {
+        $top_page = $pages[0];
+        $page_path = isset($top_page['path']) ? (string) $top_page['path'] : '/';
+        $page_samples = isset($top_page['samples']) ? (int) $top_page['samples'] : 0;
+
+        $details[] = [
+            'label' => __('Top sampled page', 'sitepulse'),
+            'value' => sprintf(
+                '%1$s · %2$s',
+                $page_path,
+                sprintf(_n('%s sample', '%s samples', $page_samples, 'sitepulse'), number_format_i18n($page_samples))
+            ),
+        ];
+    }
+
+    $card['details'] = $details;
+
+    return $card;
+}
+
+/**
  * Builds the contextual status banner based on the current metrics.
  *
  * @param array<string,array<string,mixed>> $cards    Formatted cards indexed by key.
@@ -2276,9 +2471,10 @@ function sitepulse_custom_dashboard_format_status_banner($cards, $payload, $rang
         'data'  => '',
     ];
 
-    $uptime_card = isset($cards['uptime']) ? $cards['uptime'] : null;
-    $logs_card   = isset($cards['logs']) ? $cards['logs'] : null;
-    $speed_card  = isset($cards['speed']) ? $cards['speed'] : null;
+    $uptime_card     = isset($cards['uptime']) ? $cards['uptime'] : null;
+    $logs_card       = isset($cards['logs']) ? $cards['logs'] : null;
+    $speed_card      = isset($cards['speed']) ? $cards['speed'] : null;
+    $experience_card = isset($cards['experience']) ? $cards['experience'] : null;
 
     if (is_array($uptime_card) && empty($uptime_card['inactive'])) {
         $uptime_status = isset($uptime_card['status']['class']) ? $uptime_card['status']['class'] : 'status-ok';
@@ -2376,6 +2572,32 @@ function sitepulse_custom_dashboard_format_status_banner($cards, $payload, $rang
         }
     }
 
+    if (is_array($experience_card) && empty($experience_card['inactive'])) {
+        $experience_status = isset($experience_card['status']['class']) ? $experience_card['status']['class'] : 'status-ok';
+
+        if ('status-bad' === $experience_status && 'danger' !== $tone) {
+            $tone = 'danger';
+            $icon = '🚨';
+            $message = __('🚨 Real user experience is in the red.', 'sitepulse');
+            $sr = __('Real user monitoring indicates a critical degradation.', 'sitepulse');
+            $cta = [
+                'label' => __('Inspect real user metrics', 'sitepulse'),
+                'url'   => admin_url('admin.php?page=sitepulse-speed'),
+                'data'  => 'performance-playbook',
+            ];
+        } elseif ('status-warn' === $experience_status && 'danger' !== $tone && 'warning' !== $tone) {
+            $tone = 'warning';
+            $icon = '⚠️';
+            $message = __('⚠️ Real user metrics require attention.', 'sitepulse');
+            $sr = __('Real user metrics require attention.', 'sitepulse');
+            $cta = [
+                'label' => __('Review Web Vitals', 'sitepulse'),
+                'url'   => admin_url('admin.php?page=sitepulse-speed'),
+                'data'  => 'performance-playbook',
+            ];
+        }
+    }
+
     $kpis = sitepulse_custom_dashboard_build_kpi_cards($payload, $range_label);
 
     return [
@@ -2432,6 +2654,12 @@ function sitepulse_custom_dashboard_format_metrics_view($payload) {
         'speed'  => sitepulse_custom_dashboard_format_speed_card_view(
             isset($payload['speed']) ? $payload['speed'] : null,
             !empty($modules['speed_analyzer']),
+            $range_label
+        ),
+        'experience' => sitepulse_custom_dashboard_format_rum_card_view(
+            isset($payload['rum']) ? $payload['rum'] : null,
+            !empty($modules['speed_analyzer']),
+            !empty($modules['rum']),
             $range_label
         ),
     ];
@@ -2735,6 +2963,16 @@ function sitepulse_custom_dashboard_prepare_metrics_payload($range) {
     $uptime = sitepulse_custom_dashboard_calculate_uptime_metrics($range, $config);
     $logs   = sitepulse_custom_dashboard_analyze_debug_log();
     $speed  = sitepulse_custom_dashboard_calculate_speed_metrics($range, $config);
+    $rum    = function_exists('sitepulse_rum_get_admin_summary')
+        ? sitepulse_rum_get_admin_summary()
+        : [];
+
+    if (!is_array($rum)) {
+        $rum = [];
+    }
+
+    $rum_enabled = function_exists('sitepulse_rum_is_enabled') ? sitepulse_rum_is_enabled() : false;
+    $rum['enabled'] = $rum_enabled;
 
     if (is_array($logs)) {
         $logs['enabled'] = function_exists('sitepulse_is_module_active')
@@ -2763,10 +3001,8 @@ function sitepulse_custom_dashboard_prepare_metrics_payload($range) {
         'speed_analyzer'   => function_exists('sitepulse_is_module_active')
             ? sitepulse_is_module_active('speed_analyzer')
             : true,
-        'resource_monitor' => function_exists('sitepulse_is_module_active')
-            ? sitepulse_is_module_active('resource_monitor')
-            : true,
-        'ai_insights'      => function_exists('sitepulse_is_module_active')
+        'rum'            => $rum_enabled,
+        'ai_insights'    => function_exists('sitepulse_is_module_active')
             ? sitepulse_is_module_active('ai_insights')
             : function_exists('sitepulse_ai_get_history_entries'),
     ];
@@ -2801,7 +3037,7 @@ function sitepulse_custom_dashboard_prepare_metrics_payload($range) {
         'uptime'           => $uptime,
         'logs'             => $logs,
         'speed'            => $speed,
-        'resource'         => $resource,
+        'rum'              => $rum,
         'modules'          => $modules_status,
         'ai_summary'       => $ai_summary,
         'incidents'        => $incidents,
