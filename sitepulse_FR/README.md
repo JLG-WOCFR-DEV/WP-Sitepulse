@@ -24,9 +24,11 @@ Monitors your WordPress site's speed, database, maintenance, server, and errors 
 
 Sitepulse - JLG takes the pulse of your WordPress site, offering modules for:
 
-- Speed analysis (load times, server processing time)
+- Speed analysis (load times, server processing time, **profilage applicatif ad hoc** sur les hooks et requêtes SQL)
+- Real-user Web Vitals capture (LCP, FID, CLS) with consent-aware script injection and REST batching
 - Database optimization (clean bloat, suggest indexes)
 - Server monitoring (CPU, memory, uptime) with programmable maintenance windows that pause alerts and keep an internal audit trail
+- External service monitoring (latency/error tracking for `wp_remote_request()` calls, REST reporting, alert thresholds)
 - Error logging and alerts (email plus Slack, Microsoft Teams, and Discord webhooks with native formatting)
 - Plugin impact analysis
 - Maintenance checks and AI insights
@@ -50,10 +52,10 @@ Toggle modules in the admin panel to keep it lightweight. Includes debug mode an
 
 | Module | Objectif | Fonctionnalités clés |
 | --- | --- | --- |
-| **Speed Analyzer** | Mesurer la performance front-end | Scans manuels et planifiés, agrégation mobile/desktop, recommandations contextualisées, budgets de vitesse personnalisables |
+| **Speed Analyzer** | Mesurer la performance front-end | Scans manuels et planifiés, agrégation mobile/desktop, recommandations contextualisées, budgets de vitesse personnalisables, profiler de requêtes WordPress, collecte RUM Web Vitals |
 | **Database Optimizer** | Nettoyer et optimiser la base | Purge des révisions/transients, historique des opérations, seuils ajustables et notifications de nettoyage |
 | **Uptime Tracker** | Surveiller la disponibilité | Agents multiples avec file d’attente distante normalisée (TTL/limite filtrables), rétention 30-365 jours, export CSV, intégration Site Health, fenêtres de maintenance ciblées par agent |
-| **Resource Monitor** | Suivre CPU/RAM/Disque | Snapshots réguliers, historique configurable (90-365 jours), exports JSON/CSV volumineux, alertes visuelles basées sur les seuils |
+| **Resource Monitor** | Suivre CPU/RAM/Disque | Snapshots réguliers, historique configurable (90-365 jours), exports JSON/CSV volumineux, alertes visuelles basées sur les seuils, surveillance des services externes (latence/erreurs) |
 | **Error Alerts** | Détecter les erreurs PHP/JS | Lecture sécurisée de `debug.log`, webhooks Slack/Teams/Discord, filtrage par gravité, journal d’alertes |
 | **AI Insights** | Générer des recommandations | Orchestrateur Gemini avec cache, historique commentable, export CSV/clipboard, module de notes collaboratif |
 | **Plugin Impact Scanner** | Évaluer l’effet des extensions | Mesures de temps de chargement, poids disque, filtres multi-critères, scénarios d’atténuation |
@@ -61,6 +63,8 @@ Toggle modules in the admin panel to keep it lightweight. Includes debug mode an
 | **Custom Dashboards** | Construire des vues dédiées | Widgets drag & drop, préférences par utilisateur, intégration KPI modules, partage interne |
 
 Chaque module peut être activé/désactivé depuis l’interface d’administration pour n’installer que les briques nécessaires à votre contexte. Les hooks `sitepulse_module_enabled` / `sitepulse_module_disabled` permettent d’auditer ces actions ou d’automatiser le provisionnement.
+
+👉 Consultez la fiche [docs/observability.md](../docs/observability.md) pour un guide détaillé sur le profiler de requêtes, la surveillance des appels sortants et la collecte RUM Web Vitals.
 
 ## Workflow de monitoring
 
