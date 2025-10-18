@@ -64,11 +64,26 @@ $sitepulse_constants = [
     'SITEPULSE_OPTION_RESOURCE_MONITOR_SCHEMA_VERSION' => 'sitepulse_resource_monitor_schema_version',
     'SITEPULSE_OPTION_RESOURCE_MONITOR_RETENTION_DAYS' => 'sitepulse_resource_monitor_retention_days',
     'SITEPULSE_OPTION_RESOURCE_MONITOR_EXPORT_MAX_ROWS' => 'sitepulse_resource_monitor_export_max_rows',
+    'SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS' => 'sitepulse_http_monitor_retention_days',
+    'SITEPULSE_OPTION_HTTP_MONITOR_SCHEMA_VERSION' => 'sitepulse_http_monitor_schema_version',
+    'SITEPULSE_OPTION_HTTP_MONITOR_LATENCY_THRESHOLD_MS' => 'sitepulse_http_monitor_latency_threshold_ms',
+    'SITEPULSE_OPTION_HTTP_MONITOR_ERROR_RATE_THRESHOLD' => 'sitepulse_http_monitor_error_rate_threshold',
+    'SITEPULSE_OPTION_RUM_SETTINGS'                 => 'sitepulse_rum_settings',
+    'SITEPULSE_OPTION_RUM_RETENTION_DAYS'           => 'sitepulse_rum_retention_days',
+    'SITEPULSE_OPTION_RUM_SCHEMA_VERSION'           => 'sitepulse_rum_schema_version',
+    'SITEPULSE_OPTION_RUM_INGEST_TOKEN'             => 'sitepulse_rum_ingest_token',
+    'SITEPULSE_OPTION_RUM_CACHE_KEYS'               => 'sitepulse_rum_cache_keys',
     'SITEPULSE_PLUGIN_IMPACT_OPTION'              => 'sitepulse_plugin_impact_stats',
     'SITEPULSE_OPTION_PLUGIN_IMPACT_HISTORY'      => 'sitepulse_plugin_impact_history',
     'SITEPULSE_OPTION_PLUGIN_IMPACT_SCORES'       => 'sitepulse_plugin_impact_scores',
     'SITEPULSE_OPTION_IMPACT_LOADER_SIGNATURE'    => 'sitepulse_impact_loader_signature',
     'SITEPULSE_PLUGIN_DIR_SCAN_QUEUE_OPTION'      => 'sitepulse_plugin_dir_scan_queue',
+    'SITEPULSE_TRANSIENT_HTTP_MONITOR_CLEANUP_LOCK' => 'sitepulse_http_monitor_cleanup_lock',
+    'SITEPULSE_TABLE_HTTP_MONITOR_EVENTS'         => 'sitepulse_http_monitor_events',
+    'SITEPULSE_CRON_HTTP_MONITOR_CLEANUP'         => 'sitepulse_http_monitor_cleanup',
+    'SITEPULSE_TABLE_RUM_EVENTS'                  => 'sitepulse_rum_events',
+    'SITEPULSE_TRANSIENT_RUM_AGGREGATE_CACHE_PREFIX' => 'sitepulse_rum_aggregates_',
+    'SITEPULSE_CRON_RUM_CLEANUP'                  => 'sitepulse_rum_cleanup',
 ];
 
 foreach ($sitepulse_constants as $constant => $value) {
@@ -137,6 +152,8 @@ $options = [
     SITEPULSE_OPTION_SPEED_AUTOMATION_CONFIG,
     SITEPULSE_OPTION_SPEED_AUTOMATION_HISTORY,
     SITEPULSE_OPTION_SPEED_AUTOMATION_QUEUE,
+    SITEPULSE_OPTION_REQUEST_TRACE_RETENTION_DAYS,
+    SITEPULSE_OPTION_REQUEST_TRACE_SCHEMA_VERSION,
     SITEPULSE_OPTION_ALERT_ENABLED_CHANNELS,
     SITEPULSE_OPTION_CPU_ALERT_THRESHOLD,
     SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD,
@@ -161,6 +178,15 @@ $options = [
     SITEPULSE_OPTION_RESOURCE_MONITOR_SCHEMA_VERSION,
     SITEPULSE_OPTION_RESOURCE_MONITOR_RETENTION_DAYS,
     SITEPULSE_OPTION_RESOURCE_MONITOR_EXPORT_MAX_ROWS,
+    SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS,
+    SITEPULSE_OPTION_HTTP_MONITOR_SCHEMA_VERSION,
+    SITEPULSE_OPTION_HTTP_MONITOR_LATENCY_THRESHOLD_MS,
+    SITEPULSE_OPTION_HTTP_MONITOR_ERROR_RATE_THRESHOLD,
+    SITEPULSE_OPTION_RUM_SETTINGS,
+    SITEPULSE_OPTION_RUM_RETENTION_DAYS,
+    SITEPULSE_OPTION_RUM_SCHEMA_VERSION,
+    SITEPULSE_OPTION_RUM_INGEST_TOKEN,
+    SITEPULSE_OPTION_RUM_CACHE_KEYS,
     SITEPULSE_PLUGIN_IMPACT_OPTION,
     SITEPULSE_OPTION_PLUGIN_IMPACT_HISTORY,
     SITEPULSE_OPTION_PLUGIN_IMPACT_SCORES,
@@ -174,6 +200,7 @@ $transients = [
     SITEPULSE_TRANSIENT_ERROR_ALERT_CPU_LOCK,
     SITEPULSE_TRANSIENT_ERROR_ALERT_PHP_FATAL_LOCK,
     SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT,
+    SITEPULSE_TRANSIENT_HTTP_MONITOR_CLEANUP_LOCK,
     SITEPULSE_TRANSIENT_SPEED_SCAN_LOCK,
 ];
 
@@ -294,6 +321,75 @@ if (!function_exists('sitepulse_uninstall_drop_resource_monitor_table')) {
     }
 }
 
+if (!function_exists('sitepulse_uninstall_drop_request_trace_table')) {
+    /**
+     * Drops the request trace table for the current blog.
+     *
+     * @return void
+     */
+    function sitepulse_uninstall_drop_request_trace_table() {
+        if (!defined('SITEPULSE_TABLE_REQUEST_TRACES')) {
+            return;
+        }
+
+        global $wpdb;
+
+        if (!($wpdb instanceof wpdb)) {
+            return;
+        }
+
+        $table = $wpdb->prefix . SITEPULSE_TABLE_REQUEST_TRACES;
+
+        $wpdb->query("DROP TABLE IF EXISTS {$table}");
+    }
+}
+
+if (!function_exists('sitepulse_uninstall_drop_http_monitor_table')) {
+    /**
+     * Drops the HTTP monitor events table for the current blog.
+     *
+     * @return void
+     */
+    function sitepulse_uninstall_drop_http_monitor_table() {
+        if (!defined('SITEPULSE_TABLE_HTTP_MONITOR_EVENTS')) {
+            return;
+        }
+
+        global $wpdb;
+
+        if (!($wpdb instanceof wpdb)) {
+            return;
+        }
+
+        $table = $wpdb->prefix . SITEPULSE_TABLE_HTTP_MONITOR_EVENTS;
+
+        $wpdb->query("DROP TABLE IF EXISTS {$table}");
+    }
+}
+
+if (!function_exists('sitepulse_uninstall_drop_rum_table')) {
+    /**
+     * Drops the RUM metrics table for the current blog.
+     *
+     * @return void
+     */
+    function sitepulse_uninstall_drop_rum_table() {
+        if (!defined('SITEPULSE_TABLE_RUM_EVENTS')) {
+            return;
+        }
+
+        global $wpdb;
+
+        if (!($wpdb instanceof wpdb)) {
+            return;
+        }
+
+        $table = $wpdb->prefix . SITEPULSE_TABLE_RUM_EVENTS;
+
+        $wpdb->query("DROP TABLE IF EXISTS {$table}");
+    }
+}
+
 /**
  * Removes plugin data for a single site.
  *
@@ -324,6 +420,9 @@ function sitepulse_uninstall_cleanup_blog($options, $transients, $cron_hooks, $t
     sitepulse_remove_administrator_capability();
 
     sitepulse_uninstall_drop_resource_monitor_table();
+    sitepulse_uninstall_drop_request_trace_table();
+    sitepulse_uninstall_drop_http_monitor_table();
+    sitepulse_uninstall_drop_rum_table();
 }
 
 if (is_multisite()) {

@@ -129,9 +129,82 @@ if (!defined('SITEPULSE_VERSION')) {
     define('SITEPULSE_VERSION', 'test');
 }
 
+if (!defined('SITEPULSE_PATH')) {
+    define('SITEPULSE_PATH', dirname(__DIR__, 3) . '/sitepulse_FR/');
+}
+
 if (!defined('SITEPULSE_URL')) {
     define('SITEPULSE_URL', 'https://example.com/wp-content/plugins/sitepulse/');
 }
+
+if (!defined('SITEPULSE_TABLE_REQUEST_TRACES')) {
+    define('SITEPULSE_TABLE_REQUEST_TRACES', 'sitepulse_request_traces');
+}
+
+if (!defined('SITEPULSE_OPTION_REQUEST_TRACE_SCHEMA_VERSION')) {
+    define('SITEPULSE_OPTION_REQUEST_TRACE_SCHEMA_VERSION', 'sitepulse_request_trace_schema_version');
+}
+
+if (!defined('SITEPULSE_REQUEST_TRACE_SCHEMA_VERSION')) {
+    define('SITEPULSE_REQUEST_TRACE_SCHEMA_VERSION', 1);
+}
+
+if (!defined('SITEPULSE_OPTION_REQUEST_TRACE_RETENTION_DAYS')) {
+    define('SITEPULSE_OPTION_REQUEST_TRACE_RETENTION_DAYS', 'sitepulse_request_trace_retention_days');
+}
+
+if (!defined('SITEPULSE_DEFAULT_REQUEST_TRACE_RETENTION_DAYS')) {
+    define('SITEPULSE_DEFAULT_REQUEST_TRACE_RETENTION_DAYS', 14);
+}
+
+if (!defined('SITEPULSE_TRANSIENT_REQUEST_TRACE_SESSION_PREFIX')) {
+    define('SITEPULSE_TRANSIENT_REQUEST_TRACE_SESSION_PREFIX', 'sitepulse_request_trace_session_');
+}
+
+if (!defined('SITEPULSE_TRANSIENT_REQUEST_TRACE_RESULT_PREFIX')) {
+    define('SITEPULSE_TRANSIENT_REQUEST_TRACE_RESULT_PREFIX', 'sitepulse_request_trace_result_');
+}
+
+if (!defined('SITEPULSE_NONCE_ACTION_REQUEST_TRACE')) {
+    define('SITEPULSE_NONCE_ACTION_REQUEST_TRACE', 'sitepulse_request_trace');
+}
+
+if (!defined('SITEPULSE_TABLE_HTTP_MONITOR_EVENTS')) {
+    define('SITEPULSE_TABLE_HTTP_MONITOR_EVENTS', 'sitepulse_http_monitor_events');
+}
+
+if (!defined('SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS')) {
+    define('SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS', 'sitepulse_http_monitor_retention_days');
+}
+
+if (!defined('SITEPULSE_DEFAULT_HTTP_MONITOR_RETENTION_DAYS')) {
+    define('SITEPULSE_DEFAULT_HTTP_MONITOR_RETENTION_DAYS', 14);
+}
+
+if (!defined('SITEPULSE_TRANSIENT_HTTP_MONITOR_CLEANUP_LOCK')) {
+    define('SITEPULSE_TRANSIENT_HTTP_MONITOR_CLEANUP_LOCK', 'sitepulse_http_monitor_cleanup_lock');
+}
+
+if (!defined('SITEPULSE_OPTION_HTTP_MONITOR_LATENCY_THRESHOLD_MS')) {
+    define('SITEPULSE_OPTION_HTTP_MONITOR_LATENCY_THRESHOLD_MS', 'sitepulse_http_monitor_latency_threshold_ms');
+}
+
+if (!defined('SITEPULSE_OPTION_HTTP_MONITOR_ERROR_RATE_THRESHOLD')) {
+    define('SITEPULSE_OPTION_HTTP_MONITOR_ERROR_RATE_THRESHOLD', 'sitepulse_http_monitor_error_rate_threshold');
+}
+
+if (!defined('SITEPULSE_DEFAULT_HTTP_MONITOR_LATENCY_THRESHOLD_MS')) {
+    define('SITEPULSE_DEFAULT_HTTP_MONITOR_LATENCY_THRESHOLD_MS', 1200);
+}
+
+if (!defined('SITEPULSE_DEFAULT_HTTP_MONITOR_ERROR_RATE_THRESHOLD')) {
+    define('SITEPULSE_DEFAULT_HTTP_MONITOR_ERROR_RATE_THRESHOLD', 20);
+}
+
+if (!defined('SITEPULSE_CRON_HTTP_MONITOR_CLEANUP')) {
+    define('SITEPULSE_CRON_HTTP_MONITOR_CLEANUP', 'sitepulse_http_monitor_cleanup');
+}
+
 
 if (!function_exists('sitepulse_log')) {
     function sitepulse_log($message, $level = 'INFO') {
