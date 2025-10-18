@@ -859,10 +859,21 @@ function sitepulse_resource_monitor_register_cron_schedule($schedules) {
 
     return $schedules;
 }
-function sitepulse_resource_monitor_bootstrap_cron_schedule() {
+
+/**
+ * Registers the cron schedule filter after WordPress has initialized.
+ *
+ * Translation functions should only run once the locale files are available,
+ * which happens on or after the `init` hook. Delaying the filter avoids
+ * triggering the `_load_textdomain_just_in_time()` notice introduced in
+ * WordPress 6.7.
+ *
+ * @return void
+ */
+function sitepulse_resource_monitor_defer_cron_schedule_registration() {
     add_filter('cron_schedules', 'sitepulse_resource_monitor_register_cron_schedule');
 }
-add_action('init', 'sitepulse_resource_monitor_bootstrap_cron_schedule', 20);
+add_action('init', 'sitepulse_resource_monitor_defer_cron_schedule_registration');
 
 /**
  * Ensures the resource monitor cron event is scheduled when the module is active.
