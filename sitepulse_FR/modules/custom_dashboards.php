@@ -1435,6 +1435,55 @@ function sitepulse_custom_dashboard_format_speed_card_view($speed, $is_active, $
         );
     }
 
+    $rum_enabled_flag = isset($speed['rum_enabled']) ? (bool) $speed['rum_enabled'] : false;
+    $rum_data = isset($speed['rum']) && is_array($speed['rum']) ? $speed['rum'] : null;
+    $rum_detail_rows = [];
+
+    if ($rum_enabled_flag && is_array($rum_data)) {
+        $rum_samples = isset($rum_data['sample_count']) ? (int) $rum_data['sample_count'] : 0;
+        $rum_summary = isset($rum_data['summary']) && is_array($rum_data['summary']) ? $rum_data['summary'] : [];
+        $rum_lcp = isset($rum_summary['LCP']['p75']) ? (float) $rum_summary['LCP']['p75'] : null;
+        $rum_fid = isset($rum_summary['FID']['p75']) ? (float) $rum_summary['FID']['p75'] : null;
+        $rum_cls = isset($rum_summary['CLS']['p75']) ? (float) $rum_summary['CLS']['p75'] : null;
+
+        if ($rum_samples > 0) {
+            $summary_parts[] = sprintf(
+                /* translators: %s: number of RUM samples. */
+                _n('%s RUM sample', '%s RUM samples', $rum_samples, 'sitepulse'),
+                number_format_i18n($rum_samples)
+            );
+        }
+
+        $rum_detail_rows[] = [
+            'label' => __('RUM LCP p75', 'sitepulse'),
+            'value' => ($rum_lcp !== null)
+                ? sprintf(__('%s ms', 'sitepulse'), number_format_i18n($rum_lcp, 0))
+                : __('N/A', 'sitepulse'),
+        ];
+        $rum_detail_rows[] = [
+            'label' => __('RUM FID p75', 'sitepulse'),
+            'value' => ($rum_fid !== null)
+                ? sprintf(__('%s ms', 'sitepulse'), number_format_i18n($rum_fid, 0))
+                : __('N/A', 'sitepulse'),
+        ];
+        $rum_detail_rows[] = [
+            'label' => __('RUM CLS p75', 'sitepulse'),
+            'value' => ($rum_cls !== null)
+                ? number_format_i18n($rum_cls, 3)
+                : __('N/A', 'sitepulse'),
+        ];
+    } elseif ($rum_enabled_flag) {
+        $rum_detail_rows[] = [
+            'label' => __('RUM', 'sitepulse'),
+            'value' => __('No RUM samples recorded for this period.', 'sitepulse'),
+        ];
+    } else {
+        $rum_detail_rows[] = [
+            'label' => __('RUM', 'sitepulse'),
+            'value' => __('Collection disabled', 'sitepulse'),
+        ];
+    }
+
     if (!empty($summary_parts)) {
         $card['summary'] = implode(' · ', $summary_parts);
     }
@@ -1455,6 +1504,10 @@ function sitepulse_custom_dashboard_format_speed_card_view($speed, $is_active, $
                 : __('N/A', 'sitepulse'),
         ],
     ];
+
+    if (!empty($rum_detail_rows)) {
+        $card['details'] = array_merge($card['details'], $rum_detail_rows);
+    }
 
     $card['trend'] = sitepulse_custom_dashboard_format_trend(
         isset($speed['trend']) ? $speed['trend'] : null,
@@ -2689,17 +2742,31 @@ function sitepulse_custom_dashboard_prepare_metrics_payload($range) {
             : true;
     }
 
+    if (is_array($speed)) {
+        $rum_range = isset($config['days']) ? (int) $config['days'] : 7;
+        $speed['rum_enabled'] = function_exists('sitepulse_rum_is_enabled') ? sitepulse_rum_is_enabled() : false;
+
+        if (function_exists('sitepulse_rum_calculate_aggregates')) {
+            $speed['rum'] = sitepulse_rum_calculate_aggregates([
+                'range_days' => $rum_range,
+            ]);
+        }
+    }
+
     $modules_status = [
-        'uptime_tracker' => function_exists('sitepulse_is_module_active')
+        'uptime_tracker'   => function_exists('sitepulse_is_module_active')
             ? sitepulse_is_module_active('uptime_tracker')
             : true,
-        'log_analyzer'   => function_exists('sitepulse_is_module_active')
+        'log_analyzer'     => function_exists('sitepulse_is_module_active')
             ? sitepulse_is_module_active('log_analyzer')
             : true,
-        'speed_analyzer' => function_exists('sitepulse_is_module_active')
+        'speed_analyzer'   => function_exists('sitepulse_is_module_active')
             ? sitepulse_is_module_active('speed_analyzer')
             : true,
-        'ai_insights'    => function_exists('sitepulse_is_module_active')
+        'resource_monitor' => function_exists('sitepulse_is_module_active')
+            ? sitepulse_is_module_active('resource_monitor')
+            : true,
+        'ai_insights'      => function_exists('sitepulse_is_module_active')
             ? sitepulse_is_module_active('ai_insights')
             : function_exists('sitepulse_ai_get_history_entries'),
     ];
@@ -2725,6 +2792,8 @@ function sitepulse_custom_dashboard_prepare_metrics_payload($range) {
         $ai_summary
     );
 
+    $resource = sitepulse_custom_dashboard_calculate_resource_metrics();
+
     $payload = [
         'range'            => $range,
         'available_ranges' => $available_ranges,
@@ -2732,6 +2801,7 @@ function sitepulse_custom_dashboard_prepare_metrics_payload($range) {
         'uptime'           => $uptime,
         'logs'             => $logs,
         'speed'            => $speed,
+        'resource'         => $resource,
         'modules'          => $modules_status,
         'ai_summary'       => $ai_summary,
         'incidents'        => $incidents,
@@ -4242,6 +4312,38 @@ function sitepulse_custom_dashboard_calculate_speed_metrics($range, $config) {
     ];
 }
 
+/**
+ * Collects resource monitor metrics for the dashboard payload.
+ *
+ * @return array<string,mixed>|null
+ */
+function sitepulse_custom_dashboard_calculate_resource_metrics() {
+    $enabled = function_exists('sitepulse_is_module_active')
+        ? sitepulse_is_module_active('resource_monitor')
+        : true;
+
+    $snapshot = function_exists('sitepulse_resource_monitor_get_snapshot')
+        ? sitepulse_resource_monitor_get_snapshot()
+        : null;
+
+    $http_stats = function_exists('sitepulse_http_monitor_get_stats')
+        ? sitepulse_http_monitor_get_stats([
+            'since' => (int) current_time('timestamp', true) - DAY_IN_SECONDS,
+            'limit' => 10,
+        ])
+        : null;
+
+    if (!$enabled && $snapshot === null && $http_stats === null) {
+        return null;
+    }
+
+    return [
+        'enabled'  => $enabled,
+        'snapshot' => $snapshot,
+        'http'     => $http_stats,
+    ];
+}
+
 function sitepulse_get_dashboard_preferences($user_id = 0, $allowed_cards = null) {
     if (!is_int($user_id) || $user_id <= 0) {
         $user_id = get_current_user_id();
@@ -5523,6 +5625,143 @@ function sitepulse_custom_dashboards_page() {
             $disk_free_percent = min(100.0, max(0.0, ($disk_free_bytes / $disk_total_bytes) * 100));
         }
 
+        $http_stats = null;
+
+        if (isset($resource_data) && is_array($resource_data) && isset($resource_data['http']) && is_array($resource_data['http'])) {
+            $http_stats = $resource_data['http'];
+        } elseif (function_exists('sitepulse_http_monitor_get_stats')) {
+            $http_stats = sitepulse_http_monitor_get_stats([
+                'since' => (int) current_time('timestamp', true) - DAY_IN_SECONDS,
+                'limit' => 10,
+            ]);
+        }
+
+        $http_summary_text = '';
+        $http_detail_lines = [];
+        $http_top_line = '';
+        $http_has_data = false;
+        $http_status = 'status-ok';
+        $http_empty_message = __('No outbound traffic recorded in the last 24 hours.', 'sitepulse');
+
+        if (is_array($http_stats)) {
+            $http_summary = isset($http_stats['summary']) && is_array($http_stats['summary']) ? $http_stats['summary'] : [];
+            $http_thresholds = isset($http_stats['thresholds']) && is_array($http_stats['thresholds']) ? $http_stats['thresholds'] : [];
+            $http_services = isset($http_stats['services']) && is_array($http_stats['services']) ? $http_stats['services'] : [];
+
+            $http_total = isset($http_summary['total']) ? (int) $http_summary['total'] : 0;
+            $http_error_rate = isset($http_summary['errorRate']) && $http_summary['errorRate'] !== null
+                ? (float) $http_summary['errorRate']
+                : null;
+            $http_p95 = isset($http_summary['p95Duration']) && $http_summary['p95Duration'] !== null
+                ? (float) $http_summary['p95Duration']
+                : null;
+
+            $summary_parts = [];
+
+            if ($http_total > 0) {
+                $http_has_data = true;
+                $summary_parts[] = sprintf(
+                    /* translators: %s: number of HTTP requests. */
+                    _n('%s request', '%s requests', $http_total, 'sitepulse'),
+                    number_format_i18n($http_total)
+                );
+            }
+
+            if ($http_p95 !== null) {
+                $summary_parts[] = sprintf(
+                    /* translators: %s: latency in milliseconds. */
+                    __('p95 %s ms', 'sitepulse'),
+                    number_format_i18n($http_p95, 0)
+                );
+            }
+
+            if ($http_error_rate !== null) {
+                $summary_parts[] = sprintf(
+                    /* translators: %s: error rate percentage. */
+                    __('errors %s%%', 'sitepulse'),
+                    number_format_i18n($http_error_rate, 2)
+                );
+            }
+
+            if (!empty($summary_parts)) {
+                $http_summary_text = array_shift($summary_parts);
+                $http_detail_lines = $summary_parts;
+            }
+
+            if (!empty($http_services)) {
+                $top_service = $http_services[0];
+                $service_host = isset($top_service['host']) ? (string) $top_service['host'] : '';
+                $service_path = isset($top_service['path']) ? (string) $top_service['path'] : '';
+                $service_method = isset($top_service['method']) ? strtoupper((string) $top_service['method']) : 'GET';
+                $service_avg = isset($top_service['average']) && $top_service['average'] !== null
+                    ? (float) $top_service['average']
+                    : null;
+                $service_error_rate = isset($top_service['errorRate']) && $top_service['errorRate'] !== null
+                    ? (float) $top_service['errorRate']
+                    : null;
+
+                $service_label = trim($service_host . $service_path);
+
+                if ($service_label === '') {
+                    $service_label = '/';
+                }
+
+                $detail_parts = [];
+
+                if ($service_avg !== null) {
+                    $detail_parts[] = sprintf(
+                        /* translators: %s: latency in milliseconds. */
+                        __('avg %s ms', 'sitepulse'),
+                        number_format_i18n($service_avg, 0)
+                    );
+                }
+
+                if ($service_error_rate !== null) {
+                    $detail_parts[] = sprintf(
+                        /* translators: %s: error rate percentage. */
+                        __('%s%% errors', 'sitepulse'),
+                        number_format_i18n($service_error_rate, 2)
+                    );
+                }
+
+                $http_top_line = sprintf(
+                    /* translators: 1: HTTP method. 2: Service host/path. */
+                    __('Top: %1$s %2$s', 'sitepulse'),
+                    $service_method,
+                    $service_label
+                );
+
+                if (!empty($detail_parts)) {
+                    $http_top_line .= ' — ' . implode(' · ', $detail_parts);
+                }
+            }
+
+            $latency_threshold = isset($http_thresholds['latency']) ? (int) $http_thresholds['latency'] : 0;
+            $error_threshold = isset($http_thresholds['errorRate']) ? (float) $http_thresholds['errorRate'] : 0.0;
+
+            if ($http_p95 !== null && $latency_threshold > 0) {
+                if ($http_p95 >= ($latency_threshold * 1.5)) {
+                    $http_status = 'status-bad';
+                } elseif ($http_p95 >= $latency_threshold) {
+                    $http_status = 'status-warn';
+                }
+            }
+
+            if ($http_error_rate !== null && $error_threshold > 0) {
+                if ($http_error_rate >= $error_threshold) {
+                    $http_status = 'status-bad';
+                } elseif ($http_error_rate >= max(1.0, $error_threshold * 0.5)) {
+                    if ($http_status !== 'status-bad') {
+                        $http_status = 'status-warn';
+                    }
+                }
+            }
+
+            if (!$http_has_data) {
+                $http_summary_text = '';
+            }
+        }
+
         $status_order = [
             'status-ok'   => 0,
             'status-warn' => 1,
@@ -5567,6 +5806,10 @@ function sitepulse_custom_dashboards_page() {
             }
         }
 
+        if ($http_has_data && $http_status !== 'status-ok') {
+            $resource_status = $adjust_status($resource_status, $http_status);
+        }
+
         $resource_card = [
             'status'             => $resource_status,
             'load_display'       => $load_display,
@@ -5577,6 +5820,14 @@ function sitepulse_custom_dashboards_page() {
             'disk_total'         => $disk_total,
             'disk_free_percent'  => $disk_free_percent,
             'generated_at'       => isset($snapshot['generated_at']) ? (int) $snapshot['generated_at'] : 0,
+            'http'               => [
+                'status'        => $http_status,
+                'summary'       => $http_summary_text,
+                'details'       => $http_detail_lines,
+                'top_service'   => $http_top_line,
+                'has_data'      => $http_has_data,
+                'empty_message' => $http_empty_message,
+            ],
         ];
 
         $memory_dataset = [];
@@ -6122,6 +6373,24 @@ function sitepulse_custom_dashboards_page() {
                     <?php endif; ?>
                     <?php if ($resource_card['disk_free_percent'] !== null) : ?>
                         <span class="sitepulse-metric-unit"><?php printf(esc_html__('(%s%% free)', 'sitepulse'), esc_html(number_format_i18n($resource_card['disk_free_percent'], 0))); ?></span>
+                    <?php endif; ?>
+                </span>
+            </li>
+            <li>
+                <span class="label"><?php esc_html_e('External calls (24h)', 'sitepulse'); ?></span>
+                <span class="value">
+                    <?php if (!empty($resource_card['http']['has_data'])) : ?>
+                        <?php if ($resource_card['http']['summary'] !== '') : ?>
+                            <?php echo esc_html($resource_card['http']['summary']); ?>
+                        <?php endif; ?>
+                        <?php foreach ((array) $resource_card['http']['details'] as $detail) : ?>
+                            <span class="sitepulse-metric-unit"><?php echo esc_html($detail); ?></span>
+                        <?php endforeach; ?>
+                        <?php if (!empty($resource_card['http']['top_service'])) : ?>
+                            <span class="sitepulse-metric-unit"><?php echo esc_html($resource_card['http']['top_service']); ?></span>
+                        <?php endif; ?>
+                    <?php else : ?>
+                        <?php echo esc_html($resource_card['http']['empty_message']); ?>
                     <?php endif; ?>
                 </span>
             </li>
