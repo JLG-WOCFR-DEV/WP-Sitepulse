@@ -37,6 +37,7 @@ $sitepulse_constants = [
     'SITEPULSE_OPTION_ERROR_ALERT_WEBHOOKS'       => 'sitepulse_error_alert_webhooks',
     'SITEPULSE_OPTION_ERROR_ALERT_SEVERITIES'     => 'sitepulse_error_alert_severities',
     'SITEPULSE_OPTION_ALERT_ACTIVITY'             => 'sitepulse_alert_activity',
+    'SITEPULSE_OPTION_REQUEST_PROFILER_HISTORY'   => 'sitepulse_request_profiler_history',
     'SITEPULSE_OPTION_CPU_ALERT_THRESHOLD'        => 'sitepulse_cpu_alert_threshold',
     'SITEPULSE_OPTION_PHP_FATAL_ALERT_THRESHOLD'  => 'sitepulse_php_fatal_alert_threshold',
     'SITEPULSE_OPTION_ALERT_COOLDOWN_MINUTES'     => 'sitepulse_alert_cooldown_minutes',
@@ -55,11 +56,7 @@ $sitepulse_constants = [
     'SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_PREFIX' => 'sitepulse_error_alert_',
     'SITEPULSE_TRANSIENT_ERROR_ALERT_LOCK_SUFFIX' => '_lock',
     'SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX'  => 'sitepulse_plugin_dir_size_',
-    'SITEPULSE_OPTION_REQUEST_TRACE_RETENTION_DAYS' => 'sitepulse_request_trace_retention_days',
-    'SITEPULSE_OPTION_REQUEST_TRACE_SCHEMA_VERSION' => 'sitepulse_request_trace_schema_version',
-    'SITEPULSE_TABLE_REQUEST_TRACES'              => 'sitepulse_request_traces',
-    'SITEPULSE_TRANSIENT_REQUEST_TRACE_SESSION_PREFIX' => 'sitepulse_request_trace_session_',
-    'SITEPULSE_TRANSIENT_REQUEST_TRACE_RESULT_PREFIX'  => 'sitepulse_request_trace_result_',
+    'SITEPULSE_TRANSIENT_REQUEST_PROFILER_LAST_TRACE_PREFIX' => 'sitepulse_request_profiler_last_trace_',
     'SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER'    => 'sitepulse_error_alert_log_pointer',
     'SITEPULSE_OPTION_CRON_WARNINGS'              => 'sitepulse_cron_warnings',
     'SITEPULSE_TRANSIENT_RESOURCE_MONITOR_SNAPSHOT' => 'sitepulse_resource_monitor_snapshot',
@@ -176,6 +173,7 @@ $options = [
     SITEPULSE_OPTION_DEBUG_NOTICES,
     SITEPULSE_OPTION_ERROR_ALERT_LOG_POINTER,
     SITEPULSE_OPTION_CRON_WARNINGS,
+    SITEPULSE_OPTION_REQUEST_PROFILER_HISTORY,
     SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY,
     SITEPULSE_OPTION_RESOURCE_MONITOR_SCHEMA_VERSION,
     SITEPULSE_OPTION_RESOURCE_MONITOR_RETENTION_DAYS,
@@ -208,9 +206,7 @@ $transients = [
 
 $transient_prefixes = [
     SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX,
-    SITEPULSE_TRANSIENT_REQUEST_TRACE_SESSION_PREFIX,
-    SITEPULSE_TRANSIENT_REQUEST_TRACE_RESULT_PREFIX,
-    SITEPULSE_TRANSIENT_RUM_AGGREGATE_CACHE_PREFIX,
+    SITEPULSE_TRANSIENT_REQUEST_PROFILER_LAST_TRACE_PREFIX,
 ];
 
 $transient_prefixes = array_values(array_unique(array_filter($transient_prefixes, 'strlen')));

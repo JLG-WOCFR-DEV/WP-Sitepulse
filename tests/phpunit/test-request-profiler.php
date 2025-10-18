@@ -1,168 +1,67 @@
 <?php
 /**
- * Tests for the request profiler helpers.
+ * Tests for the SitePulse request profiler helpers.
  */
 
-require_once __DIR__ . '/includes/stubs.php';
-
 class Sitepulse_Request_Profiler_Test extends WP_UnitTestCase {
-    public static function setUpBeforeClass(): void {
-        parent::setUpBeforeClass();
-
-        require_once SITEPULSE_PATH . 'includes/request-profiler.php';
+    public static function wpSetUpBeforeClass($factory) {
+        require_once dirname(__DIR__, 2) . '/sitepulse_FR/includes/functions.php';
+        require_once dirname(__DIR__, 2) . '/sitepulse_FR/includes/request-profiler.php';
     }
 
-    protected function setUp(): void {
-        parent::setUp();
+    protected function set_up(): void {
+        parent::set_up();
 
-        if (function_exists('sitepulse_request_profiler_maybe_upgrade_schema')) {
-            sitepulse_request_profiler_maybe_upgrade_schema();
+        update_option(SITEPULSE_OPTION_REQUEST_PROFILER_HISTORY, []);
+    }
+
+    protected function tear_down(): void {
+        delete_option(SITEPULSE_OPTION_REQUEST_PROFILER_HISTORY);
+        parent::tear_down();
+    }
+
+    public function test_store_trace_limits_history_length() {
+        $limit = SITEPULSE_DEFAULT_REQUEST_PROFILER_HISTORY_LIMIT;
+
+        for ($i = 0; $i < $limit + 2; $i++) {
+            sitepulse_request_profiler_store_trace([
+                'timestamp'      => $i,
+                'url'            => 'https://example.com/?id=' . $i,
+                'duration_ms'    => 100 + $i,
+                'memory_peak_mb' => 50,
+                'query_count'    => 10 + $i,
+                'slow_queries'   => [],
+                'user_id'        => 1,
+            ]);
         }
 
-        $table = function_exists('sitepulse_request_profiler_get_table_name')
-            ? sitepulse_request_profiler_get_table_name()
-            : '';
+        $history = get_option(SITEPULSE_OPTION_REQUEST_PROFILER_HISTORY, []);
 
-        if ($table !== '') {
-            global $wpdb;
-
-            if ($wpdb instanceof wpdb) {
-                $wpdb->query("TRUNCATE TABLE {$table}");
-            }
-        }
+        $this->assertCount($limit, $history, 'The history should keep the most recent entries only.');
+        $this->assertSame($limit + 1, $history[0]['timestamp'], 'New traces must be prepended.');
     }
 
-    public function test_prepare_hooks_filters_invalid_entries(): void {
-        $hooks = [
-            'valid_hook' => ['count' => 2, 'total' => 0.5, 'max' => 0.4],
-            'ignored_zero_total' => ['count' => 3, 'total' => 0.0, 'max' => 0.1],
-            '' => ['count' => 1, 'total' => 1.2, 'max' => 1.2],
-            'top_hook' => ['count' => 1, 'total' => 1.8, 'max' => 1.8],
+    public function test_get_last_trace_for_user_prioritises_transient() {
+        $user_id = self::factory()->user->create(['role' => 'administrator']);
+
+        $trace = [
+            'timestamp'      => time(),
+            'url'            => 'https://example.com/admin.php',
+            'duration_ms'    => 250.5,
+            'memory_peak_mb' => 64.0,
+            'query_count'    => 42,
+            'slow_queries'   => [
+                ['sql' => 'SELECT 1', 'time_ms' => 12.3],
+            ],
+            'user_id'        => $user_id,
         ];
 
-        $prepared = sitepulse_request_profiler_prepare_hooks($hooks);
+        sitepulse_request_profiler_cache_last_trace($trace);
 
-        $this->assertCount(2, $prepared);
-        $this->assertSame('top_hook', $prepared[0]['hook']);
-        $this->assertSame('valid_hook', $prepared[1]['hook']);
-        $this->assertEqualsWithDelta(0.25, $prepared[1]['avg_time'], 0.0001);
-    }
+        $fetched = sitepulse_request_profiler_get_last_trace_for_user($user_id);
 
-    public function test_prepare_queries_groups_duplicates(): void {
-        $queries = [
-            ['SELECT * FROM wp_posts WHERE ID = 1', 0.012, 'get_post'],
-            ['SELECT * FROM wp_posts WHERE ID = 1', 0.020, 'get_post'],
-            ['SELECT * FROM wp_users WHERE ID = 2', 0.050, 'get_user'],
-            ['SELECT * FROM wp_users WHERE ID = 2', 0.010, 'get_user'],
-            ['SELECT * FROM wp_options', 0.002, 'alloptions'],
-            ['SELECT * FROM wp_options', 0.000, 'alloptions'],
-        ];
-
-        $prepared = sitepulse_request_profiler_prepare_queries($queries);
-
-        $this->assertCount(3, $prepared);
-        $this->assertSame('SELECT * FROM wp_users WHERE ID = 2', $prepared[0]['sql']);
-        $this->assertSame(2, $prepared[0]['count']);
-        $this->assertEqualsWithDelta(0.03, $prepared[0]['avg_time'], 0.0001);
-        $this->assertSame(['get_user'], $prepared[0]['callers']);
-    }
-
-    public function test_store_trace_persists_and_retrieves_payload(): void {
-        $payload = [
-            'recorded_at'    => gmdate('Y-m-d H:i:s'),
-            'request_url'    => 'https://example.com/sample',
-            'request_method' => 'POST',
-            'trace_token'    => 'abc123',
-            'total_duration' => 1.23,
-            'memory_peak'    => 512000,
-            'hook_count'     => 2,
-            'query_count'    => 3,
-            'hooks'          => [
-                ['hook' => 'init', 'count' => 5, 'total_time' => 0.4, 'avg_time' => 0.08, 'max_time' => 0.2],
-            ],
-            'queries'        => [
-                ['sql' => 'SELECT * FROM wp_posts', 'count' => 2, 'total_time' => 0.03, 'avg_time' => 0.015, 'callers' => ['get_posts']],
-            ],
-            'context'        => [
-                'user' => 1,
-                'referrer' => 'admin',
-            ],
-        ];
-
-        $trace_id = sitepulse_request_profiler_store_trace($payload);
-
-        $this->assertGreaterThan(0, $trace_id);
-
-        $trace = sitepulse_request_profiler_get_trace($trace_id);
-
-        $this->assertIsArray($trace);
-        $this->assertSame('https://example.com/sample', $trace['request_url']);
-        $this->assertSame(2, (int) $trace['hook_count']);
-        $this->assertSame('POST', $trace['request_method']);
-        $this->assertSame('abc123', $trace['trace_token']);
-        $this->assertIsArray($trace['hooks']);
-        $this->assertSame('init', $trace['hooks'][0]['hook']);
-        $this->assertIsArray($trace['queries']);
-        $this->assertSame('SELECT * FROM wp_posts', $trace['queries'][0]['sql']);
-        $this->assertSame('admin', $trace['context']['referrer']);
-    }
-
-    public function test_get_recent_traces_respects_limit_and_user(): void {
-        $now = time();
-
-        $first_id = sitepulse_request_profiler_store_trace([
-            'recorded_at'    => gmdate('Y-m-d H:i:s', $now - 60),
-            'request_url'    => 'https://example.com/page-one',
-            'request_method' => 'GET',
-            'total_duration' => 0.45,
-            'hook_count'     => 3,
-            'query_count'    => 4,
-            'context'        => [
-                'user_id'  => 1,
-                'timestamp'=> $now - 60,
-            ],
-        ]);
-
-        $second_id = sitepulse_request_profiler_store_trace([
-            'recorded_at'    => gmdate('Y-m-d H:i:s', $now - 30),
-            'request_url'    => 'https://example.com/page-two',
-            'request_method' => 'POST',
-            'total_duration' => 0.80,
-            'hook_count'     => 5,
-            'query_count'    => 6,
-            'context'        => [
-                'user_id'  => 2,
-                'timestamp'=> $now - 30,
-            ],
-        ]);
-
-        $third_id = sitepulse_request_profiler_store_trace([
-            'recorded_at'    => gmdate('Y-m-d H:i:s', $now - 10),
-            'request_url'    => 'https://example.com/page-three',
-            'request_method' => 'GET',
-            'total_duration' => 0.32,
-            'hook_count'     => 7,
-            'query_count'    => 1,
-            'context'        => [
-                'user_id'  => 1,
-                'timestamp'=> $now - 10,
-            ],
-        ]);
-
-        $this->assertGreaterThan(0, $first_id);
-        $this->assertGreaterThan(0, $second_id);
-        $this->assertGreaterThan(0, $third_id);
-
-        $history = sitepulse_request_profiler_get_recent_traces([
-            'limit'   => 2,
-            'user_id' => 1,
-        ]);
-
-        $this->assertCount(2, $history);
-        $this->assertSame('https://example.com/page-three', $history[0]['url']);
-        $this->assertSame('https://example.com/page-one', $history[1]['url']);
-        $this->assertGreaterThan($history[1]['timestamp'], $history[0]['timestamp']);
-        $this->assertSame('GET', $history[0]['method']);
-        $this->assertNotEmpty($history[0]['display_date']);
+        $this->assertNotNull($fetched, 'A cached trace should be returned.');
+        $this->assertSame($trace['query_count'], $fetched['query_count']);
+        $this->assertSame($trace['slow_queries'][0]['sql'], $fetched['slow_queries'][0]['sql']);
     }
 }
