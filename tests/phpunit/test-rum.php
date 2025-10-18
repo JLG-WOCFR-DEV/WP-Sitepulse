@@ -30,6 +30,12 @@ class Sitepulse_Rum_Test extends WP_UnitTestCase {
                 $wpdb->query("TRUNCATE TABLE {$table}");
             }
         }
+
+        if (function_exists('sitepulse_rum_flush_cache')) {
+            sitepulse_rum_flush_cache();
+        } else {
+            delete_option('sitepulse_rum_cache_keys');
+        }
     }
 
     public function test_grade_metric_boundaries(): void {
@@ -184,5 +190,54 @@ class Sitepulse_Rum_Test extends WP_UnitTestCase {
         $this->assertSame(1, $data['sample_count']);
         $this->assertArrayHasKey('summary', $data);
         $this->assertArrayHasKey('LCP', $data['summary']);
+    }
+
+    public function test_cache_is_flushed_when_samples_are_stored(): void {
+        update_option('sitepulse_rum_settings', ['enabled' => true]);
+
+        $now = time();
+
+        sitepulse_rum_store_samples([
+            [
+                'metric'          => 'LCP',
+                'value'           => 2000,
+                'rating'          => 'good',
+                'path'            => '/',
+                'path_hash'       => md5('/'),
+                'device'          => 'desktop',
+                'navigation_type' => 'navigate',
+                'recorded_at'     => $now,
+            ],
+        ]);
+
+        sitepulse_rum_calculate_aggregates(['range_days' => 7]);
+
+        $option_key = function_exists('sitepulse_rum_get_cache_registry_option_key')
+            ? sitepulse_rum_get_cache_registry_option_key()
+            : 'sitepulse_rum_cache_keys';
+
+        $registry = get_option($option_key, []);
+
+        $this->assertIsArray($registry);
+        $this->assertNotEmpty($registry);
+
+        $cache_key = (string) reset($registry);
+        $this->assertNotSame('', $cache_key);
+        $this->assertNotFalse(get_transient($cache_key));
+
+        sitepulse_rum_store_samples([
+            [
+                'metric'          => 'FID',
+                'value'           => 150,
+                'rating'          => 'needs_improvement',
+                'path'            => '/',
+                'path_hash'       => md5('/'),
+                'device'          => 'desktop',
+                'navigation_type' => 'navigate',
+                'recorded_at'     => $now + 10,
+            ],
+        ]);
+
+        $this->assertFalse(get_transient($cache_key));
     }
 }

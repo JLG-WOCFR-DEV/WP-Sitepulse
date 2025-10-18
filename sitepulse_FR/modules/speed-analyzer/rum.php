@@ -148,6 +148,144 @@ function sitepulse_rum_get_ingest_token($force_refresh = false) {
     return $token;
 }
 
+if (!function_exists('sitepulse_rum_get_cache_prefix')) {
+    /**
+     * Retrieves the transient prefix used to cache aggregates.
+     *
+     * @return string
+     */
+    function sitepulse_rum_get_cache_prefix() {
+        if (defined('SITEPULSE_TRANSIENT_RUM_AGGREGATE_CACHE_PREFIX')) {
+            return SITEPULSE_TRANSIENT_RUM_AGGREGATE_CACHE_PREFIX;
+        }
+
+        return 'sitepulse_rum_aggregates_';
+    }
+}
+
+if (!function_exists('sitepulse_rum_get_cache_registry_option_key')) {
+    /**
+     * Returns the option key storing cached aggregate identifiers.
+     *
+     * @return string
+     */
+    function sitepulse_rum_get_cache_registry_option_key() {
+        if (defined('SITEPULSE_OPTION_RUM_CACHE_KEYS')) {
+            return SITEPULSE_OPTION_RUM_CACHE_KEYS;
+        }
+
+        return 'sitepulse_rum_cache_keys';
+    }
+}
+
+if (!function_exists('sitepulse_rum_get_cache_expiration')) {
+    /**
+     * Returns the expiration time (in seconds) for cached aggregates.
+     *
+     * @return int
+     */
+    function sitepulse_rum_get_cache_expiration() {
+        $default = defined('MINUTE_IN_SECONDS') ? MINUTE_IN_SECONDS * 5 : 300;
+
+        /**
+         * Filters the RUM aggregate cache expiration.
+         *
+         * @param int $default Default cache duration in seconds.
+         */
+        $expiration = apply_filters('sitepulse_rum_cache_expiration', $default);
+
+        if (!is_numeric($expiration) || (int) $expiration < 1) {
+            return $default;
+        }
+
+        return (int) $expiration;
+    }
+}
+
+if (!function_exists('sitepulse_rum_get_cache_registry')) {
+    /**
+     * Retrieves the list of registered aggregate cache keys.
+     *
+     * @return array<int,string>
+     */
+    function sitepulse_rum_get_cache_registry() {
+        $option_key = sitepulse_rum_get_cache_registry_option_key();
+        $registry = get_option($option_key, []);
+
+        if (!is_array($registry)) {
+            return [];
+        }
+
+        $registry = array_filter(array_map('strval', $registry));
+
+        return array_values(array_unique($registry));
+    }
+}
+
+if (!function_exists('sitepulse_rum_register_cache_key')) {
+    /**
+     * Adds a cache key to the registry so it can be invalidated later.
+     *
+     * @param string $cache_key Cache identifier.
+     * @return void
+     */
+    function sitepulse_rum_register_cache_key($cache_key) {
+        if (!is_string($cache_key) || $cache_key === '') {
+            return;
+        }
+
+        $registry = sitepulse_rum_get_cache_registry();
+
+        if (in_array($cache_key, $registry, true)) {
+            return;
+        }
+
+        $registry[] = $cache_key;
+        update_option(sitepulse_rum_get_cache_registry_option_key(), $registry, false);
+    }
+}
+
+if (!function_exists('sitepulse_rum_flush_cache')) {
+    /**
+     * Clears cached aggregate transients.
+     *
+     * @return void
+     */
+    function sitepulse_rum_flush_cache() {
+        $registry = sitepulse_rum_get_cache_registry();
+
+        foreach ($registry as $cache_key) {
+            delete_transient($cache_key);
+        }
+
+        delete_option(sitepulse_rum_get_cache_registry_option_key());
+    }
+}
+
+if (!function_exists('sitepulse_rum_get_cache_key')) {
+    /**
+     * Builds a cache key for the provided aggregate arguments.
+     *
+     * @param array<string,mixed> $args Aggregate context (range_days, path_hash, device).
+     * @return string
+     */
+    function sitepulse_rum_get_cache_key(array $args) {
+        $context = [
+            'range_days' => isset($args['range_days']) ? (int) $args['range_days'] : 0,
+            'path_hash'  => isset($args['path_hash']) ? (string) $args['path_hash'] : '',
+            'device'     => isset($args['device']) ? (string) $args['device'] : '',
+        ];
+
+        $encoded = wp_json_encode($context);
+
+        if ($encoded === false) {
+            $encoded = maybe_serialize($context);
+        }
+
+        return sitepulse_rum_get_cache_prefix() . md5((string) $encoded);
+    }
+}
+
 /**
  * Enqueues the frontend script that captures Web Vitals when enabled.
  *
@@ -409,6 +547,10 @@ function sitepulse_rum_store_samples(array $samples) {
         if ($result) {
             $inserted++;
         }
+    }
+
+    if ($inserted > 0) {
+        sitepulse_rum_flush_cache();
     }
 
     return $inserted;
@@ -812,6 +954,20 @@ function sitepulse_rum_calculate_aggregates($args = []) {
         $params[] = $device;
     }
 
+    $cache_key = sitepulse_rum_get_cache_key([
+        'range_days' => $range_days,
+        'path_hash'  => $path_hash !== '' ? $path_hash : 'all',
+        'device'     => $device !== '' ? $device : 'all',
+    ]);
+
+    if ($cache_key !== '') {
+        $cached = get_transient($cache_key);
+
+        if (is_array($cached)) {
+            return $cached;
+        }
+    }
+
     $where_sql = implode(' AND ', $conditions);
     $limit = isset($args['max_rows']) && is_numeric($args['max_rows']) ? (int) $args['max_rows'] : 5000;
 
@@ -958,7 +1114,7 @@ function sitepulse_rum_calculate_aggregates($args = []) {
         $pages = array_slice($pages, 0, (int) $max_pages);
     }
 
-    return [
+    $result = [
         'range' => [
             'days'  => $range_days,
             'since' => $since,
@@ -970,6 +1126,13 @@ function sitepulse_rum_calculate_aggregates($args = []) {
         'summary'        => $summary,
         'pages'          => $pages,
     ];
+
+    if ($cache_key !== '') {
+        set_transient($cache_key, $result, sitepulse_rum_get_cache_expiration());
+        sitepulse_rum_register_cache_key($cache_key);
+    }
+
+    return $result;
 }
 
 /**

@@ -120,4 +120,7 @@ return [
     SITEPULSE_OPTION_RUM_INGEST_TOKEN => [
         'value' => '',
     ],
+    SITEPULSE_OPTION_RUM_CACHE_KEYS => [
+        'value' => [],
+    ],
 ];

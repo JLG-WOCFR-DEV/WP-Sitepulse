@@ -98,6 +98,7 @@ return [
     'SITEPULSE_OPTION_RUM_RETENTION_DAYS' => 'sitepulse_rum_retention_days',
     'SITEPULSE_OPTION_RUM_SCHEMA_VERSION' => 'sitepulse_rum_schema_version',
     'SITEPULSE_OPTION_RUM_INGEST_TOKEN' => 'sitepulse_rum_ingest_token',
+    'SITEPULSE_OPTION_RUM_CACHE_KEYS' => 'sitepulse_rum_cache_keys',
     'SITEPULSE_AS_GROUP_RESOURCE_MONITOR' => 'sitepulse_resource_monitor',
     'SITEPULSE_ACTION_RESOURCE_MONITOR_REPORTS' => 'sitepulse_resource_monitor_generate_reports',
     'SITEPULSE_CRON_HTTP_MONITOR_CLEANUP' => 'sitepulse_http_monitor_cleanup',
