@@ -63,6 +63,18 @@ if (!defined('SITEPULSE_OPTION_ALERT_RECIPIENTS')) {
     define('SITEPULSE_OPTION_ALERT_RECIPIENTS', 'sitepulse_alert_recipients');
 }
 
+if (!defined('SITEPULSE_OPTION_REQUEST_PROFILER_HISTORY')) {
+    define('SITEPULSE_OPTION_REQUEST_PROFILER_HISTORY', 'sitepulse_request_profiler_history');
+}
+
+if (!defined('SITEPULSE_DEFAULT_REQUEST_PROFILER_HISTORY_LIMIT')) {
+    define('SITEPULSE_DEFAULT_REQUEST_PROFILER_HISTORY_LIMIT', 5);
+}
+
+if (!defined('SITEPULSE_TRANSIENT_REQUEST_PROFILER_LAST_TRACE_PREFIX')) {
+    define('SITEPULSE_TRANSIENT_REQUEST_PROFILER_LAST_TRACE_PREFIX', 'sitepulse_request_profiler_last_trace_');
+}
+
 if (!defined('SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS')) {
     define('SITEPULSE_OPTION_ERROR_ALERT_DELIVERY_CHANNELS', 'sitepulse_error_alert_delivery_channels');
 }
