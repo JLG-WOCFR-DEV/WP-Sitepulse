@@ -5,6 +5,10 @@ if (!defined('SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY')) {
     define('SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY', 'sitepulse_resource_monitor_history');
 }
 
+if (defined('SITEPULSE_PATH')) {
+    require_once SITEPULSE_PATH . 'modules/resource-monitor/http-monitor.php';
+}
+
 if (!defined('SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY_LOCK')) {
     define('SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY_LOCK', 'sitepulse_resource_monitor_history_lock');
 }

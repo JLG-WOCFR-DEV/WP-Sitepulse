@@ -1,33 +1,33 @@
 <?php
+/**
+ * Outbound HTTP monitoring utilities.
+ *
+ * @package SitePulse
+ */
+
 if (!defined('ABSPATH')) {
     exit;
 }
 
-/**
- * HTTP monitor instrumentation and persistence helpers.
- */
+sitepulse_http_monitor_init();
 
 /**
- * Registers the hooks required for the outbound HTTP monitor.
+ * Bootstraps the HTTP monitor hooks.
  *
  * @return void
  */
-function sitepulse_http_monitor_bootstrap() {
-    if (!sitepulse_http_monitor_is_enabled()) {
+function sitepulse_http_monitor_init() {
+    if (!function_exists('add_action')) {
         return;
     }
 
-    add_action('http_api_debug', 'sitepulse_http_monitor_capture_event', 10, 5);
-    add_action('shutdown', 'sitepulse_http_monitor_flush_buffer');
-    add_action('init', 'sitepulse_http_monitor_schedule_cleanup');
-
-    if (defined('SITEPULSE_CRON_HTTP_MONITOR_CLEANUP')) {
-        add_action(SITEPULSE_CRON_HTTP_MONITOR_CLEANUP, 'sitepulse_http_monitor_purge_old_entries');
-    }
+    add_action('plugins_loaded', 'sitepulse_http_monitor_bootstrap_storage', 11);
+    add_action('http_api_debug', 'sitepulse_http_monitor_handle_http_api_debug', 10, 5);
+    add_action('rest_api_init', 'sitepulse_http_monitor_register_rest_routes');
 }
 
 /**
- * Ensures the datastore schema is up to date.
+ * Ensures the HTTP monitor table exists.
  *
  * @return void
  */
@@ -36,424 +36,396 @@ function sitepulse_http_monitor_bootstrap_storage() {
 }
 
 /**
- * Determines whether the HTTP monitor should collect telemetry.
+ * Determines whether the HTTP monitor should capture outbound requests.
  *
  * @return bool
  */
 function sitepulse_http_monitor_is_enabled() {
-    if (!function_exists('sitepulse_is_module_active')) {
-        return false;
+    if (function_exists('sitepulse_is_module_active')) {
+        return sitepulse_is_module_active('resource_monitor');
     }
 
-    $enabled = sitepulse_is_module_active('resource_monitor');
-
-    /**
-     * Filters the activation state of the HTTP monitor.
-     *
-     * @param bool $enabled Whether the monitor is enabled.
-     */
-    return (bool) apply_filters('sitepulse_http_monitor_enabled', $enabled);
+    return true;
 }
 
 /**
- * Handles the http_api_debug hook and buffers outbound call metrics.
+ * Handles the debug hook fired before and after WordPress performs an HTTP request.
  *
- * @param mixed       $response Response or WP_Error.
- * @param string      $type     Request lifecycle step (response, request, transport_debug, etc.).
- * @param string      $class    HTTP transport class.
- * @param array       $args     Arguments passed to wp_remote_request().
- * @param string|null $url      Target URL.
+ * @param mixed       $response Response or error from the HTTP API.
+ * @param string      $type     Debug context (request|response|transport).
+ * @param object|null $class    Transport instance.
+ * @param array       $args     Request arguments.
+ * @param string      $url      Target URL.
+ *
  * @return void
  */
-function sitepulse_http_monitor_capture_event($response, $type, $class, $args, $url) {
-    if (!in_array($type, ['request', 'response', 'error'], true)) {
-        return;
-    }
+function sitepulse_http_monitor_handle_http_api_debug($response, $type, $class, $args, $url) {
+    static $pending = [];
 
-    $key = sitepulse_http_monitor_build_request_key($url, $args);
+    $key = sitepulse_http_monitor_get_request_key($class, $url);
 
     if ($type === 'request') {
-        if (sitepulse_http_monitor_should_ignore($url, $args)) {
-            sitepulse_http_monitor_request_context('set', $key, ['ignored' => true]);
-
-            return;
-        }
-
-        sitepulse_http_monitor_request_context('set', $key, [
+        $pending[$key] = [
             'started_at' => microtime(true),
-            'method'     => isset($args['method']) ? strtoupper((string) $args['method']) : 'GET',
-            'url'        => (string) $url,
-            'transport'  => (string) $class,
             'args'       => is_array($args) ? $args : [],
-        ]);
+        ];
 
         return;
     }
 
-    $payload = sitepulse_http_monitor_request_context('get', $key);
-
-    if (!is_array($payload) || !empty($payload['ignored'])) {
-        sitepulse_http_monitor_request_context('forget', $key);
-
+    if ($type !== 'response') {
         return;
     }
 
-    $event = sitepulse_http_monitor_normalize_event($payload, $response, $type);
-    sitepulse_http_monitor_request_context('forget', $key);
+    $context = isset($pending[$key]) ? $pending[$key] : null;
+    unset($pending[$key]);
 
-    if (empty($event)) {
+    if (!sitepulse_http_monitor_is_enabled()) {
         return;
     }
 
-    sitepulse_http_monitor_buffer('add', $event);
-
-    if (sitepulse_http_monitor_buffer('count') >= 10) {
-        sitepulse_http_monitor_flush_buffer();
+    if (!is_string($url) || $url === '') {
+        return;
     }
+
+    $request_args = is_array($args) ? $args : [];
+
+    if ($context !== null && isset($context['args']) && is_array($context['args'])) {
+        $request_args = $context['args'];
+    }
+
+    if (sitepulse_http_monitor_should_ignore($url, $request_args)) {
+        return;
+    }
+
+    $entry = sitepulse_http_monitor_prepare_entry($response, $context, $request_args, $url);
+
+    if (empty($entry)) {
+        return;
+    }
+
+    sitepulse_http_monitor_store_entry($entry);
 }
 
 /**
- * Generates a deterministic cache key for a tracked HTTP request.
+ * Builds a stable key used to link the request and response debug events.
  *
- * @param string|null $url  Target URL.
- * @param array       $args Request arguments.
+ * @param object|null $class Transport instance.
+ * @param string      $url   Requested URL.
+ *
  * @return string
  */
-function sitepulse_http_monitor_build_request_key($url, $args) {
-    $method = isset($args['method']) ? strtoupper((string) $args['method']) : 'GET';
-    $timeout = isset($args['timeout']) ? (string) $args['timeout'] : '';
-    $signature = wp_json_encode($args);
-
-    if (!is_string($signature)) {
-        $signature = serialize($args);
+function sitepulse_http_monitor_get_request_key($class, $url) {
+    if (is_object($class)) {
+        return spl_object_hash($class);
     }
 
-    return md5($method . '|' . (string) $url . '|' . $timeout . '|' . $signature);
+    if (is_string($url) && $url !== '') {
+        return md5($url);
+    }
+
+    return uniqid('sitepulse_http_', true);
 }
 
 /**
- * Stores or retrieves request context metadata.
+ * Determines whether the outbound request should be ignored.
  *
- * @param string      $action Action type (set, get, forget, clear).
- * @param string|null $key    Context key.
- * @param mixed       $value  Value to store when action is set.
- * @return mixed
- */
-function sitepulse_http_monitor_request_context($action, $key = null, $value = null) {
-    static $map = [];
-
-    switch ($action) {
-        case 'set':
-            if ($key !== null) {
-                $map[$key] = $value;
-            }
-
-            return null;
-        case 'get':
-            if ($key === null) {
-                return null;
-            }
-
-            return $map[$key] ?? null;
-        case 'forget':
-            if ($key === null) {
-                return null;
-            }
-
-            $existing = $map[$key] ?? null;
-            unset($map[$key]);
-
-            return $existing;
-        case 'clear':
-            $map = [];
-
-            return null;
-    }
-
-    return null;
-}
-
-/**
- * Buffers events prior to database persistence.
+ * @param string $url  Target URL.
+ * @param array  $args Request arguments.
  *
- * @param string     $action Action to execute (add, drain, count).
- * @param array|null $event  Event payload when action is add.
- * @return mixed
- */
-function sitepulse_http_monitor_buffer($action, $event = null) {
-    static $buffer = [];
-
-    if ($action === 'add' && is_array($event)) {
-        $buffer[] = $event;
-
-        return null;
-    }
-
-    if ($action === 'drain') {
-        $events = $buffer;
-        $buffer = [];
-
-        return $events;
-    }
-
-    if ($action === 'count') {
-        return count($buffer);
-    }
-
-    return null;
-}
-
-/**
- * Determines whether a specific outbound call should be ignored.
- *
- * @param string|null $url  Target URL.
- * @param array       $args Request arguments.
  * @return bool
  */
-function sitepulse_http_monitor_should_ignore($url, $args) {
-    if (empty($url) || !is_string($url)) {
-        return true;
+function sitepulse_http_monitor_should_ignore($url, array $args = []) {
+    $should_ignore = false;
+
+    if (isset($args['sitepulse_skip_monitor']) && $args['sitepulse_skip_monitor']) {
+        $should_ignore = true;
     }
 
-    if (!is_array($args)) {
-        $args = [];
+    if (function_exists('apply_filters')) {
+        /**
+         * Filters whether an outbound HTTP request should be ignored by SitePulse.
+         *
+         * @param bool   $should_ignore Whether the request should be ignored.
+         * @param string $url           Target URL.
+         * @param array  $args          Request arguments.
+         */
+        $should_ignore = (bool) apply_filters('sitepulse_http_monitor_should_ignore', $should_ignore, $url, $args);
     }
 
-    if (!empty($args['sitepulse_disable_http_monitor'])) {
-        return true;
-    }
-
-    if (isset($args['headers']) && is_array($args['headers'])) {
-        foreach ($args['headers'] as $header_key => $header_value) {
-            if (is_string($header_key) && strtolower($header_key) === 'x-sitepulse-ignore') {
-                return true;
-            }
-        }
-    }
-
-    $parsed = wp_parse_url($url);
-
-    if (!is_array($parsed) || empty($parsed['host'])) {
-        return true;
-    }
-
-    $host = strtolower($parsed['host']);
-    $site_host = wp_parse_url(home_url(), PHP_URL_HOST);
-
-    if (is_string($site_host) && strtolower($site_host) === $host) {
-        return true;
-    }
-
-    $default_ignored_hosts = ['localhost', '127.0.0.1'];
-    $ignored_hosts = (array) apply_filters('sitepulse_http_monitor_ignored_hosts', $default_ignored_hosts, $url, $args);
-
-    if (in_array($host, $ignored_hosts, true)) {
-        return true;
-    }
-
-    /**
-     * Filters whether a specific HTTP request should be ignored by the monitor.
-     *
-     * @param bool   $ignore Whether to ignore the call.
-     * @param string $url    Target URL.
-     * @param array  $args   Request arguments.
-     */
-    $should_ignore = apply_filters('sitepulse_http_monitor_should_ignore', false, $url, $args);
-
-    return (bool) $should_ignore;
+    return $should_ignore;
 }
 
 /**
- * Normalises an outbound HTTP call into a database-ready payload.
+ * Prepares a normalized HTTP entry from the raw debug context.
  *
- * @param array  $payload  Request metadata captured before execution.
- * @param mixed  $response HTTP API response payload or WP_Error.
- * @param string $type     Lifecycle step that triggered the callback.
- * @return array<string, mixed>
+ * @param mixed      $response Response or error from the HTTP API.
+ * @param array|null $context  Timing context captured before the request.
+ * @param array      $args     Request arguments.
+ * @param string     $url      Target URL.
+ *
+ * @return array<string,mixed>
  */
-function sitepulse_http_monitor_normalize_event(array $payload, $response, $type) {
-    $started_at = isset($payload['started_at']) ? (float) $payload['started_at'] : microtime(true);
-    $ended_at = microtime(true);
-    $duration_ms = max(0, (int) round(($ended_at - $started_at) * 1000));
+function sitepulse_http_monitor_prepare_entry($response, $context, array $args, $url) {
+    $host = '';
 
-    $requested_at = (int) current_time('timestamp', true);
-    $method = isset($payload['method']) ? strtoupper((string) $payload['method']) : 'GET';
-    $url = isset($payload['url']) ? (string) $payload['url'] : '';
-    $transport = isset($payload['transport']) ? (string) $payload['transport'] : '';
-
-    $parsed = wp_parse_url($url);
-    $host = isset($parsed['host']) ? strtolower((string) $parsed['host']) : '';
-    $path = isset($parsed['path']) ? $parsed['path'] : '/';
-
-    if (isset($parsed['query']) && $parsed['query'] !== '') {
-        $path .= '?' . $parsed['query'];
+    if (function_exists('wp_parse_url')) {
+        $parsed_host = wp_parse_url($url, PHP_URL_HOST);
+        $host        = is_string($parsed_host) ? strtolower($parsed_host) : '';
     }
 
-    if ($path === '') {
-        $path = '/';
+    if ($host === '' && function_exists('parse_url')) {
+        $parsed_host = parse_url($url, PHP_URL_HOST);
+        $host        = is_string($parsed_host) ? strtolower($parsed_host) : '';
     }
 
-    $status_code = null;
-    $error_code = null;
-    $error_message = null;
+    $method = isset($args['method']) && is_string($args['method']) ? strtoupper($args['method']) : 'GET';
+    $method = substr($method, 0, 10);
 
-    if ($response instanceof WP_Error) {
-        $error_code = $response->get_error_code();
-        $error_message = $response->get_error_message();
+    $duration = null;
+
+    if (is_array($context) && isset($context['started_at'])) {
+        $duration = max(0, (microtime(true) - (float) $context['started_at']) * 1000);
+    }
+
+    $entry = [
+        'recorded_at'   => time(),
+        'url'           => sitepulse_http_monitor_sanitize_url($url),
+        'host'          => sitepulse_http_monitor_truncate($host, 191),
+        'method'        => sitepulse_http_monitor_truncate($method, 10),
+        'response_code' => null,
+        'duration_ms'   => $duration,
+        'bytes'         => null,
+        'error_code'    => '',
+        'error_message' => '',
+        'is_error'      => 0,
+    ];
+
+    if (is_wp_error($response)) {
+        $entry['is_error']     = 1;
+        $entry['error_code']   = sitepulse_http_monitor_truncate($response->get_error_code(), 191);
+        $messages               = $response->get_error_messages();
+        $message_text           = implode('; ', array_map('strval', $messages));
+        $entry['error_message'] = sitepulse_http_monitor_truncate(sitepulse_http_monitor_sanitize_text($message_text), 800);
     } elseif (is_array($response)) {
         if (isset($response['response']['code'])) {
-            $status_code = (int) $response['response']['code'];
+            $entry['response_code'] = (int) $response['response']['code'];
         }
 
-        if (isset($response['response']['message']) && $response['response']['message']) {
-            $error_message = (string) $response['response']['message'];
+        if (isset($response['body'])) {
+            $entry['bytes'] = strlen((string) $response['body']);
         }
 
-        if ($status_code && $status_code >= 400 && empty($error_message)) {
-            $error_message = isset($response['response']['message'])
-                ? (string) $response['response']['message']
-                : __('Erreur HTTP', 'sitepulse');
+        if (isset($response['headers']) && is_array($response['headers'])) {
+            $content_length = null;
+
+            if (isset($response['headers']['content-length'])) {
+                $content_length = $response['headers']['content-length'];
+            } elseif (isset($response['headers']['Content-Length'])) {
+                $content_length = $response['headers']['Content-Length'];
+            }
+
+            if ($content_length !== null && is_numeric($content_length)) {
+                $entry['bytes'] = max(0, (int) $content_length);
+            }
         }
-    } elseif (is_object($response) && method_exists($response, 'get_status')) {
-        $status_code = (int) $response->get_status();
+    } elseif ($response instanceof WP_HTTP_Response) {
+        $entry['response_code'] = (int) $response->get_status();
+        $entry['bytes']         = strlen((string) $response->get_data());
     }
 
-    if ($type === 'error' && $response instanceof WP_Error) {
-        $status_code = null;
+    if ($entry['response_code'] !== null && $entry['response_code'] >= 400) {
+        $entry['is_error'] = 1;
     }
 
-    $is_error = false;
-
-    if ($response instanceof WP_Error) {
-        $is_error = true;
-    } elseif (is_int($status_code) && $status_code >= 400) {
-        $is_error = true;
+    if ($entry['is_error'] && $entry['error_code'] === '' && $entry['response_code'] !== null) {
+        $entry['error_code'] = 'http_' . $entry['response_code'];
     }
 
-    $response_bytes = null;
-
-    if (is_array($response)) {
-        if (isset($response['headers']['content-length'])) {
-            $response_bytes = (int) $response['headers']['content-length'];
-        } elseif (isset($response['body']) && is_string($response['body'])) {
-            $response_bytes = strlen($response['body']);
-        }
-    }
-
-    return [
-        'requested_at'   => $requested_at,
-        'method'         => $method,
-        'host'           => substr($host, 0, 191),
-        'path'           => substr($path, 0, 191),
-        'status_code'    => $status_code,
-        'duration_ms'    => $duration_ms,
-        'transport'      => substr($transport, 0, 191),
-        'is_error'       => $is_error ? 1 : 0,
-        'error_code'     => $error_code ? substr((string) $error_code, 0, 64) : null,
-        'error_message'  => $error_message ? substr((string) $error_message, 0, 255) : null,
-        'response_bytes' => $response_bytes,
-    ];
+    return $entry;
 }
 
 /**
- * Flushes buffered events to the database.
+ * Normalizes a URL for storage.
+ *
+ * @param string $url Raw URL.
+ *
+ * @return string
+ */
+function sitepulse_http_monitor_sanitize_url($url) {
+    $sanitized = is_string($url) ? $url : '';
+
+    if (function_exists('esc_url_raw')) {
+        $sanitized = esc_url_raw($sanitized);
+    }
+
+    return sitepulse_http_monitor_truncate($sanitized, 2048);
+}
+
+/**
+ * Sanitizes arbitrary text before storage.
+ *
+ * @param string $text Input text.
+ *
+ * @return string
+ */
+function sitepulse_http_monitor_sanitize_text($text) {
+    $normalized = is_string($text) ? $text : '';
+
+    if (function_exists('wp_strip_all_tags')) {
+        $normalized = wp_strip_all_tags($normalized);
+    }
+
+    return trim($normalized);
+}
+
+/**
+ * Truncates a string to a fixed length using multibyte support when available.
+ *
+ * @param string $value  Input string.
+ * @param int    $length Maximum length.
+ *
+ * @return string
+ */
+function sitepulse_http_monitor_truncate($value, $length) {
+    $string = is_string($value) ? $value : '';
+
+    if ($length <= 0) {
+        return '';
+    }
+
+    if (function_exists('mb_substr')) {
+        return mb_substr($string, 0, $length);
+    }
+
+    return substr($string, 0, $length);
+}
+
+/**
+ * Persists an HTTP entry into the datastore.
+ *
+ * @param array<string,mixed> $entry Normalized entry fields.
  *
  * @return void
  */
-function sitepulse_http_monitor_flush_buffer() {
-    $events = sitepulse_http_monitor_buffer('drain');
+function sitepulse_http_monitor_store_entry(array $entry) {
+    $table = sitepulse_http_monitor_get_table_name();
 
-    if (empty($events) || !is_array($events)) {
+    if ($table === '' || !sitepulse_http_monitor_table_exists()) {
         return;
+    }
+
+    global $wpdb;
+
+    if (!($wpdb instanceof wpdb)) {
+        return;
+    }
+
+    $data = [
+        'recorded_at'   => isset($entry['recorded_at']) ? (int) $entry['recorded_at'] : time(),
+        'url'           => isset($entry['url']) ? $entry['url'] : '',
+        'host'          => isset($entry['host']) ? $entry['host'] : '',
+        'method'        => isset($entry['method']) ? $entry['method'] : 'GET',
+        'response_code' => isset($entry['response_code']) ? $entry['response_code'] : null,
+        'duration_ms'   => isset($entry['duration_ms']) ? (float) $entry['duration_ms'] : null,
+        'bytes'         => isset($entry['bytes']) ? max(0, (int) $entry['bytes']) : null,
+        'error_code'    => isset($entry['error_code']) ? $entry['error_code'] : '',
+        'error_message' => isset($entry['error_message']) ? $entry['error_message'] : '',
+        'is_error'      => !empty($entry['is_error']) ? 1 : 0,
+        'created_at'    => function_exists('current_time') ? current_time('mysql') : gmdate('Y-m-d H:i:s'),
+    ];
+
+    $formats = ['%d', '%s', '%s', '%s', '%d', '%f', '%d', '%s', '%s', '%d', '%s'];
+
+    $wpdb->insert($table, $data, $formats);
+
+    sitepulse_http_monitor_apply_retention();
+    sitepulse_http_monitor_clear_caches();
+}
+
+/**
+ * Clears cached aggregates for the HTTP monitor.
+ *
+ * @return void
+ */
+function sitepulse_http_monitor_clear_caches() {
+    if (defined('SITEPULSE_TRANSIENT_HTTP_MONITOR_AGGREGATES')) {
+        delete_transient(SITEPULSE_TRANSIENT_HTTP_MONITOR_AGGREGATES);
+    }
+
+    if (defined('SITEPULSE_TRANSIENT_HTTP_MONITOR_RECENT')) {
+        delete_transient(SITEPULSE_TRANSIENT_HTTP_MONITOR_RECENT);
+    }
+}
+/**
+ * Retrieves the HTTP monitor table name.
+ *
+ * @return string
+ */
+function sitepulse_http_monitor_get_table_name() {
+    if (!defined('SITEPULSE_TABLE_HTTP_MONITOR')) {
+        return '';
+    }
+
+    global $wpdb;
+
+    if (!($wpdb instanceof wpdb)) {
+        return '';
+    }
+
+    return $wpdb->prefix . SITEPULSE_TABLE_HTTP_MONITOR;
+}
+
+/**
+ * Checks whether the HTTP monitor table exists.
+ *
+ * @param bool $force_refresh Optional. Bypass the cached result.
+ *
+ * @return bool
+ */
+function sitepulse_http_monitor_table_exists($force_refresh = false) {
+    static $exists = null;
+
+    if ($force_refresh) {
+        $exists = null;
+    }
+
+    if ($exists !== null) {
+        return $exists;
     }
 
     $table = sitepulse_http_monitor_get_table_name();
 
     if ($table === '') {
-        return;
+        $exists = false;
+
+        return $exists;
     }
 
     global $wpdb;
 
     if (!($wpdb instanceof wpdb)) {
-        return;
+        $exists = false;
+
+        return $exists;
     }
 
-    $created_at = gmdate('Y-m-d H:i:s');
+    $exists = (bool) $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
 
-    foreach ($events as $event) {
-        if (!is_array($event)) {
-            continue;
-        }
-
-        $data = [
-            'requested_at' => isset($event['requested_at']) ? (int) $event['requested_at'] : (int) current_time('timestamp', true),
-            'method'       => isset($event['method']) ? (string) $event['method'] : 'GET',
-            'host'         => isset($event['host']) ? (string) $event['host'] : '',
-            'path'         => isset($event['path']) ? (string) $event['path'] : '/',
-            'duration_ms'  => isset($event['duration_ms']) ? max(0, (int) $event['duration_ms']) : 0,
-            'transport'    => isset($event['transport']) ? (string) $event['transport'] : '',
-            'is_error'     => !empty($event['is_error']) ? 1 : 0,
-            'created_at'   => $created_at,
-        ];
-
-        $format = ['%d', '%s', '%s', '%s', '%d', '%s', '%d', '%s'];
-
-        if (isset($event['status_code']) && $event['status_code'] !== null) {
-            $data['status_code'] = (int) $event['status_code'];
-            $format[] = '%d';
-        }
-
-        if (!empty($event['error_code'])) {
-            $data['error_code'] = (string) $event['error_code'];
-            $format[] = '%s';
-        }
-
-        if (!empty($event['error_message'])) {
-            $data['error_message'] = (string) $event['error_message'];
-            $format[] = '%s';
-        }
-
-        if (isset($event['response_bytes']) && $event['response_bytes'] !== null) {
-            $data['response_bytes'] = (int) $event['response_bytes'];
-            $format[] = '%d';
-        }
-
-        $wpdb->insert($table, $data, $format);
-    }
+    return $exists;
 }
 
 /**
- * Returns the fully qualified HTTP monitor table name.
- *
- * @return string
- */
-function sitepulse_http_monitor_get_table_name() {
-    if (!defined('SITEPULSE_TABLE_HTTP_MONITOR_EVENTS')) {
-        return '';
-    }
-
-    global $wpdb;
-
-    if (!($wpdb instanceof wpdb)) {
-        return '';
-    }
-
-    return $wpdb->prefix . SITEPULSE_TABLE_HTTP_MONITOR_EVENTS;
-}
-
-/**
- * Creates or upgrades the HTTP monitor schema.
+ * Creates or upgrades the HTTP monitor table.
  *
  * @return void
  */
 function sitepulse_http_monitor_maybe_upgrade_schema() {
-    if (!defined('SITEPULSE_HTTP_MONITOR_SCHEMA_VERSION')
-        || !defined('SITEPULSE_OPTION_HTTP_MONITOR_SCHEMA_VERSION')) {
+    if (!defined('SITEPULSE_HTTP_MONITOR_SCHEMA_VERSION') || !defined('SITEPULSE_OPTION_HTTP_MONITOR_SCHEMA_VERSION')) {
         return;
     }
 
-    $target = (int) SITEPULSE_HTTP_MONITOR_SCHEMA_VERSION;
+    $target  = (int) SITEPULSE_HTTP_MONITOR_SCHEMA_VERSION;
     $current = (int) get_option(SITEPULSE_OPTION_HTTP_MONITOR_SCHEMA_VERSION, 0);
 
     if ($current >= $target && sitepulse_http_monitor_table_exists()) {
@@ -468,30 +440,7 @@ function sitepulse_http_monitor_maybe_upgrade_schema() {
 }
 
 /**
- * Checks whether the HTTP monitor table exists.
- *
- * @return bool
- */
-function sitepulse_http_monitor_table_exists() {
-    $table = sitepulse_http_monitor_get_table_name();
-
-    if ($table === '') {
-        return false;
-    }
-
-    global $wpdb;
-
-    if (!($wpdb instanceof wpdb)) {
-        return false;
-    }
-
-    $result = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
-
-    return !empty($result);
-}
-
-/**
- * Installs the HTTP monitor events table.
+ * Installs the HTTP monitor table.
  *
  * @return void
  */
@@ -508,185 +457,340 @@ function sitepulse_http_monitor_install_table() {
         return;
     }
 
-    $charset = $wpdb->get_charset_collate();
+    $charset_collate = $wpdb->get_charset_collate();
 
     $sql = "CREATE TABLE {$table} (
         id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
-        requested_at int(10) unsigned NOT NULL,
-        method varchar(16) NOT NULL DEFAULT 'GET',
-        host varchar(191) NOT NULL DEFAULT '',
-        path varchar(191) NOT NULL DEFAULT '/',
-        status_code smallint(6) NULL,
-        duration_ms int(10) unsigned NULL,
-        transport varchar(191) NOT NULL DEFAULT '',
+        recorded_at int(10) unsigned NOT NULL,
+        url text NOT NULL,
+        host varchar(191) NOT NULL,
+        method varchar(10) NOT NULL,
+        response_code smallint(6) NULL,
+        duration_ms float NULL,
+        bytes bigint(20) unsigned NULL,
+        error_code varchar(191) NULL,
+        error_message text NULL,
         is_error tinyint(1) NOT NULL DEFAULT 0,
-        error_code varchar(64) NULL,
-        error_message varchar(255) NULL,
-        response_bytes bigint(20) unsigned NULL,
         created_at datetime NOT NULL,
         PRIMARY KEY  (id),
-        KEY requested_at (requested_at),
+        KEY recorded_at (recorded_at),
         KEY host (host),
-        KEY status_code (status_code),
-        KEY is_error (is_error)
-    ) {$charset};";
+        KEY response_code (response_code)
+    ) {$charset_collate};";
 
     if (!function_exists('dbDelta')) {
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
     }
 
     dbDelta($sql);
+
+    sitepulse_http_monitor_table_exists(true);
 }
 
 /**
- * Schedules the daily cleanup cron event if needed.
+ * Applies the configured retention policy to the HTTP logs.
  *
  * @return void
  */
-function sitepulse_http_monitor_schedule_cleanup() {
-    if (!defined('SITEPULSE_CRON_HTTP_MONITOR_CLEANUP')) {
-        return;
-    }
-
-    if (!function_exists('wp_next_scheduled') || !function_exists('wp_schedule_event')) {
-        return;
-    }
-
-    if (!wp_next_scheduled(SITEPULSE_CRON_HTTP_MONITOR_CLEANUP)) {
-        wp_schedule_event(time() + HOUR_IN_SECONDS, 'daily', SITEPULSE_CRON_HTTP_MONITOR_CLEANUP);
-    }
-}
-
-/**
- * Handles updates to the HTTP monitor threshold and retention settings.
- *
- * @return void
- */
-function sitepulse_http_monitor_handle_settings() {
-    if (!function_exists('sitepulse_get_capability') || !current_user_can(sitepulse_get_capability())) {
-        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour modifier cette configuration.", 'sitepulse'));
-    }
-
-    $nonce_action = defined('SITEPULSE_NONCE_ACTION_HTTP_MONITOR_SETTINGS')
-        ? SITEPULSE_NONCE_ACTION_HTTP_MONITOR_SETTINGS
-        : 'sitepulse_http_monitor_settings';
-
-    check_admin_referer($nonce_action);
-
-    $latency_raw = isset($_POST['sitepulse_http_latency_threshold'])
-        ? wp_unslash($_POST['sitepulse_http_latency_threshold'])
-        : '';
-    $error_raw = isset($_POST['sitepulse_http_error_rate'])
-        ? wp_unslash($_POST['sitepulse_http_error_rate'])
-        : '';
-    $retention_raw = isset($_POST['sitepulse_http_retention_days'])
-        ? wp_unslash($_POST['sitepulse_http_retention_days'])
-        : '';
-
-    $latency_threshold = max(0, absint($latency_raw));
-    $error_threshold = $error_raw === '' ? 0 : (float) $error_raw;
-    $error_threshold = (int) round(min(100, max(0, $error_threshold)));
-    $retention_days = absint($retention_raw);
-
-    update_option(SITEPULSE_OPTION_HTTP_MONITOR_LATENCY_THRESHOLD_MS, $latency_threshold, false);
-    update_option(SITEPULSE_OPTION_HTTP_MONITOR_ERROR_RATE_THRESHOLD, $error_threshold, false);
-
-    if ($retention_days >= 1) {
-        update_option(SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS, $retention_days, false);
-    }
-
-    $redirect = admin_url('admin.php?page=sitepulse-resources');
-    $redirect = add_query_arg('sitepulse_http_monitor', 'updated', $redirect);
-
-    wp_safe_redirect($redirect);
-    exit;
-}
-
-/**
- * Deletes HTTP monitor events older than the configured retention window.
- *
- * @return void
- */
-function sitepulse_http_monitor_purge_old_entries() {
-    if (!defined('SITEPULSE_TRANSIENT_HTTP_MONITOR_CLEANUP_LOCK')) {
-        return;
-    }
-
-    $lock = get_transient(SITEPULSE_TRANSIENT_HTTP_MONITOR_CLEANUP_LOCK);
-
-    if ($lock) {
-        return;
-    }
-
-    set_transient(SITEPULSE_TRANSIENT_HTTP_MONITOR_CLEANUP_LOCK, 1, MINUTE_IN_SECONDS * 5);
-
-    $retention_days = (int) get_option(
-        SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS,
-        defined('SITEPULSE_DEFAULT_HTTP_MONITOR_RETENTION_DAYS') ? (int) SITEPULSE_DEFAULT_HTTP_MONITOR_RETENTION_DAYS : 14
-    );
-
-    if ($retention_days <= 0) {
-        delete_transient(SITEPULSE_TRANSIENT_HTTP_MONITOR_CLEANUP_LOCK);
-
-        return;
-    }
-
-    $threshold = (int) current_time('timestamp', true) - ($retention_days * DAY_IN_SECONDS);
+function sitepulse_http_monitor_apply_retention() {
     $table = sitepulse_http_monitor_get_table_name();
 
-    if ($table !== '') {
-        global $wpdb;
-
-        if ($wpdb instanceof wpdb) {
-            $wpdb->query($wpdb->prepare("DELETE FROM {$table} WHERE requested_at < %d", $threshold));
-        }
+    if ($table === '' || !sitepulse_http_monitor_table_exists()) {
+        return;
     }
 
-    delete_transient(SITEPULSE_TRANSIENT_HTTP_MONITOR_CLEANUP_LOCK);
-}
+    $days = sitepulse_http_monitor_get_retention_days();
 
-/**
- * Prepares a SQL query with optional parameters.
- *
- * @param string $sql    SQL statement.
- * @param array  $params Parameters to interpolate.
- * @return string|null
- */
-function sitepulse_http_monitor_prepare_sql($sql, array $params) {
+    if ($days <= 0) {
+        return;
+    }
+
+    $threshold = time() - ($days * DAY_IN_SECONDS);
+
     global $wpdb;
 
-    if (empty($params)) {
-        return $sql;
-    }
-
     if (!($wpdb instanceof wpdb)) {
-        return null;
+        return;
     }
 
-    return $wpdb->prepare($sql, $params);
+    $wpdb->query($wpdb->prepare("DELETE FROM {$table} WHERE recorded_at < %d", $threshold));
 }
 
 /**
- * Retrieves aggregated statistics for outbound HTTP calls.
+ * Retrieves the configured retention window in days.
  *
- * @param array $args Query arguments.
- * @return array<string, mixed>
+ * @return int
  */
-function sitepulse_http_monitor_get_stats(array $args = []) {
+function sitepulse_http_monitor_get_retention_days() {
+    $default = defined('SITEPULSE_DEFAULT_HTTP_MONITOR_RETENTION_DAYS') ? (int) SITEPULSE_DEFAULT_HTTP_MONITOR_RETENTION_DAYS : 14;
+
+    if (!defined('SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS')) {
+        return $default;
+    }
+
+    $value = get_option(SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS, $default);
+
+    if (!is_numeric($value)) {
+        return $default;
+    }
+
+    $days = max(1, (int) $value);
+
+    if (function_exists('apply_filters')) {
+        /**
+         * Filters the number of days HTTP monitor entries should be retained.
+         *
+         * @param int $days Retention window in days.
+         */
+        $days = (int) apply_filters('sitepulse_http_monitor_retention_days', $days);
+    }
+
+    return $days;
+}
+
+/**
+ * Returns the HTTP monitor thresholds and settings.
+ *
+ * @return array<string,float>
+ */
+function sitepulse_http_monitor_get_settings() {
     $defaults = [
-        'since' => null,
-        'limit' => 25,
+        'latency_threshold_ms' => defined('SITEPULSE_DEFAULT_HTTP_MONITOR_LATENCY_THRESHOLD_MS')
+            ? (float) SITEPULSE_DEFAULT_HTTP_MONITOR_LATENCY_THRESHOLD_MS
+            : 1000.0,
+        'error_rate_percent'  => defined('SITEPULSE_DEFAULT_HTTP_MONITOR_ERROR_RATE')
+            ? (float) SITEPULSE_DEFAULT_HTTP_MONITOR_ERROR_RATE
+            : 5.0,
     ];
 
-    $args = array_merge($defaults, $args);
+    if (!defined('SITEPULSE_OPTION_HTTP_MONITOR_SETTINGS')) {
+        return $defaults;
+    }
+
+    $option = get_option(SITEPULSE_OPTION_HTTP_MONITOR_SETTINGS, []);
+
+    if (!is_array($option)) {
+        return $defaults;
+    }
+
+    $settings = $defaults;
+
+    if (isset($option['latency_threshold_ms']) && is_numeric($option['latency_threshold_ms'])) {
+        $settings['latency_threshold_ms'] = max(0, (float) $option['latency_threshold_ms']);
+    }
+
+    if (isset($option['error_rate_percent']) && is_numeric($option['error_rate_percent'])) {
+        $settings['error_rate_percent'] = max(0, min(100, (float) $option['error_rate_percent']));
+    }
+
+    return function_exists('apply_filters')
+        ? (array) apply_filters('sitepulse_http_monitor_settings', $settings)
+        : $settings;
+}
+/**
+ * Registers REST endpoints exposing outbound HTTP statistics.
+ *
+ * @return void
+ */
+function sitepulse_http_monitor_register_rest_routes() {
+    if (!function_exists('register_rest_route')) {
+        return;
+    }
+
+    register_rest_route(
+        'sitepulse/v1',
+        '/resources/http',
+        [
+            'methods'             => defined('WP_REST_Server::READABLE') ? WP_REST_Server::READABLE : 'GET',
+            'callback'            => 'sitepulse_http_monitor_rest_stats',
+            'permission_callback' => 'sitepulse_http_monitor_rest_permission_check',
+            'args'                => [
+                'since' => [
+                    'description' => __('Filtrer les requêtes à partir d’un horodatage Unix ou d’une date lisible.', 'sitepulse'),
+                    'type'        => 'string',
+                    'required'    => false,
+                ],
+                'top_limit' => [
+                    'description' => __('Nombre maximum de services externes à retourner.', 'sitepulse'),
+                    'type'        => 'integer',
+                    'required'    => false,
+                    'default'     => 10,
+                ],
+                'sample_limit' => [
+                    'description' => __('Nombre maximum d’appels récents à inclure.', 'sitepulse'),
+                    'type'        => 'integer',
+                    'required'    => false,
+                    'default'     => 20,
+                ],
+            ],
+        ]
+    );
+}
+
+/**
+ * Permission callback for the HTTP monitor REST endpoints.
+ *
+ * @return bool
+ */
+function sitepulse_http_monitor_rest_permission_check() {
+    if (function_exists('sitepulse_resource_monitor_rest_permission_check')) {
+        return sitepulse_resource_monitor_rest_permission_check();
+    }
+
+    $capability = function_exists('sitepulse_get_capability') ? sitepulse_get_capability() : 'manage_options';
+
+    return current_user_can($capability);
+}
+
+/**
+ * Handles the HTTP monitor REST endpoint.
+ *
+ * @param WP_REST_Request $request Incoming request.
+ *
+ * @return WP_REST_Response|WP_Error
+ */
+function sitepulse_http_monitor_rest_stats($request) {
+    if (!sitepulse_http_monitor_is_enabled()) {
+        return new WP_Error(
+            'sitepulse_http_monitor_inactive',
+            __('Le module Resource Monitor est désactivé.', 'sitepulse'),
+            ['status' => 400]
+        );
+    }
+
+    $since_param  = $request->get_param('since');
+    $top_limit    = sitepulse_http_monitor_normalize_limit($request->get_param('top_limit'), 10, 1, 50);
+    $sample_limit = sitepulse_http_monitor_normalize_limit($request->get_param('sample_limit'), 20, 1, 100);
+
+    $since_timestamp = null;
+
+    if ($since_param !== null && $since_param !== '') {
+        if (function_exists('sitepulse_resource_monitor_rest_parse_since_param')) {
+            $parsed = sitepulse_resource_monitor_rest_parse_since_param($since_param);
+
+            if (isset($parsed['error'])) {
+                return new WP_Error('sitepulse_http_monitor_invalid_since', $parsed['error'], ['status' => 400]);
+            }
+
+            $since_timestamp = isset($parsed['timestamp']) ? $parsed['timestamp'] : null;
+        } else {
+            if (is_numeric($since_param)) {
+                $since_timestamp = (int) $since_param;
+            } else {
+                $parsed = strtotime((string) $since_param);
+
+                if ($parsed === false) {
+                    return new WP_Error(
+                        'sitepulse_http_monitor_invalid_since',
+                        __('Impossible d’interpréter la valeur fournie pour le paramètre since.', 'sitepulse'),
+                        ['status' => 400]
+                    );
+                }
+
+                $since_timestamp = $parsed;
+            }
+        }
+    }
+
+    $settings = sitepulse_http_monitor_get_settings();
+
+    $should_cache   = ($since_timestamp === null && $top_limit === 10 && $sample_limit === 20);
+    $cached_summary = false;
+    $cached_recent  = false;
+
+    if ($should_cache && defined('SITEPULSE_TRANSIENT_HTTP_MONITOR_AGGREGATES')) {
+        $cached_summary = get_transient(SITEPULSE_TRANSIENT_HTTP_MONITOR_AGGREGATES);
+    }
+
+    if ($should_cache && defined('SITEPULSE_TRANSIENT_HTTP_MONITOR_RECENT')) {
+        $cached_recent = get_transient(SITEPULSE_TRANSIENT_HTTP_MONITOR_RECENT);
+    }
+
+    if (is_array($cached_summary) && isset($cached_summary['summary'], $cached_summary['top_hosts'])) {
+        $summary_data = $cached_summary;
+    } else {
+        $summary_data = sitepulse_http_monitor_build_summary($since_timestamp, $settings, $top_limit);
+
+        if ($should_cache && defined('SITEPULSE_TRANSIENT_HTTP_MONITOR_AGGREGATES')) {
+            set_transient(SITEPULSE_TRANSIENT_HTTP_MONITOR_AGGREGATES, $summary_data, MINUTE_IN_SECONDS * 5);
+        }
+    }
+
+    if (is_array($cached_recent)) {
+        $recent_entries = $cached_recent;
+    } else {
+        $recent_entries = sitepulse_http_monitor_get_recent_entries($sample_limit, $since_timestamp);
+
+        if ($should_cache && defined('SITEPULSE_TRANSIENT_HTTP_MONITOR_RECENT')) {
+            set_transient(SITEPULSE_TRANSIENT_HTTP_MONITOR_RECENT, $recent_entries, MINUTE_IN_SECONDS * 5);
+        }
+    }
+
+    $response = [
+        'thresholds' => [
+            'latency_ms'         => $settings['latency_threshold_ms'],
+            'error_rate_percent' => $settings['error_rate_percent'],
+        ],
+        'summary'   => $summary_data['summary'],
+        'top_hosts' => $summary_data['top_hosts'],
+        'recent'    => $recent_entries,
+        'since'     => $since_timestamp,
+    ];
+
+    return rest_ensure_response($response);
+}
+
+/**
+ * Ensures a numeric limit falls within an expected range.
+ *
+ * @param mixed $value   Raw value.
+ * @param int   $default Default value.
+ * @param int   $min     Minimum allowed.
+ * @param int   $max     Maximum allowed.
+ *
+ * @return int
+ */
+function sitepulse_http_monitor_normalize_limit($value, $default, $min, $max) {
+    if (!is_numeric($value)) {
+        return $default;
+    }
+
+    $value = (int) $value;
+
+    if ($value < $min) {
+        return $min;
+    }
+
+    if ($value > $max) {
+        return $max;
+    }
+
+    return $value;
+}
+
+/**
+ * Builds aggregate statistics for the HTTP monitor REST response.
+ *
+ * @param int|null            $since_timestamp Optional start timestamp.
+ * @param array<string,mixed> $settings        Monitor settings.
+ * @param int                 $limit          Maximum number of hosts to return.
+ *
+ * @return array{summary:array<string,mixed>,top_hosts:array<int,array<string,mixed>>}
+ */
+function sitepulse_http_monitor_build_summary($since_timestamp, array $settings, $limit) {
     $table = sitepulse_http_monitor_get_table_name();
 
-    if ($table === '') {
+    if ($table === '' || !sitepulse_http_monitor_table_exists()) {
         return [
-            'summary'   => [],
-            'services'  => [],
-            'samples'   => [],
-            'thresholds' => sitepulse_http_monitor_get_threshold_configuration(),
+            'summary'   => [
+                'total_requests'      => 0,
+                'error_count'         => 0,
+                'slow_count'          => 0,
+                'average_duration_ms' => 0.0,
+                'max_duration_ms'     => 0.0,
+                'error_rate_percent'  => 0.0,
+            ],
+            'top_hosts' => [],
         ];
     }
 
@@ -694,260 +798,168 @@ function sitepulse_http_monitor_get_stats(array $args = []) {
 
     if (!($wpdb instanceof wpdb)) {
         return [
-            'summary'   => [],
-            'services'  => [],
-            'samples'   => [],
-            'thresholds' => sitepulse_http_monitor_get_threshold_configuration(),
+            'summary'   => [
+                'total_requests'      => 0,
+                'error_count'         => 0,
+                'slow_count'          => 0,
+                'average_duration_ms' => 0.0,
+                'max_duration_ms'     => 0.0,
+                'error_rate_percent'  => 0.0,
+            ],
+            'top_hosts' => [],
         ];
     }
 
-    $where = '1=1';
-    $params = [];
+    $values = [];
+    $sql    = "SELECT COUNT(*) AS total_requests,
+        SUM(CASE WHEN is_error = 1 THEN 1 ELSE 0 END) AS error_count,
+        AVG(duration_ms) AS avg_duration,
+        MAX(duration_ms) AS max_duration,
+        SUM(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= %f THEN 1 ELSE 0 END) AS slow_count
+        FROM {$table}";
 
-    if (!empty($args['since'])) {
-        $since = is_numeric($args['since']) ? (int) $args['since'] : strtotime((string) $args['since']);
-        if ($since) {
-            $where .= ' AND requested_at >= %d';
-            $params[] = $since;
-        }
+    $values[] = isset($settings['latency_threshold_ms']) ? (float) $settings['latency_threshold_ms'] : 0.0;
+
+    if ($since_timestamp !== null) {
+        $sql     .= ' WHERE recorded_at >= %d';
+        $values[] = (int) $since_timestamp;
     }
 
-    $summary_sql = "SELECT COUNT(*) as total, SUM(is_error) as errors, AVG(duration_ms) as average_duration, MAX(duration_ms) as max_duration
-        FROM {$table} WHERE {$where}";
+    $summary_row = $wpdb->get_row($wpdb->prepare($sql, $values), ARRAY_A);
 
-    $summary_query = sitepulse_http_monitor_prepare_sql($summary_sql, $params);
-    $summary = $summary_query ? $wpdb->get_row($summary_query, ARRAY_A) : null;
-
-    if (!is_array($summary)) {
-        $summary = ['total' => 0, 'errors' => 0, 'average_duration' => null, 'max_duration' => null];
+    if (!is_array($summary_row)) {
+        $summary_row = [
+            'total_requests' => 0,
+            'error_count'    => 0,
+            'avg_duration'   => 0,
+            'max_duration'   => 0,
+            'slow_count'     => 0,
+        ];
     }
 
-    $percentile = null;
+    $total_requests = isset($summary_row['total_requests']) ? (int) $summary_row['total_requests'] : 0;
+    $error_count    = isset($summary_row['error_count']) ? (int) $summary_row['error_count'] : 0;
+    $slow_count     = isset($summary_row['slow_count']) ? (int) $summary_row['slow_count'] : 0;
+    $avg_duration   = isset($summary_row['avg_duration']) ? (float) $summary_row['avg_duration'] : 0.0;
+    $max_duration   = isset($summary_row['max_duration']) ? (float) $summary_row['max_duration'] : 0.0;
 
-    if (!empty($summary['total'])) {
-        $position = (int) ceil((int) $summary['total'] * 0.95);
-        $percentile_sql = "SELECT duration_ms FROM {$table} WHERE {$where} AND duration_ms IS NOT NULL ORDER BY duration_ms ASC LIMIT %d, 1";
-        $percentile_params = $params;
-        $percentile_params[] = max(0, $position - 1);
-        $percentile_query = sitepulse_http_monitor_prepare_sql($percentile_sql, $percentile_params);
-        if ($percentile_query) {
-            $percentile = $wpdb->get_var($percentile_query);
-        }
-    }
+    $error_rate = $total_requests > 0 ? ($error_count / $total_requests) * 100 : 0.0;
 
-    $limit = max(1, min(100, (int) $args['limit']));
-    $services_sql = "SELECT host, path, method, COUNT(*) as total_requests, SUM(is_error) as error_requests,
-        AVG(duration_ms) as average_duration, MAX(duration_ms) as max_duration, MAX(requested_at) as last_seen,
-        MAX(status_code) as last_status_code
+    $hosts_sql = "SELECT host,
+            COUNT(*) AS total_requests,
+            SUM(CASE WHEN is_error = 1 THEN 1 ELSE 0 END) AS error_count,
+            AVG(duration_ms) AS avg_duration,
+            MAX(duration_ms) AS max_duration
         FROM {$table}
-        WHERE {$where}
-        GROUP BY host, path, method
-        ORDER BY average_duration DESC
-        LIMIT %d";
+        WHERE host <> ''";
 
-    $service_params = $params;
-    $service_params[] = $limit;
-    $services_query = sitepulse_http_monitor_prepare_sql($services_sql, $service_params);
-    $services = $services_query ? $wpdb->get_results($services_query, ARRAY_A) : null;
+    $host_values = [];
 
-    if (!is_array($services)) {
-        $services = [];
+    if ($since_timestamp !== null) {
+        $hosts_sql   .= ' AND recorded_at >= %d';
+        $host_values[] = (int) $since_timestamp;
     }
 
-    $samples_sql = "SELECT requested_at, host, path, method, status_code, duration_ms, is_error
-        FROM {$table}
-        WHERE {$where}
-        ORDER BY requested_at DESC
-        LIMIT %d";
+    $hosts_sql   .= ' GROUP BY host ORDER BY avg_duration DESC LIMIT %d';
+    $host_values[] = max(1, (int) $limit);
 
-    $sample_params = $params;
-    $sample_params[] = min(50, $limit * 2);
-    $samples_query = sitepulse_http_monitor_prepare_sql($samples_sql, $sample_params);
-    $samples = $samples_query ? $wpdb->get_results($samples_query, ARRAY_A) : null;
+    $host_results = $wpdb->get_results($wpdb->prepare($hosts_sql, $host_values), ARRAY_A);
+    $top_hosts    = [];
 
-    if (!is_array($samples)) {
-        $samples = [];
+    if (is_array($host_results)) {
+        foreach ($host_results as $row) {
+            if (!is_array($row) || empty($row['host'])) {
+                continue;
+            }
+
+            $host_total  = isset($row['total_requests']) ? (int) $row['total_requests'] : 0;
+            $host_errors = isset($row['error_count']) ? (int) $row['error_count'] : 0;
+            $host_avg    = isset($row['avg_duration']) ? (float) $row['avg_duration'] : 0.0;
+            $host_max    = isset($row['max_duration']) ? (float) $row['max_duration'] : 0.0;
+
+            $top_hosts[] = [
+                'host'                => (string) $row['host'],
+                'total_requests'      => $host_total,
+                'error_count'         => $host_errors,
+                'error_rate_percent'  => $host_total > 0 ? ($host_errors / $host_total) * 100 : 0.0,
+                'average_duration_ms' => $host_avg,
+                'max_duration_ms'     => $host_max,
+            ];
+        }
     }
 
     return [
         'summary' => [
-            'total'           => (int) ($summary['total'] ?? 0),
-            'errors'          => (int) ($summary['errors'] ?? 0),
-            'errorRate'       => sitepulse_http_monitor_calculate_error_rate((int) ($summary['total'] ?? 0), (int) ($summary['errors'] ?? 0)),
-            'averageDuration' => isset($summary['average_duration']) ? (float) $summary['average_duration'] : null,
-            'maxDuration'     => isset($summary['max_duration']) ? (float) $summary['max_duration'] : null,
-            'p95Duration'     => $percentile !== null ? (float) $percentile : null,
+            'total_requests'      => $total_requests,
+            'error_count'         => $error_count,
+            'slow_count'          => $slow_count,
+            'average_duration_ms' => $avg_duration,
+            'max_duration_ms'     => $max_duration,
+            'error_rate_percent'  => $error_rate,
         ],
-        'services'  => array_map('sitepulse_http_monitor_normalize_service_row', $services),
-        'samples'   => array_map('sitepulse_http_monitor_normalize_sample_row', $samples),
-        'thresholds' => sitepulse_http_monitor_get_threshold_configuration(),
+        'top_hosts' => $top_hosts,
     ];
 }
 
 /**
- * Normalises a service aggregation row.
+ * Retrieves recent HTTP samples for display.
  *
- * @param array $row Database row.
- * @return array<string, mixed>
+ * @param int      $limit           Maximum number of entries.
+ * @param int|null $since_timestamp Optional start timestamp.
+ *
+ * @return array<int,array<string,mixed>>
  */
-function sitepulse_http_monitor_normalize_service_row($row) {
-    if (!is_array($row)) {
+function sitepulse_http_monitor_get_recent_entries($limit, $since_timestamp = null) {
+    $table = sitepulse_http_monitor_get_table_name();
+
+    if ($table === '' || !sitepulse_http_monitor_table_exists()) {
         return [];
     }
 
-    $total = isset($row['total_requests']) ? (int) $row['total_requests'] : 0;
-    $errors = isset($row['error_requests']) ? (int) $row['error_requests'] : 0;
+    global $wpdb;
 
-    return [
-        'host'          => isset($row['host']) ? (string) $row['host'] : '',
-        'path'          => isset($row['path']) ? (string) $row['path'] : '/',
-        'method'        => isset($row['method']) ? (string) $row['method'] : 'GET',
-        'total'         => $total,
-        'errors'        => $errors,
-        'errorRate'     => sitepulse_http_monitor_calculate_error_rate($total, $errors),
-        'average'       => isset($row['average_duration']) ? (float) $row['average_duration'] : null,
-        'max'           => isset($row['max_duration']) ? (float) $row['max_duration'] : null,
-        'lastSeen'      => isset($row['last_seen']) ? (int) $row['last_seen'] : null,
-        'lastStatus'    => isset($row['last_status_code']) ? (int) $row['last_status_code'] : null,
-    ];
-}
-
-/**
- * Normalises a single sample row.
- *
- * @param array $row Database row.
- * @return array<string, mixed>
- */
-function sitepulse_http_monitor_normalize_sample_row($row) {
-    if (!is_array($row)) {
+    if (!($wpdb instanceof wpdb)) {
         return [];
     }
 
-    return [
-        'timestamp'  => isset($row['requested_at']) ? (int) $row['requested_at'] : null,
-        'host'       => isset($row['host']) ? (string) $row['host'] : '',
-        'path'       => isset($row['path']) ? (string) $row['path'] : '/',
-        'method'     => isset($row['method']) ? (string) $row['method'] : 'GET',
-        'status'     => isset($row['status_code']) ? (int) $row['status_code'] : null,
-        'duration'   => isset($row['duration_ms']) ? (int) $row['duration_ms'] : null,
-        'isError'    => !empty($row['is_error']),
-    ];
-}
+    $sql    = "SELECT recorded_at, host, method, response_code, duration_ms, bytes, is_error, url, error_code, error_message
+        FROM {$table}";
+    $values = [];
 
-/**
- * Calculates the error rate percentage.
- *
- * @param int $total  Total requests.
- * @param int $errors Total errors.
- * @return float|null
- */
-function sitepulse_http_monitor_calculate_error_rate($total, $errors) {
-    if ($total <= 0) {
-        return null;
+    if ($since_timestamp !== null) {
+        $sql     .= ' WHERE recorded_at >= %d';
+        $values[] = (int) $since_timestamp;
     }
 
-    return round(($errors / $total) * 100, 2);
-}
+    $sql     .= ' ORDER BY recorded_at DESC LIMIT %d';
+    $values[] = max(1, (int) $limit);
 
-/**
- * Retrieves the configured threshold values for the HTTP monitor.
- *
- * @return array<string, int>
- */
-function sitepulse_http_monitor_get_threshold_configuration() {
-    $latency = (int) get_option(
-        SITEPULSE_OPTION_HTTP_MONITOR_LATENCY_THRESHOLD_MS,
-        defined('SITEPULSE_DEFAULT_HTTP_MONITOR_LATENCY_THRESHOLD_MS') ? (int) SITEPULSE_DEFAULT_HTTP_MONITOR_LATENCY_THRESHOLD_MS : 1200
-    );
+    $results = $wpdb->get_results($wpdb->prepare($sql, $values), ARRAY_A);
 
-    $error_rate = (int) get_option(
-        SITEPULSE_OPTION_HTTP_MONITOR_ERROR_RATE_THRESHOLD,
-        defined('SITEPULSE_DEFAULT_HTTP_MONITOR_ERROR_RATE_THRESHOLD') ? (int) SITEPULSE_DEFAULT_HTTP_MONITOR_ERROR_RATE_THRESHOLD : 20
-    );
-
-    return [
-        'latency'   => $latency,
-        'errorRate' => $error_rate,
-    ];
-}
-
-/**
- * Evaluates thresholds and dispatches alerts if required.
- *
- * @return void
- */
-function sitepulse_http_monitor_check_thresholds() {
-    if (!function_exists('sitepulse_error_alert_send')) {
-        return;
+    if (!is_array($results)) {
+        return [];
     }
 
-    $stats = sitepulse_http_monitor_get_stats([
-        'since' => (int) current_time('timestamp', true) - HOUR_IN_SECONDS,
-        'limit' => 10,
-    ]);
+    $entries = [];
 
-    if (empty($stats['summary']) || empty($stats['thresholds'])) {
-        return;
+    foreach ($results as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $entries[] = [
+            'recorded_at'   => isset($row['recorded_at']) ? (int) $row['recorded_at'] : 0,
+            'host'          => isset($row['host']) ? (string) $row['host'] : '',
+            'method'        => isset($row['method']) ? (string) $row['method'] : '',
+            'response_code' => isset($row['response_code']) ? (int) $row['response_code'] : null,
+            'duration_ms'   => isset($row['duration_ms']) ? (float) $row['duration_ms'] : null,
+            'bytes'         => isset($row['bytes']) ? (int) $row['bytes'] : null,
+            'is_error'      => !empty($row['is_error']),
+            'url'           => isset($row['url']) ? (string) $row['url'] : '',
+            'error_code'    => isset($row['error_code']) ? (string) $row['error_code'] : '',
+            'error_message' => isset($row['error_message']) ? (string) $row['error_message'] : '',
+        ];
     }
 
-    $thresholds = $stats['thresholds'];
-    $summary = $stats['summary'];
-
-    if (isset($thresholds['latency'], $summary['p95Duration'])
-        && $thresholds['latency'] > 0
-        && $summary['p95Duration'] !== null
-        && $summary['p95Duration'] >= $thresholds['latency']) {
-        $subject = __('Latence élevée détectée sur les appels externes', 'sitepulse');
-        $message = sprintf(
-            /* translators: %s: latency in milliseconds. */
-            __('Le 95e percentile de latence a atteint %s ms sur la dernière heure.', 'sitepulse'),
-            number_format_i18n((float) $summary['p95Duration'])
-        );
-
-        sitepulse_error_alert_send('http_latency', $subject, $message, 'warning', [
-            'metric'     => 'latency',
-            'threshold'  => (int) $thresholds['latency'],
-            'observation'=> (float) $summary['p95Duration'],
-        ]);
-    }
-
-    if (isset($thresholds['errorRate'], $summary['errorRate'])
-        && $thresholds['errorRate'] > 0
-        && $summary['errorRate'] !== null
-        && $summary['errorRate'] >= $thresholds['errorRate']) {
-        $subject = __('Taux d’erreurs élevé sur les appels externes', 'sitepulse');
-        $message = sprintf(
-            /* translators: %s: error rate percentage. */
-            __('Le taux d’erreurs des appels externes a atteint %s%% sur la dernière heure.', 'sitepulse'),
-            number_format_i18n((float) $summary['errorRate'], 2)
-        );
-
-        sitepulse_error_alert_send('http_errors', $subject, $message, 'error', [
-            'metric'     => 'error_rate',
-            'threshold'  => (int) $thresholds['errorRate'],
-            'observation'=> (float) $summary['errorRate'],
-        ]);
-    }
-}
-
-/**
- * REST API callback returning the HTTP monitor statistics.
- *
- * @param WP_REST_Request $request Current request object.
- * @return WP_REST_Response|array
- */
-function sitepulse_http_monitor_rest_stats($request) {
-    if (!($request instanceof WP_REST_Request)) {
-        return rest_ensure_response(sitepulse_http_monitor_get_stats());
-    }
-
-    $limit = $request->get_param('limit');
-    $since = $request->get_param('since');
-
-    $stats = sitepulse_http_monitor_get_stats([
-        'since' => $since,
-        'limit' => is_numeric($limit) ? (int) $limit : 25,
-    ]);
-
-    return rest_ensure_response($stats);
+    return $entries;
 }

@@ -94,36 +94,13 @@ return [
     SITEPULSE_OPTION_RESOURCE_MONITOR_EXPORT_MAX_ROWS => [
         'value' => SITEPULSE_DEFAULT_RESOURCE_MONITOR_EXPORT_MAX_ROWS,
     ],
-    SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS => [
-        'value' => SITEPULSE_DEFAULT_HTTP_MONITOR_RETENTION_DAYS,
-    ],
-    SITEPULSE_OPTION_HTTP_MONITOR_SCHEMA_VERSION => [
-        'value' => 0,
-    ],
-    SITEPULSE_OPTION_HTTP_MONITOR_LATENCY_THRESHOLD_MS => [
-        'value' => SITEPULSE_DEFAULT_HTTP_MONITOR_LATENCY_THRESHOLD_MS,
-    ],
-    SITEPULSE_OPTION_HTTP_MONITOR_ERROR_RATE_THRESHOLD => [
-        'value' => SITEPULSE_DEFAULT_HTTP_MONITOR_ERROR_RATE_THRESHOLD,
-    ],
-    SITEPULSE_OPTION_RUM_SETTINGS => [
+    SITEPULSE_OPTION_HTTP_MONITOR_SETTINGS => [
         'value' => [
-            'enabled'         => false,
-            'require_consent' => false,
-            'sample_rate'     => 1.0,
-            'range_days'      => 7,
+            'latency_threshold_ms' => SITEPULSE_DEFAULT_HTTP_MONITOR_LATENCY_THRESHOLD_MS,
+            'error_rate_percent'  => SITEPULSE_DEFAULT_HTTP_MONITOR_ERROR_RATE,
         ],
     ],
-    SITEPULSE_OPTION_RUM_RETENTION_DAYS => [
-        'value' => SITEPULSE_DEFAULT_RUM_RETENTION_DAYS,
-    ],
-    SITEPULSE_OPTION_RUM_SCHEMA_VERSION => [
-        'value' => 0,
-    ],
-    SITEPULSE_OPTION_RUM_INGEST_TOKEN => [
-        'value' => '',
-    ],
-    SITEPULSE_OPTION_RUM_CACHE_KEYS => [
-        'value' => [],
+    SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS => [
+        'value' => SITEPULSE_DEFAULT_HTTP_MONITOR_RETENTION_DAYS,
     ],
 ];
