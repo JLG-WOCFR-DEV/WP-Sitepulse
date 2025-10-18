@@ -2,6 +2,74 @@
     margin: 16px 0 24px;
 }
 
+.sitepulse-module-nav__categories {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 8px;
+    margin: 0 0 16px;
+}
+
+.sitepulse-module-nav__category-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--sitepulse-color-border);
+    border-radius: 999px;
+    background: var(--sitepulse-color-surface);
+    color: var(--sitepulse-color-text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+    padding: 6px 14px;
+    cursor: pointer;
+    transition: background-color var(--sitepulse-duration-fast) var(--sitepulse-easing-standard),
+        border-color var(--sitepulse-duration-fast) var(--sitepulse-easing-standard),
+        color var(--sitepulse-duration-fast) var(--sitepulse-easing-standard),
+        box-shadow var(--sitepulse-duration-fast) var(--sitepulse-easing-standard);
+}
+
+.sitepulse-module-nav__category-button:hover,
+.sitepulse-module-nav__category-button:focus-visible {
+    border-color: var(--sitepulse-color-accent);
+    color: var(--sitepulse-color-heading);
+    box-shadow: 0 0 0 2px var(--sitepulse-color-accent-soft);
+    outline: none;
+}
+
+.sitepulse-module-nav__category-button.is-active {
+    background: var(--sitepulse-color-accent);
+    border-color: var(--sitepulse-color-accent);
+    color: var(--sitepulse-color-on-accent);
+    box-shadow: 0 1px 0 rgba(15, 23, 42, 0.12);
+}
+
+.sitepulse-module-nav__category-label {
+    white-space: nowrap;
+}
+
+.sitepulse-module-nav__category-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--sitepulse-color-surface-subtle, #f6f7f7);
+    color: var(--sitepulse-color-text-soft);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.sitepulse-module-nav__category-button.is-active .sitepulse-module-nav__category-count {
+    background: rgba(255, 255, 255, 0.18);
+    color: inherit;
+}
+
+.sitepulse-module-nav--category-filtering .sitepulse-module-nav__category-button:not(.is-active) {
+    opacity: 0.85;
+}
+
 .sitepulse-module-nav__search {
     margin-bottom: 12px;
 }
@@ -296,6 +364,15 @@
 }
 
 @media (max-width: 782px) {
+    .sitepulse-module-nav__categories {
+        margin-bottom: 12px;
+    }
+
+    .sitepulse-module-nav__category-button {
+        flex: 1 1 auto;
+        justify-content: center;
+    }
+
     .sitepulse-module-nav__search-meta {
         flex-direction: column;
         align-items: flex-start;

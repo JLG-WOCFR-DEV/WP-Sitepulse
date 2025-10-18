@@ -786,57 +786,6 @@ function sitepulse_uptime_get_agents() {
 function sitepulse_uptime_get_agent($agent_id) {
     $agent_id = sitepulse_uptime_normalize_agent_id($agent_id);
     $agents = sitepulse_uptime_get_agents();
-    $sla_snapshot = sitepulse_uptime_build_sla_windows($uptime_log, [7, 30], $agents);
-    $sla_reports = sitepulse_uptime_get_sla_reports();
-    $sla_settings = sitepulse_uptime_get_sla_automation_settings();
-    $sla_report_status = isset($_GET['sitepulse_sla_report_status'])
-        ? sanitize_key(wp_unslash($_GET['sitepulse_sla_report_status']))
-        : '';
-    $sla_report_id = isset($_GET['sitepulse_sla_report_id'])
-        ? sanitize_text_field(wp_unslash($_GET['sitepulse_sla_report_id']))
-        : '';
-    $sla_settings_status = isset($_GET['sitepulse_sla_settings'])
-        ? sanitize_key(wp_unslash($_GET['sitepulse_sla_settings']))
-        : '';
-    $latest_generated_report = null;
-
-    if (!empty($sla_reports)) {
-        foreach ($sla_reports as $report_entry) {
-            if (isset($report_entry['id']) && $report_entry['id'] === $sla_report_id) {
-                $latest_generated_report = $report_entry;
-                break;
-            }
-        }
-
-        if (null === $latest_generated_report) {
-            $latest_generated_report = $sla_reports[0];
-        }
-    }
-    $sla_next_run_label = '';
-    $sla_next_run_relative = '';
-
-    if (!empty($sla_settings['enabled']) && !empty($sla_settings['next_run'])) {
-        $next_run_timestamp = (int) $sla_settings['next_run'];
-        $sla_next_run_label = function_exists('wp_date')
-            ? wp_date(get_option('date_format', 'Y-m-d') . ' ' . get_option('time_format', 'H:i'), $next_run_timestamp)
-            : date(get_option('date_format', 'Y-m-d') . ' ' . get_option('time_format', 'H:i'), $next_run_timestamp);
-        $sla_next_run_relative = sitepulse_uptime_format_relative_time($next_run_timestamp, (int) current_time('timestamp'));
-    }
-    $sla_report_error_messages = [
-        'sitepulse_upload_unsupported'  => __('Impossible de générer le rapport : répertoire d’upload indisponible.', 'sitepulse'),
-        'sitepulse_upload_error'        => __('Impossible de générer le rapport : vérifiez les permissions du dossier d’upload.', 'sitepulse'),
-        'sitepulse_upload_permission'   => __('Impossible de créer le dossier de rapports SLA.', 'sitepulse'),
-        'sitepulse_report_csv'          => __('Impossible de générer le fichier CSV du rapport.', 'sitepulse'),
-        'sitepulse_report_pdf'          => __('Impossible de générer le PDF du rapport.', 'sitepulse'),
-        'sitepulse_report_write_failed' => __('Impossible d’enregistrer les métadonnées du rapport.', 'sitepulse'),
-    ];
-    $sla_report_notice_message = '';
-
-    if ($sla_report_status && 'success' !== $sla_report_status) {
-        $sla_report_notice_message = isset($sla_report_error_messages[$sla_report_status])
-            ? $sla_report_error_messages[$sla_report_status]
-            : sprintf(__('Impossible de générer le rapport SLA (%s).', 'sitepulse'), $sla_report_status);
-    }
 
     if (!isset($agents[$agent_id])) {
         return [
@@ -4725,6 +4674,17 @@ function sitepulse_uptime_tracker_page() {
     $uptime_log = sitepulse_normalize_uptime_log(get_option(SITEPULSE_OPTION_UPTIME_LOG, []));
     $uptime_log = sitepulse_trim_uptime_log($uptime_log);
     $uptime_archive = sitepulse_get_uptime_archive();
+    $agents = sitepulse_uptime_get_agents();
+    $sla_reports = sitepulse_uptime_get_sla_reports();
+    $sla_settings = sitepulse_uptime_get_sla_automation_settings();
+
+    if (!is_array($sla_reports)) {
+        $sla_reports = [];
+    }
+
+    if (!is_array($sla_settings)) {
+        $sla_settings = [];
+    }
     $available_months = sitepulse_uptime_get_archive_months($uptime_archive);
     $requested_month = '';
 
@@ -4756,6 +4716,57 @@ function sitepulse_uptime_tracker_page() {
         'missing-data'  => __('Aucune archive ne correspond à cette période.', 'sitepulse'),
         'empty-period'  => __('Aucune donnée exploitable pour cette période.', 'sitepulse'),
     ];
+
+    $sla_report_status = isset($_GET['sitepulse_sla_report_status'])
+        ? sanitize_key(wp_unslash($_GET['sitepulse_sla_report_status']))
+        : '';
+    $sla_report_id = isset($_GET['sitepulse_sla_report_id'])
+        ? sanitize_text_field(wp_unslash($_GET['sitepulse_sla_report_id']))
+        : '';
+    $sla_settings_status = isset($_GET['sitepulse_sla_settings'])
+        ? sanitize_key(wp_unslash($_GET['sitepulse_sla_settings']))
+        : '';
+    $sla_report_error_messages = [
+        'sitepulse_upload_unsupported'  => __('Impossible de générer le rapport : répertoire d’upload indisponible.', 'sitepulse'),
+        'sitepulse_upload_error'        => __('Impossible de générer le rapport : vérifiez les permissions du dossier d’upload.', 'sitepulse'),
+        'sitepulse_upload_permission'   => __('Impossible de créer le dossier de rapports SLA.', 'sitepulse'),
+        'sitepulse_report_csv'          => __('Impossible de générer le fichier CSV du rapport.', 'sitepulse'),
+        'sitepulse_report_pdf'          => __('Impossible de générer le PDF du rapport.', 'sitepulse'),
+        'sitepulse_report_write_failed' => __('Impossible d’enregistrer les métadonnées du rapport.', 'sitepulse'),
+    ];
+    $sla_report_notice_message = '';
+
+    if ($sla_report_status && 'success' !== $sla_report_status) {
+        $sla_report_notice_message = isset($sla_report_error_messages[$sla_report_status])
+            ? $sla_report_error_messages[$sla_report_status]
+            : sprintf(__('Impossible de générer le rapport SLA (%s).', 'sitepulse'), $sla_report_status);
+    }
+
+    $latest_generated_report = null;
+
+    if (!empty($sla_reports)) {
+        foreach ($sla_reports as $report_entry) {
+            if (isset($report_entry['id']) && $report_entry['id'] === $sla_report_id) {
+                $latest_generated_report = $report_entry;
+                break;
+            }
+        }
+
+        if (null === $latest_generated_report) {
+            $latest_generated_report = $sla_reports[0];
+        }
+    }
+
+    $sla_next_run_label = '';
+    $sla_next_run_relative = '';
+
+    if (!empty($sla_settings['enabled']) && !empty($sla_settings['next_run'])) {
+        $next_run_timestamp = (int) $sla_settings['next_run'];
+        $sla_next_run_label = function_exists('wp_date')
+            ? wp_date(get_option('date_format', 'Y-m-d') . ' ' . get_option('time_format', 'H:i'), $next_run_timestamp)
+            : date(get_option('date_format', 'Y-m-d') . ' ' . get_option('time_format', 'H:i'), $next_run_timestamp);
+        $sla_next_run_relative = sitepulse_uptime_format_relative_time($next_run_timestamp, (int) current_time('timestamp'));
+    }
 
     $preview_metrics = [
         'global' => [
@@ -4855,7 +4866,30 @@ function sitepulse_uptime_tracker_page() {
     $preview_month_label = ($selected_month_key !== '' && isset($available_months[$selected_month_key]['label']))
         ? $available_months[$selected_month_key]['label']
         : '';
-    $agents = sitepulse_uptime_get_agents();
+    $sla_snapshot = sitepulse_uptime_build_sla_windows($uptime_log, [7, 30], $agents);
+
+    if (!is_array($sla_snapshot)) {
+        $sla_snapshot = [
+            'summary' => [],
+            'windows' => [],
+        ];
+    } else {
+        $sla_snapshot = wp_parse_args(
+            $sla_snapshot,
+            [
+                'summary' => [],
+                'windows' => [],
+            ]
+        );
+
+        if (!is_array($sla_snapshot['summary'])) {
+            $sla_snapshot['summary'] = [];
+        }
+
+        if (!is_array($sla_snapshot['windows'])) {
+            $sla_snapshot['windows'] = [];
+        }
+    }
     $total_checks = count($uptime_log);
     $boolean_checks = array_values(array_filter($uptime_log, function ($entry) {
         return isset($entry['status']) && is_bool($entry['status']);
