@@ -49,6 +49,9 @@ return [
     SITEPULSE_OPTION_ALERT_ACTIVITY => [
         'value' => [],
     ],
+    SITEPULSE_OPTION_REQUEST_PROFILER_HISTORY => [
+        'value' => [],
+    ],
     SITEPULSE_OPTION_CRON_WARNINGS => [
         'value' => [],
     ],
@@ -84,5 +87,14 @@ return [
     ],
     SITEPULSE_OPTION_RESOURCE_MONITOR_EXPORT_MAX_ROWS => [
         'value' => SITEPULSE_DEFAULT_RESOURCE_MONITOR_EXPORT_MAX_ROWS,
+    ],
+    SITEPULSE_OPTION_HTTP_MONITOR_SETTINGS => [
+        'value' => [
+            'latency_threshold_ms' => SITEPULSE_DEFAULT_HTTP_MONITOR_LATENCY_THRESHOLD_MS,
+            'error_rate_percent'  => SITEPULSE_DEFAULT_HTTP_MONITOR_ERROR_RATE,
+        ],
+    ],
+    SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS => [
+        'value' => SITEPULSE_DEFAULT_HTTP_MONITOR_RETENTION_DAYS,
     ],
 ];
