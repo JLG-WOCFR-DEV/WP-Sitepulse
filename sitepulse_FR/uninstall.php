@@ -69,6 +69,11 @@ $sitepulse_constants = [
     'SITEPULSE_OPTION_HTTP_MONITOR_SCHEMA_VERSION'    => 'sitepulse_http_monitor_schema_version',
     'SITEPULSE_TRANSIENT_HTTP_MONITOR_AGGREGATES'     => 'sitepulse_http_monitor_aggregates',
     'SITEPULSE_TRANSIENT_HTTP_MONITOR_RECENT'         => 'sitepulse_http_monitor_recent',
+    'SITEPULSE_OPTION_RUM_SETTINGS'                   => 'sitepulse_rum_settings',
+    'SITEPULSE_OPTION_RUM_RETENTION_DAYS'             => 'sitepulse_rum_retention_days',
+    'SITEPULSE_OPTION_RUM_SCHEMA_VERSION'             => 'sitepulse_rum_schema_version',
+    'SITEPULSE_TRANSIENT_RUM_AGGREGATES'              => 'sitepulse_rum_aggregates',
+    'SITEPULSE_TABLE_RUM_METRICS'                     => 'sitepulse_rum_metrics',
     'SITEPULSE_PLUGIN_IMPACT_OPTION'              => 'sitepulse_plugin_impact_stats',
     'SITEPULSE_OPTION_PLUGIN_IMPACT_HISTORY'      => 'sitepulse_plugin_impact_history',
     'SITEPULSE_OPTION_PLUGIN_IMPACT_SCORES'       => 'sitepulse_plugin_impact_scores',
@@ -177,6 +182,9 @@ $options = [
     SITEPULSE_OPTION_HTTP_MONITOR_SETTINGS,
     SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS,
     SITEPULSE_OPTION_HTTP_MONITOR_SCHEMA_VERSION,
+    SITEPULSE_OPTION_RUM_SETTINGS,
+    SITEPULSE_OPTION_RUM_RETENTION_DAYS,
+    SITEPULSE_OPTION_RUM_SCHEMA_VERSION,
     SITEPULSE_PLUGIN_IMPACT_OPTION,
     SITEPULSE_OPTION_PLUGIN_IMPACT_HISTORY,
     SITEPULSE_OPTION_PLUGIN_IMPACT_SCORES,
@@ -194,6 +202,7 @@ $transients = [
     SITEPULSE_TRANSIENT_SPEED_SCAN_LOCK,
     SITEPULSE_TRANSIENT_HTTP_MONITOR_AGGREGATES,
     SITEPULSE_TRANSIENT_HTTP_MONITOR_RECENT,
+    SITEPULSE_TRANSIENT_RUM_AGGREGATES,
 ];
 
 $transient_prefixes = [
@@ -340,6 +349,33 @@ if (!function_exists('sitepulse_uninstall_drop_http_monitor_table')) {
     }
 }
 
+if (!function_exists('sitepulse_uninstall_drop_rum_table')) {
+    /**
+     * Drops the RUM metrics table for the current blog.
+     *
+     * @return void
+     */
+    function sitepulse_uninstall_drop_rum_table() {
+        if (!defined('SITEPULSE_TABLE_RUM_METRICS')) {
+            return;
+        }
+
+        global $wpdb;
+
+        if (!($wpdb instanceof wpdb)) {
+            return;
+        }
+
+        $table = $wpdb->prefix . SITEPULSE_TABLE_RUM_METRICS;
+
+        if ($table === '') {
+            return;
+        }
+
+        $wpdb->query("DROP TABLE IF EXISTS {$table}");
+    }
+}
+
 /**
  * Removes plugin data for a single site.
  *
@@ -371,6 +407,7 @@ function sitepulse_uninstall_cleanup_blog($options, $transients, $cron_hooks, $t
 
     sitepulse_uninstall_drop_resource_monitor_table();
     sitepulse_uninstall_drop_http_monitor_table();
+    sitepulse_uninstall_drop_rum_table();
 }
 
 if (is_multisite()) {

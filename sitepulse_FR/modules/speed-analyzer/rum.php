@@ -1,77 +1,35 @@
 <?php
+/**
+ * Real User Monitoring utilities for Web Vitals collection.
+ *
+ * @package SitePulse
+ */
+
 if (!defined('ABSPATH')) {
     exit;
 }
 
-/**
- * Lightweight Real User Monitoring (Web Vitals) helpers.
- */
+sitepulse_rum_init();
 
 /**
- * Boots the RUM services (REST API, storage, frontend script).
+ * Boots the hooks used by the RUM feature.
  *
  * @return void
  */
-function sitepulse_rum_bootstrap() {
-    add_action('init', 'sitepulse_rum_maybe_upgrade_schema');
+function sitepulse_rum_init() {
+    add_action('plugins_loaded', 'sitepulse_rum_bootstrap_storage', 12);
     add_action('rest_api_init', 'sitepulse_rum_register_rest_routes');
-    add_action('init', 'sitepulse_rum_schedule_cleanup');
-    add_action('wp_enqueue_scripts', 'sitepulse_rum_enqueue_frontend_assets');
-
-    if (defined('SITEPULSE_CRON_RUM_CLEANUP')) {
-        add_action(SITEPULSE_CRON_RUM_CLEANUP, 'sitepulse_rum_purge_old_entries');
-    }
+    add_action('wp_enqueue_scripts', 'sitepulse_rum_enqueue_assets');
+    add_action('admin_post_sitepulse_rum_settings', 'sitepulse_rum_handle_settings_post');
 }
 
 /**
- * Retrieves and normalizes the stored RUM settings.
+ * Ensures the storage required for RUM metrics is ready.
  *
- * @return array<string,mixed>
+ * @return void
  */
-function sitepulse_rum_get_settings() {
-    $defaults = [
-        'enabled'         => false,
-        'require_consent' => false,
-        'sample_rate'     => 1.0,
-        'range_days'      => 7,
-    ];
-
-    $option_key = defined('SITEPULSE_OPTION_RUM_SETTINGS') ? SITEPULSE_OPTION_RUM_SETTINGS : 'sitepulse_rum_settings';
-    $raw = get_option($option_key, []);
-
-    if (!is_array($raw)) {
-        $raw = [];
-    }
-
-    $normalized = $defaults;
-
-    if (isset($raw['enabled'])) {
-        $normalized['enabled'] = rest_sanitize_boolean($raw['enabled']);
-    }
-
-    if (isset($raw['require_consent'])) {
-        $normalized['require_consent'] = rest_sanitize_boolean($raw['require_consent']);
-    }
-
-    if (isset($raw['sample_rate']) && is_numeric($raw['sample_rate'])) {
-        $normalized['sample_rate'] = min(1.0, max(0.0, (float) $raw['sample_rate']));
-    }
-
-    if (isset($raw['range_days']) && is_numeric($raw['range_days'])) {
-        $normalized['range_days'] = (int) $raw['range_days'];
-    }
-
-    if ($normalized['range_days'] < 1) {
-        $normalized['range_days'] = 7;
-    }
-
-    /**
-     * Filters the RUM settings used by SitePulse.
-     *
-     * @param array<string,mixed> $normalized Normalized settings.
-     * @param array<string,mixed> $raw        Raw option value.
-     */
-    return apply_filters('sitepulse_rum_settings', $normalized, $raw);
+function sitepulse_rum_bootstrap_storage() {
+    sitepulse_rum_maybe_upgrade_schema();
 }
 
 /**
@@ -80,288 +38,127 @@ function sitepulse_rum_get_settings() {
  * @return bool
  */
 function sitepulse_rum_is_enabled() {
-    if (!function_exists('sitepulse_is_module_active') || !sitepulse_is_module_active('speed_analyzer')) {
-        return false;
-    }
-
     $settings = sitepulse_rum_get_settings();
 
-    $enabled = !empty($settings['enabled']);
-
-    /**
-     * Filters the activation flag of the RUM collector.
-     *
-     * @param bool                  $enabled  Whether RUM is enabled.
-     * @param array<string,mixed>   $settings Current settings.
-     */
-    return (bool) apply_filters('sitepulse_rum_enabled', $enabled, $settings);
+    return !empty($settings['enabled']);
 }
 
 /**
- * Determines whether the current visitor granted consent when required.
- *
- * @param array<string,mixed>|null $settings Optional. Preloaded settings.
- *
- * @return bool
- */
-function sitepulse_rum_has_consent($settings = null) {
-    if ($settings === null) {
-        $settings = sitepulse_rum_get_settings();
-    }
-
-    $require_consent = !empty($settings['require_consent']);
-    $has_consent = true;
-
-    if ($require_consent) {
-        $has_consent = isset($_COOKIE['sitepulse_rum_consent']) && $_COOKIE['sitepulse_rum_consent'] === '1';
-    }
-
-    /**
-     * Filters whether the current visitor granted consent to collect RUM metrics.
-     *
-     * @param bool                  $has_consent Whether consent has been provided.
-     * @param array<string,mixed>   $settings    Current settings.
-     */
-    return (bool) apply_filters('sitepulse_rum_has_consent', $has_consent, $settings);
-}
-
-/**
- * Retrieves or creates the ingest token shared with the frontend script.
- *
- * @param bool $force_refresh Optional. When true, regenerates the token.
- *
- * @return string
- */
-function sitepulse_rum_get_ingest_token($force_refresh = false) {
-    $option_key = defined('SITEPULSE_OPTION_RUM_INGEST_TOKEN') ? SITEPULSE_OPTION_RUM_INGEST_TOKEN : 'sitepulse_rum_ingest_token';
-    $token = get_option($option_key, '');
-
-    if (!is_string($token)) {
-        $token = '';
-    }
-
-    if ($token === '' || $force_refresh) {
-        $token = wp_generate_password(48, false, false);
-        update_option($option_key, $token, false);
-    }
-
-    return $token;
-}
-
-if (!function_exists('sitepulse_rum_get_cache_prefix')) {
-    /**
-     * Retrieves the transient prefix used to cache aggregates.
-     *
-     * @return string
-     */
-    function sitepulse_rum_get_cache_prefix() {
-        if (defined('SITEPULSE_TRANSIENT_RUM_AGGREGATE_CACHE_PREFIX')) {
-            return SITEPULSE_TRANSIENT_RUM_AGGREGATE_CACHE_PREFIX;
-        }
-
-        return 'sitepulse_rum_aggregates_';
-    }
-}
-
-if (!function_exists('sitepulse_rum_get_cache_registry_option_key')) {
-    /**
-     * Returns the option key storing cached aggregate identifiers.
-     *
-     * @return string
-     */
-    function sitepulse_rum_get_cache_registry_option_key() {
-        if (defined('SITEPULSE_OPTION_RUM_CACHE_KEYS')) {
-            return SITEPULSE_OPTION_RUM_CACHE_KEYS;
-        }
-
-        return 'sitepulse_rum_cache_keys';
-    }
-}
-
-if (!function_exists('sitepulse_rum_get_cache_expiration')) {
-    /**
-     * Returns the expiration time (in seconds) for cached aggregates.
-     *
-     * @return int
-     */
-    function sitepulse_rum_get_cache_expiration() {
-        $default = defined('MINUTE_IN_SECONDS') ? MINUTE_IN_SECONDS * 5 : 300;
-
-        /**
-         * Filters the RUM aggregate cache expiration.
-         *
-         * @param int $default Default cache duration in seconds.
-         */
-        $expiration = apply_filters('sitepulse_rum_cache_expiration', $default);
-
-        if (!is_numeric($expiration) || (int) $expiration < 1) {
-            return $default;
-        }
-
-        return (int) $expiration;
-    }
-}
-
-if (!function_exists('sitepulse_rum_get_cache_registry')) {
-    /**
-     * Retrieves the list of registered aggregate cache keys.
-     *
-     * @return array<int,string>
-     */
-    function sitepulse_rum_get_cache_registry() {
-        $option_key = sitepulse_rum_get_cache_registry_option_key();
-        $registry = get_option($option_key, []);
-
-        if (!is_array($registry)) {
-            return [];
-        }
-
-        $registry = array_filter(array_map('strval', $registry));
-
-        return array_values(array_unique($registry));
-    }
-}
-
-if (!function_exists('sitepulse_rum_register_cache_key')) {
-    /**
-     * Adds a cache key to the registry so it can be invalidated later.
-     *
-     * @param string $cache_key Cache identifier.
-     * @return void
-     */
-    function sitepulse_rum_register_cache_key($cache_key) {
-        if (!is_string($cache_key) || $cache_key === '') {
-            return;
-        }
-
-        $registry = sitepulse_rum_get_cache_registry();
-
-        if (in_array($cache_key, $registry, true)) {
-            return;
-        }
-
-        $registry[] = $cache_key;
-        update_option(sitepulse_rum_get_cache_registry_option_key(), $registry, false);
-    }
-}
-
-if (!function_exists('sitepulse_rum_flush_cache')) {
-    /**
-     * Clears cached aggregate transients.
-     *
-     * @return void
-     */
-    function sitepulse_rum_flush_cache() {
-        $registry = sitepulse_rum_get_cache_registry();
-
-        foreach ($registry as $cache_key) {
-            delete_transient($cache_key);
-        }
-
-        delete_option(sitepulse_rum_get_cache_registry_option_key());
-    }
-}
-
-if (!function_exists('sitepulse_rum_get_cache_key')) {
-    /**
-     * Builds a cache key for the provided aggregate arguments.
-     *
-     * @param array<string,mixed> $args Aggregate context (range_days, path_hash, device).
-     * @return string
-     */
-    function sitepulse_rum_get_cache_key(array $args) {
-        $context = [
-            'range_days' => isset($args['range_days']) ? (int) $args['range_days'] : 0,
-            'path_hash'  => isset($args['path_hash']) ? (string) $args['path_hash'] : '',
-            'device'     => isset($args['device']) ? (string) $args['device'] : '',
-        ];
-
-        $encoded = wp_json_encode($context);
-
-        if ($encoded === false) {
-            $encoded = maybe_serialize($context);
-        }
-
-        return sitepulse_rum_get_cache_prefix() . md5((string) $encoded);
-    }
-}
-
-/**
- * Enqueues the frontend script that captures Web Vitals when enabled.
- *
- * @return void
- */
-function sitepulse_rum_enqueue_frontend_assets() {
-    if (is_admin()) {
-        return;
-    }
-
-    if (!sitepulse_rum_is_enabled()) {
-        return;
-    }
-
-    $settings = sitepulse_rum_get_settings();
-
-    if (!sitepulse_rum_has_consent($settings)) {
-        return;
-    }
-
-    $handle = 'sitepulse-rum-web-vitals';
-    $src = SITEPULSE_URL . 'modules/js/sitepulse-rum-web-vitals.js';
-    $version = defined('SITEPULSE_VERSION') ? SITEPULSE_VERSION : false;
-
-    if (!wp_script_is($handle, 'registered')) {
-        wp_register_script($handle, $src, [], $version, true);
-    }
-
-    $config = sitepulse_rum_get_frontend_payload($settings);
-    $config_json = wp_json_encode($config);
-
-    if (false === $config_json) {
-        $config_json = '{}';
-    }
-
-    wp_add_inline_script($handle, 'window.SitePulseRum=' . $config_json . ';', 'before');
-    wp_enqueue_script($handle);
-}
-
-/**
- * Builds the configuration passed to the frontend collector.
- *
- * @param array<string,mixed>|null $settings Optional. Preloaded settings.
+ * Retrieves the RUM settings.
  *
  * @return array<string,mixed>
  */
-function sitepulse_rum_get_frontend_payload($settings = null) {
-    if ($settings === null) {
-        $settings = sitepulse_rum_get_settings();
-    }
-
-    $payload = [
-        'enabled'         => sitepulse_rum_is_enabled(),
-        'endpoint'        => rest_url('sitepulse/v1/rum'),
-        'token'           => sitepulse_rum_get_ingest_token(),
-        'sampleRate'      => isset($settings['sample_rate']) ? (float) $settings['sample_rate'] : 1.0,
-        'rangeDays'       => isset($settings['range_days']) ? (int) $settings['range_days'] : 7,
-        'requiresConsent' => !empty($settings['require_consent']),
-        'deviceHint'      => function_exists('wp_is_mobile') && wp_is_mobile() ? 'mobile' : 'desktop',
-        'site'            => [
-            'url'   => home_url('/'),
-            'title' => get_bloginfo('name'),
-        ],
+function sitepulse_rum_get_settings() {
+    $defaults = [
+        'enabled'          => false,
+        'token'            => '',
+        'consent_required' => false,
     ];
 
-    /**
-     * Filters the frontend payload consumed by the Web Vitals collector.
-     *
-     * @param array<string,mixed> $payload  Payload passed to JS.
-     * @param array<string,mixed> $settings Current settings.
-     */
-    return apply_filters('sitepulse_rum_frontend_payload', $payload, $settings);
+    if (!defined('SITEPULSE_OPTION_RUM_SETTINGS')) {
+        return $defaults;
+    }
+
+    $stored = get_option(SITEPULSE_OPTION_RUM_SETTINGS, []);
+
+    if (!is_array($stored)) {
+        $stored = [];
+    }
+
+    $settings = array_merge($defaults, array_intersect_key($stored, $defaults));
+
+    if ($settings['enabled'] && $settings['token'] === '') {
+        $settings['token'] = sitepulse_rum_generate_token();
+        update_option(SITEPULSE_OPTION_RUM_SETTINGS, $settings, false);
+    }
+
+    return $settings;
 }
 
 /**
- * Registers the REST API endpoints used by the RUM module.
+ * Updates the RUM settings.
+ *
+ * @param array<string,mixed> $settings Settings payload.
+ * @return void
+ */
+function sitepulse_rum_update_settings(array $settings) {
+    if (!defined('SITEPULSE_OPTION_RUM_SETTINGS')) {
+        return;
+    }
+
+    $current = sitepulse_rum_get_settings();
+    $merged  = array_merge($current, array_intersect_key($settings, $current));
+
+    update_option(SITEPULSE_OPTION_RUM_SETTINGS, $merged, false);
+}
+
+/**
+ * Generates a random ingestion token.
+ *
+ * @return string
+ */
+function sitepulse_rum_generate_token() {
+    if (function_exists('wp_generate_password')) {
+        return wp_generate_password(32, false);
+    }
+
+    return bin2hex(random_bytes(16));
+}
+
+/**
+ * Retrieves the configured ingestion token, optionally generating one.
+ *
+ * @param bool $create_when_missing Whether a token should be generated when absent.
+ * @return string
+ */
+function sitepulse_rum_get_token($create_when_missing = false) {
+    $settings = sitepulse_rum_get_settings();
+
+    if ($settings['token'] !== '') {
+        return (string) $settings['token'];
+    }
+
+    if (!$create_when_missing) {
+        return '';
+    }
+
+    $settings['token'] = sitepulse_rum_generate_token();
+    update_option(SITEPULSE_OPTION_RUM_SETTINGS, $settings, false);
+
+    return (string) $settings['token'];
+}
+
+/**
+ * Determines whether the current visitor has granted consent for RUM collection.
+ *
+ * @return bool
+ */
+function sitepulse_rum_user_has_consent() {
+    $settings = sitepulse_rum_get_settings();
+
+    if (empty($settings['consent_required'])) {
+        return true;
+    }
+
+    $consent = false;
+
+    if (function_exists('apply_filters')) {
+        /**
+         * Filters whether the current visitor has granted consent for RUM collection.
+         *
+         * Return true once the visitor has accepted analytics cookies or an equivalent consent banner.
+         *
+         * @param bool  $consent  Whether consent was granted.
+         * @param array $settings RUM settings.
+         */
+        $consent = (bool) apply_filters('sitepulse_rum_user_has_consent', $consent, $settings);
+    }
+
+    return $consent;
+}
+
+/**
+ * Registers the REST API routes used by the RUM feature.
  *
  * @return void
  */
@@ -370,16 +167,17 @@ function sitepulse_rum_register_rest_routes() {
         'sitepulse/v1',
         '/rum',
         [
-            'methods'             => WP_REST_Server::CREATABLE,
-            'callback'            => 'sitepulse_rum_rest_ingest',
+            'methods'             => \WP_REST_Server::CREATABLE,
+            'callback'            => 'sitepulse_rum_rest_ingest_metrics',
             'permission_callback' => '__return_true',
             'args'                => [
                 'token'   => [
-                    'required'          => true,
-                    'sanitize_callback' => 'sanitize_text_field',
+                    'type'     => 'string',
+                    'required' => true,
                 ],
-                'samples' => [
-                    'required'          => true,
+                'metrics' => [
+                    'type'     => 'array',
+                    'required' => true,
                 ],
             ],
         ]
@@ -389,21 +187,16 @@ function sitepulse_rum_register_rest_routes() {
         'sitepulse/v1',
         '/rum/aggregates',
         [
-            'methods'             => WP_REST_Server::READABLE,
+            'methods'             => \WP_REST_Server::READABLE,
             'callback'            => 'sitepulse_rum_rest_get_aggregates',
-            'permission_callback' => 'sitepulse_rum_rest_permission_check',
+            'permission_callback' => 'sitepulse_rum_rest_require_capability',
             'args'                => [
-                'range' => [
+                'days' => [
+                    'type'              => 'integer',
                     'required'          => false,
-                    'sanitize_callback' => 'absint',
-                ],
-                'path' => [
-                    'required'          => false,
-                    'sanitize_callback' => 'sanitize_text_field',
-                ],
-                'device' => [
-                    'required'          => false,
-                    'sanitize_callback' => 'sanitize_key',
+                    'validate_callback' => static function ($value) {
+                        return is_numeric($value) && (int) $value > 0;
+                    },
                 ],
             ],
         ]
@@ -411,302 +204,429 @@ function sitepulse_rum_register_rest_routes() {
 }
 
 /**
- * Ensures only privileged users can access the aggregate endpoint.
+ * REST permission callback ensuring the requester can manage the plugin.
  *
  * @return bool
  */
-function sitepulse_rum_rest_permission_check() {
+function sitepulse_rum_rest_require_capability() {
+    if (!function_exists('sitepulse_get_capability')) {
+        return current_user_can('manage_options');
+    }
+
     return current_user_can(sitepulse_get_capability());
 }
 
 /**
- * Handles ingestion of Web Vitals samples from the frontend collector.
+ * Handles RUM ingestion requests.
  *
- * @param WP_REST_Request $request Request instance.
- *
- * @return WP_REST_Response|WP_Error
+ * @param \WP_REST_Request $request Incoming request.
+ * @return \WP_REST_Response|\WP_Error
  */
-function sitepulse_rum_rest_ingest($request) {
+function sitepulse_rum_rest_ingest_metrics($request) {
     if (!sitepulse_rum_is_enabled()) {
-        return new WP_Error('sitepulse_rum_disabled', __('La collecte RUM est désactivée.', 'sitepulse'), ['status' => 403]);
+        return new \WP_Error('sitepulse_rum_disabled', __('La collecte RUM est désactivée.', 'sitepulse'), [
+            'status' => 403,
+        ]);
     }
 
-    $token = (string) $request->get_param('token');
-    $expected_token = sitepulse_rum_get_ingest_token();
+    $params = $request->get_json_params();
 
-    if ($expected_token === '' || !hash_equals($expected_token, $token)) {
-        return new WP_Error('sitepulse_rum_invalid_token', __('Jeton de collecte invalide.', 'sitepulse'), ['status' => 401]);
+    if (!is_array($params) || empty($params)) {
+        $params = $request->get_body_params();
     }
 
-    $raw_samples = $request->get_param('samples');
+    $token = isset($params['token']) ? sanitize_text_field($params['token']) : '';
+    $expected_token = sitepulse_rum_get_token(false);
 
-    if (!is_array($raw_samples)) {
-        return new WP_Error('sitepulse_rum_invalid_payload', __('Format de données invalide.', 'sitepulse'), ['status' => 400]);
+    if ($expected_token === '' || $token === '' || !hash_equals($expected_token, $token)) {
+        return new \WP_Error('sitepulse_rum_invalid_token', __('La vérification du jeton a échoué.', 'sitepulse'), [
+            'status' => 403,
+        ]);
     }
 
-    $max_samples = 50;
-    $normalized = [];
+    $metrics = isset($params['metrics']) ? $params['metrics'] : [];
 
-    foreach ($raw_samples as $sample) {
-        if (count($normalized) >= $max_samples) {
+    if (!is_array($metrics) || empty($metrics)) {
+        return new \WP_Error('sitepulse_rum_invalid_payload', __('Aucune mesure valide fournie.', 'sitepulse'), [
+            'status' => 400,
+        ]);
+    }
+
+    $max_batch = 50;
+
+    if (function_exists('apply_filters')) {
+        /**
+         * Filters the maximum number of metrics accepted per ingestion request.
+         *
+         * @param int $max_batch Maximum metrics per request.
+         */
+        $max_batch = (int) apply_filters('sitepulse_rum_max_metrics_per_request', $max_batch);
+    }
+
+    $max_batch = max(1, $max_batch);
+
+    $stored = 0;
+    $processed = 0;
+
+    foreach ($metrics as $metric) {
+        if ($processed >= $max_batch) {
             break;
         }
 
-        if (!is_array($sample)) {
+        $processed++;
+
+        if (!is_array($metric)) {
             continue;
         }
 
-        $normalized_sample = sitepulse_rum_build_sample($sample, 'rest');
-
-        if ($normalized_sample !== null) {
-            $normalized[] = $normalized_sample;
+        if (sitepulse_rum_store_metric($metric)) {
+            $stored++;
         }
     }
 
-    if (empty($normalized)) {
-        return new WP_Error('sitepulse_rum_empty_batch', __('Aucune mesure valide à enregistrer.', 'sitepulse'), ['status' => 400]);
-    }
-
-    $stored = sitepulse_rum_store_samples($normalized);
-
     if ($stored === 0) {
-        return new WP_Error('sitepulse_rum_storage_failed', __('Impossible d’enregistrer les mesures.', 'sitepulse'), ['status' => 500]);
+        return new \WP_Error('sitepulse_rum_store_failed', __('Impossible d’enregistrer les mesures.', 'sitepulse'), [
+            'status' => 400,
+        ]);
     }
 
-    $response = [
-        'stored'       => $stored,
-        'received'     => count($normalized),
-        'retentionDays'=> sitepulse_rum_get_retention_days(),
-        'timestamp'    => current_time('timestamp'),
-    ];
+    sitepulse_rum_apply_retention();
+    sitepulse_rum_clear_cache();
 
-    return rest_ensure_response($response);
+    return rest_ensure_response([
+        'stored'    => $stored,
+        'processed' => $processed,
+    ]);
 }
 
 /**
- * Returns aggregated RUM statistics.
+ * Returns aggregated RUM metrics for the requested window.
  *
- * @param WP_REST_Request $request Request instance.
- *
- * @return WP_REST_Response
+ * @param \WP_REST_Request $request Incoming request.
+ * @return \WP_REST_Response
  */
 function sitepulse_rum_rest_get_aggregates($request) {
-    $range_days = (int) $request->get_param('range');
-    $path = (string) $request->get_param('path');
-    $device = (string) $request->get_param('device');
+    $days = (int) $request->get_param('days');
 
-    $aggregates = sitepulse_rum_calculate_aggregates([
-        'range_days' => $range_days > 0 ? $range_days : null,
-        'path'       => $path,
-        'device'     => $device,
+    if ($days <= 0) {
+        $days = 7;
+    }
+
+    $aggregates = sitepulse_rum_get_aggregates([
+        'days' => $days,
     ]);
 
     return rest_ensure_response($aggregates);
 }
 
 /**
- * Persists a batch of sanitized samples.
+ * Handles the admin submission of RUM settings.
  *
- * @param array<int,array<string,mixed>> $samples Normalized samples.
- *
- * @return int Number of stored rows.
+ * @return void
  */
-function sitepulse_rum_store_samples(array $samples) {
+function sitepulse_rum_handle_settings_post() {
+    if (!sitepulse_rum_rest_require_capability()) {
+        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour modifier cette configuration.", 'sitepulse'));
+    }
+
+    $nonce_action = defined('SITEPULSE_NONCE_ACTION_RUM_SETTINGS') ? SITEPULSE_NONCE_ACTION_RUM_SETTINGS : 'sitepulse_rum_settings';
+
+    check_admin_referer($nonce_action);
+
+    $enabled = isset($_POST['sitepulse_rum_enabled']);
+    $consent_required = isset($_POST['sitepulse_rum_consent_required']);
+    $regenerate = isset($_POST['sitepulse_rum_regenerate']);
+
+    $settings = sitepulse_rum_get_settings();
+    $settings['enabled'] = (bool) $enabled;
+    $settings['consent_required'] = (bool) $consent_required;
+
+    if ($regenerate || ($settings['enabled'] && $settings['token'] === '')) {
+        $settings['token'] = sitepulse_rum_generate_token();
+    }
+
+    sitepulse_rum_update_settings($settings);
+    sitepulse_rum_clear_cache();
+
+    $redirect_url = admin_url('admin.php?page=sitepulse-speed');
+    $redirect_url = add_query_arg('sitepulse-rum-updated', $settings['enabled'] ? '1' : '0', $redirect_url);
+
+    if ($regenerate) {
+        $redirect_url = add_query_arg('sitepulse-rum-token', 'regenerated', $redirect_url);
+    }
+
+    wp_safe_redirect($redirect_url);
+    exit;
+}
+
+/**
+ * Registers the frontend assets used to capture Web Vitals.
+ *
+ * @return void
+ */
+function sitepulse_rum_enqueue_assets() {
+    if (is_admin() || !sitepulse_rum_is_enabled()) {
+        return;
+    }
+
+    $settings = sitepulse_rum_get_settings();
+
+    if (empty($settings['enabled'])) {
+        return;
+    }
+
+    $token = sitepulse_rum_get_token(true);
+
+    if ($token === '') {
+        return;
+    }
+
+    $handle = 'sitepulse-rum';
+    $version = defined('SITEPULSE_VERSION') ? SITEPULSE_VERSION : false;
+
+    wp_register_script(
+        $handle,
+        SITEPULSE_URL . 'modules/js/sitepulse-rum.js',
+        [],
+        $version,
+        true
+    );
+
+    $config = sitepulse_rum_get_frontend_config($settings);
+
+    wp_localize_script($handle, 'SitePulseRUMConfig', $config);
+
+    wp_enqueue_script($handle);
+}
+
+/**
+ * Builds the configuration passed to the frontend collector.
+ *
+ * @param array<string,mixed> $settings Current settings.
+ * @return array<string,mixed>
+ */
+function sitepulse_rum_get_frontend_config(array $settings) {
+    $device = 'desktop';
+
+    if (function_exists('wp_is_mobile') && wp_is_mobile()) {
+        $device = 'mobile';
+    }
+
+    $consent_granted = sitepulse_rum_user_has_consent();
+
+    $config = [
+        'enabled'         => true,
+        'token'           => sitepulse_rum_get_token(true),
+        'restUrl'         => esc_url_raw(rest_url('sitepulse/v1/rum')),
+        'device'          => $device,
+        'consentRequired' => !empty($settings['consent_required']),
+        'consentGranted'  => $consent_granted,
+        'flushDelay'      => 4000,
+        'batchSize'       => 6,
+        'debug'           => defined('SITEPULSE_DEBUG') ? (bool) SITEPULSE_DEBUG : false,
+        'locale'          => get_locale(),
+    ];
+
+    if (function_exists('apply_filters')) {
+        /**
+         * Filters the frontend RUM configuration before it is exposed to the collector script.
+         *
+         * @param array $config   Localized configuration values.
+         * @param array $settings Current RUM settings.
+         */
+        $config = (array) apply_filters('sitepulse_rum_frontend_config', $config, $settings);
+    }
+
+    return $config;
+}
+
+/**
+ * Stores a single metric entry in the database.
+ *
+ * @param array<string,mixed> $metric Metric payload.
+ * @return bool
+ */
+function sitepulse_rum_store_metric(array $metric) {
     $table = sitepulse_rum_get_table_name();
 
-    if ($table === '' || empty($samples)) {
-        return 0;
+    if ($table === '' || !sitepulse_rum_table_exists()) {
+        return false;
     }
+
+    $name = isset($metric['name']) ? strtoupper((string) $metric['name']) : '';
+
+    if (!in_array($name, ['LCP', 'FID', 'CLS'], true)) {
+        return false;
+    }
+
+    $value = isset($metric['value']) ? (float) $metric['value'] : null;
+
+    if (!is_finite($value) || $value < 0) {
+        return false;
+    }
+
+    $timestamp = isset($metric['timestamp']) ? (int) $metric['timestamp'] : 0;
+
+    if ($timestamp > 0 && $timestamp > 2000000000) {
+        $timestamp = (int) floor($timestamp / 1000);
+    }
+
+    if ($timestamp <= 0) {
+        $timestamp = time();
+    }
+
+    $page = isset($metric['url']) ? (string) $metric['url'] : '';
+
+    if ($page === '' && isset($metric['path'])) {
+        $page = (string) $metric['path'];
+    }
+
+    if ($page === '' && isset($metric['page'])) {
+        $page = (string) $metric['page'];
+    }
+
+    $page_path = sitepulse_rum_normalize_path($page);
+
+    $rating = isset($metric['rating']) ? strtolower((string) $metric['rating']) : '';
+
+    if (!in_array($rating, ['good', 'needs_improvement', 'poor'], true)) {
+        $rating = '';
+    }
+
+    $device = isset($metric['device']) ? strtolower((string) $metric['device']) : '';
+
+    if (!in_array($device, ['mobile', 'desktop', 'tablet'], true)) {
+        $device = '';
+    }
+
+    $connection = isset($metric['connection']) ? strtolower((string) $metric['connection']) : '';
+    $navigation = isset($metric['navigationType']) ? strtolower((string) $metric['navigationType']) : '';
+
+    $samples = isset($metric['samples']) ? (int) $metric['samples'] : 0;
+
+    if ($samples < 0) {
+        $samples = 0;
+    }
+
+    $data = [
+        'recorded_at' => $timestamp,
+        'metric'      => $name,
+        'value'       => $value,
+        'rating'      => $rating,
+        'page_url'    => $page,
+        'page_path'   => $page_path,
+        'device'      => $device,
+        'connection'  => $connection,
+        'navigation'  => $navigation,
+        'samples'     => $samples,
+        'created_at'  => current_time('mysql', true),
+    ];
 
     global $wpdb;
 
     if (!($wpdb instanceof wpdb)) {
-        return 0;
+        return false;
     }
 
-    $inserted = 0;
-    $created_at = current_time('mysql', true);
+    $format = ['%d', '%s', '%f', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s'];
 
-    foreach ($samples as $sample) {
-        $data = [
-            'recorded_at'     => isset($sample['recorded_at']) ? (int) $sample['recorded_at'] : time(),
-            'metric'          => isset($sample['metric']) ? (string) $sample['metric'] : '',
-            'value'           => isset($sample['value']) ? (float) $sample['value'] : 0.0,
-            'rating'          => isset($sample['rating']) ? (string) $sample['rating'] : 'unknown',
-            'path'            => isset($sample['path']) ? (string) $sample['path'] : '/',
-            'path_hash'       => isset($sample['path_hash']) ? (string) $sample['path_hash'] : md5('/'),
-            'device'          => isset($sample['device']) ? (string) $sample['device'] : 'unknown',
-            'navigation_type' => isset($sample['navigation_type']) ? (string) $sample['navigation_type'] : 'navigate',
-            'created_at'      => $created_at,
-        ];
+    $result = $wpdb->insert($table, $data, $format);
 
-        $formats = ['%d', '%s', '%f', '%s', '%s', '%s', '%s', '%s', '%s'];
-
-        $result = $wpdb->insert($table, $data, $formats);
-
-        if ($result) {
-            $inserted++;
-        }
-    }
-
-    if ($inserted > 0) {
-        sitepulse_rum_flush_cache();
-    }
-
-    return $inserted;
+    return $result !== false;
 }
 
 /**
- * Normalizes a raw sample payload.
+ * Normalizes a page path for storage and grouping.
  *
- * @param array<string,mixed> $sample  Raw sample data.
- * @param string              $context Optional. Context identifier.
- *
- * @return array<string,mixed>|null
- */
-function sitepulse_rum_build_sample(array $sample, $context = 'rest') {
-    $metric = isset($sample['metric']) ? strtoupper((string) $sample['metric']) : '';
-
-    if (!in_array($metric, ['LCP', 'FID', 'CLS'], true)) {
-        return null;
-    }
-
-    $value = null;
-
-    if (isset($sample['value']) && is_numeric($sample['value'])) {
-        $value = (float) $sample['value'];
-    }
-
-    if ($value === null || $value < 0) {
-        return null;
-    }
-
-    $path = '/';
-
-    if (!empty($sample['path']) && is_string($sample['path'])) {
-        $path = '/' . ltrim($sample['path'], '/');
-    } elseif (!empty($sample['url']) && is_string($sample['url'])) {
-        $parsed = wp_parse_url($sample['url']);
-        $path = isset($parsed['path']) ? (string) $parsed['path'] : '/';
-        if (isset($parsed['query'])) {
-            $path .= '?' . $parsed['query'];
-        }
-    }
-
-    if ($path === '') {
-        $path = '/';
-    }
-
-    $path = esc_url_raw($path);
-    $path_hash = md5($path);
-
-    $device = 'unknown';
-
-    if (!empty($sample['device']) && is_string($sample['device'])) {
-        $device_candidate = sanitize_key($sample['device']);
-        if ($device_candidate !== '') {
-            $device = $device_candidate;
-        }
-    }
-
-    $navigation_type = 'navigate';
-
-    if (!empty($sample['navigationType']) && is_string($sample['navigationType'])) {
-        $navigation_type = sanitize_key($sample['navigationType']);
-    }
-
-    $rating = null;
-
-    if (!empty($sample['rating']) && is_string($sample['rating'])) {
-        $candidate = sanitize_key(str_replace([' ', '-'], '_', strtolower($sample['rating'])));
-        if (in_array($candidate, ['good', 'needs_improvement', 'poor'], true)) {
-            $rating = $candidate;
-        }
-    }
-
-    if ($rating === null) {
-        $rating = sitepulse_rum_grade_metric($metric, $value);
-    }
-
-    $timestamp = null;
-
-    if (isset($sample['timestamp']) && is_numeric($sample['timestamp'])) {
-        $timestamp = (int) $sample['timestamp'];
-    } elseif (isset($sample['recorded_at']) && is_numeric($sample['recorded_at'])) {
-        $timestamp = (int) $sample['recorded_at'];
-    }
-
-    if ($timestamp === null || $timestamp <= 0) {
-        $timestamp = current_time('timestamp');
-    }
-
-    return [
-        'metric'          => $metric,
-        'value'           => $value,
-        'rating'          => $rating,
-        'path'            => $path,
-        'path_hash'       => $path_hash,
-        'device'          => $device,
-        'navigation_type' => $navigation_type,
-        'recorded_at'     => $timestamp,
-    ];
-}
-
-/**
- * Computes the rating bucket for a given metric value.
- *
- * @param string $metric Metric slug.
- * @param float  $value  Observed value.
- *
+ * @param string $raw_path Raw path or URL.
  * @return string
  */
-function sitepulse_rum_grade_metric($metric, $value) {
-    $metric = strtoupper((string) $metric);
-    $value = (float) $value;
+function sitepulse_rum_normalize_path($raw_path) {
+    $raw_path = is_string($raw_path) ? trim($raw_path) : '';
 
-    switch ($metric) {
-        case 'LCP':
-            if ($value <= 2500.0) {
-                return 'good';
-            }
-
-            if ($value <= 4000.0) {
-                return 'needs_improvement';
-            }
-
-            return 'poor';
-        case 'FID':
-            if ($value <= 100.0) {
-                return 'good';
-            }
-
-            if ($value <= 300.0) {
-                return 'needs_improvement';
-            }
-
-            return 'poor';
-        case 'CLS':
-            if ($value <= 0.1) {
-                return 'good';
-            }
-
-            if ($value <= 0.25) {
-                return 'needs_improvement';
-            }
-
-            return 'poor';
-        default:
-            return 'unknown';
+    if ($raw_path === '') {
+        return '/';
     }
+
+    $parsed = wp_parse_url($raw_path, PHP_URL_PATH);
+
+    if (!is_string($parsed) || $parsed === '') {
+        $parsed = $raw_path;
+    }
+
+    $parsed = '/' . ltrim($parsed, '/');
+
+    return substr($parsed, 0, 191);
 }
 
 /**
- * Returns the fully qualified table name for RUM samples.
+ * Applies the retention policy to stored metrics.
+ *
+ * @return void
+ */
+function sitepulse_rum_apply_retention() {
+    $table = sitepulse_rum_get_table_name();
+
+    if ($table === '' || !sitepulse_rum_table_exists()) {
+        return;
+    }
+
+    $days = sitepulse_rum_get_retention_days();
+
+    if ($days <= 0) {
+        return;
+    }
+
+    $threshold = time() - ($days * DAY_IN_SECONDS);
+
+    global $wpdb;
+
+    if (!($wpdb instanceof wpdb)) {
+        return;
+    }
+
+    $wpdb->query($wpdb->prepare("DELETE FROM {$table} WHERE recorded_at < %d", $threshold));
+}
+
+/**
+ * Retrieves the retention window for RUM metrics.
+ *
+ * @return int
+ */
+function sitepulse_rum_get_retention_days() {
+    $default = defined('SITEPULSE_DEFAULT_RUM_RETENTION_DAYS') ? (int) SITEPULSE_DEFAULT_RUM_RETENTION_DAYS : 30;
+
+    if (!defined('SITEPULSE_OPTION_RUM_RETENTION_DAYS')) {
+        return $default;
+    }
+
+    $value = get_option(SITEPULSE_OPTION_RUM_RETENTION_DAYS, $default);
+
+    if (!is_numeric($value)) {
+        return $default;
+    }
+
+    $days = max(1, (int) $value);
+
+    if (function_exists('apply_filters')) {
+        /**
+         * Filters the number of days to keep RUM metrics.
+         *
+         * @param int $days Retention window.
+         */
+        $days = (int) apply_filters('sitepulse_rum_retention_days', $days);
+    }
+
+    return $days;
+}
+
+/**
+ * Returns the name of the RUM metrics table.
  *
  * @return string
  */
 function sitepulse_rum_get_table_name() {
-    if (!defined('SITEPULSE_TABLE_RUM_EVENTS')) {
+    if (!defined('SITEPULSE_TABLE_RUM_METRICS')) {
         return '';
     }
 
@@ -716,20 +636,19 @@ function sitepulse_rum_get_table_name() {
         return '';
     }
 
-    return $wpdb->prefix . SITEPULSE_TABLE_RUM_EVENTS;
+    return $wpdb->prefix . SITEPULSE_TABLE_RUM_METRICS;
 }
 
 /**
- * Checks whether the RUM table exists.
+ * Checks whether the RUM table exists, optionally forcing a refresh.
  *
- * @param bool $force Optional. When true, bypasses the cached state.
- *
+ * @param bool $force_refresh Whether to refresh the cached status.
  * @return bool
  */
-function sitepulse_rum_table_exists($force = false) {
+function sitepulse_rum_table_exists($force_refresh = false) {
     static $exists = null;
 
-    if ($force) {
+    if ($force_refresh) {
         $exists = null;
     }
 
@@ -741,6 +660,7 @@ function sitepulse_rum_table_exists($force = false) {
 
     if ($table === '') {
         $exists = false;
+
         return false;
     }
 
@@ -748,16 +668,20 @@ function sitepulse_rum_table_exists($force = false) {
 
     if (!($wpdb instanceof wpdb)) {
         $exists = false;
+
         return false;
     }
 
-    $exists = (bool) $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
+    $query = $wpdb->prepare('SHOW TABLES LIKE %s', $table);
+    $found = $wpdb->get_var($query);
+
+    $exists = ($found === $table);
 
     return $exists;
 }
 
 /**
- * Creates or upgrades the RUM datastore schema.
+ * Ensures the RUM metrics table exists and matches the expected schema.
  *
  * @return void
  */
@@ -766,9 +690,8 @@ function sitepulse_rum_maybe_upgrade_schema() {
         return;
     }
 
-    $target = (int) SITEPULSE_RUM_SCHEMA_VERSION;
-    $option_key = SITEPULSE_OPTION_RUM_SCHEMA_VERSION;
-    $current = (int) get_option($option_key, 0);
+    $target  = (int) SITEPULSE_RUM_SCHEMA_VERSION;
+    $current = (int) get_option(SITEPULSE_OPTION_RUM_SCHEMA_VERSION, 0);
 
     if ($current >= $target && sitepulse_rum_table_exists()) {
         return;
@@ -777,12 +700,12 @@ function sitepulse_rum_maybe_upgrade_schema() {
     sitepulse_rum_install_table();
 
     if ($current < $target) {
-        update_option($option_key, $target, false);
+        update_option(SITEPULSE_OPTION_RUM_SCHEMA_VERSION, $target, false);
     }
 }
 
 /**
- * Installs the RUM events table.
+ * Creates the RUM metrics table.
  *
  * @return void
  */
@@ -799,25 +722,26 @@ function sitepulse_rum_install_table() {
         return;
     }
 
-    $charset_collate = $wpdb->get_charset_collate();
+    $charset = $wpdb->get_charset_collate();
 
     $sql = "CREATE TABLE {$table} (
         id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
         recorded_at int(10) unsigned NOT NULL,
-        metric varchar(16) NOT NULL,
-        value float NOT NULL,
-        rating varchar(32) NOT NULL,
-        path varchar(191) NOT NULL,
-        path_hash char(32) NOT NULL,
-        device varchar(32) NOT NULL,
-        navigation_type varchar(32) NOT NULL,
+        metric varchar(20) NOT NULL,
+        value double NOT NULL,
+        rating varchar(20) NOT NULL DEFAULT '',
+        page_url text NULL,
+        page_path varchar(191) NOT NULL,
+        device varchar(20) NOT NULL DEFAULT '',
+        connection varchar(50) NOT NULL DEFAULT '',
+        navigation varchar(20) NOT NULL DEFAULT '',
+        samples smallint(5) unsigned NOT NULL DEFAULT 0,
         created_at datetime NOT NULL,
-        PRIMARY KEY (id),
+        PRIMARY KEY  (id),
         KEY recorded_at (recorded_at),
         KEY metric (metric),
-        KEY path_hash (path_hash),
-        KEY device (device)
-    ) {$charset_collate};";
+        KEY page_metric (page_path, metric)
+    ) {$charset};";
 
     if (!function_exists('dbDelta')) {
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -829,415 +753,269 @@ function sitepulse_rum_install_table() {
 }
 
 /**
- * Schedules the cleanup event used to purge old samples.
+ * Computes aggregated statistics over the stored metrics.
  *
- * @return void
- */
-function sitepulse_rum_schedule_cleanup() {
-    if (!defined('SITEPULSE_CRON_RUM_CLEANUP')) {
-        return;
-    }
-
-    if (wp_next_scheduled(SITEPULSE_CRON_RUM_CLEANUP)) {
-        return;
-    }
-
-    wp_schedule_event(time() + DAY_IN_SECONDS, 'daily', SITEPULSE_CRON_RUM_CLEANUP);
-}
-
-/**
- * Purges RUM samples older than the configured retention.
- *
- * @return void
- */
-function sitepulse_rum_purge_old_entries() {
-    $table = sitepulse_rum_get_table_name();
-
-    if ($table === '') {
-        return;
-    }
-
-    global $wpdb;
-
-    if (!($wpdb instanceof wpdb)) {
-        return;
-    }
-
-    $retention_days = sitepulse_rum_get_retention_days();
-
-    if ($retention_days <= 0) {
-        return;
-    }
-
-    $threshold = time() - ($retention_days * DAY_IN_SECONDS);
-    $wpdb->query($wpdb->prepare("DELETE FROM {$table} WHERE recorded_at < %d", $threshold));
-}
-
-/**
- * Retrieves the number of days samples should be retained.
- *
- * @return int
- */
-function sitepulse_rum_get_retention_days() {
-    $default = defined('SITEPULSE_DEFAULT_RUM_RETENTION_DAYS') ? (int) SITEPULSE_DEFAULT_RUM_RETENTION_DAYS : 30;
-    $option_key = defined('SITEPULSE_OPTION_RUM_RETENTION_DAYS') ? SITEPULSE_OPTION_RUM_RETENTION_DAYS : 'sitepulse_rum_retention_days';
-    $stored = get_option($option_key, $default);
-
-    if (!is_numeric($stored)) {
-        return $default;
-    }
-
-    $value = (int) $stored;
-
-    if ($value < 1) {
-        return $default;
-    }
-
-    return $value;
-}
-
-/**
- * Computes aggregated statistics for the supplied filters.
- *
- * @param array<string,mixed> $args Optional. Query arguments.
- *
+ * @param array<string,int> $args Aggregation arguments.
  * @return array<string,mixed>
  */
-function sitepulse_rum_calculate_aggregates($args = []) {
-    $defaults = [
-        'range_days' => null,
-        'path'       => '',
-        'device'     => '',
-        'max_rows'   => 5000,
-    ];
+function sitepulse_rum_get_aggregates(array $args = []) {
+    $days = isset($args['days']) ? (int) $args['days'] : 7;
+    $days = max(1, $days);
 
-    $args = wp_parse_args($args, $defaults);
+    $cache_key = defined('SITEPULSE_TRANSIENT_RUM_AGGREGATES')
+        ? SITEPULSE_TRANSIENT_RUM_AGGREGATES . '_' . $days
+        : 'sitepulse_rum_aggregates_' . $days;
+
+    $cached = get_transient($cache_key);
+
+    if (is_array($cached)) {
+        return $cached;
+    }
+
     $table = sitepulse_rum_get_table_name();
 
     if ($table === '' || !sitepulse_rum_table_exists()) {
         return [
-            'range'         => ['days' => (int) $args['range_days'] ?: 7, 'since' => null, 'until' => null],
-            'sample_count'  => 0,
-            'page_count'    => 0,
-            'last_sample_at'=> null,
-            'summary'       => [],
-            'pages'         => [],
+            'window'  => [
+                'days'    => $days,
+                'samples' => 0,
+            ],
+            'metrics' => [],
+            'pages'   => [],
         ];
     }
 
-    $range_days = isset($args['range_days']) && is_numeric($args['range_days']) ? (int) $args['range_days'] : null;
-
-    if ($range_days === null || $range_days <= 0) {
-        $settings = sitepulse_rum_get_settings();
-        $range_days = isset($settings['range_days']) ? (int) $settings['range_days'] : 7;
-    }
-
-    $range_days = max(1, min(90, $range_days));
-    $since = time() - ($range_days * DAY_IN_SECONDS);
-
-    $conditions = ['recorded_at >= %d'];
-    $params = [$since];
-
-    $path = is_string($args['path']) ? trim($args['path']) : '';
-    $path_hash = '';
-
-    if ($path !== '') {
-        $path_hash = md5(esc_url_raw($path));
-        $conditions[] = 'path_hash = %s';
-        $params[] = $path_hash;
-    }
-
-    $device = is_string($args['device']) ? sanitize_key($args['device']) : '';
-
-    if ($device !== '' && $device !== 'all') {
-        $conditions[] = 'device = %s';
-        $params[] = $device;
-    }
-
-    $cache_key = sitepulse_rum_get_cache_key([
-        'range_days' => $range_days,
-        'path_hash'  => $path_hash !== '' ? $path_hash : 'all',
-        'device'     => $device !== '' ? $device : 'all',
-    ]);
-
-    if ($cache_key !== '') {
-        $cached = get_transient($cache_key);
-
-        if (is_array($cached)) {
-            return $cached;
-        }
-    }
-
-    $where_sql = implode(' AND ', $conditions);
-    $limit = isset($args['max_rows']) && is_numeric($args['max_rows']) ? (int) $args['max_rows'] : 5000;
-
-    if ($limit < 1) {
-        $limit = 5000;
-    }
+    $limit = isset($args['limit']) ? (int) $args['limit'] : 3000;
+    $limit = max(1, $limit);
+    $since = time() - ($days * DAY_IN_SECONDS);
 
     global $wpdb;
 
     if (!($wpdb instanceof wpdb)) {
         return [
-            'range'         => ['days' => $range_days, 'since' => null, 'until' => null],
-            'sample_count'  => 0,
-            'page_count'    => 0,
-            'last_sample_at'=> null,
-            'summary'       => [],
-            'pages'         => [],
+            'window'  => [
+                'days'    => $days,
+                'samples' => 0,
+            ],
+            'metrics' => [],
+            'pages'   => [],
         ];
     }
 
-    $sql = "SELECT metric, value, rating, path, path_hash, device, navigation_type, recorded_at FROM {$table} WHERE {$where_sql} ORDER BY recorded_at DESC LIMIT {$limit}";
-    $query = $wpdb->prepare($sql, $params);
-    $rows = $wpdb->get_results($query, ARRAY_A);
+    $sql = $wpdb->prepare(
+        "SELECT metric, value, rating, page_path, device, connection, navigation, samples, recorded_at
+        FROM {$table}
+        WHERE recorded_at >= %d
+        ORDER BY recorded_at DESC
+        LIMIT %d",
+        $since,
+        $limit
+    );
 
-    $summary_values = [];
-    $summary_ratings = [];
-    $pages = [];
-    $page_index = [];
-    $last_sample_at = null;
+    $rows = $wpdb->get_results($sql, ARRAY_A);
+
+    $totals = [
+        'window'  => [
+            'days'    => $days,
+            'samples' => 0,
+            'since'   => $since,
+        ],
+        'metrics' => [],
+        'pages'   => [],
+    ];
+
+    if (empty($rows)) {
+        set_transient($cache_key, $totals, HOUR_IN_SECONDS);
+
+        return $totals;
+    }
 
     foreach ($rows as $row) {
-        $metric = isset($row['metric']) ? strtoupper((string) $row['metric']) : '';
+        $metric = isset($row['metric']) ? strtoupper($row['metric']) : '';
+        $value  = isset($row['value']) ? (float) $row['value'] : null;
 
-        if (!in_array($metric, ['LCP', 'FID', 'CLS'], true)) {
+        if ($metric === '' || !is_finite($value)) {
             continue;
         }
 
-        $value = isset($row['value']) ? (float) $row['value'] : null;
+        $totals['window']['samples']++;
 
-        if ($value === null) {
-            continue;
-        }
-
-        $rating = isset($row['rating']) ? sanitize_key((string) $row['rating']) : 'unknown';
-        $path_value = isset($row['path']) ? (string) $row['path'] : '/';
-        $hash = isset($row['path_hash']) ? (string) $row['path_hash'] : md5($path_value);
-        $device_value = isset($row['device']) ? sanitize_key((string) $row['device']) : 'unknown';
-        $recorded_at = isset($row['recorded_at']) ? (int) $row['recorded_at'] : 0;
-
-        $summary_values[$metric][] = $value;
-        $summary_ratings[$metric][$rating] = isset($summary_ratings[$metric][$rating])
-            ? $summary_ratings[$metric][$rating] + 1
-            : 1;
-
-        $page_key = $hash . '|' . $device_value;
-
-        if (!isset($page_index[$page_key])) {
-            $page_index[$page_key] = count($pages);
-            $pages[] = [
-                'path'         => $path_value,
-                'path_hash'    => $hash,
-                'device'       => $device_value,
-                'samples'      => 0,
-                'latest_at'    => $recorded_at,
-                'metrics'      => [],
-            ];
-        }
-
-        $page_pos = $page_index[$page_key];
-        $pages[$page_pos]['samples']++;
-        if ($recorded_at > $pages[$page_pos]['latest_at']) {
-            $pages[$page_pos]['latest_at'] = $recorded_at;
-        }
-
-        if (!isset($pages[$page_pos]['metrics'][$metric])) {
-            $pages[$page_pos]['metrics'][$metric] = [
+        if (!isset($totals['metrics'][$metric])) {
+            $totals['metrics'][$metric] = [
                 'values'  => [],
-                'ratings' => [],
+                'count'   => 0,
+                'ratings' => [
+                    'good'             => 0,
+                    'needs_improvement'=> 0,
+                    'poor'             => 0,
+                ],
             ];
         }
 
-        $pages[$page_pos]['metrics'][$metric]['values'][] = $value;
-        $pages[$page_pos]['metrics'][$metric]['ratings'][$rating] = isset($pages[$page_pos]['metrics'][$metric]['ratings'][$rating])
-            ? $pages[$page_pos]['metrics'][$metric]['ratings'][$rating] + 1
-            : 1;
+        $totals['metrics'][$metric]['values'][] = $value;
+        $totals['metrics'][$metric]['count']++;
 
-        if ($last_sample_at === null || $recorded_at > $last_sample_at) {
-            $last_sample_at = $recorded_at;
+        $rating = isset($row['rating']) ? strtolower($row['rating']) : '';
+
+        if (isset($totals['metrics'][$metric]['ratings'][$rating])) {
+            $totals['metrics'][$metric]['ratings'][$rating]++;
         }
+
+        $page = isset($row['page_path']) && $row['page_path'] !== '' ? $row['page_path'] : '/';
+
+        if (!isset($totals['pages'][$page])) {
+            $totals['pages'][$page] = [
+                'samples' => 0,
+                'metrics' => [],
+            ];
+        }
+
+        if (!isset($totals['pages'][$page]['metrics'][$metric])) {
+            $totals['pages'][$page]['metrics'][$metric] = [
+                'values' => [],
+                'count'  => 0,
+            ];
+        }
+
+        $totals['pages'][$page]['metrics'][$metric]['values'][] = $value;
+        $totals['pages'][$page]['metrics'][$metric]['count']++;
+        $totals['pages'][$page]['samples']++;
     }
 
-    $summary = [];
+    foreach ($totals['metrics'] as $metric => $data) {
+        $totals['metrics'][$metric] = sitepulse_rum_summarize_values($data['values'], $data['ratings']);
+    }
 
-    foreach ($summary_values as $metric => $values) {
-        sort($values);
-        $count = count($values);
-        $average = $count > 0 ? array_sum($values) / $count : null;
-        $percentiles = sitepulse_rum_calculate_percentiles($values, [0.5, 0.75, 0.95]);
+    $page_summaries = [];
 
-        $summary[$metric] = [
-            'count'   => $count,
-            'average' => $average,
-            'p50'     => isset($percentiles[0.5]) ? $percentiles[0.5] : null,
-            'p75'     => isset($percentiles[0.75]) ? $percentiles[0.75] : null,
-            'p95'     => isset($percentiles[0.95]) ? $percentiles[0.95] : null,
-            'ratings' => sitepulse_rum_normalize_rating_counts(isset($summary_ratings[$metric]) ? $summary_ratings[$metric] : []),
-            'status'  => sitepulse_rum_determine_status($metric, isset($summary_ratings[$metric]) ? $summary_ratings[$metric] : [], isset($percentiles[0.75]) ? $percentiles[0.75] : null),
-            'unit'    => $metric === 'CLS' ? '' : 'ms',
+    foreach ($totals['pages'] as $path => $data) {
+        $metrics = [];
+
+        foreach ($data['metrics'] as $metric => $metric_data) {
+            $metrics[$metric] = sitepulse_rum_summarize_values($metric_data['values']);
+        }
+
+        $page_summaries[] = [
+            'path'    => $path,
+            'samples' => $data['samples'],
+            'metrics' => $metrics,
         ];
     }
 
-    foreach ($pages as &$page) {
-        foreach ($page['metrics'] as $metric => $metric_data) {
-            $values = $metric_data['values'];
-            sort($values);
-            $count = count($values);
-            $average = $count > 0 ? array_sum($values) / $count : null;
-            $percentiles = sitepulse_rum_calculate_percentiles($values, [0.5, 0.75, 0.95]);
-
-            $page['metrics'][$metric] = [
-                'count'   => $count,
-                'average' => $average,
-                'p50'     => isset($percentiles[0.5]) ? $percentiles[0.5] : null,
-                'p75'     => isset($percentiles[0.75]) ? $percentiles[0.75] : null,
-                'p95'     => isset($percentiles[0.95]) ? $percentiles[0.95] : null,
-                'ratings' => sitepulse_rum_normalize_rating_counts($metric_data['ratings']),
-                'status'  => sitepulse_rum_determine_status($metric, $metric_data['ratings'], isset($percentiles[0.75]) ? $percentiles[0.75] : null),
-            ];
-        }
-    }
-    unset($page);
-
-    usort($pages, static function ($a, $b) {
-        if ($a['samples'] === $b['samples']) {
-            return $b['latest_at'] <=> $a['latest_at'];
-        }
-
+    usort($page_summaries, static function ($a, $b) {
         return $b['samples'] <=> $a['samples'];
     });
 
-    $max_pages = apply_filters('sitepulse_rum_max_page_breakdown', 10, $args);
+    $page_summaries = array_slice($page_summaries, 0, 10);
 
-    if (is_numeric($max_pages) && $max_pages > 0) {
-        $pages = array_slice($pages, 0, (int) $max_pages);
-    }
+    $totals['pages'] = $page_summaries;
 
-    $result = [
-        'range' => [
-            'days'  => $range_days,
-            'since' => $since,
-            'until' => time(),
-        ],
-        'sample_count'   => array_sum(array_map('count', $summary_values)),
-        'page_count'     => count($pages),
-        'last_sample_at' => $last_sample_at,
-        'summary'        => $summary,
-        'pages'          => $pages,
-    ];
+    set_transient($cache_key, $totals, HOUR_IN_SECONDS);
 
-    if ($cache_key !== '') {
-        set_transient($cache_key, $result, sitepulse_rum_get_cache_expiration());
-        sitepulse_rum_register_cache_key($cache_key);
-    }
-
-    return $result;
+    return $totals;
 }
 
 /**
- * Normalizes rating counters to include all buckets.
+ * Summarizes a list of metric values into descriptive statistics.
  *
- * @param array<string,int> $ratings Raw rating counts.
- *
- * @return array<string,int>
+ * @param array<int,float>      $values  Recorded values.
+ * @param array<string,int>|null $ratings Optional rating counters.
+ * @return array<string,mixed>
  */
-function sitepulse_rum_normalize_rating_counts($ratings) {
-    $defaults = [
-        'good'             => 0,
-        'needs_improvement'=> 0,
-        'poor'             => 0,
-    ];
+function sitepulse_rum_summarize_values(array $values, $ratings = null) {
+    $values = array_values(array_filter(array_map('floatval', $values), static function ($value) {
+        return is_finite($value);
+    }));
 
-    if (!is_array($ratings)) {
-        return $defaults;
-    }
-
-    foreach ($defaults as $bucket => $count) {
-        if (isset($ratings[$bucket]) && is_numeric($ratings[$bucket])) {
-            $defaults[$bucket] = (int) $ratings[$bucket];
-        }
-    }
-
-    return $defaults;
-}
-
-/**
- * Calculates the requested percentiles for an ordered dataset.
- *
- * @param float[] $values     Sorted list of values.
- * @param float[] $percentile_targets Targets expressed as fractions (0-1).
- *
- * @return array<float,float>
- */
-function sitepulse_rum_calculate_percentiles(array $values, array $percentile_targets) {
-    $result = [];
     $count = count($values);
 
     if ($count === 0) {
-        return $result;
+        return [
+            'count'   => 0,
+            'average' => 0,
+            'p75'     => 0,
+            'p95'     => 0,
+            'ratings' => $ratings ?: [],
+        ];
     }
 
     sort($values);
 
-    foreach ($percentile_targets as $target) {
-        $target = (float) $target;
+    $average = array_sum($values) / $count;
+    $p75 = sitepulse_rum_calculate_percentile($values, 0.75);
+    $p95 = sitepulse_rum_calculate_percentile($values, 0.95);
 
-        if ($target < 0 || $target > 1) {
-            continue;
+    if (is_array($ratings)) {
+        $total_ratings = array_sum($ratings);
+
+        if ($total_ratings > 0) {
+            foreach ($ratings as $key => $value) {
+                $ratings[$key] = round(($value / $total_ratings) * 100, 2);
+            }
         }
-
-        $index = $target * ($count - 1);
-        $lower = (int) floor($index);
-        $upper = (int) ceil($index);
-
-        if ($lower === $upper) {
-            $result[$target] = $values[$lower];
-            continue;
-        }
-
-        $weight = $index - $lower;
-        $result[$target] = $values[$lower] * (1 - $weight) + $values[$upper] * $weight;
     }
 
-    return $result;
+    return [
+        'count'   => $count,
+        'average' => $average,
+        'p75'     => $p75,
+        'p95'     => $p95,
+        'ratings' => is_array($ratings) ? $ratings : [],
+    ];
 }
 
 /**
- * Derives a status badge from rating distribution or percentile.
+ * Calculates a percentile for the provided values.
  *
- * @param string          $metric      Metric slug.
- * @param array<string,int> $ratings   Rating distribution.
- * @param float|null      $p75         75th percentile value.
- *
- * @return string Status identifier.
+ * @param array<int,float> $values   Sorted values.
+ * @param float            $percent  Percentile to compute between 0 and 1.
+ * @return float
  */
-function sitepulse_rum_determine_status($metric, $ratings, $p75) {
-    $ratings = sitepulse_rum_normalize_rating_counts($ratings);
-    $total = array_sum($ratings);
+function sitepulse_rum_calculate_percentile(array $values, $percent) {
+    $count = count($values);
 
-    if ($total === 0 || $p75 === null) {
-        return 'status-warn';
+    if ($count === 0) {
+        return 0.0;
     }
 
-    $dominant = 'needs_improvement';
-    $max_count = -1;
+    $percent = max(0, min(1, (float) $percent));
 
-    foreach ($ratings as $bucket => $count) {
-        if ($count > $max_count) {
-            $dominant = $bucket;
-            $max_count = $count;
-        }
+    $index = ($count - 1) * $percent;
+    $lower = (int) floor($index);
+    $upper = (int) ceil($index);
+
+    if ($lower === $upper) {
+        return (float) $values[$lower];
     }
 
-    if ($dominant === 'good') {
-        return 'status-ok';
-    }
+    $weight = $index - $lower;
 
-    if ($dominant === 'poor') {
-        return 'status-bad';
-    }
-
-    return 'status-warn';
+    return (float) ($values[$lower] * (1 - $weight) + $values[$upper] * $weight);
 }
 
+/**
+ * Clears cached aggregate data.
+ *
+ * @return void
+ */
+function sitepulse_rum_clear_cache() {
+    $base = defined('SITEPULSE_TRANSIENT_RUM_AGGREGATES')
+        ? SITEPULSE_TRANSIENT_RUM_AGGREGATES
+        : 'sitepulse_rum_aggregates';
+
+    delete_transient($base . '_7');
+    delete_transient($base . '_30');
+}
+
+/**
+ * Retrieves the latest aggregated metrics for display inside the admin UI.
+ *
+ * @return array<string,mixed>
+ */
+function sitepulse_rum_get_admin_summary() {
+    $summary = sitepulse_rum_get_aggregates([
+        'days' => 7,
+    ]);
+
+    return is_array($summary) ? $summary : [];
+}

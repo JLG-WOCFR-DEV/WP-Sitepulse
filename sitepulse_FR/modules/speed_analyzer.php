@@ -2,6 +2,7 @@
 if (!defined('ABSPATH')) exit;
 
 require_once SITEPULSE_PATH . 'includes/request-profiler.php';
+require_once SITEPULSE_PATH . 'modules/speed-analyzer/rum.php';
 
 if (function_exists('sitepulse_request_profiler_bootstrap')) {
     sitepulse_request_profiler_bootstrap();
@@ -2685,6 +2686,57 @@ function sitepulse_speed_analyzer_page() {
         wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour accéder à cette page.", 'sitepulse'));
     }
 
+    $rum_notices = [];
+
+    if (isset($_GET['sitepulse-rum-updated'])) {
+        $rum_status = sanitize_text_field(wp_unslash($_GET['sitepulse-rum-updated']));
+
+        if ($rum_status === '1') {
+            $rum_notices[] = [
+                'class'   => 'notice-success',
+                'message' => esc_html__('La collecte RUM est désormais active.', 'sitepulse'),
+            ];
+        } elseif ($rum_status === '0') {
+            $rum_notices[] = [
+                'class'   => 'notice-info',
+                'message' => esc_html__('La collecte RUM a été désactivée.', 'sitepulse'),
+            ];
+        }
+    }
+
+    if (isset($_GET['sitepulse-rum-token'])) {
+        $rum_notices[] = [
+            'class'   => 'notice-success',
+            'message' => esc_html__('Un nouveau jeton RUM a été généré.', 'sitepulse'),
+        ];
+    }
+
+    $rum_settings = function_exists('sitepulse_rum_get_settings')
+        ? sitepulse_rum_get_settings()
+        : [
+            'enabled'          => false,
+            'token'            => '',
+            'consent_required' => false,
+        ];
+
+    $rum_summary = (!empty($rum_settings['enabled']) && function_exists('sitepulse_rum_get_admin_summary'))
+        ? sitepulse_rum_get_admin_summary()
+        : [];
+
+    $rum_retention_days = function_exists('sitepulse_rum_get_retention_days')
+        ? sitepulse_rum_get_retention_days()
+        : 0;
+
+    $rum_metric_labels = [
+        'LCP' => esc_html__('Largest Contentful Paint', 'sitepulse'),
+        'FID' => esc_html__('First Input Delay', 'sitepulse'),
+        'CLS' => esc_html__('Cumulative Layout Shift', 'sitepulse'),
+    ];
+
+    $rum_nonce_action = defined('SITEPULSE_NONCE_ACTION_RUM_SETTINGS')
+        ? SITEPULSE_NONCE_ACTION_RUM_SETTINGS
+        : 'sitepulse_rum_settings';
+
     global $wpdb;
 
     $rum_settings = function_exists('sitepulse_rum_get_settings') ? sitepulse_rum_get_settings() : [
@@ -2834,6 +2886,13 @@ function sitepulse_speed_analyzer_page() {
     }
     ?>
     <div class="wrap">
+        <?php if (!empty($rum_notices)) : ?>
+            <?php foreach ($rum_notices as $notice) : ?>
+                <div class="notice <?php echo esc_attr($notice['class']); ?> is-dismissible">
+                    <p><?php echo esc_html($notice['message']); ?></p>
+                </div>
+            <?php endforeach; ?>
+        <?php endif; ?>
         <h1><span class="dashicons-before dashicons-performance"></span> <?php esc_html_e('Analyseur de Vitesse', 'sitepulse'); ?></h1>
         <p><?php esc_html_e('Cet outil analyse la performance interne de votre serveur et de votre base de données à chaque chargement de page.', 'sitepulse'); ?></p>
 
@@ -2965,6 +3024,175 @@ function sitepulse_speed_analyzer_page() {
                 <?php endif; ?>
             </div>
         <?php endif; ?>
+
+        <div class="sitepulse-rum card">
+            <h2><?php esc_html_e('Web Vitals réels (RUM)', 'sitepulse'); ?></h2>
+
+            <?php if (empty($rum_settings['enabled'])) : ?>
+                <p><?php esc_html_e('Activez la collecte pour suivre les Web Vitals ressentis par vos visiteurs en complément des tests synthétiques.', 'sitepulse'); ?></p>
+            <?php else : ?>
+                <?php
+                $rum_window_days = isset($rum_summary['window']['days']) ? (int) $rum_summary['window']['days'] : 7;
+                $rum_total_samples = isset($rum_summary['window']['samples']) ? (int) $rum_summary['window']['samples'] : 0;
+                ?>
+                <p class="description">
+                    <?php
+                    printf(
+                        /* translators: 1: number of days, 2: number of samples. */
+                        esc_html__('Fenêtre analysée : %1$s jours – %2$s mesures.', 'sitepulse'),
+                        esc_html(number_format_i18n($rum_window_days)),
+                        esc_html(number_format_i18n($rum_total_samples))
+                    );
+                    ?>
+                </p>
+
+                <?php if (!empty($rum_summary['metrics'])) : ?>
+                    <table class="widefat striped">
+                        <thead>
+                            <tr>
+                                <th scope="col"><?php esc_html_e('Métrique', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('Moyenne', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('p75', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('p95', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('Bon (%)', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('Échantillons', 'sitepulse'); ?></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($rum_summary['metrics'] as $metric_key => $metric_data) :
+                                $label = isset($rum_metric_labels[$metric_key]) ? $rum_metric_labels[$metric_key] : $metric_key;
+                                $decimals = ($metric_key === 'CLS') ? 3 : 2;
+                                $average = isset($metric_data['average']) ? (float) $metric_data['average'] : 0;
+                                $p75 = isset($metric_data['p75']) ? (float) $metric_data['p75'] : 0;
+                                $p95 = isset($metric_data['p95']) ? (float) $metric_data['p95'] : 0;
+                                $count = isset($metric_data['count']) ? (int) $metric_data['count'] : 0;
+                                $good_rate = isset($metric_data['ratings']['good']) ? (float) $metric_data['ratings']['good'] : null;
+                            ?>
+                                <tr>
+                                    <td><?php echo esc_html($label); ?></td>
+                                    <td><?php echo esc_html(number_format_i18n($average, $decimals)); ?></td>
+                                    <td><?php echo esc_html(number_format_i18n($p75, $decimals)); ?></td>
+                                    <td><?php echo esc_html(number_format_i18n($p95, $decimals)); ?></td>
+                                    <td>
+                                        <?php
+                                        if ($good_rate !== null) {
+                                            echo esc_html(number_format_i18n($good_rate, 2));
+                                        } else {
+                                            esc_html_e('—', 'sitepulse');
+                                        }
+                                        ?>
+                                    </td>
+                                    <td><?php echo esc_html(number_format_i18n($count)); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php else : ?>
+                    <p><?php esc_html_e('Aucune donnée RUM collectée pour le moment.', 'sitepulse'); ?></p>
+                <?php endif; ?>
+
+                <?php if (!empty($rum_summary['pages'])) : ?>
+                    <h3><?php esc_html_e('Pages principales', 'sitepulse'); ?></h3>
+                    <table class="widefat striped">
+                        <thead>
+                            <tr>
+                                <th scope="col"><?php esc_html_e('Page', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('LCP p75 (ms)', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('FID p75 (ms)', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('CLS p75', 'sitepulse'); ?></th>
+                                <th scope="col"><?php esc_html_e('Échantillons', 'sitepulse'); ?></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($rum_summary['pages'] as $page_summary) :
+                                $page_path = isset($page_summary['path']) ? $page_summary['path'] : '/';
+                                $page_samples = isset($page_summary['samples']) ? (int) $page_summary['samples'] : 0;
+                                $page_metrics = isset($page_summary['metrics']) ? $page_summary['metrics'] : [];
+
+                                $page_lcp = isset($page_metrics['LCP']['p75']) ? (float) $page_metrics['LCP']['p75'] : null;
+                                $page_fid = isset($page_metrics['FID']['p75']) ? (float) $page_metrics['FID']['p75'] : null;
+                                $page_cls = isset($page_metrics['CLS']['p75']) ? (float) $page_metrics['CLS']['p75'] : null;
+                            ?>
+                                <tr>
+                                    <td><code><?php echo esc_html($page_path); ?></code></td>
+                                    <td>
+                                        <?php
+                                        echo ($page_lcp !== null)
+                                            ? esc_html(number_format_i18n($page_lcp, 2))
+                                            : esc_html__('—', 'sitepulse');
+                                        ?>
+                                    </td>
+                                    <td>
+                                        <?php
+                                        echo ($page_fid !== null)
+                                            ? esc_html(number_format_i18n($page_fid, 2))
+                                            : esc_html__('—', 'sitepulse');
+                                        ?>
+                                    </td>
+                                    <td>
+                                        <?php
+                                        echo ($page_cls !== null)
+                                            ? esc_html(number_format_i18n($page_cls, 3))
+                                            : esc_html__('—', 'sitepulse');
+                                        ?>
+                                    </td>
+                                    <td><?php echo esc_html(number_format_i18n($page_samples)); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php endif; ?>
+            <?php endif; ?>
+
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="sitepulse-rum-settings">
+                <?php wp_nonce_field($rum_nonce_action); ?>
+                <input type="hidden" name="action" value="sitepulse_rum_settings">
+                <fieldset>
+                    <legend class="screen-reader-text"><?php esc_html_e('Paramètres RUM', 'sitepulse'); ?></legend>
+                    <label>
+                        <input type="checkbox" name="sitepulse_rum_enabled" value="1" <?php checked(!empty($rum_settings['enabled'])); ?>>
+                        <?php esc_html_e('Activer la collecte RUM', 'sitepulse'); ?>
+                    </label>
+                </fieldset>
+                <fieldset>
+                    <legend class="screen-reader-text"><?php esc_html_e('Consentement', 'sitepulse'); ?></legend>
+                    <label>
+                        <input type="checkbox" name="sitepulse_rum_consent_required" value="1" <?php checked(!empty($rum_settings['consent_required'])); ?>>
+                        <?php esc_html_e('Requiert un consentement explicite avant de charger le script', 'sitepulse'); ?>
+                    </label>
+                </fieldset>
+
+                <?php if (!empty($rum_settings['token'])) : ?>
+                    <p>
+                        <strong><?php esc_html_e('Jeton d’ingestion', 'sitepulse'); ?> :</strong>
+                        <code><?php echo esc_html($rum_settings['token']); ?></code>
+                    </p>
+                <?php else : ?>
+                    <p class="description"><?php esc_html_e('Un jeton unique sera généré automatiquement lors de l’activation.', 'sitepulse'); ?></p>
+                <?php endif; ?>
+
+                <p class="description"><?php esc_html_e('Depuis votre bannière de consentement, appelez “SitePulseRUM.grantConsent()” pour déclencher l’envoi des mesures après accord utilisateur.', 'sitepulse'); ?></p>
+
+                <p class="sitepulse-rum-actions">
+                    <?php submit_button(__('Enregistrer les paramètres', 'sitepulse'), 'primary', 'submit', false); ?>
+                    <button type="submit" name="sitepulse_rum_regenerate" value="1" class="button">
+                        <?php esc_html_e('Regénérer le jeton', 'sitepulse'); ?>
+                    </button>
+                </p>
+            </form>
+
+            <?php if ($rum_retention_days > 0) : ?>
+                <p class="description">
+                    <?php
+                    printf(
+                        /* translators: %s: number of days. */
+                        esc_html__('Les mesures sont conservées pendant %s jours.', 'sitepulse'),
+                        esc_html(number_format_i18n($rum_retention_days))
+                    );
+                    ?>
+                </p>
+            <?php endif; ?>
+        </div>
 
         <div class="speed-history-wrapper">
             <h2><?php esc_html_e('Historique des temps de réponse', 'sitepulse'); ?></h2>

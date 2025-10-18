@@ -103,4 +103,14 @@ return [
     SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS => [
         'value' => SITEPULSE_DEFAULT_HTTP_MONITOR_RETENTION_DAYS,
     ],
+    SITEPULSE_OPTION_RUM_SETTINGS => [
+        'value' => [
+            'enabled'          => false,
+            'token'            => '',
+            'consent_required' => false,
+        ],
+    ],
+    SITEPULSE_OPTION_RUM_RETENTION_DAYS => [
+        'value' => SITEPULSE_DEFAULT_RUM_RETENTION_DAYS,
+    ],
 ];
