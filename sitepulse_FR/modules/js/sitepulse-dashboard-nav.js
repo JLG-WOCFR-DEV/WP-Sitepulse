@@ -24,19 +24,20 @@
             window.setTimeout(callback, 16);
         };
 
-    var STORAGE_KEY = 'sitepulseModuleNavSearch';
+    var SEARCH_STORAGE_KEY = 'sitepulseModuleNavSearch';
+    var CATEGORY_STORAGE_KEY = 'sitepulseModuleNavCategory';
 
     var isString = function (value) {
         return typeof value === 'string' || value instanceof String;
     };
 
-    var readStorage = function () {
+    var readFromStorage = function (key) {
         if (!('localStorage' in window)) {
             return '';
         }
 
         try {
-            var stored = window.localStorage.getItem(STORAGE_KEY);
+            var stored = window.localStorage.getItem(key);
 
             return isString(stored) ? stored : '';
         } catch (error) {
@@ -44,20 +45,36 @@
         }
     };
 
-    var writeStorage = function (value) {
+    var writeToStorage = function (key, value) {
         if (!('localStorage' in window)) {
             return;
         }
 
         try {
             if (value) {
-                window.localStorage.setItem(STORAGE_KEY, value);
+                window.localStorage.setItem(key, value);
             } else {
-                window.localStorage.removeItem(STORAGE_KEY);
+                window.localStorage.removeItem(key);
             }
         } catch (error) {
             // Gracefully ignore storage issues (quota, private mode, etc.).
         }
+    };
+
+    var readSearchStorage = function () {
+        return readFromStorage(SEARCH_STORAGE_KEY);
+    };
+
+    var writeSearchStorage = function (value) {
+        writeToStorage(SEARCH_STORAGE_KEY, value);
+    };
+
+    var readCategoryStorage = function () {
+        return readFromStorage(CATEGORY_STORAGE_KEY);
+    };
+
+    var writeCategoryStorage = function (value) {
+        writeToStorage(CATEGORY_STORAGE_KEY, value);
     };
 
     var sprintfFn = null;
@@ -113,6 +130,45 @@
         var clearButton = nav.querySelector('[data-sitepulse-nav-clear]');
         var resultsDisplay = nav.querySelector('[data-sitepulse-nav-results]');
         var emptyMessage = nav.querySelector('[data-sitepulse-nav-empty]');
+        var categoryButtons = nav.querySelectorAll('[data-sitepulse-nav-category]');
+        var currentQuery = '';
+        var activeCategory = 'all';
+
+        var normalizeCategory = function (value) {
+            if (!isString(value) || value === '') {
+                return 'all';
+            }
+
+            return value;
+        };
+
+        var escapeAttributeValue = function (value) {
+            if (!isString(value)) {
+                return '';
+            }
+
+            return value.replace(/"/g, '\"');
+        };
+
+        var getCategoryButton = function (slug) {
+            var normalized = normalizeCategory(slug);
+
+            return nav.querySelector('[data-sitepulse-nav-category="' + escapeAttributeValue(normalized) + '"]');
+        };
+
+        var updateCategoryButtons = function () {
+            if (!categoryButtons || categoryButtons.length === 0) {
+                return;
+            }
+
+            Array.prototype.forEach.call(categoryButtons, function (button) {
+                var buttonCategory = button.getAttribute('data-sitepulse-nav-category') || 'all';
+                var isActive = buttonCategory === activeCategory;
+
+                button.classList.toggle('is-active', isActive);
+                button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+            });
+        };
 
         var getItems = function () {
             return nav.querySelectorAll('[data-sitepulse-nav-item]');
@@ -198,14 +254,18 @@
             });
         };
 
-        var filterItems = function (query) {
-            var value = isString(query) ? query.trim().toLowerCase() : '';
+        var filterItems = function () {
+            var value = isString(currentQuery) ? currentQuery.trim().toLowerCase() : '';
+            var normalizedCategory = isString(activeCategory) && activeCategory !== 'all' ? activeCategory : '';
             var items = getItems();
             var matches = 0;
 
             Array.prototype.forEach.call(items, function (item) {
                 var filterText = item.getAttribute('data-filter-text') || '';
-                var isMatch = value === '' || filterText.indexOf(value) !== -1;
+                var itemCategory = item.getAttribute('data-category') || '';
+                var matchesCategory = !normalizedCategory || itemCategory === normalizedCategory;
+                var matchesQuery = value === '' || filterText.indexOf(value) !== -1;
+                var isMatch = matchesCategory && matchesQuery;
                 var link = item.querySelector('a');
 
                 if (isMatch) {
@@ -231,6 +291,8 @@
 
             Array.prototype.forEach.call(groups, function (group) {
                 var groupItems = group.querySelectorAll('[data-sitepulse-nav-item]');
+                var groupCategory = group.getAttribute('data-sitepulse-nav-group') || '';
+                var categoryAllowsGroup = !normalizedCategory || groupCategory === normalizedCategory;
                 var hasVisible = false;
 
                 Array.prototype.forEach.call(groupItems, function (groupItem) {
@@ -239,7 +301,7 @@
                     }
                 });
 
-                group.hidden = !hasVisible;
+                group.hidden = !categoryAllowsGroup || !hasVisible;
             });
 
             if (emptyMessage) {
@@ -249,6 +311,8 @@
             }
 
             nav.classList.toggle('sitepulse-module-nav--filtering', value !== '');
+            nav.classList.toggle('sitepulse-module-nav--category-filtering', normalizedCategory !== '');
+            nav.setAttribute('data-sitepulse-nav-active-category', normalizedCategory || 'all');
             updateResultsDisplay(matches);
             toggleClearButton(value);
 
@@ -266,6 +330,74 @@
             raf(updateButtons);
         };
 
+        var setActiveCategory = function (slug, options) {
+            if (!categoryButtons || categoryButtons.length === 0) {
+                activeCategory = 'all';
+                nav.setAttribute('data-sitepulse-nav-active-category', 'all');
+                return;
+            }
+
+            var normalized = normalizeCategory(slug);
+
+            if (!getCategoryButton(normalized)) {
+                normalized = 'all';
+            }
+
+            var suppressFilter = options && options.suppressFilter;
+            var skipStorage = options && options.skipStorage;
+
+            if (activeCategory === normalized) {
+                if (!suppressFilter) {
+                    filterItems();
+                }
+
+                return;
+            }
+
+            activeCategory = normalized;
+            nav.setAttribute('data-sitepulse-nav-active-category', activeCategory);
+            updateCategoryButtons();
+
+            if (!skipStorage) {
+                writeCategoryStorage(activeCategory);
+            }
+
+            if (!suppressFilter) {
+                filterItems();
+            }
+        };
+
+        var initializeCategory = function () {
+            if (!categoryButtons || categoryButtons.length === 0) {
+                activeCategory = 'all';
+                nav.setAttribute('data-sitepulse-nav-active-category', 'all');
+                return;
+            }
+
+            var defaultCategory = nav.getAttribute('data-sitepulse-nav-default-category') || 'all';
+            var storedCategory = readCategoryStorage();
+            var candidate = storedCategory && getCategoryButton(storedCategory) ? storedCategory : defaultCategory;
+
+            if (!getCategoryButton(candidate)) {
+                candidate = 'all';
+            }
+
+            setActiveCategory(candidate, { skipStorage: true, suppressFilter: true });
+        };
+
+        if (categoryButtons && categoryButtons.length > 0) {
+            Array.prototype.forEach.call(categoryButtons, function (button) {
+                button.addEventListener('click', function () {
+                    var slug = button.getAttribute('data-sitepulse-nav-category') || 'all';
+                    setActiveCategory(slug);
+                });
+            });
+        } else {
+            nav.setAttribute('data-sitepulse-nav-active-category', 'all');
+        }
+
+        initializeCategory();
+
         prevButton.addEventListener('click', function () {
             scrollByAmount(-1);
         });
@@ -279,44 +411,48 @@
 
         if (searchInput) {
             var applyStoredSearch = function () {
-                var storedValue = readStorage();
+                var storedValue = readSearchStorage();
 
                 if (storedValue) {
                     searchInput.value = storedValue;
-                    filterItems(storedValue);
                 } else {
-                    filterItems('');
+                    searchInput.value = '';
                 }
 
-                toggleClearButton(searchInput.value || '');
+                currentQuery = searchInput.value || '';
+                filterItems();
+                toggleClearButton(currentQuery);
             };
 
             searchInput.addEventListener('input', function () {
-                var currentValue = searchInput.value || '';
-                writeStorage(currentValue);
-                filterItems(currentValue);
+                currentQuery = searchInput.value || '';
+                writeSearchStorage(currentQuery);
+                filterItems();
             });
 
             searchInput.addEventListener('keydown', function (event) {
                 if (event.key === 'Escape') {
                     searchInput.value = '';
-                    writeStorage('');
-                    filterItems('');
-                    toggleClearButton('');
+                    currentQuery = '';
+                    writeSearchStorage('');
+                    filterItems();
+                    toggleClearButton(currentQuery);
                 }
             });
 
             applyStoredSearch();
         } else {
-            filterItems('');
+            filterItems();
+            toggleClearButton(currentQuery);
         }
 
         if (clearButton && searchInput) {
             clearButton.addEventListener('click', function () {
                 searchInput.value = '';
-                writeStorage('');
-                filterItems('');
-                toggleClearButton('');
+                currentQuery = '';
+                writeSearchStorage('');
+                filterItems();
+                toggleClearButton(currentQuery);
                 searchInput.focus();
             });
         }

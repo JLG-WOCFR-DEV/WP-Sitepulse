@@ -9,6 +9,7 @@
     var manualProfile = settings.manualProfile || null;
     var manualThresholds = {};
     var activeSourceCatalog = {};
+    var profilerSettings = settings.profiler || null;
 
     updateProfileCatalog(settings.profiles || {});
     updateManualProfile(manualProfile || {});
@@ -839,6 +840,603 @@
         setButtonState(false, dom);
     }
 
+    function initProfilerFeature() {
+        if (!profilerSettings || !profilerSettings.enabled) {
+            return;
+        }
+
+        var button = document.getElementById('sitepulse-speed-profiler-run');
+        var statusEl = document.getElementById('sitepulse-speed-profiler-status');
+        var resultsEl = document.getElementById('sitepulse-speed-profiler-results');
+
+        if (!button || !statusEl || !resultsEl) {
+            return;
+        }
+
+        var state = {
+            button: button,
+            status: statusEl,
+            results: resultsEl,
+            hooksBody: resultsEl.querySelector('[data-role="profiler-hooks"]'),
+            queriesBody: resultsEl.querySelector('[data-role="profiler-queries"]'),
+            token: null,
+            pollTimer: null,
+            startedAt: 0,
+            running: false,
+            historyEntries: Array.isArray(profilerSettings.history)
+                ? profilerSettings.history.slice(0, 5)
+                : [],
+            historyDom: initProfilerHistory()
+        };
+
+        button.addEventListener('click', function (event) {
+            event.preventDefault();
+
+            if (state.running) {
+                return;
+            }
+
+            startProfilerSession(state);
+        });
+
+        updateProfilerHistory(state, null);
+        setProfilerButtonState(state, 'idle');
+    }
+
+    function initProfilerHistory() {
+        var container = document.getElementById('sitepulse-speed-profiler-history');
+
+        if (!container) {
+            return null;
+        }
+
+        return {
+            container: container,
+            body: container.querySelector('[data-role="profiler-history-body"]'),
+            empty: container.querySelector('[data-role="profiler-history-empty"]')
+        };
+    }
+
+    function setProfilerButtonState(state, mode) {
+        if (!state || !state.button) {
+            return;
+        }
+
+        var button = state.button;
+        var i18n = (profilerSettings && profilerSettings.i18n) || {};
+
+        if (typeof button.dataset.profilerIdleLabel === 'undefined') {
+            button.dataset.profilerIdleLabel = button.textContent || '';
+        }
+
+        if (mode === 'running') {
+            button.disabled = true;
+            button.setAttribute('aria-busy', 'true');
+            button.textContent = i18n.buttonRunning || button.dataset.profilerIdleLabel;
+        } else if (mode === 'retry') {
+            button.disabled = false;
+            button.removeAttribute('aria-busy');
+            button.textContent = i18n.buttonRetry || button.dataset.profilerIdleLabel;
+        } else {
+            button.disabled = false;
+            button.removeAttribute('aria-busy');
+            button.textContent = i18n.buttonIdle || button.dataset.profilerIdleLabel;
+        }
+    }
+
+    function updateProfilerStatus(state, message, tone) {
+        if (!state || !state.status) {
+            return;
+        }
+
+        var statusEl = state.status;
+        statusEl.textContent = message || '';
+        statusEl.className = 'sitepulse-speed-profiler__status';
+
+        if (tone) {
+            statusEl.classList.add('is-' + tone);
+        }
+    }
+
+    function clearProfilerTimer(state) {
+        if (!state || !state.pollTimer) {
+            return;
+        }
+
+        window.clearTimeout(state.pollTimer);
+        state.pollTimer = null;
+    }
+
+    function startProfilerSession(state) {
+        if (!profilerSettings || !profilerSettings.startAction || !profilerSettings.fetchAction) {
+            handleProfilerFailure(state, 'statusFailed');
+            return;
+        }
+
+        var ajaxUrl = settings.ajaxUrl;
+
+        if (!ajaxUrl || !profilerSettings.nonce) {
+            handleProfilerFailure(state, 'statusFailed');
+            return;
+        }
+
+        state.running = true;
+        state.startedAt = Date.now();
+        state.token = null;
+        state.results.hidden = true;
+
+        if (state.hooksBody) {
+            state.hooksBody.innerHTML = '';
+        }
+
+        if (state.queriesBody) {
+            state.queriesBody.innerHTML = '';
+        }
+
+        setProfilerButtonState(state, 'running');
+        updateProfilerStatus(state, (profilerSettings.i18n && profilerSettings.i18n.statusTrigger) || '', 'info');
+
+        var formData = new window.FormData();
+        formData.append('action', profilerSettings.startAction);
+        formData.append('nonce', profilerSettings.nonce);
+        formData.append('target', window.location.href);
+
+        fetch(ajaxUrl, {
+            method: 'POST',
+            credentials: 'same-origin',
+            body: formData
+        })
+            .then(function (response) {
+                return response.json()
+                    .catch(function () {
+                        return {};
+                    })
+                    .then(function (payload) {
+                        return { ok: response.ok, payload: payload };
+                    });
+            })
+            .then(function (result) {
+                if (!result || !result.payload || !result.payload.success) {
+                    handleProfilerFailure(state, 'statusFailed');
+                    return;
+                }
+
+                var data = result.payload.data || {};
+
+                if (!data.token || !data.url) {
+                    handleProfilerFailure(state, 'statusFailed');
+                    return;
+                }
+
+                state.token = data.token;
+                triggerProfilerRequest(state, data.url);
+            })
+            .catch(function () {
+                handleProfilerFailure(state, 'statusFailed');
+            });
+    }
+
+    function triggerProfilerRequest(state, url) {
+        if (!url) {
+            handleProfilerFailure(state, 'statusFailed');
+            return;
+        }
+
+        updateProfilerStatus(state, (profilerSettings.i18n && profilerSettings.i18n.statusPending) || '', 'info');
+
+        fetch(url, {
+            method: 'GET',
+            credentials: 'same-origin',
+            cache: 'no-store'
+        })
+            .catch(function () {
+                // Even if the request fails, attempt to poll once in case the trace succeeded.
+            })
+            .then(function () {
+                scheduleProfilerPoll(state, profilerSettings.pollInterval || 2000);
+            });
+    }
+
+    function scheduleProfilerPoll(state, delay) {
+        if (!state) {
+            return;
+        }
+
+        clearProfilerTimer(state);
+
+        state.pollTimer = window.setTimeout(function () {
+            pollProfilerResult(state);
+        }, delay);
+    }
+
+    function pollProfilerResult(state) {
+        if (!state.running || !state.token) {
+            return;
+        }
+
+        var ajaxUrl = settings.ajaxUrl;
+
+        if (!ajaxUrl || !profilerSettings || !profilerSettings.fetchAction) {
+            handleProfilerFailure(state, 'statusFailed');
+            return;
+        }
+
+        var timeout = profilerSettings.timeout || 30000;
+
+        if (Date.now() - state.startedAt > timeout) {
+            handleProfilerFailure(state, 'statusFailed');
+            return;
+        }
+
+        var formData = new window.FormData();
+        formData.append('action', profilerSettings.fetchAction);
+        formData.append('nonce', profilerSettings.nonce);
+        formData.append('token', state.token);
+
+        fetch(ajaxUrl, {
+            method: 'POST',
+            credentials: 'same-origin',
+            body: formData
+        })
+            .then(function (response) {
+                return response.json()
+                    .catch(function () {
+                        return {};
+                    })
+                    .then(function (payload) {
+                        return { ok: response.ok, payload: payload };
+                    });
+            })
+            .then(function (result) {
+                if (!result || !result.payload || !result.payload.success) {
+                    handleProfilerFailure(state, 'statusFailed');
+                    return;
+                }
+
+                var data = result.payload.data || {};
+                var status = data.status || 'pending';
+
+                if (status === 'pending') {
+                    scheduleProfilerPoll(state, profilerSettings.pollInterval || 2000);
+                    return;
+                }
+
+                if (status === 'failed') {
+                    handleProfilerFailure(state, 'statusFailed');
+                    return;
+                }
+
+                clearProfilerTimer(state);
+                state.running = false;
+                state.token = null;
+
+                renderProfilerResults(state, data);
+            })
+            .catch(function () {
+                handleProfilerFailure(state, 'statusFailed');
+            });
+    }
+
+    function handleProfilerFailure(state, messageKey) {
+        clearProfilerTimer(state);
+
+        if (state) {
+            state.running = false;
+            state.token = null;
+
+            if (state.results) {
+                state.results.hidden = true;
+            }
+        }
+
+        var i18n = (profilerSettings && profilerSettings.i18n) || {};
+        var message = messageKey && i18n[messageKey] ? i18n[messageKey] : (i18n.statusFailed || '');
+
+        updateProfilerStatus(state, message, 'error');
+        setProfilerButtonState(state, 'retry');
+    }
+
+    function renderProfilerResults(state, payload) {
+        if (!state || !state.results) {
+            return;
+        }
+
+        var hooks = Array.isArray(payload.hooks) ? payload.hooks : [];
+        var queries = Array.isArray(payload.queries) ? payload.queries : [];
+        var i18n = (profilerSettings && profilerSettings.i18n) || {};
+
+        state.results.hidden = false;
+
+        renderProfilerRows(state.hooksBody, hooks, 5, i18n.noHooks || '', function (entry) {
+            return [
+                entry.hook || '',
+                formatNumber(entry.count || 0, 0),
+                formatNumber(entry.total_ms || 0, 2),
+                formatNumber(entry.avg_ms || 0, 2),
+                formatNumber(entry.max_ms || 0, 2)
+            ];
+        });
+
+        renderProfilerRows(state.queriesBody, queries, 5, i18n.noQueries || '', function (entry) {
+            var callers = Array.isArray(entry.callers) ? entry.callers.slice(0, 5) : [];
+
+            return [
+                entry.sql || '',
+                formatNumber(entry.count || 0, 0),
+                formatNumber(entry.total_ms || 0, 2),
+                formatNumber(entry.avg_ms || 0, 2),
+                callers.join(', ')
+            ];
+        });
+
+        var summary = payload.summary || {};
+        var pieces = [];
+
+        if (typeof summary.duration_ms === 'number' && isFinite(summary.duration_ms)) {
+            pieces.push(formatNumber(summary.duration_ms, 2) + ' ms');
+        }
+
+        if (typeof summary.hook_count === 'number' && isFinite(summary.hook_count)) {
+            pieces.push(formatNumber(summary.hook_count, 0) + ' hooks');
+        }
+
+        if (typeof summary.query_count === 'number' && isFinite(summary.query_count)) {
+            pieces.push(formatNumber(summary.query_count, 0) + ' SQL');
+        }
+
+        var statusMessage = i18n.statusCompleted || '';
+
+        if (pieces.length) {
+            statusMessage += statusMessage ? ' (' + pieces.join(' · ') + ')' : pieces.join(' · ');
+        }
+
+        updateProfilerStatus(state, statusMessage, 'success');
+        setProfilerButtonState(state, 'retry');
+        updateProfilerHistory(state, payload.history || null);
+    }
+
+    function normalizeHistoryEntry(entry) {
+        if (!entry || typeof entry !== 'object') {
+            return null;
+        }
+
+        var normalized = {
+            id: 0,
+            method: '',
+            url: '',
+            duration_ms: 0,
+            hook_count: 0,
+            query_count: 0,
+            display_date: '',
+            recorded_at: '',
+            timestamp: 0
+        };
+
+        if (typeof entry.id === 'number') {
+            normalized.id = entry.id;
+        } else if (typeof entry.id === 'string') {
+            var parsedId = parseInt(entry.id, 10);
+            if (!isNaN(parsedId)) {
+                normalized.id = parsedId;
+            }
+        }
+
+        normalized.method = typeof entry.method === 'string' ? entry.method : '';
+        normalized.url = typeof entry.url === 'string' ? entry.url : '';
+
+        if (typeof entry.duration_ms === 'number' && isFinite(entry.duration_ms)) {
+            normalized.duration_ms = entry.duration_ms;
+        } else if (typeof entry.duration_ms === 'string') {
+            var parsedDuration = parseFloat(entry.duration_ms);
+            if (!isNaN(parsedDuration)) {
+                normalized.duration_ms = parsedDuration;
+            }
+        }
+
+        if (typeof entry.hook_count === 'number' && isFinite(entry.hook_count)) {
+            normalized.hook_count = entry.hook_count;
+        } else if (typeof entry.hook_count === 'string') {
+            var parsedHook = parseInt(entry.hook_count, 10);
+            if (!isNaN(parsedHook)) {
+                normalized.hook_count = parsedHook;
+            }
+        }
+
+        if (typeof entry.query_count === 'number' && isFinite(entry.query_count)) {
+            normalized.query_count = entry.query_count;
+        } else if (typeof entry.query_count === 'string') {
+            var parsedQuery = parseInt(entry.query_count, 10);
+            if (!isNaN(parsedQuery)) {
+                normalized.query_count = parsedQuery;
+            }
+        }
+
+        normalized.display_date = typeof entry.display_date === 'string' && entry.display_date !== ''
+            ? entry.display_date
+            : (typeof entry.recorded_at === 'string' ? entry.recorded_at : '');
+
+        normalized.recorded_at = typeof entry.recorded_at === 'string' ? entry.recorded_at : normalized.display_date;
+
+        if (typeof entry.timestamp === 'number' && isFinite(entry.timestamp)) {
+            normalized.timestamp = entry.timestamp;
+        } else if (typeof entry.timestamp === 'string') {
+            var parsedTs = parseInt(entry.timestamp, 10);
+            if (!isNaN(parsedTs)) {
+                normalized.timestamp = parsedTs;
+            }
+        }
+
+        return normalized;
+    }
+
+    function formatHistoryLabel(entry) {
+        var label = '';
+
+        if (entry.method) {
+            label += entry.method + ' ';
+        }
+
+        if (entry.url) {
+            label += entry.url;
+        }
+
+        return truncateText(label.trim(), 120);
+    }
+
+    function truncateText(value, maxLength) {
+        if (typeof value !== 'string') {
+            return '';
+        }
+
+        if (value.length <= maxLength) {
+            return value;
+        }
+
+        return value.slice(0, Math.max(0, maxLength - 1)) + '…';
+    }
+
+    function renderProfilerHistory(dom, entries) {
+        if (!dom || !dom.body) {
+            return;
+        }
+
+        while (dom.body.firstChild) {
+            dom.body.removeChild(dom.body.firstChild);
+        }
+
+        var list = Array.isArray(entries) ? entries.slice(0, 5) : [];
+
+        if (!list.length) {
+            if (dom.empty) {
+                dom.empty.hidden = false;
+            }
+
+            return;
+        }
+
+        if (dom.empty) {
+            dom.empty.hidden = true;
+        }
+
+        var fragment = document.createDocumentFragment();
+
+        list.forEach(function (entry) {
+            var row = document.createElement('tr');
+
+            var dateCell = document.createElement('td');
+            dateCell.textContent = entry.display_date || entry.recorded_at || '';
+            row.appendChild(dateCell);
+
+            var durationCell = document.createElement('td');
+            durationCell.textContent = formatNumber(entry.duration_ms || 0, 2);
+            row.appendChild(durationCell);
+
+            var hookCell = document.createElement('td');
+            hookCell.textContent = formatNumber(entry.hook_count || 0, 0);
+            row.appendChild(hookCell);
+
+            var queryCell = document.createElement('td');
+            queryCell.textContent = formatNumber(entry.query_count || 0, 0);
+            row.appendChild(queryCell);
+
+            var urlCell = document.createElement('td');
+            urlCell.textContent = formatHistoryLabel(entry);
+            row.appendChild(urlCell);
+
+            fragment.appendChild(row);
+        });
+
+        dom.body.appendChild(fragment);
+    }
+
+    function updateProfilerHistory(state, entry) {
+        if (!state) {
+            return;
+        }
+
+        if (!Array.isArray(state.historyEntries)) {
+            state.historyEntries = [];
+        }
+
+        if (entry) {
+            var normalized = normalizeHistoryEntry(entry);
+
+            if (normalized) {
+                state.historyEntries = [normalized].concat(state.historyEntries.filter(function (item) {
+                    return !item || item.id !== normalized.id;
+                }));
+            }
+        }
+
+        state.historyEntries = state.historyEntries.slice(0, 5);
+
+        if (state.historyDom) {
+            renderProfilerHistory(state.historyDom, state.historyEntries);
+        }
+    }
+
+    function renderProfilerRows(body, items, columns, emptyMessage, mapRow) {
+        if (!body) {
+            return;
+        }
+
+        body.innerHTML = '';
+
+        if (!Array.isArray(items) || items.length === 0) {
+            var emptyRow = document.createElement('tr');
+            var emptyCell = document.createElement('td');
+            emptyCell.colSpan = columns;
+            emptyCell.textContent = emptyMessage || '';
+            emptyRow.appendChild(emptyCell);
+            body.appendChild(emptyRow);
+            return;
+        }
+
+        items.forEach(function (item) {
+            var values = mapRow(item) || [];
+            var row = document.createElement('tr');
+
+            values.forEach(function (value) {
+                var cell = document.createElement('td');
+                var text = value;
+
+                if (text === null || typeof text === 'undefined') {
+                    text = '';
+                }
+
+                cell.textContent = typeof text === 'string' ? text : String(text);
+                row.appendChild(cell);
+            });
+
+            body.appendChild(row);
+        });
+    }
+
+    function formatNumber(value, decimals) {
+        var number = Number(value);
+
+        if (!isFinite(number)) {
+            number = 0;
+        }
+
+        var options = {};
+
+        if (typeof decimals === 'number') {
+            options.minimumFractionDigits = decimals;
+            options.maximumFractionDigits = decimals;
+        }
+
+        try {
+            return number.toLocaleString(undefined, options);
+        } catch (error) {
+            if (typeof decimals === 'number') {
+                return number.toFixed(decimals);
+            }
+
+            return String(number);
+        }
+    }
+
     function init() {
         var dom = {
             button: document.getElementById('sitepulse-speed-rescan'),
@@ -854,6 +1452,8 @@
         };
 
         applySource(currentSourceKey, dom);
+
+        initProfilerFeature();
 
         if (dom.sourceSelect) {
             dom.sourceSelect.value = currentSourceKey;

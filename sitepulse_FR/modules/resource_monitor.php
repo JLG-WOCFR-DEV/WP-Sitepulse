@@ -37,6 +37,14 @@ if (!defined('SITEPULSE_ACTION_RESOURCE_MONITOR_REPORTS')) {
     define('SITEPULSE_ACTION_RESOURCE_MONITOR_REPORTS', 'sitepulse_resource_monitor_generate_reports');
 }
 
+$http_monitor_path = __DIR__ . '/resource-monitor/http-monitor.php';
+
+if (file_exists($http_monitor_path)) {
+    require_once $http_monitor_path;
+}
+
+add_action('plugins_loaded', 'sitepulse_http_monitor_bootstrap', 12);
+
 add_action('admin_menu', function() {
     add_submenu_page(
         'sitepulse-dashboard',
@@ -54,6 +62,7 @@ add_action('plugins_loaded', 'sitepulse_resource_monitor_bootstrap_storage', 9);
 add_action('init', 'sitepulse_resource_monitor_schedule_report_generation');
 add_action(SITEPULSE_ACTION_RESOURCE_MONITOR_REPORTS, 'sitepulse_resource_monitor_run_scheduled_reports');
 add_action('admin_post_sitepulse_resource_monitor_trigger_report', 'sitepulse_resource_monitor_handle_report_trigger');
+add_action('admin_post_sitepulse_save_http_monitor_settings', 'sitepulse_http_monitor_handle_settings');
 
 /**
  * Ensures the resource monitor datastore is ready.
@@ -62,6 +71,9 @@ add_action('admin_post_sitepulse_resource_monitor_trigger_report', 'sitepulse_re
  */
 function sitepulse_resource_monitor_bootstrap_storage() {
     sitepulse_resource_monitor_maybe_upgrade_schema();
+    if (function_exists('sitepulse_http_monitor_bootstrap_storage')) {
+        sitepulse_http_monitor_bootstrap_storage();
+    }
 }
 
 /**
@@ -515,6 +527,29 @@ function sitepulse_resource_monitor_register_rest_routes() {
                     'type'        => 'string',
                     'required'    => false,
                     'default'     => 'raw',
+                ],
+            ],
+        ]
+    );
+
+    register_rest_route(
+        'sitepulse/v1',
+        '/resources/http',
+        [
+            'methods'             => defined('WP_REST_Server::READABLE') ? WP_REST_Server::READABLE : 'GET',
+            'callback'            => 'sitepulse_http_monitor_rest_stats',
+            'permission_callback' => 'sitepulse_resource_monitor_rest_permission_check',
+            'args'                => [
+                'since' => [
+                    'description' => __('Filtrer les appels depuis un horodatage ou une date ISO 8601.', 'sitepulse'),
+                    'type'        => 'string',
+                    'required'    => false,
+                ],
+                'limit' => [
+                    'description' => __('Nombre maximum de services agrégés à retourner.', 'sitepulse'),
+                    'type'        => 'integer',
+                    'required'    => false,
+                    'default'     => 25,
                 ],
             ],
         ]
@@ -2780,6 +2815,17 @@ function sitepulse_resource_monitor_page() {
         }
     }
 
+    if (isset($_GET['sitepulse_http_monitor'])) {
+        $http_status = sanitize_key((string) $_GET['sitepulse_http_monitor']);
+
+        if ($http_status === 'updated') {
+            $resource_monitor_notices[] = [
+                'type'    => 'success',
+                'message' => esc_html__('Les seuils du moniteur HTTP ont été enregistrés.', 'sitepulse'),
+            ];
+        }
+    }
+
     $snapshot = sitepulse_resource_monitor_get_snapshot();
 
     $history_result = sitepulse_resource_monitor_get_history([
@@ -2831,7 +2877,41 @@ function sitepulse_resource_monitor_page() {
 
     $rest_history_endpoint = function_exists('rest_url') ? rest_url('sitepulse/v1/resources/history') : '';
     $rest_aggregates_endpoint = function_exists('rest_url') ? rest_url('sitepulse/v1/resources/aggregates') : '';
+    $rest_http_endpoint = function_exists('rest_url') ? rest_url('sitepulse/v1/resources/http') : '';
     $rest_nonce = wp_create_nonce('wp_rest');
+
+    $http_stats = function_exists('sitepulse_http_monitor_get_stats')
+        ? sitepulse_http_monitor_get_stats([
+            'since' => (int) current_time('timestamp', true) - DAY_IN_SECONDS,
+            'limit' => 25,
+        ])
+        : [
+            'summary'    => [],
+            'services'   => [],
+            'samples'    => [],
+            'thresholds' => [],
+        ];
+
+    $http_thresholds = function_exists('sitepulse_http_monitor_get_threshold_configuration')
+        ? sitepulse_http_monitor_get_threshold_configuration()
+        : ['latency' => 0, 'errorRate' => 0];
+
+    $http_retention_days = (int) get_option(
+        SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS,
+        defined('SITEPULSE_DEFAULT_HTTP_MONITOR_RETENTION_DAYS') ? (int) SITEPULSE_DEFAULT_HTTP_MONITOR_RETENTION_DAYS : 14
+    );
+
+    if ($http_retention_days < 1) {
+        $http_retention_days = defined('SITEPULSE_DEFAULT_HTTP_MONITOR_RETENTION_DAYS')
+            ? (int) SITEPULSE_DEFAULT_HTTP_MONITOR_RETENTION_DAYS
+            : 14;
+    }
+
+    $http_latency_value = isset($http_thresholds['latency']) ? (int) $http_thresholds['latency'] : 0;
+    $http_error_value = isset($http_thresholds['errorRate']) ? (int) $http_thresholds['errorRate'] : 0;
+    $http_settings_nonce = defined('SITEPULSE_NONCE_ACTION_HTTP_MONITOR_SETTINGS')
+        ? SITEPULSE_NONCE_ACTION_HTTP_MONITOR_SETTINGS
+        : 'sitepulse_http_monitor_settings';
 
     $last_report_raw = get_transient(SITEPULSE_TRANSIENT_RESOURCE_MONITOR_LAST_REPORT);
     $last_report_for_js = null;
@@ -2872,6 +2952,7 @@ function sitepulse_resource_monitor_page() {
         'rest'           => [
             'history'    => esc_url_raw($rest_history_endpoint),
             'aggregates' => esc_url_raw($rest_aggregates_endpoint),
+            'http'       => esc_url_raw($rest_http_endpoint),
             'nonce'      => $rest_nonce,
         ],
         'granularity'    => [
@@ -2882,6 +2963,11 @@ function sitepulse_resource_monitor_page() {
             'metrics'      => $aggregated_metrics,
             'summary'      => $history_summary,
             'summaryText'  => $history_summary_text,
+        ],
+        'httpMonitor'    => [
+            'initial'       => $http_stats,
+            'windowSeconds' => DAY_IN_SECONDS,
+            'limit'         => 25,
         ],
         'reporting'      => [
             'lastReport' => $last_report_for_js,
@@ -2915,6 +3001,24 @@ function sitepulse_resource_monitor_page() {
             'trendFlat'         => esc_html__('Stable', 'sitepulse'),
             'reportQueued'      => esc_html__('Le rapport a été planifié et sera envoyé sous peu.', 'sitepulse'),
             'reportExecuted'    => esc_html__('Le rapport a été généré avec succès.', 'sitepulse'),
+            'httpMonitorTitle'  => esc_html__('Services externes', 'sitepulse'),
+            'httpMonitorSummary'=> esc_html__('Synthèse des appels sortants (24 h)', 'sitepulse'),
+            'httpMonitorEmpty'  => esc_html__('Aucun appel externe enregistré sur la période.', 'sitepulse'),
+            'httpMonitorLatency'=> esc_html__('Latence (moy./max/p95)', 'sitepulse'),
+            'httpMonitorErrors' => esc_html__('Taux d’erreurs', 'sitepulse'),
+            'httpMonitorRequests' => esc_html__('Requêtes', 'sitepulse'),
+            'httpMonitorLastSeen'=> esc_html__('Dernière occurrence', 'sitepulse'),
+            'httpMonitorSamples'=> esc_html__('Derniers appels', 'sitepulse'),
+            'httpMonitorStatus' => esc_html__('Statut', 'sitepulse'),
+            'httpMonitorDuration' => esc_html__('Durée', 'sitepulse'),
+            'httpMonitorMethod' => esc_html__('Méthode', 'sitepulse'),
+            'httpMonitorHost'   => esc_html__('Hôte', 'sitepulse'),
+            'httpMonitorPath'   => esc_html__('Chemin', 'sitepulse'),
+            'httpMonitorThresholdLatency' => esc_html__('Seuil latence (p95)', 'sitepulse'),
+            'httpMonitorThresholdErrors'  => esc_html__('Seuil taux d’erreurs', 'sitepulse'),
+            'httpMonitorRefresh' => esc_html__('Actualiser les statistiques', 'sitepulse'),
+            'httpMonitorLoading' => esc_html__('Récupération des métriques des appels externes…', 'sitepulse'),
+            'httpMonitorError'   => esc_html__('Impossible de récupérer les métriques des appels externes.', 'sitepulse'),
         ],
         'refreshFeedback' => $refresh_feedback,
         'refreshStatusId' => 'sitepulse-resource-refresh-status',
@@ -3163,6 +3267,68 @@ function sitepulse_resource_monitor_page() {
                 </button>
             </form>
         </div>
+        <section class="sitepulse-http-monitor" data-http-monitor>
+            <div class="sitepulse-http-monitor-header">
+                <h2><?php esc_html_e('Services externes', 'sitepulse'); ?></h2>
+                <button type="button" class="button button-secondary" data-http-monitor-refresh>
+                    <?php esc_html_e('Actualiser les statistiques', 'sitepulse'); ?>
+                </button>
+            </div>
+            <p class="description" data-http-monitor-description></p>
+            <div class="sitepulse-http-monitor-thresholds">
+                <span data-http-monitor-threshold-latency></span>
+                <span data-http-monitor-threshold-errors></span>
+            </div>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="sitepulse-http-monitor-settings">
+                <?php wp_nonce_field($http_settings_nonce); ?>
+                <input type="hidden" name="action" value="sitepulse_save_http_monitor_settings">
+                <div class="sitepulse-http-monitor-fields">
+                    <label>
+                        <span><?php esc_html_e('Seuil latence p95 (ms)', 'sitepulse'); ?></span>
+                        <input type="number" name="sitepulse_http_latency_threshold" min="0" step="10" value="<?php echo esc_attr($http_latency_value); ?>" />
+                        <span class="description"><?php esc_html_e('Définissez 0 pour désactiver les alertes sur la latence.', 'sitepulse'); ?></span>
+                    </label>
+                    <label>
+                        <span><?php esc_html_e('Seuil taux d’erreurs (%)', 'sitepulse'); ?></span>
+                        <input type="number" name="sitepulse_http_error_rate" min="0" max="100" step="1" value="<?php echo esc_attr($http_error_value); ?>" />
+                        <span class="description"><?php esc_html_e('Pourcentage maximal d’appels en erreur avant déclenchement d’une alerte.', 'sitepulse'); ?></span>
+                    </label>
+                    <label>
+                        <span><?php esc_html_e('Rétention des données (jours)', 'sitepulse'); ?></span>
+                        <input type="number" name="sitepulse_http_retention_days" min="1" max="365" step="1" value="<?php echo esc_attr($http_retention_days); ?>" />
+                    </label>
+                </div>
+                <p class="submit">
+                    <button type="submit" class="button button-secondary"><?php esc_html_e('Enregistrer les seuils', 'sitepulse'); ?></button>
+                </p>
+            </form>
+            <div class="sitepulse-http-monitor-summary" data-http-monitor-summary></div>
+            <div class="sitepulse-http-monitor-table-wrapper">
+                <table class="widefat striped" data-http-monitor-table>
+                    <thead>
+                        <tr>
+                            <th scope="col"><?php esc_html_e('Hôte', 'sitepulse'); ?></th>
+                            <th scope="col"><?php esc_html_e('Chemin', 'sitepulse'); ?></th>
+                            <th scope="col"><?php esc_html_e('Méthode', 'sitepulse'); ?></th>
+                            <th scope="col"><?php esc_html_e('Requêtes', 'sitepulse'); ?></th>
+                            <th scope="col"><?php esc_html_e('Latence (moy./max)', 'sitepulse'); ?></th>
+                            <th scope="col"><?php esc_html_e('Taux d’erreurs', 'sitepulse'); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody data-http-monitor-table-body>
+                        <tr data-empty>
+                            <td colspan="6"><?php esc_html_e('Aucun appel externe enregistré sur la période.', 'sitepulse'); ?></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="sitepulse-http-monitor-samples" data-http-monitor-samples>
+                <h3><?php esc_html_e('Derniers appels', 'sitepulse'); ?></h3>
+                <ul data-http-monitor-sample-list>
+                    <li data-empty><?php esc_html_e('Aucun appel externe enregistré sur la période.', 'sitepulse'); ?></li>
+                </ul>
+            </div>
+        </section>
         <div class="sitepulse-resource-history" id="sitepulse-resource-history">
             <div class="sitepulse-resource-history-header">
                 <h2><?php esc_html_e('Historique des ressources', 'sitepulse'); ?></h2>
@@ -3228,18 +3394,6 @@ function sitepulse_resource_monitor_page() {
                     <?php endif; ?>
                 </p>
             <?php endif; ?>
-        </div>
-    </div>
-    <?php
-}
-            </p>
-            <p id="sitepulse-resource-history-summary" class="sitepulse-resource-history-summary" role="status" aria-live="polite">
-                <?php echo esc_html($history_summary_text); ?>
-            </p>
-            <div class="sitepulse-resource-history-actions">
-                <a class="button button-secondary" href="<?php echo esc_url($export_csv_url); ?>"><?php esc_html_e('Exporter en CSV', 'sitepulse'); ?></a>
-                <a class="button button-secondary" href="<?php echo esc_url($export_json_url); ?>"><?php esc_html_e('Exporter en JSON', 'sitepulse'); ?></a>
-            </div>
         </div>
     </div>
     <?php
@@ -4369,6 +4523,10 @@ function sitepulse_resource_monitor_check_thresholds(array $history_entries, arr
 
     if (!empty($thresholds['disk']) && $disk_streak >= $required && $latest_disk_percent !== null) {
         sitepulse_resource_monitor_dispatch_threshold_alert('disk', $thresholds['disk'], $latest_disk_percent, $required, $snapshot);
+    }
+
+    if (function_exists('sitepulse_http_monitor_check_thresholds')) {
+        sitepulse_http_monitor_check_thresholds();
     }
 }
 

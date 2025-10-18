@@ -33,6 +33,7 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
         require_once dirname(__DIR__, 2) . '/sitepulse_FR/includes/functions.php';
         require_once dirname(__DIR__, 2) . '/sitepulse_FR/includes/admin-settings.php';
         require_once dirname(__DIR__, 2) . '/sitepulse_FR/includes/debug-notices.php';
+        require_once dirname(__DIR__, 2) . '/sitepulse_FR/modules/custom_dashboards.php';
         require_once $module;
     }
 
@@ -236,6 +237,17 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
                             ],
                             'effective_checks' => 12,
                         ],
+                        'agent_special' => [
+                            'availability'     => 100.0,
+                            'downtime'         => [
+                                'incidents'      => [],
+                                'total_duration' => 0.0,
+                            ],
+                            'maintenance'      => [
+                                'total_duration' => 0.0,
+                            ],
+                            'effective_checks' => 8,
+                        ],
                     ],
                 ],
             ],
@@ -243,6 +255,10 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
                 'agent_formula' => [
                     'label'  => '=1+1',
                     'region' => '+Region',
+                ],
+                'agent_special' => [
+                    'label'  => '@danger',
+                    'region' => '-Region',
                 ],
             ],
         ];
@@ -262,6 +278,28 @@ class Sitepulse_Uptime_Tracker_Test extends WP_UnitTestCase {
 
         $this->assertStringContainsString("'=1+1", $contents);
         $this->assertStringContainsString("'+Region", $contents);
+        $this->assertStringContainsString("'@danger", $contents);
+        $this->assertStringContainsString("'-Region", $contents);
+    }
+
+    public function test_impact_export_rows_apply_csv_helper() {
+        $impact = [
+            'overall' => 42.0,
+            'modules' => [
+                [
+                    'label'  => '=Module',
+                    'score'  => 37.5,
+                    'status' => 'status-good',
+                    'signal' => '@Alert',
+                ],
+            ],
+        ];
+
+        $rows = sitepulse_custom_dashboard_format_impact_export_rows($impact, '=Range');
+
+        $this->assertSame("'=Range", $rows[0][1]);
+        $this->assertSame("'=Module", $rows[3][0]);
+        $this->assertSame("'@Alert", $rows[3][3]);
     }
 
     public function test_normalize_log_uses_five_minute_schedule_interval() {
