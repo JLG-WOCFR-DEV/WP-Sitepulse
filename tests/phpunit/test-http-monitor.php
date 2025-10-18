@@ -148,4 +148,46 @@ class Sitepulse_Http_Monitor_Test extends WP_UnitTestCase {
         $this->assertNotEmpty($stats['samples']);
         $this->assertCount(2, $stats['samples']);
     }
+
+    public function test_handle_settings_updates_thresholds(): void {
+        $admin_id = self::factory()->user->create(['role' => 'administrator']);
+        wp_set_current_user($admin_id);
+
+        $nonce = wp_create_nonce('sitepulse_http_monitor_settings');
+
+        $_POST = [
+            'sitepulse_http_latency_threshold' => '1750',
+            'sitepulse_http_error_rate'       => '37.5',
+            'sitepulse_http_retention_days'   => '45',
+            '_wpnonce'                        => $nonce,
+        ];
+
+        $_REQUEST['_wpnonce'] = $nonce;
+
+        $captured_redirect = null;
+
+        $filter = static function ($location) use (&$captured_redirect) {
+            $captured_redirect = $location;
+            throw new Exception('redirect');
+        };
+
+        add_filter('wp_redirect', $filter);
+
+        try {
+            sitepulse_http_monitor_handle_settings();
+        } catch (Exception $exception) {
+            $this->assertSame('redirect', $exception->getMessage());
+        }
+
+        remove_filter('wp_redirect', $filter);
+
+        $this->assertSame(1750, (int) get_option(SITEPULSE_OPTION_HTTP_MONITOR_LATENCY_THRESHOLD_MS));
+        $this->assertSame(38, (int) get_option(SITEPULSE_OPTION_HTTP_MONITOR_ERROR_RATE_THRESHOLD));
+        $this->assertSame(45, (int) get_option(SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS));
+        $this->assertNotNull($captured_redirect);
+        $this->assertStringContainsString('sitepulse-resources', $captured_redirect);
+
+        $_POST = [];
+        $_REQUEST = [];
+    }
 }

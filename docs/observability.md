@@ -45,6 +45,7 @@ Chaque composant est livré par défaut avec des protections de rétention, une 
    - les erreurs récentes normalisées (timeouts, SSL, DNS) ;
    - un extrait des derniers appels avec horodatage.
 3. Les statistiques sont également exposées via l’API REST : `GET /wp-json/sitepulse/v1/resources/http`.
+4. Le formulaire intégré permet d’ajuster les seuils (latence p95, taux d’erreurs) et la rétention (jours) sans toucher aux options PHP.
 
 ### Maintenance
 

@@ -558,6 +558,51 @@ function sitepulse_http_monitor_schedule_cleanup() {
 }
 
 /**
+ * Handles updates to the HTTP monitor threshold and retention settings.
+ *
+ * @return void
+ */
+function sitepulse_http_monitor_handle_settings() {
+    if (!function_exists('sitepulse_get_capability') || !current_user_can(sitepulse_get_capability())) {
+        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour modifier cette configuration.", 'sitepulse'));
+    }
+
+    $nonce_action = defined('SITEPULSE_NONCE_ACTION_HTTP_MONITOR_SETTINGS')
+        ? SITEPULSE_NONCE_ACTION_HTTP_MONITOR_SETTINGS
+        : 'sitepulse_http_monitor_settings';
+
+    check_admin_referer($nonce_action);
+
+    $latency_raw = isset($_POST['sitepulse_http_latency_threshold'])
+        ? wp_unslash($_POST['sitepulse_http_latency_threshold'])
+        : '';
+    $error_raw = isset($_POST['sitepulse_http_error_rate'])
+        ? wp_unslash($_POST['sitepulse_http_error_rate'])
+        : '';
+    $retention_raw = isset($_POST['sitepulse_http_retention_days'])
+        ? wp_unslash($_POST['sitepulse_http_retention_days'])
+        : '';
+
+    $latency_threshold = max(0, absint($latency_raw));
+    $error_threshold = $error_raw === '' ? 0 : (float) $error_raw;
+    $error_threshold = (int) round(min(100, max(0, $error_threshold)));
+    $retention_days = absint($retention_raw);
+
+    update_option(SITEPULSE_OPTION_HTTP_MONITOR_LATENCY_THRESHOLD_MS, $latency_threshold, false);
+    update_option(SITEPULSE_OPTION_HTTP_MONITOR_ERROR_RATE_THRESHOLD, $error_threshold, false);
+
+    if ($retention_days >= 1) {
+        update_option(SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS, $retention_days, false);
+    }
+
+    $redirect = admin_url('admin.php?page=sitepulse-resources');
+    $redirect = add_query_arg('sitepulse_http_monitor', 'updated', $redirect);
+
+    wp_safe_redirect($redirect);
+    exit;
+}
+
+/**
  * Deletes HTTP monitor events older than the configured retention window.
  *
  * @return void
