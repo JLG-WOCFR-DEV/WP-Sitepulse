@@ -1,0 +1,16 @@
+{
+  "name": "wp-sitepulse-tooling",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Development tooling for WP Sitepulse",
+  "scripts": {
+    "lint:php": "vendor/bin/phpcs",
+    "lint:php:report": "vendor/bin/phpcs --report=full",
+    "analyse:php": "vendor/bin/phpstan analyse",
+    "audit:accessibility": "node scripts/run-pa11y.mjs",
+    "audit:security": "php tools/security-scan.php"
+  },
+  "devDependencies": {
+    "pa11y": "^6.2.3"
+  }
+}
