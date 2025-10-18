@@ -859,7 +859,10 @@ function sitepulse_resource_monitor_register_cron_schedule($schedules) {
 
     return $schedules;
 }
-add_filter('cron_schedules', 'sitepulse_resource_monitor_register_cron_schedule');
+function sitepulse_resource_monitor_bootstrap_cron_schedule() {
+    add_filter('cron_schedules', 'sitepulse_resource_monitor_register_cron_schedule');
+}
+add_action('init', 'sitepulse_resource_monitor_bootstrap_cron_schedule', 20);
 
 /**
  * Ensures the resource monitor cron event is scheduled when the module is active.
