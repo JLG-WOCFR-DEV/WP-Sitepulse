@@ -74,6 +74,7 @@ Chaque composant est livré par défaut avec des protections de rétention, une 
   - les pages principales / device les plus affectés ;
   - un rappel du jeton et de l’endpoint pour vos intégrations externes.
 - Les tableaux de bord personnalisés disposent d’un widget « RUM » capable de filtrer par plage (7/30/90 jours) et par device.
+- Le tableau « Resources » du dashboard récapitule également les appels externes (volume, p95, taux d’erreurs et service le plus sollicité sur 24 h).
 - Utilisez `GET /wp-json/sitepulse/v1/rum/aggregates` pour intégrer les médianes/p75/p95 dans vos outils BI.
 
 ### Personnalisation
