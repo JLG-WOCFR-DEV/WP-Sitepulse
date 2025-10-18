@@ -32,6 +32,8 @@ function sitepulse_http_monitor_init() {
         return;
     }
 
+    $initialized = true;
+
     if (!function_exists('add_action')) {
         return;
     }
@@ -41,6 +43,15 @@ function sitepulse_http_monitor_init() {
     add_action('plugins_loaded', 'sitepulse_http_monitor_bootstrap_storage', 11);
     add_action('http_api_debug', 'sitepulse_http_monitor_handle_http_api_debug', 10, 5);
     add_action('rest_api_init', 'sitepulse_http_monitor_register_rest_routes');
+}
+
+/**
+ * Proxy used to bootstrap the HTTP monitor when invoked by other modules.
+ *
+ * @return void
+ */
+function sitepulse_http_monitor_bootstrap() {
+    sitepulse_http_monitor_init();
 }
 
 /**
