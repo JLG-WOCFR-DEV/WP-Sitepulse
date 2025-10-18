@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<ruleset name="Sitepulse Coding Standards">
+    <description>WordPress Coding Standards for Sitepulse plugin.</description>
+    <file>sitepulse_FR</file>
+    <file>tests</file>
+    <exclude-pattern>vendor</exclude-pattern>
+
+    <config name="installed_paths" value="vendor/wp-coding-standards/wpcs"/>
+    <config name="basepath" value="."/>
+
+    <rule ref="WordPress-Core"/>
+    <rule ref="WordPress-Docs"/>
+    <rule ref="WordPress-Extra"/>
+
+    <rule ref="Generic.Arrays.DisallowShortArraySyntax" severity="0"/>
+
+    <rule ref="WordPress.WP.I18n" severity="6"/>
+
+    <exclude-pattern>*/vendor/*</exclude-pattern>
+    <exclude-pattern>*/node_modules/*</exclude-pattern>
+</ruleset>
