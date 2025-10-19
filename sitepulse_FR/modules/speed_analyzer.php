@@ -2745,11 +2745,12 @@ function sitepulse_speed_analyzer_page() {
         'sample_rate'     => 1.0,
         'range_days'      => 7,
     ];
+    $rum_range_days = isset($rum_settings['range_days']) ? (int) $rum_settings['range_days'] : 7;
     $rum_retention_days = function_exists('sitepulse_rum_get_retention_days') ? sitepulse_rum_get_retention_days() : 30;
     $rum_token = function_exists('sitepulse_rum_get_ingest_token') ? sitepulse_rum_get_ingest_token() : '';
     $rum_aggregates = function_exists('sitepulse_rum_calculate_aggregates')
         ? sitepulse_rum_calculate_aggregates([
-            'range_days' => isset($rum_settings['range_days']) ? (int) $rum_settings['range_days'] : 7,
+            'range_days' => $rum_range_days,
         ])
         : [
             'sample_count'   => 0,
@@ -3326,7 +3327,7 @@ function sitepulse_speed_analyzer_page() {
                     </label>
                     <label>
                         <span><?php esc_html_e('Fenêtre d’analyse (jours)', 'sitepulse'); ?></span>
-                        <input type="number" name="sitepulse_rum_range_days" min="1" max="90" step="1" value="<?php echo esc_attr((int) $rum_settings['range_days']); ?>" />
+                        <input type="number" name="sitepulse_rum_range_days" min="1" max="90" step="1" value="<?php echo esc_attr($rum_range_days); ?>" />
                     </label>
                     <label>
                         <span><?php esc_html_e('Rétention des données (jours)', 'sitepulse'); ?></span>
