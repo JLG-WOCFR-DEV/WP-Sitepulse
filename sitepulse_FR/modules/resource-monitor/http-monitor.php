@@ -604,6 +604,93 @@ function sitepulse_http_monitor_get_settings() {
         ? (array) apply_filters('sitepulse_http_monitor_settings', $settings)
         : $settings;
 }
+
+/**
+ * Handles the submission of the HTTP monitor settings form.
+ *
+ * @return void
+ */
+function sitepulse_http_monitor_handle_settings() {
+    $capability = function_exists('sitepulse_get_capability')
+        ? sitepulse_get_capability()
+        : 'manage_options';
+
+    if (!current_user_can($capability)) {
+        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour modifier cette configuration.", 'sitepulse'));
+    }
+
+    $nonce_action = defined('SITEPULSE_NONCE_ACTION_HTTP_MONITOR_SETTINGS')
+        ? SITEPULSE_NONCE_ACTION_HTTP_MONITOR_SETTINGS
+        : 'sitepulse_http_monitor_settings';
+
+    check_admin_referer($nonce_action);
+
+    $current_settings = sitepulse_http_monitor_get_settings();
+
+    $latency_input = isset($_POST['sitepulse_http_latency_threshold'])
+        ? wp_unslash($_POST['sitepulse_http_latency_threshold'])
+        : $current_settings['latency_threshold_ms'];
+
+    $latency_threshold = is_numeric($latency_input)
+        ? max(0, (int) round((float) $latency_input))
+        : (int) round((float) $current_settings['latency_threshold_ms']);
+
+    $error_rate_input = isset($_POST['sitepulse_http_error_rate'])
+        ? wp_unslash($_POST['sitepulse_http_error_rate'])
+        : $current_settings['error_rate_percent'];
+
+    $error_rate_threshold = is_numeric($error_rate_input)
+        ? (int) round((float) $error_rate_input)
+        : (int) round((float) $current_settings['error_rate_percent']);
+
+    $error_rate_threshold = max(0, min(100, $error_rate_threshold));
+
+    $retention_default = sitepulse_http_monitor_get_retention_days();
+
+    $retention_input = isset($_POST['sitepulse_http_retention_days'])
+        ? wp_unslash($_POST['sitepulse_http_retention_days'])
+        : $retention_default;
+
+    $retention_days = is_numeric($retention_input)
+        ? max(1, (int) $retention_input)
+        : $retention_default;
+
+    if (defined('SITEPULSE_OPTION_HTTP_MONITOR_SETTINGS')) {
+        update_option(
+            SITEPULSE_OPTION_HTTP_MONITOR_SETTINGS,
+            [
+                'latency_threshold_ms' => $latency_threshold,
+                'error_rate_percent'  => $error_rate_threshold,
+            ]
+        );
+    }
+
+    if (defined('SITEPULSE_OPTION_HTTP_MONITOR_LATENCY_THRESHOLD_MS')) {
+        update_option(SITEPULSE_OPTION_HTTP_MONITOR_LATENCY_THRESHOLD_MS, $latency_threshold);
+    }
+
+    if (defined('SITEPULSE_OPTION_HTTP_MONITOR_ERROR_RATE_THRESHOLD')) {
+        update_option(SITEPULSE_OPTION_HTTP_MONITOR_ERROR_RATE_THRESHOLD, $error_rate_threshold);
+    }
+
+    if (defined('SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS')) {
+        update_option(SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS, $retention_days);
+    }
+
+    if (defined('SITEPULSE_TRANSIENT_HTTP_MONITOR_AGGREGATES')) {
+        delete_transient(SITEPULSE_TRANSIENT_HTTP_MONITOR_AGGREGATES);
+    }
+
+    if (defined('SITEPULSE_TRANSIENT_HTTP_MONITOR_RECENT')) {
+        delete_transient(SITEPULSE_TRANSIENT_HTTP_MONITOR_RECENT);
+    }
+
+    $redirect_url = admin_url('admin.php?page=sitepulse-resources');
+    $redirect_url = add_query_arg('sitepulse-http-settings', 'updated', $redirect_url);
+
+    wp_safe_redirect($redirect_url);
+    exit;
+}
 /**
  * Registers REST endpoints exposing outbound HTTP statistics.
  *
