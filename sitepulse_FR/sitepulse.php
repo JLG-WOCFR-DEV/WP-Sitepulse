@@ -1360,7 +1360,7 @@ function sitepulse_register_dashboard_preview_block() {
     wp_register_style(
         'sitepulse-module-navigation',
         SITEPULSE_URL . 'modules/css/module-navigation.css',
-        [],
+        ['dashicons'],
         SITEPULSE_VERSION
     );
 
