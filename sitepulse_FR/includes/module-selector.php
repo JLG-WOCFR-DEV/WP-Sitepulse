@@ -287,7 +287,7 @@ function sitepulse_enqueue_module_navigation_assets() {
         wp_register_style(
             $style_handle,
             SITEPULSE_URL . 'modules/css/module-navigation.css',
-            ['sitepulse-dashboard-theme'],
+            ['sitepulse-dashboard-theme', 'dashicons'],
             SITEPULSE_VERSION
         );
     }
