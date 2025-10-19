@@ -3324,9 +3324,10 @@ function sitepulse_speed_analyzer_page() {
                         <input type="number" name="sitepulse_rum_sample_rate" min="1" max="100" step="1" value="<?php echo esc_attr($rum_sample_percent); ?>" />
                         <span class="description"><?php esc_html_e('Pourcentage de visites instrumentées (100 = toutes les pages).', 'sitepulse'); ?></span>
                     </label>
+                    <?php $rum_range_days = isset($rum_settings['range_days']) ? (int) $rum_settings['range_days'] : 7; ?>
                     <label>
                         <span><?php esc_html_e('Fenêtre d’analyse (jours)', 'sitepulse'); ?></span>
-                        <input type="number" name="sitepulse_rum_range_days" min="1" max="90" step="1" value="<?php echo esc_attr((int) $rum_settings['range_days']); ?>" />
+                        <input type="number" name="sitepulse_rum_range_days" min="1" max="90" step="1" value="<?php echo esc_attr($rum_range_days); ?>" />
                     </label>
                     <label>
                         <span><?php esc_html_e('Rétention des données (jours)', 'sitepulse'); ?></span>
