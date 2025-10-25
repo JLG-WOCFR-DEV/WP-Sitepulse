@@ -629,7 +629,8 @@ function sitepulse_resource_monitor_rest_history($request) {
     $history_total_available = 0;
     $filtered_total = 0;
     $granularity_seconds = sitepulse_resource_monitor_get_granularity_seconds($granularity);
-    $history_entries_for_cron = [];
+    $aggregated_source_count = 0;
+    $last_cron_included = null;
 
     if ($granularity === 'raw') {
         $history_query = sitepulse_resource_monitor_get_history([
@@ -645,58 +646,50 @@ function sitepulse_resource_monitor_rest_history($request) {
 
         $history_total_available = isset($history_query['total']) ? (int) $history_query['total'] : count($history_entries);
         $filtered_total = isset($history_query['filtered']) ? (int) $history_query['filtered'] : count($history_entries);
-        $history_entries_for_cron = $history_entries;
+        $last_cron_included = sitepulse_resource_monitor_get_last_cron_timestamp($history_entries);
     } else {
-        $history_all = sitepulse_resource_monitor_get_history([
-            'per_page' => 0,
-            'page'     => 1,
+        $grouped_history = sitepulse_resource_monitor_get_grouped_history($granularity, [
+            'per_page' => $per_page,
+            'page'     => $page,
             'since'    => $since_timestamp,
             'order'    => 'ASC',
         ]);
 
-        $all_entries = isset($history_all['entries']) && is_array($history_all['entries'])
-            ? $history_all['entries']
+        $history_entries = isset($grouped_history['entries']) && is_array($grouped_history['entries'])
+            ? $grouped_history['entries']
             : [];
 
-        $history_entries_for_cron = $all_entries;
-        $history_total_available = isset($history_all['total']) ? (int) $history_all['total'] : count($all_entries);
+        $history_total_available = isset($grouped_history['total_raw'])
+            ? (int) $grouped_history['total_raw']
+            : count($history_entries);
 
-        $grouped_entries = sitepulse_resource_monitor_group_history_entries($all_entries, $granularity);
-        $filtered_total = count($grouped_entries);
+        $filtered_total = isset($grouped_history['filtered_buckets'])
+            ? (int) $grouped_history['filtered_buckets']
+            : count($history_entries);
 
-        if ($per_page > 0) {
-            $pages = $filtered_total > 0 ? (int) ceil($filtered_total / $per_page) : 0;
+        $history_page = isset($grouped_history['page']) ? (int) $grouped_history['page'] : $page;
+        $history_per_page = isset($grouped_history['per_page']) ? (int) $grouped_history['per_page'] : $per_page;
+        $history_pages = isset($grouped_history['pages']) ? (int) $grouped_history['pages'] : ($filtered_total > 0 ? 1 : 0);
+        $history_order = isset($grouped_history['order']) ? (string) $grouped_history['order'] : 'ASC';
 
-            if ($pages > 0) {
-                $page = max(1, min($page, $pages));
-            } else {
-                $page = 1;
-            }
+        $history_query = [
+            'entries'  => $history_entries,
+            'total'    => $history_total_available,
+            'filtered' => $filtered_total,
+            'page'     => $history_page,
+            'per_page' => $history_per_page,
+            'pages'    => $history_pages,
+            'order'    => $history_order,
+        ];
 
-            $offset = max(0, ($page - 1) * $per_page);
-            $history_entries = array_slice($grouped_entries, $offset, $per_page);
-            $history_query = [
-                'entries'  => $history_entries,
-                'total'    => $history_total_available,
-                'filtered' => $filtered_total,
-                'page'     => $page,
-                'per_page' => $per_page,
-                'pages'    => $pages,
-                'order'    => 'ASC',
-            ];
-        } else {
-            $history_entries = $grouped_entries;
-            $history_query = [
-                'entries'  => $history_entries,
-                'total'    => $history_total_available,
-                'filtered' => $filtered_total,
-                'page'     => 1,
-                'per_page' => 0,
-                'pages'    => $filtered_total > 0 ? 1 : 0,
-                'order'    => 'ASC',
-            ];
-            $page = 1;
-        }
+        $page = $history_page;
+        $per_page = $history_per_page;
+
+        $aggregated_source_count = isset($grouped_history['aggregated_source_count'])
+            ? (int) $grouped_history['aggregated_source_count']
+            : $filtered_total;
+
+        $last_cron_included = sitepulse_resource_monitor_get_last_cron_timestamp_since($since_timestamp);
     }
 
     $returned_count = count($history_entries);
@@ -711,7 +704,10 @@ function sitepulse_resource_monitor_rest_history($request) {
         : null;
 
     $last_cron_overall = sitepulse_resource_monitor_get_last_cron_timestamp();
-    $last_cron_included = sitepulse_resource_monitor_get_last_cron_timestamp($history_entries_for_cron);
+
+    if ($last_cron_included === null) {
+        $last_cron_included = sitepulse_resource_monitor_get_last_cron_timestamp($history_entries);
+    }
 
     $required_consecutive = sitepulse_resource_monitor_get_required_consecutive_snapshots();
 
@@ -745,7 +741,7 @@ function sitepulse_resource_monitor_rest_history($request) {
             'granularity_seconds'  => $granularity_seconds,
             'aggregated_source_count' => $granularity === 'raw'
                 ? $returned_count
-                : count($history_entries_for_cron),
+                : $aggregated_source_count,
         ],
         'thresholds'   => sitepulse_resource_monitor_get_threshold_configuration(),
     ];
@@ -1011,6 +1007,269 @@ function sitepulse_resource_monitor_get_granularity_seconds($granularity) {
         default:
             return null;
     }
+}
+
+/**
+ * Retrieves grouped history entries for a given granularity without loading the entire history.
+ *
+ * @param string               $granularity Granularity identifier.
+ * @param array<string, mixed> $args        Query arguments.
+ * @return array<string, mixed>
+ */
+function sitepulse_resource_monitor_get_grouped_history($granularity, array $args) {
+    $seconds = sitepulse_resource_monitor_get_granularity_seconds($granularity);
+
+    $defaults = [
+        'per_page' => 0,
+        'page'     => 1,
+        'since'    => null,
+        'order'    => 'ASC',
+    ];
+
+    if (function_exists('wp_parse_args')) {
+        $args = wp_parse_args($args, $defaults);
+    } else {
+        $args = array_merge($defaults, is_array($args) ? $args : []);
+    }
+
+    $per_page = (int) $args['per_page'];
+    $per_page = $per_page >= 0 ? $per_page : 0;
+    $page = (int) $args['page'];
+    $page = $page > 0 ? $page : 1;
+    $since = $args['since'];
+    $order = strtoupper((string) $args['order']) === 'DESC' ? 'DESC' : 'ASC';
+
+    if ($seconds === null || $seconds <= 0) {
+        $raw_history = sitepulse_resource_monitor_get_history([
+            'per_page' => $per_page,
+            'page'     => $page,
+            'since'    => $since,
+            'order'    => $order,
+        ]);
+
+        return [
+            'entries'                 => isset($raw_history['entries']) && is_array($raw_history['entries']) ? $raw_history['entries'] : [],
+            'total_raw'               => isset($raw_history['total']) ? (int) $raw_history['total'] : 0,
+            'filtered_raw'            => isset($raw_history['filtered']) ? (int) $raw_history['filtered'] : 0,
+            'filtered_buckets'        => isset($raw_history['filtered']) ? (int) $raw_history['filtered'] : 0,
+            'page'                    => isset($raw_history['page']) ? (int) $raw_history['page'] : $page,
+            'per_page'                => isset($raw_history['per_page']) ? (int) $raw_history['per_page'] : $per_page,
+            'pages'                   => isset($raw_history['pages']) ? (int) $raw_history['pages'] : 0,
+            'order'                   => isset($raw_history['order']) ? (string) $raw_history['order'] : $order,
+            'aggregated_source_count' => isset($raw_history['filtered']) ? (int) $raw_history['filtered'] : 0,
+        ];
+    }
+
+    $since_timestamp = null;
+    if ($since !== null) {
+        $since_timestamp = is_numeric($since) ? (int) $since : null;
+
+        if ($since_timestamp !== null && $since_timestamp <= 0) {
+            $since_timestamp = null;
+        }
+    }
+
+    sitepulse_resource_monitor_maybe_upgrade_schema();
+
+    if (!sitepulse_resource_monitor_table_exists()) {
+        $history = sitepulse_resource_monitor_get_history([
+            'per_page' => 0,
+            'since'    => $since_timestamp,
+            'order'    => $order,
+        ]);
+
+        $entries = isset($history['entries']) && is_array($history['entries']) ? $history['entries'] : [];
+        $grouped_entries = sitepulse_resource_monitor_group_history_entries($entries, $granularity);
+
+        $filtered_buckets = count($grouped_entries);
+        $total_raw = isset($history['total']) ? (int) $history['total'] : 0;
+        $filtered_raw = isset($history['filtered']) ? (int) $history['filtered'] : count($entries);
+
+        if ($per_page > 0) {
+            $pages = $filtered_buckets > 0 ? (int) ceil($filtered_buckets / $per_page) : 0;
+
+            if ($pages > 0) {
+                $page = max(1, min($page, $pages));
+            } else {
+                $page = 1;
+            }
+
+            $entries_page = array_slice($grouped_entries, ($page - 1) * $per_page, $per_page);
+        } else {
+            $entries_page = $grouped_entries;
+            $pages = $filtered_buckets > 0 ? 1 : 0;
+            $page = 1;
+        }
+
+        $aggregated_source_count = $filtered_raw;
+
+        return [
+            'entries'                 => $entries_page,
+            'total_raw'               => $total_raw,
+            'filtered_raw'            => $filtered_raw,
+            'filtered_buckets'        => $filtered_buckets,
+            'page'                    => $page,
+            'per_page'                => $per_page,
+            'pages'                   => $pages,
+            'order'                   => $order,
+            'aggregated_source_count' => $aggregated_source_count,
+        ];
+    }
+
+    global $wpdb;
+
+    $entries = [];
+    $total_raw = 0;
+    $filtered_raw = 0;
+    $filtered_buckets = 0;
+    $pages = 0;
+    $table = sitepulse_resource_monitor_get_table_name();
+
+    if ($table === '' || !($wpdb instanceof wpdb)) {
+        return [
+            'entries'                 => $entries,
+            'total_raw'               => $total_raw,
+            'filtered_raw'            => $filtered_raw,
+            'filtered_buckets'        => $filtered_buckets,
+            'page'                    => $page,
+            'per_page'                => $per_page,
+            'pages'                   => $pages,
+            'order'                   => $order,
+            'aggregated_source_count' => $aggregated_source_count,
+        ];
+    }
+
+    $where_clauses = [];
+    $where_params = [];
+
+    if ($since_timestamp !== null) {
+        $where_clauses[] = 'recorded_at >= %d';
+        $where_params[] = $since_timestamp;
+    }
+
+    $where_sql = '';
+
+    if (!empty($where_clauses)) {
+        $where_sql = 'WHERE ' . implode(' AND ', $where_clauses);
+    }
+
+    $total_raw = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table}");
+
+    if ($since_timestamp !== null) {
+        $filtered_raw_query = "SELECT COUNT(*) FROM {$table} {$where_sql}";
+
+        if (!empty($where_params)) {
+            $filtered_raw_query = $wpdb->prepare($filtered_raw_query, $where_params);
+        }
+
+        $filtered_raw = (int) $wpdb->get_var($filtered_raw_query);
+    } else {
+        $filtered_raw = $total_raw;
+    }
+
+    $bucket_expression = "FLOOR(recorded_at / {$seconds}) * {$seconds}";
+    $bucket_count_query = "SELECT COUNT(*) FROM (SELECT 1 FROM {$table} {$where_sql} GROUP BY {$bucket_expression}) AS bucket_counts";
+
+    if (!empty($where_params)) {
+        $bucket_count_query = $wpdb->prepare($bucket_count_query, $where_params);
+    }
+
+    $filtered_buckets = (int) $wpdb->get_var($bucket_count_query);
+
+    if ($per_page > 0) {
+        $pages = $filtered_buckets > 0 ? (int) ceil($filtered_buckets / $per_page) : 0;
+
+        if ($pages > 0) {
+            $page = max(1, min($page, $pages));
+        } else {
+            $page = 1;
+        }
+
+        $offset = max(0, ($page - 1) * $per_page);
+        $limit_sql = $wpdb->prepare(' LIMIT %d OFFSET %d', $per_page, $offset);
+    } else {
+        $limit_sql = '';
+        $pages = $filtered_buckets > 0 ? 1 : 0;
+        $page = 1;
+    }
+
+    $select_query = "SELECT {$bucket_expression} AS bucket,
+        AVG(load_1) AS avg_load_1,
+        AVG(load_5) AS avg_load_5,
+        AVG(load_15) AS avg_load_15,
+        AVG(memory_usage) AS avg_memory_usage,
+        AVG(memory_limit) AS avg_memory_limit,
+        AVG(disk_free) AS avg_disk_free,
+        AVG(disk_total) AS avg_disk_total,
+        GROUP_CONCAT(DISTINCT source ORDER BY source SEPARATOR ',') AS sources,
+        COUNT(*) AS aggregated_from
+        FROM {$table} {$where_sql}
+        GROUP BY bucket
+        ORDER BY bucket {$order}{$limit_sql}";
+
+    if (!empty($where_params)) {
+        $select_query = $wpdb->prepare($select_query, $where_params);
+    }
+
+    $rows = $wpdb->get_results($select_query, ARRAY_A);
+
+    if (is_array($rows)) {
+        foreach ($rows as $row) {
+            $timestamp = isset($row['bucket']) ? (int) $row['bucket'] : 0;
+
+            if ($timestamp <= 0) {
+                continue;
+            }
+
+            $sources = [];
+
+            if (isset($row['sources']) && is_string($row['sources']) && $row['sources'] !== '') {
+                $sources_list = array_map('trim', explode(',', $row['sources']));
+                $sources = array_values(array_unique(array_filter(
+                    $sources_list,
+                    static function ($value) {
+                        return $value !== '';
+                    }
+                )));
+            }
+
+            $aggregated_from = isset($row['aggregated_from']) ? (int) $row['aggregated_from'] : 0;
+
+            $entries[] = [
+                'timestamp'        => $timestamp,
+                'load'             => [
+                    isset($row['avg_load_1']) ? (float) $row['avg_load_1'] : null,
+                    isset($row['avg_load_5']) ? (float) $row['avg_load_5'] : null,
+                    isset($row['avg_load_15']) ? (float) $row['avg_load_15'] : null,
+                ],
+                'memory'           => [
+                    'usage' => isset($row['avg_memory_usage']) && $row['avg_memory_usage'] !== null ? (int) round((float) $row['avg_memory_usage']) : null,
+                    'limit' => isset($row['avg_memory_limit']) && $row['avg_memory_limit'] !== null ? (int) round((float) $row['avg_memory_limit']) : null,
+                ],
+                'disk'             => [
+                    'free'  => isset($row['avg_disk_free']) && $row['avg_disk_free'] !== null ? (int) round((float) $row['avg_disk_free']) : null,
+                    'total' => isset($row['avg_disk_total']) && $row['avg_disk_total'] !== null ? (int) round((float) $row['avg_disk_total']) : null,
+                ],
+                'source'           => 'aggregate',
+                'aggregated_from'  => $aggregated_from,
+                'granularity'      => $granularity,
+                'sources'          => $sources,
+            ];
+
+        }
+    }
+
+    return [
+        'entries'                 => $entries,
+        'total_raw'               => $total_raw,
+        'filtered_raw'            => $filtered_raw,
+        'filtered_buckets'        => $filtered_buckets,
+        'page'                    => $page,
+        'per_page'                => $per_page,
+        'pages'                   => $pages,
+        'order'                   => $order,
+        'aggregated_source_count' => $filtered_raw,
+    ];
 }
 
 /**
@@ -3958,6 +4217,79 @@ function sitepulse_resource_monitor_get_last_cron_timestamp($history_entries = n
 
         if (isset($entry['source']) && $entry['source'] === 'cron') {
             return isset($entry['timestamp']) ? (int) $entry['timestamp'] : null;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Retrieves the most recent cron timestamp optionally limited to a lower bound.
+ *
+ * @param int|null $since Minimum timestamp to consider.
+ * @return int|null
+ */
+function sitepulse_resource_monitor_get_last_cron_timestamp_since($since = null) {
+    $since_timestamp = null;
+
+    if ($since !== null) {
+        $since_timestamp = is_numeric($since) ? (int) $since : null;
+
+        if ($since_timestamp !== null && $since_timestamp <= 0) {
+            $since_timestamp = null;
+        }
+    }
+
+    sitepulse_resource_monitor_maybe_upgrade_schema();
+
+    if (sitepulse_resource_monitor_table_exists()) {
+        $table = sitepulse_resource_monitor_get_table_name();
+
+        global $wpdb;
+
+        if ($table !== '' && $wpdb instanceof wpdb) {
+            $params = ['cron'];
+            $sql = "SELECT recorded_at FROM {$table} WHERE source = %s";
+
+            if ($since_timestamp !== null) {
+                $sql .= ' AND recorded_at >= %d';
+                $params[] = $since_timestamp;
+            }
+
+            $sql .= ' ORDER BY recorded_at DESC LIMIT 1';
+
+            $prepared = $wpdb->prepare($sql, $params);
+            $timestamp = $wpdb->get_var($prepared);
+
+            if ($timestamp !== null) {
+                return (int) $timestamp;
+            }
+        }
+    }
+
+    $history = get_option(SITEPULSE_OPTION_RESOURCE_MONITOR_HISTORY, []);
+
+    if (!is_array($history) || empty($history)) {
+        return null;
+    }
+
+    $history = sitepulse_resource_monitor_normalize_history($history);
+
+    for ($index = count($history) - 1; $index >= 0; $index--) {
+        $entry = $history[$index];
+
+        if (!is_array($entry) || !isset($entry['source']) || $entry['source'] !== 'cron') {
+            continue;
+        }
+
+        $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : null;
+
+        if ($timestamp === null) {
+            continue;
+        }
+
+        if ($since_timestamp === null || $timestamp >= $since_timestamp) {
+            return $timestamp;
         }
     }
 

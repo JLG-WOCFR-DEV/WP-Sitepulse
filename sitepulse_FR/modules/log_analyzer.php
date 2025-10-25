@@ -480,7 +480,7 @@ function sitepulse_log_analyzer_page() {
     }
     ?>
     <div class="wrap">
-        <h1><span class="dashicons-before dashicons-hammer"></span> <?php echo esc_html__('Log Analyzer', 'sitepulse'); ?></h1>
+        <h1><span class="dashicons-before dashicons-hammer" aria-hidden="true" role="presentation"></span> <?php echo esc_html__('Log Analyzer', 'sitepulse'); ?></h1>
         <p><?php printf(esc_html__('Cet outil scanne le fichier %s de WordPress pour vous aider à trouver et corriger les problèmes sur votre site.', 'sitepulse'), $log_file_display); ?></p>
 
         <?php

@@ -248,7 +248,44 @@ function sitepulse_http_monitor_prepare_entry($response, $context, array $args, 
         }
     } elseif ($response instanceof WP_HTTP_Response) {
         $entry['response_code'] = (int) $response->get_status();
-        $entry['bytes']         = strlen((string) $response->get_data());
+
+        $headers = $response->get_headers();
+        $content_length = null;
+
+        if (class_exists('WP_HTTP_Headers') && $headers instanceof WP_HTTP_Headers) {
+            $content_length = $headers->get('content-length');
+        } elseif (is_array($headers)) {
+            if (isset($headers['content-length'])) {
+                $content_length = $headers['content-length'];
+            } elseif (isset($headers['Content-Length'])) {
+                $content_length = $headers['Content-Length'];
+            }
+        }
+
+        if ($content_length !== null && is_numeric($content_length)) {
+            $entry['bytes'] = max(0, (int) $content_length);
+        } else {
+            $body = $response->get_body();
+
+            if (!is_string($body)) {
+                $data = $response->get_data();
+
+                if (is_string($data)) {
+                    $body = $data;
+                } elseif (is_scalar($data)) {
+                    $body = (string) $data;
+                } elseif (is_array($data) || is_object($data)) {
+                    $encoded = function_exists('wp_json_encode') ? wp_json_encode($data) : json_encode($data);
+                    $body = is_string($encoded) ? $encoded : '';
+                } else {
+                    $body = '';
+                }
+            }
+
+            if (is_string($body)) {
+                $entry['bytes'] = strlen($body);
+            }
+        }
     }
 
     if ($entry['response_code'] !== null && $entry['response_code'] >= 400) {
