@@ -264,8 +264,25 @@ function sitepulse_ai_trigger_async_job_request($job_id, array $queue_context = 
         $encoded_context = '';
     }
 
+    $timeout = 30;
+
+    if (function_exists('apply_filters')) {
+        /**
+         * Filters the timeout used when triggering the AI insight job via AJAX.
+         *
+         * @param int    $timeout       Timeout in seconds.
+         * @param string $job_id        Job identifier.
+         * @param array  $queue_context Normalized queue context.
+         */
+        $timeout = (int) apply_filters('sitepulse_ai_async_request_timeout', $timeout, $job_id, $queue_context);
+    }
+
+    if ($timeout <= 0) {
+        $timeout = 30;
+    }
+
     $request_args = [
-        'timeout'  => 5,
+        'timeout'  => $timeout,
         'blocking' => true,
         'body'     => [
             'action' => 'sitepulse_run_ai_insight_job',
@@ -4048,6 +4065,14 @@ function sitepulse_ai_schedule_generation_job($force_refresh) {
                     ]
                 );
             }
+
+            sitepulse_ai_queue_clear_scheduled_action($job_id, $job_data['queue']);
+
+            $job_data['fallback'] = 'ajax';
+            $job_data['queue']['engine']   = 'ajax';
+            $job_data['queue']['message']  = esc_html__('WP-Cron n’a pas pu être déclenché. L’analyse IA est exécutée immédiatement via AJAX.', 'sitepulse');
+
+            sitepulse_ai_save_job_data($job_id, $job_data);
         }
     }
 
@@ -4338,6 +4363,8 @@ function sitepulse_ai_get_cached_insight($force_refresh = false) {
 
     if ($force_refresh) {
         $cached_insight = null;
+
+        delete_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
 
         return [];
     }
