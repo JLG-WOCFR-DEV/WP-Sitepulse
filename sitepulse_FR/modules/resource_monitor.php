@@ -532,28 +532,6 @@ function sitepulse_resource_monitor_register_rest_routes() {
         ]
     );
 
-    register_rest_route(
-        'sitepulse/v1',
-        '/resources/http',
-        [
-            'methods'             => defined('WP_REST_Server::READABLE') ? WP_REST_Server::READABLE : 'GET',
-            'callback'            => 'sitepulse_http_monitor_rest_stats',
-            'permission_callback' => 'sitepulse_resource_monitor_rest_permission_check',
-            'args'                => [
-                'since' => [
-                    'description' => __('Filtrer les appels depuis un horodatage ou une date ISO 8601.', 'sitepulse'),
-                    'type'        => 'string',
-                    'required'    => false,
-                ],
-                'limit' => [
-                    'description' => __('Nombre maximum de services agrégés à retourner.', 'sitepulse'),
-                    'type'        => 'integer',
-                    'required'    => false,
-                    'default'     => 25,
-                ],
-            ],
-        ]
-    );
 }
 
 /**
