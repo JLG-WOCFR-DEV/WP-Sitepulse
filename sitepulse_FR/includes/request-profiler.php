@@ -46,6 +46,58 @@ function sitepulse_request_profiler_maybe_start() {
         return;
     }
 
+    $raw_token = isset($_GET['sitepulse_trace']) ? wp_unslash($_GET['sitepulse_trace']) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+
+    if ($raw_token !== '') {
+        $token = sitepulse_request_profiler_normalize_token($raw_token);
+
+        if ($token === '') {
+            return;
+        }
+
+        $nonce_action = defined('SITEPULSE_NONCE_ACTION_REQUEST_TRACE')
+            ? SITEPULSE_NONCE_ACTION_REQUEST_TRACE
+            : 'sitepulse_request_trace';
+
+        $nonce = isset($_GET['_wpnonce']) ? sanitize_text_field(wp_unslash($_GET['_wpnonce'])) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+
+        if ($nonce === '' || !wp_verify_nonce($nonce, $nonce_action)) {
+            sitepulse_request_profiler_add_notice(
+                esc_html__("La vérification de sécurité a échoué. Merci de relancer le profilage.", 'sitepulse'),
+                'error'
+            );
+
+            return;
+        }
+
+        $session = sitepulse_request_profiler_get_session($token);
+
+        if ($session === null) {
+            sitepulse_request_profiler_add_notice(
+                esc_html__("La session de profilage est introuvable ou a expiré.", 'sitepulse'),
+                'error'
+            );
+
+            return;
+        }
+
+        if ((int) $session['user_id'] !== get_current_user_id()) {
+            sitepulse_request_profiler_add_notice(
+                esc_html__("Ce profilage appartient à un autre utilisateur.", 'sitepulse'),
+                'error'
+            );
+
+            return;
+        }
+
+        sitepulse_request_profiler_mark_session_running($token);
+        $GLOBALS['sitepulse_request_profiler_pending_token'] = $token;
+
+        sitepulse_request_profiler_begin();
+
+        return;
+    }
+
     if (!isset($_GET['sitepulse-profile']) || $_GET['sitepulse-profile'] !== '1') { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
         return;
     }
@@ -136,12 +188,23 @@ function sitepulse_request_profiler_render_notices() {
 function sitepulse_request_profiler_begin() {
     global $wpdb;
 
+    $pending_token = '';
+
+    if (isset($GLOBALS['sitepulse_request_profiler_pending_token'])) {
+        $pending_token = sitepulse_request_profiler_normalize_token($GLOBALS['sitepulse_request_profiler_pending_token']);
+        unset($GLOBALS['sitepulse_request_profiler_pending_token']);
+    }
+
     $context = [
         'active'      => true,
         'start_time'  => microtime(true),
         'memory_base' => memory_get_usage(true),
         'user_id'     => get_current_user_id(),
     ];
+
+    if ($pending_token !== '') {
+        $context['token'] = $pending_token;
+    }
 
     if ($wpdb instanceof wpdb) {
         $context['previous_save_queries'] = isset($wpdb->save_queries) ? (bool) $wpdb->save_queries : false;
@@ -182,6 +245,8 @@ function sitepulse_request_profiler_finish() {
         $duration_ms = max(0, (microtime(true) - (float) $context['start_time']) * 1000.0);
     }
 
+    $token = isset($context['token']) ? sitepulse_request_profiler_normalize_token($context['token']) : '';
+
     $trace = [
         'timestamp'       => current_time('timestamp'),
         'url'             => sitepulse_request_profiler_get_request_uri(),
@@ -192,8 +257,24 @@ function sitepulse_request_profiler_finish() {
         'user_id'         => isset($context['user_id']) ? (int) $context['user_id'] : 0,
     ];
 
-    sitepulse_request_profiler_store_trace($trace);
-    sitepulse_request_profiler_cache_last_trace($trace);
+    $trace_id = sitepulse_request_profiler_store_trace($trace);
+
+    sitepulse_request_profiler_cache_last_trace(array_merge($trace, [
+        'id' => $trace_id,
+    ]));
+
+    if ($trace_id > 0) {
+        $details = sitepulse_request_profiler_prepare_trace_details($trace_id, $trace);
+        sitepulse_request_profiler_store_trace_details($trace_id, $details);
+    }
+
+    if ($token !== '') {
+        if ($trace_id > 0) {
+            sitepulse_request_profiler_complete_session($token, $trace_id, 'completed');
+        } else {
+            sitepulse_request_profiler_complete_session($token, null, 'failed');
+        }
+    }
 }
 
 /**
@@ -294,12 +375,14 @@ function sitepulse_request_profiler_trim_query($sql) {
  *
  * @param array<string,mixed> $trace Trace payload.
  *
- * @return void
+ * @return int Trace identifier.
  */
 function sitepulse_request_profiler_store_trace($trace) {
     if (!is_array($trace) || empty($trace)) {
-        return;
+        return 0;
     }
+
+    $trace_id = sitepulse_request_profiler_generate_trace_id();
 
     $option_key = defined('SITEPULSE_OPTION_REQUEST_PROFILER_HISTORY')
         ? SITEPULSE_OPTION_REQUEST_PROFILER_HISTORY
@@ -311,7 +394,11 @@ function sitepulse_request_profiler_store_trace($trace) {
         $history = [];
     }
 
-    array_unshift($history, sitepulse_request_profiler_normalize_trace($trace));
+    $normalized = sitepulse_request_profiler_normalize_trace(array_merge($trace, [
+        'id' => $trace_id,
+    ]));
+
+    array_unshift($history, $normalized);
 
     $limit = defined('SITEPULSE_DEFAULT_REQUEST_PROFILER_HISTORY_LIMIT')
         ? (int) SITEPULSE_DEFAULT_REQUEST_PROFILER_HISTORY_LIMIT
@@ -322,6 +409,8 @@ function sitepulse_request_profiler_store_trace($trace) {
     }
 
     update_option($option_key, $history, false);
+
+    return $trace_id;
 }
 
 /**
@@ -332,6 +421,10 @@ function sitepulse_request_profiler_store_trace($trace) {
  * @return array<string,mixed>
  */
 function sitepulse_request_profiler_normalize_trace($trace) {
+    $id = isset($trace['id']) && is_numeric($trace['id'])
+        ? (int) $trace['id']
+        : 0;
+
     $timestamp = isset($trace['timestamp']) && is_numeric($trace['timestamp'])
         ? (int) $trace['timestamp']
         : current_time('timestamp');
@@ -370,7 +463,7 @@ function sitepulse_request_profiler_normalize_trace($trace) {
         }
     }
 
-    return [
+    $normalized = [
         'timestamp'      => $timestamp,
         'url'            => $url,
         'duration_ms'    => $duration_ms,
@@ -379,6 +472,12 @@ function sitepulse_request_profiler_normalize_trace($trace) {
         'slow_queries'   => $slow_queries,
         'user_id'        => $user_id,
     ];
+
+    if ($id > 0) {
+        $normalized['id'] = $id;
+    }
+
+    return $normalized;
 }
 
 /**
@@ -490,4 +589,467 @@ function sitepulse_request_profiler_get_trigger_url() {
     );
 
     return wp_nonce_url($url, $nonce_action);
+}
+
+/**
+ * Normalizes a request profiler token.
+ *
+ * @param string $token Raw token value.
+ * @return string
+ */
+function sitepulse_request_profiler_normalize_token($token) {
+    if (!is_string($token) || $token === '') {
+        return '';
+    }
+
+    $normalized = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $token));
+
+    if ($normalized === '') {
+        return '';
+    }
+
+    if (strlen($normalized) > 64) {
+        $normalized = substr($normalized, 0, 64);
+    }
+
+    return $normalized;
+}
+
+/**
+ * Sanitizes the target URL requested for profiling.
+ *
+ * @param string $target Target URL supplied by the client.
+ * @return string
+ */
+function sitepulse_request_profiler_sanitize_target_url($target) {
+    if (!is_string($target) || $target === '') {
+        return '';
+    }
+
+    $target = trim($target);
+
+    if ($target === '') {
+        return '';
+    }
+
+    if (strpos($target, 'http://') !== 0 && strpos($target, 'https://') !== 0) {
+        $target = ltrim($target, '/');
+        $target = site_url($target === '' ? '/' : '/' . $target);
+    }
+
+    $target = esc_url_raw($target);
+
+    if ($target === '') {
+        return '';
+    }
+
+    $site_host = wp_parse_url(site_url('/'), PHP_URL_HOST);
+    $target_host = wp_parse_url($target, PHP_URL_HOST);
+
+    if (is_string($site_host) && $site_host !== '' && is_string($target_host) && $target_host !== '') {
+        $site_host = strtolower(preg_replace('/^www\./', '', $site_host));
+        $target_host = strtolower(preg_replace('/^www\./', '', $target_host));
+
+        if ($site_host !== $target_host) {
+            return '';
+        }
+    }
+
+    return $target;
+}
+
+/**
+ * Generates a new request profiler token.
+ *
+ * @return string
+ */
+function sitepulse_request_profiler_generate_token() {
+    $token = '';
+
+    if (function_exists('random_bytes')) {
+        try {
+            $token = bin2hex(random_bytes(16));
+        } catch (Exception $exception) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCATCH
+            // Fallback handled below.
+        }
+    }
+
+    if ($token === '') {
+        if (function_exists('wp_generate_uuid4')) {
+            $token = str_replace('-', '', wp_generate_uuid4());
+        } else {
+            $token = strtolower(wp_generate_password(32, false, false));
+        }
+    }
+
+    return sitepulse_request_profiler_normalize_token($token);
+}
+
+/**
+ * Builds the storage key used for profiler sessions.
+ *
+ * @param string $token Session token.
+ * @return string
+ */
+function sitepulse_request_profiler_get_session_storage_key($token) {
+    $prefix = defined('SITEPULSE_TRANSIENT_REQUEST_TRACE_SESSION_PREFIX')
+        ? SITEPULSE_TRANSIENT_REQUEST_TRACE_SESSION_PREFIX
+        : 'sitepulse_request_trace_session_';
+
+    return $prefix . $token;
+}
+
+/**
+ * Builds the storage key used for profiler trace payloads.
+ *
+ * @param int $trace_id Trace identifier.
+ * @return string
+ */
+function sitepulse_request_profiler_get_trace_storage_key($trace_id) {
+    $prefix = defined('SITEPULSE_TRANSIENT_REQUEST_TRACE_RESULT_PREFIX')
+        ? SITEPULSE_TRANSIENT_REQUEST_TRACE_RESULT_PREFIX
+        : 'sitepulse_request_trace_result_';
+
+    return $prefix . $trace_id;
+}
+
+/**
+ * Persists a profiling session.
+ *
+ * @param array<string,mixed> $session Session payload.
+ * @return bool
+ */
+function sitepulse_request_profiler_store_session($session) {
+    if (!is_array($session) || empty($session['token'])) {
+        return false;
+    }
+
+    $token = sitepulse_request_profiler_normalize_token($session['token']);
+
+    if ($token === '') {
+        return false;
+    }
+
+    $session['token'] = $token;
+
+    $lifetime = MINUTE_IN_SECONDS * 30;
+
+    if (isset($session['status']) && (string) $session['status'] === 'running') {
+        $lifetime = MINUTE_IN_SECONDS * 10;
+    }
+
+    return set_transient(sitepulse_request_profiler_get_session_storage_key($token), $session, $lifetime);
+}
+
+/**
+ * Retrieves a stored profiling session.
+ *
+ * @param string $token Session token.
+ * @return array<string,mixed>|null
+ */
+function sitepulse_request_profiler_get_session($token) {
+    $token = sitepulse_request_profiler_normalize_token($token);
+
+    if ($token === '') {
+        return null;
+    }
+
+    $session = get_transient(sitepulse_request_profiler_get_session_storage_key($token));
+
+    if (!is_array($session) || $session === []) {
+        return null;
+    }
+
+    $session['token'] = $token;
+
+    if (!isset($session['user_id']) || !is_numeric($session['user_id'])) {
+        $session['user_id'] = 0;
+    }
+
+    return $session;
+}
+
+/**
+ * Marks a profiling session as running.
+ *
+ * @param string $token Session token.
+ * @return void
+ */
+function sitepulse_request_profiler_mark_session_running($token) {
+    $session = sitepulse_request_profiler_get_session($token);
+
+    if ($session === null) {
+        return;
+    }
+
+    $session['status']     = 'running';
+    $session['started_at'] = time();
+
+    sitepulse_request_profiler_store_session($session);
+}
+
+/**
+ * Finalizes a profiling session.
+ *
+ * @param string   $token    Session token.
+ * @param int|null $trace_id Associated trace identifier.
+ * @param string   $status   Final status.
+ * @return void
+ */
+function sitepulse_request_profiler_complete_session($token, $trace_id = null, $status = 'completed') {
+    $session = sitepulse_request_profiler_get_session($token);
+
+    if ($session === null) {
+        return;
+    }
+
+    $session['status']       = $status;
+    $session['completed_at'] = time();
+
+    if ($trace_id !== null) {
+        $session['trace_id'] = (int) $trace_id;
+    }
+
+    sitepulse_request_profiler_store_session($session);
+}
+
+/**
+ * Creates a new profiling session for the provided target URL.
+ *
+ * @param int    $user_id User identifier.
+ * @param string $target  Target URL.
+ * @return array<string,mixed>|null
+ */
+function sitepulse_request_profiler_create_session($user_id, $target) {
+    $user_id = (int) $user_id;
+
+    if ($user_id <= 0) {
+        return null;
+    }
+
+    $normalized_target = sitepulse_request_profiler_sanitize_target_url($target);
+
+    if ($normalized_target === '') {
+        return null;
+    }
+
+    $token = sitepulse_request_profiler_generate_token();
+
+    if ($token === '') {
+        return null;
+    }
+
+    $session = [
+        'token'      => $token,
+        'user_id'    => $user_id,
+        'target'     => $normalized_target,
+        'status'     => 'pending',
+        'created_at' => time(),
+    ];
+
+    if (!sitepulse_request_profiler_store_session($session)) {
+        return null;
+    }
+
+    return $session;
+}
+
+/**
+ * Retrieves the stored result for a profiling session.
+ *
+ * @param string $token Session token.
+ * @return array<string,mixed>|null
+ */
+function sitepulse_request_profiler_get_result($token) {
+    $session = sitepulse_request_profiler_get_session($token);
+
+    if ($session === null) {
+        return null;
+    }
+
+    $result = [
+        'token'   => $session['token'],
+        'user_id' => isset($session['user_id']) ? (int) $session['user_id'] : 0,
+        'status'  => isset($session['status']) ? (string) $session['status'] : 'pending',
+    ];
+
+    if (isset($session['trace_id'])) {
+        $result['trace_id'] = (int) $session['trace_id'];
+    }
+
+    if (isset($session['created_at'])) {
+        $result['created_at'] = (int) $session['created_at'];
+    }
+
+    if (isset($session['completed_at'])) {
+        $result['completed_at'] = (int) $session['completed_at'];
+    }
+
+    return $result;
+}
+
+/**
+ * Generates a unique identifier for stored traces.
+ *
+ * @return int
+ */
+function sitepulse_request_profiler_generate_trace_id() {
+    $micro = (int) floor(microtime(true) * 1000);
+    $rand  = function_exists('wp_rand') ? wp_rand(0, 999) : mt_rand(0, 999);
+
+    return max(1, (int) (($micro * 1000) + $rand));
+}
+
+/**
+ * Stores the detailed payload associated with a trace identifier.
+ *
+ * @param int   $trace_id Trace identifier.
+ * @param array $payload  Trace payload.
+ * @return bool
+ */
+function sitepulse_request_profiler_store_trace_details($trace_id, $payload) {
+    $trace_id = (int) $trace_id;
+
+    if ($trace_id <= 0 || !is_array($payload) || $payload === []) {
+        return false;
+    }
+
+    return set_transient(sitepulse_request_profiler_get_trace_storage_key($trace_id), $payload, MINUTE_IN_SECONDS * 30);
+}
+
+/**
+ * Transforms a summarized trace into a detailed payload.
+ *
+ * @param int                      $trace_id Trace identifier.
+ * @param array<string,mixed>      $trace    Trace summary.
+ * @return array<string,mixed>
+ */
+function sitepulse_request_profiler_prepare_trace_details($trace_id, $trace) {
+    $queries = [];
+
+    if (isset($trace['slow_queries']) && is_array($trace['slow_queries'])) {
+        foreach ($trace['slow_queries'] as $entry) {
+            if (!is_array($entry) || empty($entry['sql'])) {
+                continue;
+            }
+
+            $sql = (string) $entry['sql'];
+
+            if ($sql === '') {
+                continue;
+            }
+
+            $time_ms = isset($entry['time_ms']) && is_numeric($entry['time_ms'])
+                ? (float) $entry['time_ms']
+                : 0.0;
+
+            $caller = isset($entry['caller']) ? sanitize_text_field((string) $entry['caller']) : '';
+
+            $queries[] = [
+                'sql'        => $sql,
+                'count'      => 1,
+                'total_time' => $time_ms / 1000.0,
+                'avg_time'   => $time_ms / 1000.0,
+                'callers'    => $caller !== '' ? [$caller] : [],
+            ];
+        }
+    }
+
+    $request_method = isset($_SERVER['REQUEST_METHOD']) ? sanitize_text_field((string) $_SERVER['REQUEST_METHOD']) : 'GET';
+
+    if ($request_method === '') {
+        $request_method = 'GET';
+    }
+
+    $request_url = isset($trace['url']) && is_string($trace['url'])
+        ? $trace['url']
+        : sitepulse_request_profiler_get_request_uri();
+
+    $memory_peak = isset($trace['memory_peak_mb']) && is_numeric($trace['memory_peak_mb'])
+        ? (int) round((float) $trace['memory_peak_mb'] * MB_IN_BYTES)
+        : (int) memory_get_peak_usage(true);
+
+    return [
+        'id'             => (int) $trace_id,
+        'hooks'          => [],
+        'queries'        => $queries,
+        'total_duration' => isset($trace['duration_ms']) ? ((float) $trace['duration_ms'] / 1000.0) : 0.0,
+        'hook_count'     => 0,
+        'query_count'    => isset($trace['query_count']) ? (int) $trace['query_count'] : count($queries),
+        'recorded_at'    => current_time('mysql'),
+        'request_method' => $request_method,
+        'request_url'    => $request_url,
+        'memory_peak'    => $memory_peak,
+    ];
+}
+
+/**
+ * Retrieves the detailed payload associated with a trace identifier.
+ *
+ * @param int $trace_id Trace identifier.
+ * @return array<string,mixed>|null
+ */
+function sitepulse_request_profiler_get_trace($trace_id) {
+    $trace_id = (int) $trace_id;
+
+    if ($trace_id <= 0) {
+        return null;
+    }
+
+    $payload = get_transient(sitepulse_request_profiler_get_trace_storage_key($trace_id));
+
+    if (!is_array($payload) || $payload === []) {
+        return null;
+    }
+
+    if (!isset($payload['hooks']) || !is_array($payload['hooks'])) {
+        $payload['hooks'] = [];
+    }
+
+    if (!isset($payload['queries']) || !is_array($payload['queries'])) {
+        $payload['queries'] = [];
+    }
+
+    $payload['id'] = $trace_id;
+
+    return $payload;
+}
+
+/**
+ * Returns the most recent traces stored by the profiler.
+ *
+ * @param array<string,mixed> $args Optional arguments (limit, user_id).
+ * @return array<int,array<string,mixed>>
+ */
+function sitepulse_request_profiler_get_recent_traces($args = []) {
+    if (!is_array($args)) {
+        $args = [];
+    }
+
+    $limit = null;
+
+    if (isset($args['limit']) && is_numeric($args['limit'])) {
+        $limit = (int) $args['limit'];
+
+        if ($limit <= 0) {
+            $limit = null;
+        }
+    }
+
+    $history = sitepulse_request_profiler_get_history($limit);
+
+    if (isset($args['user_id']) && is_numeric($args['user_id'])) {
+        $user_id = (int) $args['user_id'];
+
+        $history = array_values(array_filter(
+            $history,
+            static function ($entry) use ($user_id) {
+                return is_array($entry)
+                    && isset($entry['user_id'])
+                    && (int) $entry['user_id'] === $user_id;
+            }
+        ));
+    }
+
+    return $history;
 }
