@@ -643,6 +643,25 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
         $this->assertSame($job_id, $this->last_async_request['body']['job_id']);
         $this->assertArrayHasKey('secret', $this->last_async_request['body']);
         $this->assertSame($secret, $this->last_async_request['body']['secret']);
+        $this->assertArrayHasKey('timeout', $this->last_async_request);
+        $this->assertSame(30, $this->last_async_request['timeout']);
+
+        $job_data = sitepulse_ai_get_job_data($job_id);
+
+        $this->assertIsArray($job_data, 'Job metadata should persist after a successful AJAX fallback.');
+        $this->assertArrayHasKey('fallback', $job_data);
+        $this->assertSame('ajax', $job_data['fallback']);
+        $this->assertArrayHasKey('queue', $job_data);
+        $this->assertIsArray($job_data['queue']);
+        $this->assertArrayHasKey('engine', $job_data['queue']);
+        $this->assertSame('ajax', $job_data['queue']['engine']);
+
+        if (function_exists('wp_next_scheduled') && isset($job_data['queue']['args'])) {
+            $this->assertFalse(
+                wp_next_scheduled('sitepulse_run_ai_insight_job', $job_data['queue']['args']),
+                'The original WP-Cron event should be cleared after a successful AJAX fallback.'
+            );
+        }
 
         $logged_errors = get_option(SITEPULSE_OPTION_AI_INSIGHT_ERRORS, []);
 
@@ -686,6 +705,47 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
                 );
             }
         }
+    }
+
+    /**
+     * Ensures the AJAX trigger timeout can be customized via a filter.
+     */
+    public function test_schedule_honours_custom_async_timeout() {
+        add_filter('sitepulse_ai_spawn_cron_callable', [$this, 'filter_mock_spawn_callable'], 10, 2);
+        add_filter('pre_http_request', [$this, 'mock_async_job_request'], 10, 3);
+        add_filter('sitepulse_ai_async_request_timeout', [$this, 'filter_custom_async_timeout'], 10, 3);
+
+        $job_id = sitepulse_ai_schedule_generation_job(false);
+
+        remove_filter('sitepulse_ai_async_request_timeout', [$this, 'filter_custom_async_timeout'], 10);
+        remove_filter('pre_http_request', [$this, 'mock_async_job_request'], 10);
+        remove_filter('sitepulse_ai_spawn_cron_callable', [$this, 'filter_mock_spawn_callable'], 10);
+
+        $this->assertIsString($job_id);
+        $this->assertSame(42, $this->last_async_request['timeout']);
+    }
+
+    /**
+     * Ensures forcing a cached insight refresh purges the persistent transient.
+     */
+    public function test_get_cached_insight_force_refresh_purges_transient() {
+        $this->reset_cached_insight_static();
+        delete_transient(SITEPULSE_TRANSIENT_AI_INSIGHT);
+
+        set_transient(SITEPULSE_TRANSIENT_AI_INSIGHT, [
+            'text'      => 'Ancienne analyse.',
+            'html'      => '<p>Ancienne analyse.</p>',
+            'timestamp' => 123,
+        ], MINUTE_IN_SECONDS);
+
+        $this->assertNotEmpty(sitepulse_ai_get_cached_insight(), 'Initial retrieval should populate the runtime cache.');
+
+        $this->assertSame([], sitepulse_ai_get_cached_insight(true), 'Force refresh should reset the runtime cache.');
+        $this->assertFalse(get_transient(SITEPULSE_TRANSIENT_AI_INSIGHT), 'Force refresh should remove the persisted transient.');
+
+        $this->assertSame([], sitepulse_ai_get_cached_insight(), 'Transient removal should prevent stale payload reuse.');
+
+        $this->reset_cached_insight_static();
     }
 
     /**
@@ -1293,6 +1353,19 @@ class Sitepulse_AI_Insights_Ajax_Test extends WP_Ajax_UnitTestCase {
      */
     public function filter_custom_response_size_limit() {
         return 2 * MB_IN_BYTES;
+    }
+
+    /**
+     * Provides a deterministic timeout when filtering AJAX triggers.
+     *
+     * @param int   $timeout       Default timeout.
+     * @param string $job_id       Job identifier.
+     * @param array $queue_context Queue context.
+     *
+     * @return int
+     */
+    public function filter_custom_async_timeout($timeout, $job_id, $queue_context) {
+        return 42;
     }
 
     /**
