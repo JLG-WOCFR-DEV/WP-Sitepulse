@@ -3010,7 +3010,7 @@ function sitepulse_settings_page() {
                     <div class="sitepulse-tab-panels">
                         <form id="sitepulse-ai-secret-regen-form" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="screen-reader-text">
                             <input type="hidden" name="action" value="sitepulse_regenerate_ai_secret">
-                            <?php wp_nonce_field('sitepulse_regenerate_ai_secret'); ?>
+                            <?php wp_nonce_field('sitepulse_regenerate_ai_secret', 'sitepulse_regenerate_ai_secret_nonce'); ?>
                         </form>
                         <form method="post" action="options.php" class="sitepulse-settings-form">
                             <?php settings_fields('sitepulse_settings'); do_settings_sections('sitepulse_settings'); ?>
@@ -3072,6 +3072,8 @@ function sitepulse_settings_page() {
                         </div>
                         <div class="sitepulse-card-body">
                             <label class="sitepulse-field-label" for="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>"><?php esc_html_e('Clé API Google Gemini', 'sitepulse'); ?></label>
+                            <label class="screen-reader-text" for="sitepulse_gemini_username"><?php esc_html_e("Nom d’utilisateur associé", 'sitepulse'); ?></label>
+                            <input type="text" id="sitepulse_gemini_username" name="sitepulse_gemini_username" value="" class="sitepulse-hidden-username-field" autocomplete="username" tabindex="-1">
                             <input type="password" id="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>" name="<?php echo esc_attr(SITEPULSE_OPTION_GEMINI_API_KEY); ?>" value="" class="regular-text" autocomplete="new-password"<?php echo $has_effective_gemini_api_key && !$is_gemini_api_key_constant ? ' placeholder="' . esc_attr__('Une clé API est enregistrée', 'sitepulse') . '"' : ''; ?> <?php disabled($is_gemini_api_key_constant); ?> />
                             <?php if ($is_gemini_api_key_constant): ?>
                                 <p class="sitepulse-card-description"><?php esc_html_e('Cette clé est définie dans wp-config.php via la constante SITEPULSE_GEMINI_API_KEY. Mettez à jour ce fichier pour la modifier.', 'sitepulse'); ?></p>
