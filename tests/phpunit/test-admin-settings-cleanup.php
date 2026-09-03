@@ -268,4 +268,44 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
 
         $this->assertSame('stored-value', $sanitized);
     }
+
+    public function test_hides_module_submenus_but_keeps_dashboard_settings_and_debug(): void {
+        global $submenu;
+
+        $previous = $submenu;
+
+        $submenu['sitepulse-dashboard'] = [
+            ['Dashboard', 'manage_options', 'sitepulse-dashboard'],
+            ['Settings', 'manage_options', 'sitepulse-settings'],
+            ['Uptime', 'manage_options', 'sitepulse-uptime'],
+            ['Speed', 'manage_options', 'sitepulse-speed'],
+            ['Resources', 'manage_options', 'sitepulse-resources'],
+            ['Plugins', 'manage_options', 'sitepulse-plugins'],
+            ['Maintenance', 'manage_options', 'sitepulse-maintenance'],
+            ['Logs', 'manage_options', 'sitepulse-logs'],
+            ['Database', 'manage_options', 'sitepulse-db'],
+            ['AI Insights', 'manage_options', 'sitepulse-ai'],
+            ['Debug', 'manage_options', 'sitepulse-debug'],
+        ];
+
+        sitepulse_hide_module_admin_submenus();
+
+        $slugs = array_values(array_map(static function ($item) {
+            return $item[2];
+        }, $submenu['sitepulse-dashboard']));
+
+        $this->assertContains('sitepulse-dashboard', $slugs);
+        $this->assertContains('sitepulse-settings', $slugs);
+        $this->assertContains('sitepulse-debug', $slugs);
+        $this->assertNotContains('sitepulse-uptime', $slugs);
+        $this->assertNotContains('sitepulse-speed', $slugs);
+        $this->assertNotContains('sitepulse-resources', $slugs);
+        $this->assertNotContains('sitepulse-plugins', $slugs);
+        $this->assertNotContains('sitepulse-maintenance', $slugs);
+        $this->assertNotContains('sitepulse-logs', $slugs);
+        $this->assertNotContains('sitepulse-db', $slugs);
+        $this->assertNotContains('sitepulse-ai', $slugs);
+
+        $submenu = $previous;
+    }
 }

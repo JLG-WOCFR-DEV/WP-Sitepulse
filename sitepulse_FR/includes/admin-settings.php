@@ -119,6 +119,64 @@ function sitepulse_admin_menu() {
 add_action('admin_menu', 'sitepulse_admin_menu');
 
 /**
+ * Hides module submenu items from the admin sidebar while keeping the pages registered.
+ *
+ * Dashboard, Settings, and Debug remain visible. Module screens stay reachable via
+ * admin.php?page=sitepulse-* and the in-page module selector.
+ *
+ * @return void
+ */
+function sitepulse_hide_module_admin_submenus() {
+    if (!function_exists('remove_submenu_page')) {
+        return;
+    }
+
+    $hidden_slugs = [
+        'sitepulse-uptime',
+        'sitepulse-speed',
+        'sitepulse-resources',
+        'sitepulse-plugins',
+        'sitepulse-maintenance',
+        'sitepulse-logs',
+        'sitepulse-db',
+        'sitepulse-ai',
+    ];
+
+    if (function_exists('apply_filters')) {
+        /**
+         * Filters the SitePulse submenu slugs hidden from the admin sidebar.
+         *
+         * @param array<int,string> $hidden_slugs Submenu slugs to hide.
+         */
+        $hidden_slugs = apply_filters('sitepulse_hidden_admin_submenu_slugs', $hidden_slugs);
+    }
+
+    if (!is_array($hidden_slugs)) {
+        return;
+    }
+
+    $visible_slugs = [
+        'sitepulse-dashboard' => true,
+        'sitepulse-settings'  => true,
+    ];
+
+    if (defined('SITEPULSE_DEBUG') && SITEPULSE_DEBUG) {
+        $visible_slugs['sitepulse-debug'] = true;
+    }
+
+    foreach ($hidden_slugs as $slug) {
+        $slug = is_string($slug) ? sanitize_key($slug) : '';
+
+        if ($slug === '' || isset($visible_slugs[$slug])) {
+            continue;
+        }
+
+        remove_submenu_page('sitepulse-dashboard', $slug);
+    }
+}
+add_action('admin_menu', 'sitepulse_hide_module_admin_submenus', 999);
+
+/**
  * Registers the assets used on the SitePulse settings screen.
  *
  * @param string $hook_suffix Current admin page identifier.
@@ -4306,13 +4364,13 @@ function sitepulse_debug_page() {
 
     ?>
     <div class="wrap">
-        <h1><span class="dashicons-before dashicons-bug"></span> Debug Dashboard</h1>
-        <div class="notice notice-info"><p><strong>À quoi sert cette page ?</strong> Le mode Debug active une journalisation détaillée des actions du plugin. Cette page affiche ce journal et d'autres informations techniques pour vous aider, ou aider un développeur, à résoudre des problèmes. Ce menu n'apparaît que si le "Mode Debug" est activé dans les réglages de SitePulse.</p></div>
+        <h1><span class="dashicons-before dashicons-bug"></span> <?php esc_html_e('Debug Dashboard', 'sitepulse'); ?></h1>
+        <div class="notice notice-info"><p><strong><?php esc_html_e('À quoi sert cette page ?', 'sitepulse'); ?></strong> <?php esc_html_e('Le mode Debug active une journalisation détaillée des actions du plugin. Cette page affiche ce journal et d\'autres informations techniques pour vous aider, ou aider un développeur, à résoudre des problèmes. Ce menu n\'apparaît que si le "Mode Debug" est activé dans les réglages de SitePulse.', 'sitepulse'); ?></p></div>
         <div id="dashboard-widgets-wrap">
             <div id="dashboard-widgets" class="metabox-holder">
                 <div class="postbox-container">
                     <div class="postbox">
-                        <h2 class="hndle"><span>Détails de l'Environnement</span></h2>
+                        <h2 class="hndle"><span><?php esc_html_e('Détails de l\'Environnement', 'sitepulse'); ?></span></h2>
                         <div class="inside">
                             <?php
                             $active_modules_option = get_option(SITEPULSE_OPTION_ACTIVE_MODULES, []);
@@ -4322,17 +4380,17 @@ function sitepulse_debug_page() {
                             $active_modules_list = implode(', ', $active_modules);
                             ?>
                             <ul>
-                                <li><strong>Version de SitePulse:</strong> <?php echo esc_html(SITEPULSE_VERSION); ?></li>
-                                <li><strong>Version de WordPress:</strong> <?php echo esc_html(get_bloginfo('version')); ?></li>
-                                <li><strong>Version de PHP:</strong> <?php echo esc_html(PHP_VERSION); ?></li>
-                                <li><strong>Modules Actifs:</strong> <?php echo $active_modules_list ? esc_html($active_modules_list) : esc_html('Aucun'); ?></li>
-                                <li><strong>WP Memory Limit:</strong> <?php echo esc_html(WP_MEMORY_LIMIT); ?></li>
-                                <li><strong>Pic d'utilisation mémoire:</strong> <?php echo wp_kses_post(size_format(memory_get_peak_usage(true))); ?></li>
+                                <li><strong><?php esc_html_e('Version de SitePulse:', 'sitepulse'); ?></strong> <?php echo esc_html(SITEPULSE_VERSION); ?></li>
+                                <li><strong><?php esc_html_e('Version de WordPress:', 'sitepulse'); ?></strong> <?php echo esc_html(get_bloginfo('version')); ?></li>
+                                <li><strong><?php esc_html_e('Version de PHP:', 'sitepulse'); ?></strong> <?php echo esc_html(PHP_VERSION); ?></li>
+                                <li><strong><?php esc_html_e('Modules Actifs:', 'sitepulse'); ?></strong> <?php echo $active_modules_list ? esc_html($active_modules_list) : esc_html__('Aucun', 'sitepulse'); ?></li>
+                                <li><strong><?php esc_html_e('WP Memory Limit:', 'sitepulse'); ?></strong> <?php echo esc_html(WP_MEMORY_LIMIT); ?></li>
+                                <li><strong><?php esc_html_e('Pic d\'utilisation mémoire:', 'sitepulse'); ?></strong> <?php echo wp_kses_post(size_format(memory_get_peak_usage(true))); ?></li>
                             </ul>
                         </div>
                     </div>
                     <div class="postbox">
-                        <h2 class="hndle"><span>Tâches Planifiées (Crons)</span></h2>
+                        <h2 class="hndle"><span><?php esc_html_e('Tâches Planifiées (Crons)', 'sitepulse'); ?></span></h2>
                         <div class="inside">
                            <ul>
                                 <?php
@@ -4352,11 +4410,11 @@ function sitepulse_debug_page() {
 
                                             $has_sitepulse_cron = true;
                                             $next_run = wp_date('Y-m-d H:i:s', (int) $timestamp);
-                                            echo '<li><strong>' . esc_html($hook) . '</strong> - Prochaine exécution: ' . esc_html($next_run) . '</li>';
+                                            echo '<li><strong>' . esc_html($hook) . '</strong> - ' . esc_html__('Prochaine exécution:', 'sitepulse') . ' ' . esc_html($next_run) . '</li>';
                                         }
                                     }
                                 }
-                                if (!$has_sitepulse_cron) { echo '<li>Aucune tâche planifiée pour SitePulse trouvée.</li>'; }
+                                if (!$has_sitepulse_cron) { echo '<li>' . esc_html__('Aucune tâche planifiée pour SitePulse trouvée.', 'sitepulse') . '</li>'; }
                                 ?>
                            </ul>
                         </div>
@@ -4392,7 +4450,7 @@ function sitepulse_debug_page() {
                 </div>
             </div>
         </div>
-        <h2>Logs de Débogage Récents</h2>
+        <h2><?php esc_html_e('Logs de Débogage Récents', 'sitepulse'); ?></h2>
         <p class="description">
             <?php
             printf(
@@ -4416,13 +4474,13 @@ function sitepulse_debug_page() {
                             echo '<p class="description">' . esc_html__('Affichage tronqué pour limiter la consommation mémoire.', 'sitepulse') . '</p>';
                         }
                     } else {
-                        echo '<p>Le journal de débogage est actuellement vide.</p>';
+                        echo '<p>' . esc_html__('Le journal de débogage est actuellement vide.', 'sitepulse') . '</p>';
                     }
                 } else {
-                    echo '<p>Fichier de log non trouvé ou illisible.</p>';
+                    echo '<p>' . esc_html__('Fichier de log non trouvé ou illisible.', 'sitepulse') . '</p>';
                 }
             } else {
-                echo '<p>Fichier de log non trouvé ou illisible.</p>';
+                echo '<p>' . esc_html__('Fichier de log non trouvé ou illisible.', 'sitepulse') . '</p>';
             }
             ?>
         </div>

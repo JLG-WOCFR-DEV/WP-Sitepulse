@@ -149,4 +149,12 @@ class Sitepulse_Module_Changes_Test extends WP_UnitTestCase {
         $this->assertMatchesRegularExpression('/Dernière analyse[\s\S]*sitepulse-status\s+is-success[^>]*>[^<]*Il y a/', $output);
         $this->assertStringContainsString('Aucun relevé', $output);
     }
+
+    public function test_article_slideshow_is_disabled_by_default(): void {
+        $this->assertFalse(sitepulse_is_article_slideshow_enabled());
+
+        add_filter('sitepulse_enable_article_slideshow', '__return_true');
+        $this->assertTrue(sitepulse_is_article_slideshow_enabled());
+        remove_filter('sitepulse_enable_article_slideshow', '__return_true');
+    }
 }

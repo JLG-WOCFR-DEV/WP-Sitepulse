@@ -66,6 +66,41 @@ function sitepulse_http_monitor_is_enabled() {
 }
 
 /**
+ * Determines whether the current request context should persist outbound HTTP logs.
+ *
+ * Frontend traffic is skipped unless explicitly opted in, to avoid a SQL write on
+ * every public HTTP API call.
+ *
+ * @return bool
+ */
+function sitepulse_http_monitor_should_capture() {
+    if (function_exists('is_admin') && is_admin()) {
+        return true;
+    }
+
+    if (function_exists('wp_doing_cron') && wp_doing_cron()) {
+        return true;
+    }
+
+    if (defined('WP_CLI') && WP_CLI) {
+        return true;
+    }
+
+    $capture_frontend = false;
+
+    if (function_exists('apply_filters')) {
+        /**
+         * Filters whether frontend requests should record outbound HTTP traffic.
+         *
+         * @param bool $capture_frontend Whether frontend capture is enabled.
+         */
+        $capture_frontend = (bool) apply_filters('sitepulse_http_monitor_capture_frontend', $capture_frontend);
+    }
+
+    return $capture_frontend;
+}
+
+/**
  * Handles the debug hook fired before and after WordPress performs an HTTP request.
  *
  * @param mixed       $response Response or error from the HTTP API.
@@ -77,6 +112,10 @@ function sitepulse_http_monitor_is_enabled() {
  * @return void
  */
 function sitepulse_http_monitor_handle_http_api_debug($response, $type, $class, $args, $url) {
+    if (!sitepulse_http_monitor_should_capture()) {
+        return;
+    }
+
     static $pending = [];
 
     $key = sitepulse_http_monitor_get_request_key($class, $url);

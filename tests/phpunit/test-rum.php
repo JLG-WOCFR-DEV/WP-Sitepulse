@@ -9,6 +9,10 @@ class Sitepulse_Rum_Test extends WP_UnitTestCase {
     public static function setUpBeforeClass(): void {
         parent::setUpBeforeClass();
 
+        if (!defined('SITEPULSE_OPTION_RUM_SETTINGS')) {
+            define('SITEPULSE_OPTION_RUM_SETTINGS', 'sitepulse_rum_settings');
+        }
+
         require_once dirname(__DIR__, 2) . '/sitepulse_FR/modules/speed_analyzer.php';
     }
 
@@ -35,6 +39,28 @@ class Sitepulse_Rum_Test extends WP_UnitTestCase {
             sitepulse_rum_flush_cache();
         } else {
             delete_option('sitepulse_rum_cache_keys');
+        }
+
+        $this->delete_rum_rate_transients();
+    }
+
+    protected function tearDown(): void {
+        $this->delete_rum_rate_transients();
+        remove_all_filters('sitepulse_rum_rate_limit');
+        remove_all_filters('sitepulse_rum_rate_window');
+
+        parent::tearDown();
+    }
+
+    private function delete_rum_rate_transients(): void {
+        $ips = ['203.0.113.10', 'unknown'];
+
+        if (!empty($_SERVER['REMOTE_ADDR']) && is_string($_SERVER['REMOTE_ADDR'])) {
+            $ips[] = $_SERVER['REMOTE_ADDR'];
+        }
+
+        foreach (array_unique($ips) as $ip) {
+            delete_transient('sitepulse_rum_rate_' . md5($ip));
         }
     }
 
@@ -239,5 +265,76 @@ class Sitepulse_Rum_Test extends WP_UnitTestCase {
         ]);
 
         $this->assertFalse(get_transient($cache_key));
+    }
+
+    public function test_rate_limit_blocks_after_max_requests_per_ip(): void {
+        $_SERVER['REMOTE_ADDR'] = '203.0.113.10';
+
+        add_filter('sitepulse_rum_rate_limit', static function () {
+            return 2;
+        });
+
+        $this->assertFalse(sitepulse_rum_is_rate_limited());
+        $this->assertFalse(sitepulse_rum_is_rate_limited());
+        $this->assertTrue(sitepulse_rum_is_rate_limited());
+        $this->assertTrue(sitepulse_rum_is_rate_limited());
+    }
+
+    public function test_rest_ingest_rate_limit_does_not_break_token_check(): void {
+        update_option(SITEPULSE_OPTION_RUM_SETTINGS, [
+            'enabled' => true,
+            'token'   => 'valid-rum-token',
+        ]);
+
+        $_SERVER['REMOTE_ADDR'] = '203.0.113.10';
+
+        add_filter('sitepulse_rum_rate_limit', static function () {
+            return 1;
+        });
+
+        $metrics = [
+            [
+                'name'   => 'LCP',
+                'value'  => 1900,
+                'path'   => '/',
+                'rating' => 'good',
+            ],
+        ];
+
+        $invalid_request = new WP_REST_Request('POST', '/sitepulse/v1/rum');
+        $invalid_request->set_body_params([
+            'token'   => 'invalid-token',
+            'metrics' => $metrics,
+        ]);
+
+        $invalid_response = sitepulse_rum_rest_ingest_metrics($invalid_request);
+        $this->assertInstanceOf(WP_Error::class, $invalid_response);
+        $this->assertSame('sitepulse_rum_invalid_token', $invalid_response->get_error_code());
+
+        $valid_request = static function () use ($metrics) {
+            $request = new WP_REST_Request('POST', '/sitepulse/v1/rum');
+            $request->set_body_params([
+                'token'   => 'valid-rum-token',
+                'metrics' => $metrics,
+            ]);
+
+            return sitepulse_rum_rest_ingest_metrics($request);
+        };
+
+        $first = $valid_request();
+        if ($first instanceof WP_Error) {
+            $this->assertNotSame('sitepulse_rum_rate_limited', $first->get_error_code());
+        } else {
+            $this->assertInstanceOf(WP_REST_Response::class, $first);
+        }
+
+        $second = $valid_request();
+        $this->assertInstanceOf(WP_Error::class, $second);
+        $this->assertSame('sitepulse_rum_rate_limited', $second->get_error_code());
+        $this->assertSame(429, (int) $second->get_error_data()['status']);
+
+        $still_invalid = sitepulse_rum_rest_ingest_metrics($invalid_request);
+        $this->assertInstanceOf(WP_Error::class, $still_invalid);
+        $this->assertSame('sitepulse_rum_invalid_token', $still_invalid->get_error_code());
     }
 }

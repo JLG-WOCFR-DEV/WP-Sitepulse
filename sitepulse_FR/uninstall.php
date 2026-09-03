@@ -217,6 +217,7 @@ $transients = [
 $transient_prefixes = [
     SITEPULSE_TRANSIENT_PLUGIN_DIR_SIZE_PREFIX,
     SITEPULSE_TRANSIENT_REQUEST_PROFILER_LAST_TRACE_PREFIX,
+    'sitepulse_rum_rate_',
 ];
 
 $transient_prefixes = array_values(array_unique(array_filter($transient_prefixes, 'strlen')));

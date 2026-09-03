@@ -2190,7 +2190,7 @@ function sitepulse_run_for_site($site_id, callable $callback, $context) {
  * @return bool
  */
 function sitepulse_is_article_slideshow_enabled() {
-    $enabled = true;
+    $enabled = false;
 
     if (function_exists('apply_filters')) {
         $enabled = apply_filters('sitepulse_enable_article_slideshow', $enabled);

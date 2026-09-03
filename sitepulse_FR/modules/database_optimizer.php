@@ -21,11 +21,15 @@ function sitepulse_database_optimizer_page() {
 
         $clean_revisions  = isset($_POST['clean_revisions']) && '1' === wp_unslash($_POST['clean_revisions']);
         $clean_transients = isset($_POST['clean_transients']) && '1' === wp_unslash($_POST['clean_transients']);
+        $confirm_revisions = isset($_POST['confirm']) && '1' === wp_unslash($_POST['confirm']);
 
-        if ($clean_revisions) {
+        if ($clean_revisions && $confirm_revisions) {
+            if (!function_exists('wp_delete_post_revision') && defined('ABSPATH')) {
+                require_once ABSPATH . 'wp-admin/includes/revision.php';
+            }
+
             $batch_size = 500;
             $cleaned = 0;
-            $remaining_meta = 0;
             $last_id = 0;
             $previous_cache_invalidation = null;
 
@@ -53,58 +57,18 @@ function sitepulse_database_optimizer_page() {
                 }
 
                 $last_id = max($revision_ids);
-                $placeholders = implode(',', array_fill(0, count($revision_ids), '%d'));
-                $delete_sql = $wpdb->prepare(
-                    "DELETE FROM {$wpdb->posts} WHERE ID IN ($placeholders)",
-                    $revision_ids
-                );
 
-                if ($delete_sql === false) {
-                    break;
-                }
-
-                $deleted_rows = $wpdb->query($delete_sql);
-
-                if ($deleted_rows === false) {
-                    break;
-                }
-
-                if ($deleted_rows > 0) {
-                    $cleaned += (int) $deleted_rows;
-
-                    if (function_exists('clean_post_cache')) {
-                        foreach ($revision_ids as $revision_id) {
-                            clean_post_cache((int) $revision_id);
-                        }
+                foreach ($revision_ids as $revision_id) {
+                    if ($revision_id <= 0) {
+                        continue;
                     }
-                }
 
-                $meta_sql = $wpdb->prepare(
-                    "DELETE FROM {$wpdb->postmeta} WHERE post_id IN ($placeholders)",
-                    $revision_ids
-                );
+                    $deleted = function_exists('wp_delete_post_revision')
+                        ? wp_delete_post_revision($revision_id)
+                        : false;
 
-                if ($meta_sql === false) {
-                    $count_sql = $wpdb->prepare(
-                        "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE post_id IN ($placeholders)",
-                        $revision_ids
-                    );
-
-                    if ($count_sql !== false && $count_sql !== null) {
-                        $remaining_meta += (int) $wpdb->get_var($count_sql);
-                    }
-                } else {
-                    $meta_deleted = $wpdb->query($meta_sql);
-
-                    if ($meta_deleted === false) {
-                        $count_sql = $wpdb->prepare(
-                            "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE post_id IN ($placeholders)",
-                            $revision_ids
-                        );
-
-                        if ($count_sql !== false && $count_sql !== null) {
-                            $remaining_meta += (int) $wpdb->get_var($count_sql);
-                        }
+                    if ($deleted) {
+                        $cleaned++;
                     }
                 }
             } while (count($revision_ids) === $batch_size);
@@ -129,19 +93,11 @@ function sitepulse_database_optimizer_page() {
                 esc_attr($notice_class),
                 esc_html($message)
             );
-
-            if ($remaining_meta > 0) {
-                printf(
-                    '<div class="notice notice-warning is-dismissible"><p>%s</p></div>',
-                    sprintf(
-                        esc_html__(
-                            '%s entrées de métadonnées associées aux révisions n\'ont pas pu être nettoyées automatiquement.',
-                            'sitepulse'
-                        ),
-                        esc_html(number_format_i18n($remaining_meta))
-                    )
-                );
-            }
+        } elseif ($clean_revisions && !$confirm_revisions) {
+            printf(
+                '<div class="notice notice-warning is-dismissible"><p>%s</p></div>',
+                esc_html__('La suppression des révisions a été annulée. Veuillez confirmer l’action.', 'sitepulse')
+            );
         }
         if ($clean_transients) {
             $job_scheduled = false;
@@ -249,9 +205,17 @@ function sitepulse_database_optimizer_page() {
                     ?>
                 </p>
                 <p>
-                    <button type="submit" name="clean_revisions" value="1" class="button" <?php disabled($revisions, 0); ?>>
+                    <button
+                        type="submit"
+                        name="clean_revisions"
+                        value="1"
+                        class="button"
+                        onclick="if (!window.confirm('<?php echo esc_js(__('Supprimer toutes les révisions ? Cette action est irréversible.', 'sitepulse')); ?>')) { return false; } this.form.elements['confirm'].value = '1'; return true;"
+                        <?php disabled($revisions, 0); ?>
+                    >
                         <?php esc_html_e('Clean all revisions', 'sitepulse'); ?>
                     </button>
+                    <input type="hidden" name="confirm" value="0" />
                 </p>
             </div>
             <div class="card" style="background:#fff; padding:1px 20px 20px; margin-top:20px;">

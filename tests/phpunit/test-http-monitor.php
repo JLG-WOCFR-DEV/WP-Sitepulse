@@ -190,4 +190,66 @@ class Sitepulse_Http_Monitor_Test extends WP_UnitTestCase {
         $_POST = [];
         $_REQUEST = [];
     }
+
+    public function test_should_capture_skips_frontend_by_default(): void {
+        $this->assertFalse(sitepulse_http_monitor_should_capture());
+    }
+
+    public function test_should_capture_allows_cron_and_frontend_filter(): void {
+        add_filter('wp_doing_cron', '__return_true');
+        $this->assertTrue(sitepulse_http_monitor_should_capture());
+        remove_filter('wp_doing_cron', '__return_true');
+
+        add_filter('sitepulse_http_monitor_capture_frontend', '__return_true');
+        $this->assertTrue(sitepulse_http_monitor_should_capture());
+        remove_filter('sitepulse_http_monitor_capture_frontend', '__return_true');
+    }
+
+    public function test_handle_http_api_debug_does_not_inspect_frontend_requests(): void {
+        $reached = false;
+
+        add_filter('sitepulse_http_monitor_should_ignore', static function ($ignore) use (&$reached) {
+            $reached = true;
+
+            return $ignore;
+        });
+
+        sitepulse_http_monitor_handle_http_api_debug(
+            ['response' => ['code' => 200], 'body' => 'ok'],
+            'response',
+            null,
+            ['method' => 'GET'],
+            'https://api.example.com/frontend'
+        );
+
+        $this->assertFalse($reached);
+
+        remove_all_filters('sitepulse_http_monitor_should_ignore');
+    }
+
+    public function test_handle_http_api_debug_runs_when_frontend_capture_enabled(): void {
+        $reached = false;
+
+        update_option('sitepulse_active_modules', ['resource_monitor']);
+
+        add_filter('sitepulse_http_monitor_capture_frontend', '__return_true');
+        add_filter('sitepulse_http_monitor_should_ignore', static function ($ignore) use (&$reached) {
+            $reached = true;
+
+            return true;
+        });
+
+        sitepulse_http_monitor_handle_http_api_debug(
+            ['response' => ['code' => 200], 'body' => 'ok'],
+            'response',
+            null,
+            ['method' => 'GET'],
+            'https://api.example.com/frontend'
+        );
+
+        $this->assertTrue($reached);
+
+        remove_all_filters('sitepulse_http_monitor_capture_frontend');
+        remove_all_filters('sitepulse_http_monitor_should_ignore');
+    }
 }

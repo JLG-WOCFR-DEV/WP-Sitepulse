@@ -50,16 +50,16 @@
     --sitepulse-overlay: rgba(15, 23, 42, 0.08);
 }
 
-body.sitepulse-theme {
+body.sitepulse-theme #wpbody-content {
     font-family: var(--sitepulse-font-family);
     color: var(--sitepulse-color-text);
 }
 
-body.sitepulse-theme .wrap {
+body.sitepulse-theme #wpbody-content .wrap {
     color: inherit;
 }
 
-body.sitepulse-theme a {
+body.sitepulse-theme #wpbody-content .wrap a {
     color: var(--sitepulse-color-accent);
 }
 

@@ -217,6 +217,75 @@ function sitepulse_rum_rest_require_capability() {
 }
 
 /**
+ * Returns the client IP used for RUM ingestion rate limiting.
+ *
+ * @return string
+ */
+function sitepulse_rum_get_client_ip() {
+    $ip = '';
+
+    if (!empty($_SERVER['REMOTE_ADDR']) && is_string($_SERVER['REMOTE_ADDR'])) {
+        $ip = sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR']));
+    }
+
+    if ($ip !== '' && filter_var($ip, FILTER_VALIDATE_IP)) {
+        return $ip;
+    }
+
+    return '';
+}
+
+/**
+ * Determines whether the current client exceeded the RUM ingestion rate limit.
+ *
+ * @return bool
+ */
+function sitepulse_rum_is_rate_limited() {
+    $limit  = 30;
+    $window = defined('MINUTE_IN_SECONDS') ? 5 * MINUTE_IN_SECONDS : 300;
+
+    if (function_exists('apply_filters')) {
+        /**
+         * Filters the maximum number of RUM ingestion requests allowed per IP and window.
+         *
+         * @param int $limit Maximum requests.
+         */
+        $limit = (int) apply_filters('sitepulse_rum_rate_limit', $limit);
+
+        /**
+         * Filters the RUM ingestion rate-limit window in seconds.
+         *
+         * @param int $window Window in seconds.
+         */
+        $window = (int) apply_filters('sitepulse_rum_rate_window', $window);
+    }
+
+    $limit  = max(1, $limit);
+    $window = max(60, $window);
+
+    $ip  = sitepulse_rum_get_client_ip();
+    $key = 'sitepulse_rum_rate_' . md5($ip !== '' ? $ip : 'unknown');
+
+    $count = get_transient($key);
+
+    if ($count === false || $count === null || $count === '') {
+        set_transient($key, 1, $window);
+
+        return false;
+    }
+
+    $count = (int) $count;
+
+    if ($count >= $limit) {
+        return true;
+    }
+
+    set_transient($key, $count + 1, $window);
+
+    return false;
+}
+
+/**
  * Handles RUM ingestion requests.
  *
  * @param \WP_REST_Request $request Incoming request.
@@ -241,6 +310,12 @@ function sitepulse_rum_rest_ingest_metrics($request) {
     if ($expected_token === '' || $token === '' || !hash_equals($expected_token, $token)) {
         return new \WP_Error('sitepulse_rum_invalid_token', __('La vérification du jeton a échoué.', 'sitepulse'), [
             'status' => 403,
+        ]);
+    }
+
+    if (sitepulse_rum_is_rate_limited()) {
+        return new \WP_Error('sitepulse_rum_rate_limited', __('Trop de requêtes RUM. Réessayez dans quelques minutes.', 'sitepulse'), [
+            'status' => 429,
         ]);
     }
 
