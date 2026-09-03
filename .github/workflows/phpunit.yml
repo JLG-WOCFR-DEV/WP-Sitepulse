@@ -1,0 +1,49 @@
+name: PHPUnit
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  phpunit:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: wordpress_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: mysqli, zip, mbstring, xml
+          tools: composer
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Install WordPress test suite
+        env:
+          WP_TESTS_DIR: /tmp/wordpress-tests-lib
+          WP_CORE_DIR: /tmp/wordpress
+        run: |
+          curl -sSL https://raw.githubusercontent.com/wp-cli/scaffold-command/v2.1.0/templates/plugin/bin/install-wp-tests.sh -o /tmp/install-wp-tests.sh
+          bash /tmp/install-wp-tests.sh wordpress_test root root 127.0.0.1 latest true
+
+      - name: Run PHPUnit
+        env:
+          WP_TESTS_DIR: /tmp/wordpress-tests-lib
+        run: composer run test:phpunit
