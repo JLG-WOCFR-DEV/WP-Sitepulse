@@ -1094,3 +1094,71 @@ function sitepulse_rum_get_admin_summary() {
 
     return is_array($summary) ? $summary : [];
 }
+
+/**
+ * Handles updates to the RUM collection settings.
+ *
+ * @return void
+ */
+function sitepulse_speed_analyzer_handle_rum_settings() {
+    if (!current_user_can(sitepulse_get_capability())) {
+        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour modifier cette configuration.", 'sitepulse'));
+    }
+
+    $nonce_action = defined('SITEPULSE_NONCE_ACTION_RUM_SETTINGS') ? SITEPULSE_NONCE_ACTION_RUM_SETTINGS : 'sitepulse_rum_settings';
+    check_admin_referer($nonce_action);
+
+    $enabled = isset($_POST['sitepulse_rum_enabled']); // phpcs:ignore WordPress.Security.NonceVerification.Missing
+    $require_consent = isset($_POST['sitepulse_rum_require_consent']); // phpcs:ignore WordPress.Security.NonceVerification.Missing
+
+    $sample_rate_input = isset($_POST['sitepulse_rum_sample_rate']) // phpcs:ignore WordPress.Security.NonceVerification.Missing
+        ? floatval(wp_unslash($_POST['sitepulse_rum_sample_rate']))
+        : 100.0;
+    $sample_rate_input = max(0.0, min(100.0, $sample_rate_input));
+    $sample_rate = $sample_rate_input / 100.0;
+
+    $range_days = isset($_POST['sitepulse_rum_range_days']) // phpcs:ignore WordPress.Security.NonceVerification.Missing
+        ? absint($_POST['sitepulse_rum_range_days'])
+        : 7;
+
+    if ($range_days < 1) {
+        $range_days = 7;
+    }
+
+    $settings_option = defined('SITEPULSE_OPTION_RUM_SETTINGS') ? SITEPULSE_OPTION_RUM_SETTINGS : 'sitepulse_rum_settings';
+
+    $settings = [
+        'enabled'         => $enabled,
+        'require_consent' => $require_consent,
+        'sample_rate'     => $sample_rate,
+        'range_days'      => $range_days,
+    ];
+
+    update_option($settings_option, $settings, false);
+
+    if (isset($_POST['sitepulse_rum_retention_days'])) { // phpcs:ignore WordPress.Security.NonceVerification.Missing
+        $retention_days = absint($_POST['sitepulse_rum_retention_days']);
+        if ($retention_days >= 1) {
+            $retention_option = defined('SITEPULSE_OPTION_RUM_RETENTION_DAYS') ? SITEPULSE_OPTION_RUM_RETENTION_DAYS : 'sitepulse_rum_retention_days';
+            update_option($retention_option, $retention_days, false);
+        }
+    }
+
+    $regenerate_token = isset($_POST['sitepulse_rum_regenerate_token']); // phpcs:ignore WordPress.Security.NonceVerification.Missing
+
+    if ($regenerate_token) {
+        sitepulse_rum_get_ingest_token(true);
+    }
+
+    $redirect_url = add_query_arg(
+        [
+            'page'                  => 'sitepulse-speed',
+            'sitepulse_rum_updated' => '1',
+            'rum_token_refreshed'   => $regenerate_token ? '1' : '0',
+        ],
+        admin_url('admin.php')
+    );
+
+    wp_safe_redirect($redirect_url);
+    exit;
+}
