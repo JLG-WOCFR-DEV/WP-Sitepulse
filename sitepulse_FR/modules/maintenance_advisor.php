@@ -164,7 +164,7 @@ function sitepulse_maintenance_advisor_page() {
         <?php if (!$has_any_update_data) : ?>
             <div class="notice notice-error">
                 <p><?php esc_html_e(
-                    'Impossible de récupérer les informations de mise à jour. Vérifiez la connexion sortante de votre serveur et réessayez.',
+                    'Impossible de récupérer les données de mise à jour de WordPress. Vérifiez la connexion sortante de votre serveur et réessayez.',
                     'sitepulse'
                 ); ?></p>
             </div>

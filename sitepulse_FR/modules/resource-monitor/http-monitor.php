@@ -780,7 +780,10 @@ function sitepulse_http_monitor_apply_retention() {
         return;
     }
 
-    $wpdb->query($wpdb->prepare("DELETE FROM {$table} WHERE recorded_at < %d", $threshold));
+    $wpdb->query($wpdb->prepare(
+        "DELETE FROM {$table} WHERE COALESCE(NULLIF(recorded_at, 0), requested_at, 0) < %d",
+        $threshold
+    ));
 }
 
 /**

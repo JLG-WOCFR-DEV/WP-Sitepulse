@@ -393,3 +393,9 @@
         transition: none;
     }
 }
+
+.sitepulse-debug-snippet {
+    background: #f6f7f7;
+    padding: 12px 16px;
+    overflow: auto;
+}

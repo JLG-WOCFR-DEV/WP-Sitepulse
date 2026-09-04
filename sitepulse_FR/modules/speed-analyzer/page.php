@@ -221,7 +221,7 @@ function sitepulse_speed_analyzer_page() {
                 <?php if ($profiler_trigger_url !== '') : ?>
                     <p>
                         <a class="button" href="<?php echo esc_url($profiler_trigger_url); ?>">
-                            <?php esc_html_e('Profiler cette page', 'sitepulse'); ?>
+                            <?php esc_html_e('Recharger et profiler cette requête', 'sitepulse'); ?>
                         </a>
                     </p>
                 <?php endif; ?>
@@ -804,7 +804,7 @@ function sitepulse_speed_analyzer_page() {
             <div class="speed-card speed-card--profiler">
                 <h3><span class="dashicons dashicons-admin-generic"></span> <?php esc_html_e('Traçage applicatif (hooks & SQL)', 'sitepulse'); ?></h3>
                 <p><?php esc_html_e('Lancez un profilage ponctuel pour identifier les hooks et requêtes SQL les plus coûteux sur cette page.', 'sitepulse'); ?></p>
-                <button type="button" class="button button-secondary" id="sitepulse-speed-profiler-run"><?php esc_html_e('Profiler cette page', 'sitepulse'); ?></button>
+                <button type="button" class="button button-secondary" id="sitepulse-speed-profiler-run"><?php esc_html_e('Lancer un profilage en arrière-plan', 'sitepulse'); ?></button>
                 <p class="description"><?php esc_html_e('Une requête secondaire est exécutée en arrière-plan pour collecter les métriques détaillées.', 'sitepulse'); ?></p>
                 <div class="sitepulse-speed-profiler__status" id="sitepulse-speed-profiler-status" role="status" aria-live="polite"></div>
                 <div class="sitepulse-speed-profiler__results" id="sitepulse-speed-profiler-results" hidden>

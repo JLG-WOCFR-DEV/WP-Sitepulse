@@ -140,8 +140,8 @@ function sitepulse_log_analyzer_page() {
         // Case 2: Debug log is NOT enabled in wp-config.php
         else {
         ?>
-            <div class="notice notice-warning" style="padding-bottom: 10px;">
-                <h2><span class="dashicons dashicons-info-outline" style="padding-top: 4px;"></span> <?php esc_html_e('Journal de débogage non activé', 'sitepulse'); ?></h2>
+            <div class="notice notice-warning">
+                <h2><span class="dashicons dashicons-info-outline" aria-hidden="true"></span> <?php esc_html_e('Journal de débogage non activé', 'sitepulse'); ?></h2>
                 <p><?php echo wp_kses_post(sprintf(__('Pour que cet outil fonctionne, WordPress doit être configuré pour enregistrer les erreurs dans un fichier. Cela se fait en modifiant votre fichier <code>%s</code>.', 'sitepulse'), 'wp-config.php')); ?></p>
 
                 <h4><?php esc_html_e('Comment activer le journal de débogage :', 'sitepulse'); ?></h4>
@@ -151,7 +151,7 @@ function sitepulse_log_analyzer_page() {
                     <li><?php echo wp_kses_post(sprintf(__('Ouvrez ce fichier et cherchez la ligne : <br><code>%s</code>', 'sitepulse'), '/* C’est tout, ne touchez pas à ce qui suit ! Joyeuses publications. */')); ?></li>
                     <li><?php echo wp_kses_post(__('<strong>Juste avant</strong> cette ligne, ajoutez le code suivant :', 'sitepulse')); ?></li>
                 </ol>
-                <pre style="background: #f7f7f7; padding: 15px; border-radius: 4px;"><?php echo esc_html__("define( 'WP_DEBUG', true );\ndefine( 'WP_DEBUG_LOG', true );\ndefine( 'WP_DEBUG_DISPLAY', false );", 'sitepulse'); ?></pre>
+                <pre class="sitepulse-debug-snippet"><?php echo esc_html__("define( 'WP_DEBUG', true );\ndefine( 'WP_DEBUG_LOG', true );\ndefine( 'WP_DEBUG_DISPLAY', false );", 'sitepulse'); ?></pre>
                 <p><?php echo wp_kses_post(sprintf(__('<strong>Important :</strong> Une fois que vous avez résolu les problèmes, il est recommandé de repasser <code>%1$s</code> à <code>%2$s</code> sur un site en production.', 'sitepulse'), 'WP_DEBUG', 'false')); ?></p>
             </div>
         <?php

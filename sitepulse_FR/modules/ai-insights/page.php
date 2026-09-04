@@ -52,7 +52,7 @@ function sitepulse_ai_insights_page() {
                     sprintf(
                         /* translators: %s: URL to the SitePulse settings page. */
                         __('Le modèle sélectionné dans les réglages (<a href="%s">Réglages &gt; IA</a>) influence la granularité des recommandations et le temps de génération.', 'sitepulse'),
-                        esc_url(admin_url('admin.php?page=sitepulse-settings#sitepulse_ai_model'))
+                        esc_url(admin_url('admin.php?page=sitepulse-settings&sitepulse-settings-active-tab=sitepulse-tab-ai#sitepulse_ai_model'))
                     ),
                     ['a' => ['href' => true]]
                 ); ?></p>

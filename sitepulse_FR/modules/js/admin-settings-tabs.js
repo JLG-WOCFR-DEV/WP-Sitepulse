@@ -731,18 +731,50 @@
             fetchJobs();
         }
 
+        const scrollToHashTarget = (hashValue) => {
+            const normalizedHash = normalizeHash(hashValue);
+
+            if (!normalizedHash) {
+                return;
+            }
+
+            const target = document.getElementById(normalizedHash);
+
+            if (!target) {
+                return;
+            }
+
+            if (typeof target.scrollIntoView === 'function') {
+                target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }
+
+            if (typeof target.focus === 'function') {
+                try {
+                    target.focus({ preventScroll: true });
+                } catch (error) {
+                    target.focus();
+                }
+            }
+        };
+
         window.addEventListener('hashchange', () => {
             const panel = findPanelFromHash(window.location.hash);
 
             if (panel) {
                 activateTab(panel.id);
+                scrollToHashTarget(window.location.hash);
             }
         });
 
-        const initialPanel = findPanelFromHash(window.location.hash) || tabPanels[0];
+        const params = new URLSearchParams(window.location.search);
+        const queryTab = params.get('sitepulse-settings-active-tab');
+        const queryPanel = queryTab ? tabPanels.find((panel) => panel.id === queryTab) : null;
+        const hashedPanel = findPanelFromHash(window.location.hash);
+        const initialPanel = hashedPanel || queryPanel || tabPanels[0];
 
         if (initialPanel) {
             activateTab(initialPanel.id);
+            scrollToHashTarget(window.location.hash);
         }
     });
 })();
