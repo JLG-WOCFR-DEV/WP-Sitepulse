@@ -136,9 +136,6 @@ function sitepulse_speed_analyzer_page() {
         ? $automation_payload['queue']
         : [];
 
-    $profiler_history = function_exists('sitepulse_request_profiler_get_history')
-        ? sitepulse_request_profiler_get_history()
-        : [];
     $profiler_last_trace = null;
     $profiler_trigger_url = '';
 
@@ -212,110 +209,6 @@ function sitepulse_speed_analyzer_page() {
             </p>
             <div id="sitepulse-speed-scan-status" class="sitepulse-speed-status" role="status" aria-live="polite"></div>
         </div>
-
-        <?php if (function_exists('sitepulse_request_profiler_can_profile') && sitepulse_request_profiler_can_profile()) : ?>
-            <div class="sitepulse-speed-profiler card">
-                <h2><?php esc_html_e('Profilage de requête', 'sitepulse'); ?></h2>
-                <p><?php esc_html_e('Capturez le temps serveur, les requêtes SQL et l’empreinte mémoire de cette page pour identifier les goulets d’étranglement.', 'sitepulse'); ?></p>
-
-                <?php if ($profiler_trigger_url !== '') : ?>
-                    <p>
-                        <a class="button" href="<?php echo esc_url($profiler_trigger_url); ?>">
-                            <?php esc_html_e('Recharger et profiler cette requête', 'sitepulse'); ?>
-                        </a>
-                    </p>
-                <?php endif; ?>
-
-                <?php if (!empty($profiler_last_trace)) : ?>
-                    <div class="sitepulse-speed-profiler-summary">
-                        <h3><?php esc_html_e('Dernier profilage', 'sitepulse'); ?></h3>
-                        <p class="description">
-                            <?php
-                            echo esc_html(
-                                wp_date(
-                                    get_option('date_format') . ' ' . get_option('time_format'),
-                                    (int) $profiler_last_trace['timestamp']
-                                )
-                            );
-                            ?>
-                        </p>
-                        <ul class="ul-disc">
-                            <li>
-                                <?php
-                                printf(
-                                    /* translators: %s: execution time in milliseconds. */
-                                    esc_html__('Temps serveur : %s ms', 'sitepulse'),
-                                    esc_html(number_format_i18n((float) $profiler_last_trace['duration_ms'], 2))
-                                );
-                                ?>
-                            </li>
-                            <li>
-                                <?php
-                                printf(
-                                    /* translators: %s: number of queries. */
-                                    esc_html__('Requêtes SQL : %s', 'sitepulse'),
-                                    esc_html(number_format_i18n((int) $profiler_last_trace['query_count']))
-                                );
-                                ?>
-                            </li>
-                            <li>
-                                <?php
-                                printf(
-                                    /* translators: %s: memory peak in megabytes. */
-                                    esc_html__('Pic mémoire : %s Mo', 'sitepulse'),
-                                    esc_html(number_format_i18n((float) $profiler_last_trace['memory_peak_mb'], 2))
-                                );
-                                ?>
-                            </li>
-                        </ul>
-
-                        <?php if (!empty($profiler_last_trace['slow_queries'])) : ?>
-                            <h4><?php esc_html_e('Requêtes les plus lentes', 'sitepulse'); ?></h4>
-                            <table class="widefat striped">
-                                <thead>
-                                    <tr>
-                                        <th scope="col"><?php esc_html_e('Durée (ms)', 'sitepulse'); ?></th>
-                                        <th scope="col"><?php esc_html_e('Requête', 'sitepulse'); ?></th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($profiler_last_trace['slow_queries'] as $slow_query) : ?>
-                                        <tr>
-                                            <td><?php echo esc_html(number_format_i18n((float) $slow_query['time_ms'], 2)); ?></td>
-                                            <td><code><?php echo esc_html($slow_query['sql']); ?></code></td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        <?php endif; ?>
-                    </div>
-                <?php endif; ?>
-
-                <?php if (!empty($profiler_history)) : ?>
-                    <h3><?php esc_html_e('Historique des profilages', 'sitepulse'); ?></h3>
-                    <table class="widefat striped">
-                        <thead>
-                            <tr>
-                                <th scope="col"><?php esc_html_e('Horodatage', 'sitepulse'); ?></th>
-                                <th scope="col"><?php esc_html_e('Temps serveur (ms)', 'sitepulse'); ?></th>
-                                <th scope="col"><?php esc_html_e('Requêtes SQL', 'sitepulse'); ?></th>
-                                <th scope="col"><?php esc_html_e('Pic mémoire (Mo)', 'sitepulse'); ?></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($profiler_history as $trace) : ?>
-                                <tr>
-                                    <td><?php echo esc_html(wp_date(get_option('date_format') . ' ' . get_option('time_format'), (int) $trace['timestamp'])); ?></td>
-                                    <td><?php echo esc_html(number_format_i18n((float) $trace['duration_ms'], 2)); ?></td>
-                                    <td><?php echo esc_html(number_format_i18n((int) $trace['query_count'])); ?></td>
-                                    <td><?php echo esc_html(number_format_i18n((float) $trace['memory_peak_mb'], 2)); ?></td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                <?php endif; ?>
-            </div>
-        <?php endif; ?>
 
         <div class="sitepulse-rum card">
             <h2><?php esc_html_e('Web Vitals réels (RUM)', 'sitepulse'); ?></h2>
@@ -801,11 +694,82 @@ function sitepulse_speed_analyzer_page() {
             </div>
 
             <?php if (function_exists('sitepulse_request_profiler_is_available') && sitepulse_request_profiler_is_available()) : ?>
-            <div class="speed-card speed-card--profiler">
-                <h3><span class="dashicons dashicons-admin-generic"></span> <?php esc_html_e('Traçage applicatif (hooks & SQL)', 'sitepulse'); ?></h3>
-                <p><?php esc_html_e('Lancez un profilage ponctuel pour identifier les hooks et requêtes SQL les plus coûteux sur cette page.', 'sitepulse'); ?></p>
-                <button type="button" class="button button-secondary" id="sitepulse-speed-profiler-run"><?php esc_html_e('Lancer un profilage en arrière-plan', 'sitepulse'); ?></button>
-                <p class="description"><?php esc_html_e('Une requête secondaire est exécutée en arrière-plan pour collecter les métriques détaillées.', 'sitepulse'); ?></p>
+            <div class="speed-card speed-card--profiler" id="sitepulse-speed-profiler">
+                <h3><span class="dashicons dashicons-admin-generic"></span> <?php esc_html_e('Profilage de requête', 'sitepulse'); ?></h3>
+                <p><?php esc_html_e('Deux modes complémentaires : recharger cette page pour capturer temps / SQL / mémoire, ou lancer un tracé en arrière-plan pour lister les hooks et requêtes les plus coûteux.', 'sitepulse'); ?></p>
+                <p class="sitepulse-speed-profiler__actions">
+                    <?php if ($profiler_trigger_url !== '') : ?>
+                        <a class="button" href="<?php echo esc_url($profiler_trigger_url); ?>">
+                            <?php esc_html_e('Recharger et profiler cette requête', 'sitepulse'); ?>
+                        </a>
+                    <?php endif; ?>
+                    <button type="button" class="button button-secondary" id="sitepulse-speed-profiler-run"><?php esc_html_e('Profiler en arrière-plan (hooks & SQL)', 'sitepulse'); ?></button>
+                </p>
+                <p class="description"><?php esc_html_e('Le rechargement instrumente la requête courante. L’arrière-plan exécute une requête secondaire pour le détail hooks / SQL.', 'sitepulse'); ?></p>
+
+                <?php if (!empty($profiler_last_trace)) : ?>
+                    <div class="sitepulse-speed-profiler-summary">
+                        <h4><?php esc_html_e('Dernier rechargement profilé', 'sitepulse'); ?></h4>
+                        <p class="description">
+                            <?php
+                            echo esc_html(
+                                wp_date(
+                                    get_option('date_format') . ' ' . get_option('time_format'),
+                                    (int) $profiler_last_trace['timestamp']
+                                )
+                            );
+                            ?>
+                        </p>
+                        <ul class="ul-disc">
+                            <li>
+                                <?php
+                                printf(
+                                    /* translators: %s: execution time in milliseconds. */
+                                    esc_html__('Temps serveur : %s ms', 'sitepulse'),
+                                    esc_html(number_format_i18n((float) $profiler_last_trace['duration_ms'], 2))
+                                );
+                                ?>
+                            </li>
+                            <li>
+                                <?php
+                                printf(
+                                    /* translators: %s: number of queries. */
+                                    esc_html__('Requêtes SQL : %s', 'sitepulse'),
+                                    esc_html(number_format_i18n((int) $profiler_last_trace['query_count']))
+                                );
+                                ?>
+                            </li>
+                            <li>
+                                <?php
+                                printf(
+                                    /* translators: %s: memory peak in megabytes. */
+                                    esc_html__('Pic mémoire : %s Mo', 'sitepulse'),
+                                    esc_html(number_format_i18n((float) $profiler_last_trace['memory_peak_mb'], 2))
+                                );
+                                ?>
+                            </li>
+                        </ul>
+                        <?php if (!empty($profiler_last_trace['slow_queries'])) : ?>
+                            <h4><?php esc_html_e('Requêtes les plus lentes', 'sitepulse'); ?></h4>
+                            <table class="widefat striped">
+                                <thead>
+                                    <tr>
+                                        <th scope="col"><?php esc_html_e('Durée (ms)', 'sitepulse'); ?></th>
+                                        <th scope="col"><?php esc_html_e('Requête', 'sitepulse'); ?></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($profiler_last_trace['slow_queries'] as $slow_query) : ?>
+                                        <tr>
+                                            <td><?php echo esc_html(number_format_i18n((float) $slow_query['time_ms'], 2)); ?></td>
+                                            <td><code><?php echo esc_html($slow_query['sql']); ?></code></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        <?php endif; ?>
+                    </div>
+                <?php endif; ?>
                 <div class="sitepulse-speed-profiler__status" id="sitepulse-speed-profiler-status" role="status" aria-live="polite"></div>
                 <div class="sitepulse-speed-profiler__results" id="sitepulse-speed-profiler-results" hidden>
                     <h4><?php esc_html_e('Hooks les plus lents', 'sitepulse'); ?></h4>

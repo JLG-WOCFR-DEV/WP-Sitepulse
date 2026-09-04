@@ -31,6 +31,12 @@
         metricsGrid: '[data-sitepulse-metrics-grid]',
         metricsError: '[data-sitepulse-metrics-error]',
         announcer: '[data-sitepulse-metrics-announcer]',
+        health: '[data-sitepulse-health]',
+        healthValue: '[data-sitepulse-health-value]',
+        healthUnit: '[data-sitepulse-health-unit]',
+        healthSummary: '[data-sitepulse-health-summary]',
+        healthModules: '[data-sitepulse-health-modules]',
+        playbooks: '[data-sitepulse-playbooks]',
     };
 
     const strings = Object.assign(
@@ -60,6 +66,8 @@
     const metricsGrid = root.querySelector(selectors.metricsGrid);
     const errorEl = root.querySelector(selectors.metricsError);
     const announcerEl = root.querySelector(selectors.announcer);
+    const healthEl = root.querySelector(selectors.health);
+    const playbooksEl = root.querySelector(selectors.playbooks);
 
     function speak(message, politeness) {
         if (announcerEl) {
@@ -462,6 +470,134 @@
         }
     }
 
+    function updateHealth(health) {
+        if (!healthEl) {
+            return;
+        }
+
+        const statusClass = health && health.status && typeof health.status.class === 'string'
+            ? health.status.class
+            : 'status-warn';
+
+        healthEl.className = `sitepulse-health-hero sitepulse-health-hero--${statusClass}`;
+
+        const valueEl = healthEl.querySelector(selectors.healthValue);
+        const unitEl = healthEl.querySelector(selectors.healthUnit);
+        const summaryEl = healthEl.querySelector(selectors.healthSummary);
+        const modulesEl = healthEl.querySelector(selectors.healthModules);
+        const score = health && typeof health.score === 'number' ? health.score : null;
+
+        if (valueEl) {
+            valueEl.textContent = score === null ? 'N/A' : String(Math.round(score));
+        }
+
+        if (unitEl) {
+            toggleHidden(unitEl, score === null);
+        }
+
+        if (summaryEl) {
+            summaryEl.textContent = health && typeof health.summary === 'string' ? health.summary : '';
+        }
+
+        if (modulesEl) {
+            const modules = Array.isArray(health && health.modules) ? health.modules : [];
+            modulesEl.innerHTML = '';
+
+            modules.forEach((module) => {
+                if (!module || typeof module !== 'object') {
+                    return;
+                }
+
+                const item = document.createElement('li');
+                const moduleStatus = typeof module.status === 'string' ? module.status : 'status-warn';
+                item.className = `sitepulse-health-hero__module sitepulse-health-hero__module--${moduleStatus}`;
+
+                const label = document.createElement('span');
+                label.className = 'sitepulse-health-hero__module-label';
+                label.textContent = typeof module.label === 'string' ? module.label : '';
+
+                const scoreEl = document.createElement('span');
+                scoreEl.className = 'sitepulse-health-hero__module-score';
+                scoreEl.textContent = typeof module.score === 'number' ? String(Math.round(module.score)) : 'N/A';
+
+                if (typeof module.url === 'string' && module.url) {
+                    const link = document.createElement('a');
+                    link.href = module.url;
+                    link.appendChild(label);
+                    link.appendChild(scoreEl);
+                    item.appendChild(link);
+                } else {
+                    item.appendChild(label);
+                    item.appendChild(scoreEl);
+                }
+
+                if (typeof module.signal === 'string' && module.signal) {
+                    const signal = document.createElement('span');
+                    signal.className = 'sitepulse-health-hero__module-signal';
+                    signal.textContent = module.signal;
+                    item.appendChild(signal);
+                }
+
+                modulesEl.appendChild(item);
+            });
+
+            toggleHidden(modulesEl, modulesEl.children.length === 0);
+        }
+    }
+
+    function updatePlaybooks(playbooks) {
+        if (!playbooksEl) {
+            return;
+        }
+
+        playbooksEl.innerHTML = '';
+
+        playbooks.forEach((playbook) => {
+            if (!playbook || typeof playbook !== 'object') {
+                return;
+            }
+
+            const article = document.createElement('article');
+            const tone = typeof playbook.tone === 'string' ? playbook.tone : 'warning';
+            article.className = `sitepulse-playbook sitepulse-playbook--${tone}`;
+
+            const title = document.createElement('h2');
+            title.textContent = typeof playbook.title === 'string' ? playbook.title : '';
+            article.appendChild(title);
+
+            const steps = Array.isArray(playbook.steps) ? playbook.steps : [];
+
+            if (steps.length) {
+                const list = document.createElement('ol');
+
+                steps.forEach((step) => {
+                    if (!step || typeof step !== 'object' || typeof step.label !== 'string' || !step.label) {
+                        return;
+                    }
+
+                    const item = document.createElement('li');
+
+                    if (typeof step.url === 'string' && step.url) {
+                        const link = document.createElement('a');
+                        link.href = step.url;
+                        link.textContent = step.label;
+                        item.appendChild(link);
+                    } else {
+                        item.textContent = step.label;
+                    }
+
+                    list.appendChild(item);
+                });
+
+                article.appendChild(list);
+            }
+
+            playbooksEl.appendChild(article);
+        });
+
+        toggleHidden(playbooksEl, playbooksEl.children.length === 0);
+    }
+
     function renderView(view) {
         if (!view || typeof view !== 'object') {
             return;
@@ -481,6 +617,8 @@
         }
 
         updateBanner(view.banner || {});
+        updateHealth(view.health || {});
+        updatePlaybooks(Array.isArray(view.playbooks) ? view.playbooks : []);
 
         const cards = view.cards || {};
         const keys = Object.keys(cards);

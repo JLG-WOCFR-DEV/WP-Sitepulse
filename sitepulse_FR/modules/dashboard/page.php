@@ -56,6 +56,9 @@ function sitepulse_custom_dashboards_page() {
     }
 
     $metrics_cards = isset($metrics_view['cards']) && is_array($metrics_view['cards']) ? $metrics_view['cards'] : [];
+    $health_view = isset($metrics_view['health']) && is_array($metrics_view['health']) ? $metrics_view['health'] : [];
+    $playbooks_view = isset($metrics_view['playbooks']) && is_array($metrics_view['playbooks']) ? $metrics_view['playbooks'] : [];
+    $sla_view = isset($metrics_view['sla']) && is_array($metrics_view['sla']) ? $metrics_view['sla'] : [];
     $banner_view = isset($metrics_view['banner']) && is_array($metrics_view['banner']) ? $metrics_view['banner'] : [];
     $banner_tone = isset($banner_view['tone']) ? sanitize_html_class($banner_view['tone']) : 'ok';
     $banner_icon = isset($banner_view['icon']) ? $banner_view['icon'] : '✅';
@@ -1720,6 +1723,8 @@ function sitepulse_custom_dashboards_page() {
                 </div>
             </div>
 
+            <?php echo sitepulse_render_dashboard_health_hero($health_view); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+
             <div class="sitepulse-status-banner sitepulse-status-banner--<?php echo esc_attr($banner_tone); ?>" data-sitepulse-banner role="status" aria-live="polite">
             <div class="sitepulse-status-banner__content">
                 <span class="sitepulse-status-banner__icon" aria-hidden="true" data-sitepulse-banner-icon><?php echo esc_html($banner_icon); ?></span>
@@ -1733,6 +1738,9 @@ function sitepulse_custom_dashboards_page() {
                 <span class="sitepulse-status-banner__cta" data-sitepulse-banner-cta hidden></span>
             <?php endif; ?>
             </div>
+
+            <?php echo sitepulse_render_dashboard_playbooks($playbooks_view); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+            <?php echo sitepulse_render_dashboard_sla_action($sla_view); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
 
             <div class="sitepulse-kpi-grid" data-sitepulse-metrics-grid>
                 <?php foreach ($metrics_cards as $card_key => $card_data) : ?>

@@ -271,12 +271,18 @@ function sitepulse_custom_dashboard_normalize_impact_index($impact) {
         'range'           => isset($impact['range']) ? sanitize_key((string) $impact['range']) : '',
         'updated_at'      => isset($impact['updated_at']) ? (int) $impact['updated_at'] : $now,
         'overall'         => null,
+        'health'          => null,
         'dominant_module' => isset($impact['dominant_module']) ? sanitize_key((string) $impact['dominant_module']) : '',
         'modules'         => [],
     ];
 
     if (isset($impact['overall']) && is_numeric($impact['overall'])) {
         $normalized['overall'] = round((float) $impact['overall'], 2);
+        $normalized['health']  = round(max(0.0, min(100.0, 100.0 - (float) $impact['overall'])), 2);
+    }
+
+    if (isset($impact['health']) && is_numeric($impact['health'])) {
+        $normalized['health'] = round(max(0.0, min(100.0, (float) $impact['health'])), 2);
     }
 
     if (isset($impact['modules']) && is_array($impact['modules'])) {
@@ -405,9 +411,10 @@ function sitepulse_custom_dashboard_get_cached_impact_index($range, $max_age = 9
  * @param array<string,mixed>  $uptime         Uptime metrics.
  * @param array<string,mixed>  $speed          Speed metrics.
  * @param array<string,int>|null $ai_summary   AI insight summary.
+ * @param array<string,mixed>|null $logs       Debug log metrics.
  * @return array<string,mixed>
  */
-function sitepulse_custom_dashboard_calculate_transverse_impact_index($range, $config, $modules_status, $uptime, $speed, $ai_summary = null) {
+function sitepulse_custom_dashboard_calculate_transverse_impact_index($range, $config, $modules_status, $uptime, $speed, $ai_summary = null, $logs = null) {
     $range_id = sanitize_key((string) $range);
 
     if ($range_id === '') {
@@ -434,13 +441,15 @@ function sitepulse_custom_dashboard_calculate_transverse_impact_index($range, $c
     $module_labels = [
         'uptime_tracker' => __('Availability', 'sitepulse'),
         'speed_analyzer' => __('Performance', 'sitepulse'),
+        'log_analyzer'   => __('Errors', 'sitepulse'),
         'ai_insights'    => __('AI backlog', 'sitepulse'),
     ];
 
     $weights = [
         'uptime_tracker' => 0.4,
         'speed_analyzer' => 0.35,
-        'ai_insights'    => 0.25,
+        'log_analyzer'   => 0.25,
+        'ai_insights'    => 0.0,
     ];
 
     $weights = apply_filters('sitepulse_transverse_impact_weights', $weights, $range_id, $modules_status, $uptime, $speed, $ai_summary);
@@ -449,7 +458,8 @@ function sitepulse_custom_dashboard_calculate_transverse_impact_index($range, $c
         $weights = [
             'uptime_tracker' => 0.4,
             'speed_analyzer' => 0.35,
-            'ai_insights'    => 0.25,
+            'log_analyzer'   => 0.25,
+            'ai_insights'    => 0.0,
         ];
     }
 
@@ -638,6 +648,32 @@ function sitepulse_custom_dashboard_calculate_transverse_impact_index($range, $c
 
     $modules_output['speed_analyzer'] = $speed_entry;
 
+    $log_entry = function_exists('sitepulse_custom_dashboard_build_log_impact_entry')
+        ? sitepulse_custom_dashboard_build_log_impact_entry($logs, $modules_status)
+        : [
+            'label'   => $module_labels['log_analyzer'],
+            'status'  => 'status-warn',
+            'score'   => null,
+            'active'  => !empty($modules_status['log_analyzer']),
+            'details' => [],
+            'signal'  => '',
+        ];
+
+    if (isset($log_entry['score']) && is_numeric($log_entry['score'])) {
+        $weight_value = isset($weights['log_analyzer']) ? max(0.0, (float) $weights['log_analyzer']) : 0.0;
+
+        if ($weight_value > 0) {
+            $active_weights['log_analyzer'] = $weight_value;
+        }
+
+        if ((float) $log_entry['score'] > $dominant_score) {
+            $dominant_score  = (float) $log_entry['score'];
+            $dominant_module = 'log_analyzer';
+        }
+    }
+
+    $modules_output['log_analyzer'] = $log_entry;
+
     // AI insights scoring.
     $ai_entry = [
         'label'  => $module_labels['ai_insights'],
@@ -765,6 +801,7 @@ function sitepulse_custom_dashboard_calculate_transverse_impact_index($range, $c
             }
 
             $impact['overall'] = round($weighted_sum, 2);
+            $impact['health']  = round(max(0.0, min(100.0, 100.0 - $impact['overall'])), 2);
         }
     }
 

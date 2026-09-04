@@ -545,7 +545,7 @@ function sitepulse_uptime_tracker_page() {
                 ?></p>
             </div>
         </div>
-        <div class="card">
+        <div class="card" id="sitepulse-sla-reports">
             <h2><?php esc_html_e('Rapports SLA consolidés', 'sitepulse'); ?></h2>
             <div class="sitepulse-sla-actions">
                 <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="sitepulse-sla-actions__form">

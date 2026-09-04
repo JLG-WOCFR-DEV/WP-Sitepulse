@@ -942,6 +942,21 @@ function sitepulse_custom_dashboard_format_metrics_view($payload) {
 
     $banner = sitepulse_custom_dashboard_format_status_banner($cards, $payload, $range_label);
 
+    $health = function_exists('sitepulse_custom_dashboard_format_health_view')
+        ? sitepulse_custom_dashboard_format_health_view(
+            isset($payload['impact']) ? $payload['impact'] : null,
+            $range_label
+        )
+        : null;
+
+    $playbooks = function_exists('sitepulse_custom_dashboard_build_playbooks')
+        ? sitepulse_custom_dashboard_build_playbooks($cards, $payload)
+        : [];
+
+    $sla = function_exists('sitepulse_custom_dashboard_format_sla_action')
+        ? sitepulse_custom_dashboard_format_sla_action($payload)
+        : null;
+
     return [
         'range'           => $range,
         'range_label'     => $range_label,
@@ -952,6 +967,9 @@ function sitepulse_custom_dashboard_format_metrics_view($payload) {
             : __('Updated just now.', 'sitepulse'),
         'cards'           => $cards,
         'banner'          => $banner,
+        'health'          => $health,
+        'playbooks'       => $playbooks,
+        'sla'             => $sla,
         'modules'         => $modules,
     ];
 }

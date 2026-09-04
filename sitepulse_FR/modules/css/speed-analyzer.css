@@ -12,8 +12,18 @@
     }
 }
 
+.sitepulse-speed-profiler__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0 8px;
+}
+
+.speed-card--profiler {
+    grid-column: 1 / -1;
+}
+
 .speed-card {
-    background: var(--sitepulse-color-surface-elevated, #ffffff);
     padding: 20px;
     border: 1px solid var(--sitepulse-color-border, #d0d5dd);
     border-radius: var(--sitepulse-radius-md, 8px);

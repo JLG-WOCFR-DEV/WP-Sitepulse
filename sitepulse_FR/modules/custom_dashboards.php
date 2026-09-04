@@ -183,6 +183,7 @@ require_once __DIR__ . '/dashboard/theme.php';
 require_once __DIR__ . '/dashboard/preferences.php';
 require_once __DIR__ . '/dashboard/cards.php';
 require_once __DIR__ . '/dashboard/kpis.php';
+require_once __DIR__ . '/dashboard/health.php';
 require_once __DIR__ . '/dashboard/render.php';
 require_once __DIR__ . '/dashboard/metrics.php';
 require_once __DIR__ . '/dashboard/page.php';

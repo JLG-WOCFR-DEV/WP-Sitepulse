@@ -150,7 +150,8 @@ function sitepulse_custom_dashboard_prepare_metrics_payload($range) {
         $modules_status,
         $uptime,
         $speed,
-        $ai_summary
+        $ai_summary,
+        $logs
     );
 
     $resource = sitepulse_custom_dashboard_calculate_resource_metrics();
