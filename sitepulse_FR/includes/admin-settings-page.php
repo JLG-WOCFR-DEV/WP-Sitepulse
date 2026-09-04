@@ -521,6 +521,11 @@ function sitepulse_settings_page() {
             echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('Données stockées effacées.', 'sitepulse') . '</p></div>';
         }
         if (isset($_POST['sitepulse_reset_all'])) {
+            $reset_confirmed = isset($_POST['sitepulse_confirm_reset']) && (string) wp_unslash($_POST['sitepulse_confirm_reset']) === '1';
+
+            if (!$reset_confirmed) {
+                echo '<div class="notice notice-warning is-dismissible"><p>' . esc_html__('La réinitialisation a été annulée. Cochez la case de confirmation pour continuer.', 'sitepulse') . '</p></div>';
+            } else {
             $options_to_delete = [
                 SITEPULSE_OPTION_ACTIVE_MODULES,
                 SITEPULSE_OPTION_DEBUG_MODE,
@@ -657,6 +662,7 @@ function sitepulse_settings_page() {
                 } elseif ($log_deletion_failed) {
                     echo '<div class="notice notice-error is-dismissible"><p>' . esc_html__('Impossible de supprimer le journal de débogage. Vérifiez les permissions du fichier.', 'sitepulse') . '</p></div>';
                 }
+            }
             }
         }
     }
@@ -2037,8 +2043,14 @@ function sitepulse_settings_page() {
                                         </div>
                                         <div class="sitepulse-card-body">
                                             <p class="sitepulse-card-description"><?php esc_html_e("Réinitialise SitePulse à son état d'installation initial.", 'sitepulse'); ?></p>
+                                            <p>
+                                                <label for="sitepulse_confirm_reset">
+                                                    <input type="checkbox" name="sitepulse_confirm_reset" id="sitepulse_confirm_reset" value="1">
+                                                    <?php esc_html_e('Je comprends que cette action est irréversible.', 'sitepulse'); ?>
+                                                </label>
+                                            </p>
                                             <div class="sitepulse-card-footer">
-                                                <button type="submit" name="sitepulse_reset_all" class="button button-danger" onclick="return confirm('<?php echo esc_js(__('Êtes-vous sûr ?', 'sitepulse')); ?>');"><?php echo esc_html__('Tout réinitialiser', 'sitepulse'); ?></button>
+                                                <button type="submit" name="sitepulse_reset_all" class="button button-danger" onclick="if (!document.getElementById('sitepulse_confirm_reset').checked) { window.alert('<?php echo esc_js(__('Cochez la case de confirmation avant de réinitialiser SitePulse.', 'sitepulse')); ?>'); return false; } return window.confirm('<?php echo esc_js(__('Réinitialiser SitePulse ? Cette action est irréversible.', 'sitepulse')); ?>');"><?php echo esc_html__('Tout réinitialiser', 'sitepulse'); ?></button>
                                             </div>
                                         </div>
                                     </div>

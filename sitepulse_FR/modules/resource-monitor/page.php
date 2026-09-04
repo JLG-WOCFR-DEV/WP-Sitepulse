@@ -498,6 +498,7 @@ function sitepulse_resource_monitor_page() {
             <div id="sitepulse-resource-refresh-status" class="screen-reader-text" role="status" aria-live="polite"></div>
             <form method="post">
                 <?php wp_nonce_field('sitepulse_refresh_resource_snapshot'); ?>
+                <p class="description"><?php esc_html_e('Cette action prend un nouvel instantané et réinitialise l’historique affiché.', 'sitepulse'); ?></p>
                 <button type="submit" name="sitepulse_resource_monitor_refresh" class="button button-secondary">
                     <?php esc_html_e('Actualiser les mesures', 'sitepulse'); ?>
                 </button>
@@ -518,25 +519,29 @@ function sitepulse_resource_monitor_page() {
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="sitepulse-http-monitor-settings">
                 <?php wp_nonce_field($http_settings_nonce); ?>
                 <input type="hidden" name="action" value="sitepulse_save_http_monitor_settings">
-                <div class="sitepulse-http-monitor-fields">
-                    <label>
-                        <span><?php esc_html_e('Seuil latence p95 (ms)', 'sitepulse'); ?></span>
-                        <input type="number" name="sitepulse_http_latency_threshold" min="0" step="10" value="<?php echo esc_attr($http_latency_value); ?>" />
-                        <span class="description"><?php esc_html_e('Définissez 0 pour désactiver les alertes sur la latence.', 'sitepulse'); ?></span>
-                    </label>
-                    <label>
-                        <span><?php esc_html_e('Seuil taux d’erreurs (%)', 'sitepulse'); ?></span>
-                        <input type="number" name="sitepulse_http_error_rate" min="0" max="100" step="1" value="<?php echo esc_attr($http_error_value); ?>" />
-                        <span class="description"><?php esc_html_e('Pourcentage maximal d’appels en erreur avant déclenchement d’une alerte.', 'sitepulse'); ?></span>
-                    </label>
-                    <label>
-                        <span><?php esc_html_e('Rétention des données (jours)', 'sitepulse'); ?></span>
-                        <input type="number" name="sitepulse_http_retention_days" min="1" max="365" step="1" value="<?php echo esc_attr($http_retention_days); ?>" />
-                    </label>
-                </div>
-                <p class="submit">
-                    <button type="submit" class="button button-secondary"><?php esc_html_e('Enregistrer les seuils', 'sitepulse'); ?></button>
-                </p>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row"><label for="sitepulse_http_latency_threshold"><?php esc_html_e('Seuil latence p95 (ms)', 'sitepulse'); ?></label></th>
+                        <td>
+                            <input name="sitepulse_http_latency_threshold" type="number" id="sitepulse_http_latency_threshold" class="small-text" min="0" step="10" value="<?php echo esc_attr($http_latency_value); ?>">
+                            <p class="description"><?php esc_html_e('Définissez 0 pour désactiver les alertes sur la latence.', 'sitepulse'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="sitepulse_http_error_rate"><?php esc_html_e('Seuil taux d’erreurs (%)', 'sitepulse'); ?></label></th>
+                        <td>
+                            <input name="sitepulse_http_error_rate" type="number" id="sitepulse_http_error_rate" class="small-text" min="0" max="100" step="1" value="<?php echo esc_attr($http_error_value); ?>">
+                            <p class="description"><?php esc_html_e('Pourcentage maximal d’appels en erreur avant déclenchement d’une alerte.', 'sitepulse'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="sitepulse_http_retention_days"><?php esc_html_e('Rétention des données (jours)', 'sitepulse'); ?></label></th>
+                        <td>
+                            <input name="sitepulse_http_retention_days" type="number" id="sitepulse_http_retention_days" class="small-text" min="1" max="365" step="1" value="<?php echo esc_attr($http_retention_days); ?>">
+                        </td>
+                    </tr>
+                </table>
+                <?php submit_button(__('Enregistrer les seuils', 'sitepulse'), 'secondary'); ?>
             </form>
             <div class="sitepulse-http-monitor-summary" data-http-monitor-summary></div>
             <div class="sitepulse-http-monitor-table-wrapper">

@@ -244,14 +244,34 @@ function sitepulse_http_monitor_prepare_entry($response, $context, array $args, 
         $duration = max(0, (microtime(true) - (float) $context['started_at']) * 1000);
     }
 
+    $path = '';
+
+    if (function_exists('wp_parse_url')) {
+        $parsed_path = wp_parse_url($url, PHP_URL_PATH);
+        $path        = is_string($parsed_path) ? $parsed_path : '';
+    }
+
+    if ($path === '' && function_exists('parse_url')) {
+        $parsed_path = parse_url($url, PHP_URL_PATH);
+        $path        = is_string($parsed_path) ? $parsed_path : '';
+    }
+
+    if ($path === '') {
+        $path = '/';
+    }
+
     $entry = [
         'recorded_at'   => time(),
+        'requested_at'  => time(),
         'url'           => sitepulse_http_monitor_sanitize_url($url),
         'host'          => sitepulse_http_monitor_truncate($host, 191),
+        'path'          => sitepulse_http_monitor_truncate($path, 191),
         'method'        => sitepulse_http_monitor_truncate($method, 10),
         'response_code' => null,
+        'status_code'   => null,
         'duration_ms'   => $duration,
         'bytes'         => null,
+        'transport'     => 'WP_Http',
         'error_code'    => '',
         'error_message' => '',
         'is_error'      => 0,
@@ -266,6 +286,7 @@ function sitepulse_http_monitor_prepare_entry($response, $context, array $args, 
     } elseif (is_array($response)) {
         if (isset($response['response']['code'])) {
             $entry['response_code'] = (int) $response['response']['code'];
+            $entry['status_code']   = $entry['response_code'];
         }
 
         if (isset($response['body'])) {
@@ -287,6 +308,7 @@ function sitepulse_http_monitor_prepare_entry($response, $context, array $args, 
         }
     } elseif ($response instanceof WP_HTTP_Response) {
         $entry['response_code'] = (int) $response->get_status();
+        $entry['status_code']   = $entry['response_code'];
 
         $headers = $response->get_headers();
         $content_length = null;
@@ -335,7 +357,116 @@ function sitepulse_http_monitor_prepare_entry($response, $context, array $args, 
         $entry['error_code'] = 'http_' . $entry['response_code'];
     }
 
+    if ($entry['status_code'] === null && $entry['response_code'] !== null) {
+        $entry['status_code'] = $entry['response_code'];
+    }
+
     return $entry;
+}
+
+/**
+ * Normalizes a captured HTTP event for storage and tests.
+ *
+ * @param array<string,mixed> $payload  Request payload.
+ * @param mixed               $response HTTP response or WP_Error.
+ * @param string              $type     Event type.
+ * @return array<string,mixed>
+ */
+function sitepulse_http_monitor_normalize_event(array $payload, $response, $type = 'response') {
+    $url = isset($payload['url']) ? (string) $payload['url'] : '';
+    $args = [
+        'method' => isset($payload['method']) ? $payload['method'] : 'GET',
+    ];
+    $context = [
+        'started_at' => isset($payload['started_at']) ? (float) $payload['started_at'] : microtime(true),
+    ];
+
+    $entry = sitepulse_http_monitor_prepare_entry($response, $context, $args, $url);
+
+    if (isset($payload['transport']) && is_string($payload['transport']) && $payload['transport'] !== '') {
+        $entry['transport'] = sitepulse_http_monitor_truncate($payload['transport'], 50);
+    }
+
+    if (isset($payload['path']) && is_string($payload['path']) && $payload['path'] !== '') {
+        $entry['path'] = sitepulse_http_monitor_truncate($payload['path'], 191);
+    }
+
+    $entry['status_code'] = $entry['response_code'];
+
+    if ($type === 'error' && empty($entry['is_error'])) {
+        $entry['is_error'] = 1;
+    }
+
+    return $entry;
+}
+
+/**
+ * Holds an in-request buffer of HTTP events before they are flushed to storage.
+ *
+ * @param string                   $op    add|drain|get.
+ * @param array<string,mixed>|null $event Event payload for add.
+ * @return array<int,array<string,mixed>>|void
+ */
+function sitepulse_http_monitor_buffer($op, $event = null) {
+    static $buffer = [];
+
+    if ($op === 'add' && is_array($event)) {
+        $buffer[] = $event;
+        return;
+    }
+
+    if ($op === 'drain' || $op === 'clear') {
+        $buffer = [];
+        return;
+    }
+
+    return $buffer;
+}
+
+/**
+ * Persists buffered HTTP events.
+ *
+ * @return void
+ */
+function sitepulse_http_monitor_flush_buffer() {
+    $events = sitepulse_http_monitor_buffer('get');
+
+    if (!is_array($events) || empty($events)) {
+        return;
+    }
+
+    foreach ($events as $event) {
+        if (!is_array($event)) {
+            continue;
+        }
+
+        sitepulse_http_monitor_store_entry($event);
+    }
+
+    sitepulse_http_monitor_buffer('drain');
+}
+
+/**
+ * Stores or clears a request-scoped HTTP monitor context.
+ *
+ * @param string $op    get|set|clear.
+ * @param mixed  $value Optional value when setting.
+ * @return mixed
+ */
+function sitepulse_http_monitor_request_context($op = 'get', $value = null) {
+    static $context = [];
+
+    if ($op === 'clear') {
+        $context = [];
+        return null;
+    }
+
+    if ($op === 'set') {
+        $context = is_array($value) ? $value : [];
+        return $context;
+    }
+
+    return $context;
 }
 
 /**
@@ -414,21 +545,58 @@ function sitepulse_http_monitor_store_entry(array $entry) {
         return;
     }
 
+    $recorded_at = isset($entry['recorded_at']) ? (int) $entry['recorded_at'] : 0;
+
+    if ($recorded_at <= 0 && isset($entry['requested_at'])) {
+        $recorded_at = (int) $entry['requested_at'];
+    }
+
+    if ($recorded_at <= 0) {
+        $recorded_at = time();
+    }
+
+    $status_code = null;
+
+    if (isset($entry['status_code']) && is_numeric($entry['status_code'])) {
+        $status_code = (int) $entry['status_code'];
+    } elseif (isset($entry['response_code']) && is_numeric($entry['response_code'])) {
+        $status_code = (int) $entry['response_code'];
+    }
+
+    $path = isset($entry['path']) ? (string) $entry['path'] : '';
+
+    if ($path === '' && !empty($entry['url'])) {
+        $parsed_path = function_exists('wp_parse_url')
+            ? wp_parse_url((string) $entry['url'], PHP_URL_PATH)
+            : parse_url((string) $entry['url'], PHP_URL_PATH);
+        $path = is_string($parsed_path) ? $parsed_path : '';
+    }
+
+    if ($path === '') {
+        $path = '/';
+    }
+
     $data = [
-        'recorded_at'   => isset($entry['recorded_at']) ? (int) $entry['recorded_at'] : time(),
+        'recorded_at'   => $recorded_at,
+        'requested_at'  => isset($entry['requested_at']) ? (int) $entry['requested_at'] : $recorded_at,
         'url'           => isset($entry['url']) ? $entry['url'] : '',
         'host'          => isset($entry['host']) ? $entry['host'] : '',
+        'path'          => sitepulse_http_monitor_truncate($path, 191),
         'method'        => isset($entry['method']) ? $entry['method'] : 'GET',
-        'response_code' => isset($entry['response_code']) ? $entry['response_code'] : null,
+        'response_code' => $status_code,
+        'status_code'   => $status_code,
         'duration_ms'   => isset($entry['duration_ms']) ? (float) $entry['duration_ms'] : null,
         'bytes'         => isset($entry['bytes']) ? max(0, (int) $entry['bytes']) : null,
+        'transport'     => isset($entry['transport']) && $entry['transport'] !== ''
+            ? sitepulse_http_monitor_truncate((string) $entry['transport'], 50)
+            : 'WP_Http',
         'error_code'    => isset($entry['error_code']) ? $entry['error_code'] : '',
         'error_message' => isset($entry['error_message']) ? $entry['error_message'] : '',
         'is_error'      => !empty($entry['is_error']) ? 1 : 0,
         'created_at'    => function_exists('current_time') ? current_time('mysql') : gmdate('Y-m-d H:i:s'),
     ];
 
-    $formats = ['%d', '%s', '%s', '%s', '%d', '%f', '%d', '%s', '%s', '%d', '%s'];
+    $formats = ['%d', '%d', '%s', '%s', '%s', '%s', '%d', '%d', '%f', '%d', '%s', '%s', '%s', '%d', '%s'];
 
     $wpdb->insert($table, $data, $formats);
 
@@ -555,19 +723,25 @@ function sitepulse_http_monitor_install_table() {
     $sql = "CREATE TABLE {$table} (
         id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
         recorded_at int(10) unsigned NOT NULL,
+        requested_at int(10) unsigned NULL,
         url text NOT NULL,
         host varchar(191) NOT NULL,
+        path varchar(191) NOT NULL DEFAULT '',
         method varchar(10) NOT NULL,
         response_code smallint(6) NULL,
+        status_code smallint(6) NULL,
         duration_ms float NULL,
         bytes bigint(20) unsigned NULL,
+        transport varchar(50) NOT NULL DEFAULT '',
         error_code varchar(191) NULL,
         error_message text NULL,
         is_error tinyint(1) NOT NULL DEFAULT 0,
         created_at datetime NOT NULL,
         PRIMARY KEY  (id),
         KEY recorded_at (recorded_at),
+        KEY requested_at (requested_at),
         KEY host (host),
+        KEY host_path (host, path),
         KEY response_code (response_code)
     ) {$charset_collate};";
 
@@ -682,6 +856,20 @@ function sitepulse_http_monitor_get_settings() {
 }
 
 /**
+ * Returns HTTP monitor thresholds in the camelCase shape used by the UI.
+ *
+ * @return array{latency:int,errorRate:int}
+ */
+function sitepulse_http_monitor_get_threshold_configuration() {
+    $settings = sitepulse_http_monitor_get_settings();
+
+    return [
+        'latency'   => isset($settings['latency_threshold_ms']) ? (int) $settings['latency_threshold_ms'] : 0,
+        'errorRate' => isset($settings['error_rate_percent']) ? (int) $settings['error_rate_percent'] : 0,
+    ];
+}
+
+/**
  * Handles the submission of the HTTP monitor settings form.
  *
  * @return void
@@ -762,7 +950,13 @@ function sitepulse_http_monitor_handle_settings() {
     }
 
     $redirect_url = admin_url('admin.php?page=sitepulse-resources');
-    $redirect_url = add_query_arg('sitepulse-http-settings', 'updated', $redirect_url);
+    $redirect_url = add_query_arg(
+        [
+            'sitepulse_http_monitor'  => 'updated',
+            'sitepulse-http-settings' => 'updated',
+        ],
+        $redirect_url
+    );
 
     wp_safe_redirect($redirect_url);
     exit;
@@ -1001,7 +1195,7 @@ function sitepulse_http_monitor_build_summary($since_timestamp, array $settings,
     $values[] = isset($settings['latency_threshold_ms']) ? (float) $settings['latency_threshold_ms'] : 0.0;
 
     if ($since_timestamp !== null) {
-        $sql     .= ' WHERE recorded_at >= %d';
+        $sql     .= ' WHERE COALESCE(NULLIF(recorded_at, 0), requested_at) >= %d';
         $values[] = (int) $since_timestamp;
     }
 
@@ -1036,7 +1230,7 @@ function sitepulse_http_monitor_build_summary($since_timestamp, array $settings,
     $host_values = [];
 
     if ($since_timestamp !== null) {
-        $hosts_sql   .= ' AND recorded_at >= %d';
+        $hosts_sql   .= ' AND COALESCE(NULLIF(recorded_at, 0), requested_at) >= %d';
         $host_values[] = (int) $since_timestamp;
     }
 
@@ -1102,12 +1296,12 @@ function sitepulse_http_monitor_get_recent_entries($limit, $since_timestamp = nu
         return [];
     }
 
-    $sql    = "SELECT recorded_at, host, method, response_code, duration_ms, bytes, is_error, url, error_code, error_message
+    $sql    = "SELECT recorded_at, requested_at, host, path, method, response_code, status_code, duration_ms, bytes, transport, is_error, url, error_code, error_message
         FROM {$table}";
     $values = [];
 
     if ($since_timestamp !== null) {
-        $sql     .= ' WHERE recorded_at >= %d';
+        $sql     .= ' WHERE COALESCE(NULLIF(recorded_at, 0), requested_at) >= %d';
         $values[] = (int) $since_timestamp;
     }
 
@@ -1127,13 +1321,40 @@ function sitepulse_http_monitor_get_recent_entries($limit, $since_timestamp = nu
             continue;
         }
 
+        $status_code = null;
+
+        if (isset($row['status_code']) && $row['status_code'] !== null && $row['status_code'] !== '') {
+            $status_code = (int) $row['status_code'];
+        } elseif (isset($row['response_code']) && $row['response_code'] !== null && $row['response_code'] !== '') {
+            $status_code = (int) $row['response_code'];
+        }
+
+        $recorded_at = isset($row['recorded_at']) ? (int) $row['recorded_at'] : 0;
+
+        if ($recorded_at <= 0 && isset($row['requested_at'])) {
+            $recorded_at = (int) $row['requested_at'];
+        }
+
+        $path = isset($row['path']) ? (string) $row['path'] : '';
+
+        if ($path === '' && !empty($row['url'])) {
+            $parsed_path = function_exists('wp_parse_url')
+                ? wp_parse_url((string) $row['url'], PHP_URL_PATH)
+                : parse_url((string) $row['url'], PHP_URL_PATH);
+            $path = is_string($parsed_path) ? $parsed_path : '';
+        }
+
         $entries[] = [
-            'recorded_at'   => isset($row['recorded_at']) ? (int) $row['recorded_at'] : 0,
+            'recorded_at'   => $recorded_at,
+            'requested_at'  => isset($row['requested_at']) ? (int) $row['requested_at'] : $recorded_at,
             'host'          => isset($row['host']) ? (string) $row['host'] : '',
+            'path'          => $path !== '' ? $path : '/',
             'method'        => isset($row['method']) ? (string) $row['method'] : '',
-            'response_code' => isset($row['response_code']) ? (int) $row['response_code'] : null,
+            'response_code' => $status_code,
+            'status_code'   => $status_code,
             'duration_ms'   => isset($row['duration_ms']) ? (float) $row['duration_ms'] : null,
             'bytes'         => isset($row['bytes']) ? (int) $row['bytes'] : null,
+            'transport'     => isset($row['transport']) ? (string) $row['transport'] : '',
             'is_error'      => !empty($row['is_error']),
             'url'           => isset($row['url']) ? (string) $row['url'] : '',
             'error_code'    => isset($row['error_code']) ? (string) $row['error_code'] : '',
@@ -1142,4 +1363,109 @@ function sitepulse_http_monitor_get_recent_entries($limit, $since_timestamp = nu
     }
 
     return $entries;
+}
+
+/**
+ * Aggregates outbound HTTP traffic for the dashboard, REST clients, and tests.
+ *
+ * @param array<string,mixed> $args {
+ *     @type int $since Unix timestamp lower bound.
+ *     @type int $limit Maximum services/samples to return.
+ * }
+ * @return array<string,mixed>
+ */
+function sitepulse_http_monitor_get_stats(array $args = []) {
+    $since = isset($args['since']) && is_numeric($args['since']) ? (int) $args['since'] : null;
+    $limit = isset($args['limit']) && is_numeric($args['limit']) ? (int) $args['limit'] : 10;
+    $limit = max(1, min(100, $limit));
+
+    $settings = sitepulse_http_monitor_get_settings();
+    $summary_data = sitepulse_http_monitor_build_summary($since, $settings, $limit);
+    $samples = sitepulse_http_monitor_get_recent_entries(max($limit, 50), $since);
+
+    $grouped = [];
+    $durations = [];
+
+    foreach ($samples as $sample) {
+        if (isset($sample['duration_ms']) && is_numeric($sample['duration_ms'])) {
+            $durations[] = (float) $sample['duration_ms'];
+        }
+
+        $host = isset($sample['host']) ? (string) $sample['host'] : '';
+        $path = isset($sample['path']) ? (string) $sample['path'] : '/';
+        $method = isset($sample['method']) ? strtoupper((string) $sample['method']) : 'GET';
+        $key = strtolower($host) . "\0" . $path . "\0" . $method;
+
+        if (!isset($grouped[$key])) {
+            $grouped[$key] = [
+                'host'     => $host,
+                'path'     => $path,
+                'method'   => $method,
+                'total'    => 0,
+                'errors'   => 0,
+                'durations'=> [],
+            ];
+        }
+
+        $grouped[$key]['total']++;
+
+        if (!empty($sample['is_error'])) {
+            $grouped[$key]['errors']++;
+        }
+
+        if (isset($sample['duration_ms']) && is_numeric($sample['duration_ms'])) {
+            $grouped[$key]['durations'][] = (float) $sample['duration_ms'];
+        }
+    }
+
+    $services = [];
+
+    foreach ($grouped as $group) {
+        $average = !empty($group['durations']) ? array_sum($group['durations']) / count($group['durations']) : null;
+        $max     = !empty($group['durations']) ? max($group['durations']) : null;
+
+        $services[] = [
+            'host'      => $group['host'],
+            'path'      => $group['path'],
+            'method'    => $group['method'],
+            'total'     => $group['total'],
+            'errors'    => $group['errors'],
+            'errorRate' => $group['total'] > 0 ? ($group['errors'] / $group['total']) * 100 : 0.0,
+            'average'   => $average,
+            'max'       => $max,
+        ];
+    }
+
+    usort($services, static function ($a, $b) {
+        return $b['total'] <=> $a['total'];
+    });
+
+    $services = array_slice($services, 0, $limit);
+
+    $p95 = null;
+
+    if (!empty($durations)) {
+        sort($durations);
+        $index = (int) max(0, min(count($durations) - 1, (int) ceil(0.95 * count($durations)) - 1));
+        $p95 = $durations[$index];
+    }
+
+    $summary = isset($summary_data['summary']) && is_array($summary_data['summary']) ? $summary_data['summary'] : [];
+    $total = isset($summary['total_requests']) ? (int) $summary['total_requests'] : count($samples);
+    $errors = isset($summary['error_count']) ? (int) $summary['error_count'] : 0;
+
+    return [
+        'summary' => [
+            'total'           => $total,
+            'errors'          => $errors,
+            'errorRate'       => isset($summary['error_rate_percent']) ? (float) $summary['error_rate_percent'] : ($total > 0 ? ($errors / $total) * 100 : 0.0),
+            'averageDuration' => isset($summary['average_duration_ms']) ? (float) $summary['average_duration_ms'] : null,
+            'maxDuration'     => isset($summary['max_duration_ms']) ? (float) $summary['max_duration_ms'] : null,
+            'p95Duration'     => $p95,
+        ],
+        'services'   => $services,
+        'samples'    => array_slice($samples, 0, $limit),
+        'thresholds' => sitepulse_http_monitor_get_threshold_configuration(),
+        'top_hosts'  => isset($summary_data['top_hosts']) ? $summary_data['top_hosts'] : [],
+    ];
 }

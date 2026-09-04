@@ -87,7 +87,7 @@ return [
     'SITEPULSE_OPTION_HTTP_MONITOR_SCHEMA_VERSION' => 'sitepulse_http_monitor_schema_version',
     'SITEPULSE_OPTION_HTTP_MONITOR_RETENTION_DAYS' => 'sitepulse_http_monitor_retention_days',
     'SITEPULSE_TABLE_HTTP_MONITOR' => 'sitepulse_http_monitor_logs',
-    'SITEPULSE_HTTP_MONITOR_SCHEMA_VERSION' => 1,
+    'SITEPULSE_HTTP_MONITOR_SCHEMA_VERSION' => 2,
     'SITEPULSE_TRANSIENT_HTTP_MONITOR_AGGREGATES' => 'sitepulse_http_monitor_aggregates',
     'SITEPULSE_TRANSIENT_HTTP_MONITOR_RECENT' => 'sitepulse_http_monitor_recent',
     'SITEPULSE_NONCE_ACTION_HTTP_MONITOR_SETTINGS' => 'sitepulse_http_monitor_settings',

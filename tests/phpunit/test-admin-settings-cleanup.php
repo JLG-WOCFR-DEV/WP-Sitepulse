@@ -231,6 +231,7 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
 
         $_POST = [
             'sitepulse_reset_all'                  => '1',
+            'sitepulse_confirm_reset'              => '1',
             SITEPULSE_NONCE_FIELD_CLEANUP          => wp_create_nonce(SITEPULSE_NONCE_ACTION_CLEANUP),
         ];
 
