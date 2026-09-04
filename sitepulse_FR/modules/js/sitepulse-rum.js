@@ -7,6 +7,12 @@
         return;
     }
 
+    var sampleRate = typeof config.sampleRate === 'number' ? config.sampleRate : 1;
+
+    if (sampleRate < 1 && Math.random() > sampleRate) {
+        return;
+    }
+
     var consentRequired = !!config.consentRequired;
     var consentGranted = !consentRequired || !!config.consentGranted;
     var queue = [];

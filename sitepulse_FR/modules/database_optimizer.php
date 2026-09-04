@@ -205,17 +205,22 @@ function sitepulse_database_optimizer_page() {
                     ?>
                 </p>
                 <p>
+                    <label for="sitepulse-confirm-revisions">
+                        <input type="checkbox" name="confirm" id="sitepulse-confirm-revisions" value="1" <?php disabled($revisions, 0); ?> />
+                        <?php esc_html_e('Je confirme la suppression définitive de toutes les révisions.', 'sitepulse'); ?>
+                    </label>
+                </p>
+                <p>
                     <button
                         type="submit"
                         name="clean_revisions"
                         value="1"
-                        class="button"
-                        onclick="if (!window.confirm('<?php echo esc_js(__('Supprimer toutes les révisions ? Cette action est irréversible.', 'sitepulse')); ?>')) { return false; } this.form.elements['confirm'].value = '1'; return true;"
+                        class="button button-primary"
+                        onclick="if (!document.getElementById('sitepulse-confirm-revisions').checked) { window.alert('<?php echo esc_js(__('Cochez la case de confirmation avant de supprimer les révisions.', 'sitepulse')); ?>'); return false; } return window.confirm('<?php echo esc_js(__('Supprimer toutes les révisions ? Cette action est irréversible.', 'sitepulse')); ?>');"
                         <?php disabled($revisions, 0); ?>
                     >
                         <?php esc_html_e('Clean all revisions', 'sitepulse'); ?>
                     </button>
-                    <input type="hidden" name="confirm" value="0" />
                 </p>
             </div>
             <div class="card" style="background:#fff; padding:1px 20px 20px; margin-top:20px;">

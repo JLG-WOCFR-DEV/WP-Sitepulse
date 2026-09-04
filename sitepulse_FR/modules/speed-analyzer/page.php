@@ -49,7 +49,17 @@ function sitepulse_speed_analyzer_page() {
             'enabled'          => false,
             'token'            => '',
             'consent_required' => false,
+            'sample_rate'      => 1.0,
+            'range_days'       => 7,
         ];
+
+    $rum_range_days = isset($rum_settings['range_days']) ? (int) $rum_settings['range_days'] : 7;
+    $rum_sample_percent = isset($rum_settings['sample_rate'])
+        ? round((float) $rum_settings['sample_rate'] * 100, 1)
+        : 100.0;
+    $rum_token = function_exists('sitepulse_rum_get_ingest_token')
+        ? sitepulse_rum_get_ingest_token()
+        : (isset($rum_settings['token']) ? (string) $rum_settings['token'] : '');
 
     $rum_summary = (!empty($rum_settings['enabled']) && function_exists('sitepulse_rum_get_admin_summary'))
         ? sitepulse_rum_get_admin_summary()
@@ -70,48 +80,6 @@ function sitepulse_speed_analyzer_page() {
         : 'sitepulse_rum_settings';
 
     global $wpdb;
-
-    $rum_settings = function_exists('sitepulse_rum_get_settings') ? sitepulse_rum_get_settings() : [
-        'enabled'         => false,
-        'require_consent' => false,
-        'sample_rate'     => 1.0,
-        'range_days'      => 7,
-    ];
-    $rum_range_days = isset($rum_settings['range_days']) ? (int) $rum_settings['range_days'] : 7;
-    $rum_retention_days = function_exists('sitepulse_rum_get_retention_days') ? sitepulse_rum_get_retention_days() : 30;
-    $rum_token = function_exists('sitepulse_rum_get_ingest_token') ? sitepulse_rum_get_ingest_token() : '';
-    $rum_aggregates = function_exists('sitepulse_rum_calculate_aggregates')
-        ? sitepulse_rum_calculate_aggregates([
-            'range_days' => $rum_range_days,
-        ])
-        : [
-            'sample_count'   => 0,
-            'page_count'     => 0,
-            'last_sample_at' => null,
-            'summary'        => [],
-            'pages'          => [],
-        ];
-
-    if (!is_array($rum_aggregates)) {
-        $rum_aggregates = [
-            'sample_count'   => 0,
-            'page_count'     => 0,
-            'last_sample_at' => null,
-            'summary'        => [],
-            'pages'          => [],
-        ];
-    }
-
-    $rum_summary_metrics = isset($rum_aggregates['summary']) && is_array($rum_aggregates['summary'])
-        ? $rum_aggregates['summary']
-        : [];
-    $rum_sample_count = isset($rum_aggregates['sample_count']) ? (int) $rum_aggregates['sample_count'] : 0;
-    $rum_page_breakdown = isset($rum_aggregates['pages']) && is_array($rum_aggregates['pages'])
-        ? $rum_aggregates['pages']
-        : [];
-    $rum_sample_percent = isset($rum_settings['sample_rate'])
-        ? round((float) $rum_settings['sample_rate'] * 100, 1)
-        : 100.0;
 
     // --- Server Performance Metrics ---
 
@@ -228,15 +196,6 @@ function sitepulse_speed_analyzer_page() {
         <?php endif; ?>
         <h1><span class="dashicons-before dashicons-performance"></span> <?php esc_html_e('Analyseur de Vitesse', 'sitepulse'); ?></h1>
         <p><?php esc_html_e('Cet outil analyse la performance interne de votre serveur et de votre base de données à chaque chargement de page.', 'sitepulse'); ?></p>
-
-        <?php if (isset($_GET['sitepulse_rum_updated'])) : // phpcs:ignore WordPress.Security.NonceVerification.Recommended ?>
-            <div class="notice notice-success is-dismissible">
-                <p><?php esc_html_e('Paramètres RUM enregistrés avec succès.', 'sitepulse'); ?></p>
-                <?php if (!empty($_GET['rum_token_refreshed'])) : // phpcs:ignore WordPress.Security.NonceVerification.Recommended ?>
-                    <p><?php esc_html_e('Le jeton de collecte a été régénéré. Mettez à jour les intégrations externes si nécessaire.', 'sitepulse'); ?></p>
-                <?php endif; ?>
-            </div>
-        <?php endif; ?>
 
         <div class="speed-scan-actions">
             <button type="button" class="button button-primary" id="sitepulse-speed-rescan">
@@ -480,38 +439,66 @@ function sitepulse_speed_analyzer_page() {
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="sitepulse-rum-settings">
                 <?php wp_nonce_field($rum_nonce_action); ?>
                 <input type="hidden" name="action" value="sitepulse_rum_settings">
-                <fieldset>
-                    <legend class="screen-reader-text"><?php esc_html_e('Paramètres RUM', 'sitepulse'); ?></legend>
-                    <label>
-                        <input type="checkbox" name="sitepulse_rum_enabled" value="1" <?php checked(!empty($rum_settings['enabled'])); ?>>
-                        <?php esc_html_e('Activer la collecte RUM', 'sitepulse'); ?>
-                    </label>
-                </fieldset>
-                <fieldset>
-                    <legend class="screen-reader-text"><?php esc_html_e('Consentement', 'sitepulse'); ?></legend>
-                    <label>
-                        <input type="checkbox" name="sitepulse_rum_consent_required" value="1" <?php checked(!empty($rum_settings['consent_required'])); ?>>
-                        <?php esc_html_e('Requiert un consentement explicite avant de charger le script', 'sitepulse'); ?>
-                    </label>
-                </fieldset>
-
-                <?php if (!empty($rum_settings['token'])) : ?>
-                    <p>
-                        <strong><?php esc_html_e('Jeton d’ingestion', 'sitepulse'); ?> :</strong>
-                        <code><?php echo esc_html($rum_settings['token']); ?></code>
-                    </p>
-                <?php else : ?>
-                    <p class="description"><?php esc_html_e('Un jeton unique sera généré automatiquement lors de l’activation.', 'sitepulse'); ?></p>
-                <?php endif; ?>
-
-                <p class="description"><?php esc_html_e('Depuis votre bannière de consentement, appelez “SitePulseRUM.grantConsent()” pour déclencher l’envoi des mesures après accord utilisateur.', 'sitepulse'); ?></p>
-
-                <p class="sitepulse-rum-actions">
-                    <?php submit_button(__('Enregistrer les paramètres', 'sitepulse'), 'primary', 'submit', false); ?>
-                    <button type="submit" name="sitepulse_rum_regenerate" value="1" class="button">
-                        <?php esc_html_e('Regénérer le jeton', 'sitepulse'); ?>
-                    </button>
-                </p>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Collecte', 'sitepulse'); ?></th>
+                        <td>
+                            <label for="sitepulse_rum_enabled">
+                                <input type="checkbox" name="sitepulse_rum_enabled" id="sitepulse_rum_enabled" value="1" <?php checked(!empty($rum_settings['enabled'])); ?>>
+                                <?php esc_html_e('Activer la collecte RUM', 'sitepulse'); ?>
+                            </label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Consentement', 'sitepulse'); ?></th>
+                        <td>
+                            <label for="sitepulse_rum_consent_required">
+                                <input type="checkbox" name="sitepulse_rum_consent_required" id="sitepulse_rum_consent_required" value="1" <?php checked(!empty($rum_settings['consent_required'])); ?>>
+                                <?php esc_html_e('Requiert un consentement explicite avant de charger le script', 'sitepulse'); ?>
+                            </label>
+                            <p class="description"><?php esc_html_e('Depuis votre bannière de consentement, appelez SitePulseRUM.grantConsent() après accord utilisateur.', 'sitepulse'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="sitepulse_rum_sample_rate"><?php esc_html_e('Échantillonnage', 'sitepulse'); ?></label></th>
+                        <td>
+                            <input name="sitepulse_rum_sample_rate" type="number" id="sitepulse_rum_sample_rate" class="small-text" min="1" max="100" step="1" value="<?php echo esc_attr($rum_sample_percent); ?>">
+                            <p class="description"><?php esc_html_e('Pourcentage de visites instrumentées (100 = toutes les pages).', 'sitepulse'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="sitepulse_rum_range_days"><?php esc_html_e('Fenêtre d’analyse', 'sitepulse'); ?></label></th>
+                        <td>
+                            <input name="sitepulse_rum_range_days" type="number" id="sitepulse_rum_range_days" class="small-text" min="1" max="90" step="1" value="<?php echo esc_attr($rum_range_days); ?>">
+                            <span><?php esc_html_e('jours', 'sitepulse'); ?></span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="sitepulse_rum_retention_days"><?php esc_html_e('Rétention', 'sitepulse'); ?></label></th>
+                        <td>
+                            <input name="sitepulse_rum_retention_days" type="number" id="sitepulse_rum_retention_days" class="small-text" min="7" max="365" step="1" value="<?php echo esc_attr((int) $rum_retention_days); ?>">
+                            <span><?php esc_html_e('jours', 'sitepulse'); ?></span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Jeton d’ingestion', 'sitepulse'); ?></th>
+                        <td>
+                            <?php if ($rum_token !== '') : ?>
+                                <code><?php echo esc_html($rum_token); ?></code>
+                            <?php else : ?>
+                                <p class="description"><?php esc_html_e('Un jeton unique sera généré automatiquement lors de l’activation.', 'sitepulse'); ?></p>
+                            <?php endif; ?>
+                            <p>
+                                <label for="sitepulse_rum_regenerate">
+                                    <input type="checkbox" name="sitepulse_rum_regenerate" id="sitepulse_rum_regenerate" value="1">
+                                    <?php esc_html_e('Régénérer le jeton après enregistrement', 'sitepulse'); ?>
+                                </label>
+                            </p>
+                            <p class="description"><strong><?php esc_html_e('Endpoint REST', 'sitepulse'); ?> :</strong> <code><?php echo esc_html(rest_url('sitepulse/v1/rum')); ?></code></p>
+                        </td>
+                    </tr>
+                </table>
+                <?php submit_button(__('Enregistrer les paramètres RUM', 'sitepulse')); ?>
             </form>
 
             <?php if ($rum_retention_days > 0) : ?>
@@ -629,161 +616,6 @@ function sitepulse_speed_analyzer_page() {
                 <?php endforeach; ?>
             </div>
             <p class="description" id="sitepulse-speed-summary-note" aria-live="polite"><?php echo esc_html($summary_note); ?></p>
-        </div>
-
-        <div id="sitepulse-speed-rum" class="speed-rum">
-            <h2><?php esc_html_e('Web Vitals réels (RUM)', 'sitepulse'); ?></h2>
-            <p class="description"><?php esc_html_e('Mesurez les Web Vitals réels observés chez vos visiteurs pour compléter les audits synthétiques.', 'sitepulse'); ?></p>
-            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="speed-rum-form">
-                <?php
-                $rum_nonce_action = defined('SITEPULSE_NONCE_ACTION_RUM_SETTINGS') ? SITEPULSE_NONCE_ACTION_RUM_SETTINGS : 'sitepulse_rum_settings';
-                wp_nonce_field($rum_nonce_action);
-                ?>
-                <input type="hidden" name="action" value="sitepulse_save_rum_settings">
-                <fieldset>
-                    <legend class="screen-reader-text"><?php esc_html_e('Activation RUM', 'sitepulse'); ?></legend>
-                    <label>
-                        <input type="checkbox" name="sitepulse_rum_enabled" value="1" <?php checked(!empty($rum_settings['enabled'])); ?> />
-                        <?php esc_html_e('Activer la collecte Web Vitals sur le front-end', 'sitepulse'); ?>
-                    </label>
-                    <label>
-                        <input type="checkbox" name="sitepulse_rum_require_consent" value="1" <?php checked(!empty($rum_settings['require_consent'])); ?> />
-                        <?php esc_html_e('Ne charger le script qu’après consentement explicite (cookie sitepulse_rum_consent=1).', 'sitepulse'); ?>
-                    </label>
-                </fieldset>
-                <div class="speed-rum-fields">
-                    <label>
-                        <span><?php esc_html_e('Échantillonnage', 'sitepulse'); ?></span>
-                        <input type="number" name="sitepulse_rum_sample_rate" min="1" max="100" step="1" value="<?php echo esc_attr($rum_sample_percent); ?>" />
-                        <span class="description"><?php esc_html_e('Pourcentage de visites instrumentées (100 = toutes les pages).', 'sitepulse'); ?></span>
-                    </label>
-                    <?php $rum_range_days = isset($rum_settings['range_days']) ? (int) $rum_settings['range_days'] : 7; ?>
-                    <label>
-                        <span><?php esc_html_e('Fenêtre d’analyse (jours)', 'sitepulse'); ?></span>
-                        <input type="number" name="sitepulse_rum_range_days" min="1" max="90" step="1" value="<?php echo esc_attr($rum_range_days); ?>" />
-                    </label>
-                    <label>
-                        <span><?php esc_html_e('Rétention des données (jours)', 'sitepulse'); ?></span>
-                        <input type="number" name="sitepulse_rum_retention_days" min="7" max="365" step="1" value="<?php echo esc_attr((int) $rum_retention_days); ?>" />
-                    </label>
-                </div>
-                <div class="speed-rum-token">
-                    <p><strong><?php esc_html_e('Endpoint REST', 'sitepulse'); ?>:</strong> <code><?php echo esc_html(rest_url('sitepulse/v1/rum')); ?></code></p>
-                    <p><strong><?php esc_html_e('Jeton actuel', 'sitepulse'); ?>:</strong> <code><?php echo esc_html($rum_token); ?></code></p>
-                    <label>
-                        <input type="checkbox" name="sitepulse_rum_regenerate_token" value="1" />
-                        <?php esc_html_e('Régénérer le jeton après enregistrement (nécessite de mettre à jour vos intégrations).', 'sitepulse'); ?>
-                    </label>
-                </div>
-                <p class="submit">
-                    <button type="submit" class="button button-secondary"><?php esc_html_e('Enregistrer les paramètres RUM', 'sitepulse'); ?></button>
-                </p>
-            </form>
-
-            <div class="speed-rum-summary">
-                <h3><?php esc_html_e('Synthèse des mesures collectées', 'sitepulse'); ?></h3>
-                <?php if ($rum_sample_count > 0) : ?>
-                    <table class="widefat fixed">
-                        <thead>
-                            <tr>
-                                <th scope="col"><?php esc_html_e('Métrique', 'sitepulse'); ?></th>
-                                <th scope="col"><?php esc_html_e('p75', 'sitepulse'); ?></th>
-                                <th scope="col"><?php esc_html_e('p95', 'sitepulse'); ?></th>
-                                <th scope="col"><?php esc_html_e('Moyenne', 'sitepulse'); ?></th>
-                                <th scope="col"><?php esc_html_e('Bonnes sessions', 'sitepulse'); ?></th>
-                                <th scope="col"><?php esc_html_e('Échantillons', 'sitepulse'); ?></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach (['LCP', 'FID', 'CLS'] as $metric_slug) :
-                                $metric = isset($rum_summary_metrics[$metric_slug]) ? $rum_summary_metrics[$metric_slug] : null;
-                                $decimals = $metric_slug === 'CLS' ? 3 : 0;
-                                $unit = $metric_slug === 'CLS' ? '' : 'ms';
-                                $p75 = $metric && isset($metric['p75']) ? (float) $metric['p75'] : null;
-                                $p95 = $metric && isset($metric['p95']) ? (float) $metric['p95'] : null;
-                                $avg = $metric && isset($metric['average']) ? (float) $metric['average'] : null;
-                                $ratings = $metric && isset($metric['ratings']) && is_array($metric['ratings']) ? $metric['ratings'] : ['good' => 0];
-                                $count = $metric && isset($metric['count']) ? (int) $metric['count'] : 0;
-                                $formatted_p75 = $p75 !== null ? number_format_i18n($p75, $decimals) : null;
-                                $formatted_p95 = $p95 !== null ? number_format_i18n($p95, $decimals) : null;
-                                $formatted_avg = $avg !== null ? number_format_i18n($avg, $decimals) : null;
-                                $formatted_p75_text = $formatted_p75 !== null
-                                    ? ($unit === '' ? $formatted_p75 : sprintf(__('%s ms', 'sitepulse'), $formatted_p75))
-                                    : null;
-                                $formatted_p95_text = $formatted_p95 !== null
-                                    ? ($unit === '' ? $formatted_p95 : sprintf(__('%s ms', 'sitepulse'), $formatted_p95))
-                                    : null;
-                                $formatted_avg_text = $formatted_avg !== null
-                                    ? ($unit === '' ? $formatted_avg : sprintf(__('%s ms', 'sitepulse'), $formatted_avg))
-                                    : null;
-                                ?>
-                                <tr>
-                                    <th scope="row"><?php echo esc_html($metric_slug); ?></th>
-                                    <td>
-                                        <?php if ($formatted_p75_text !== null) : ?>
-                                            <?php echo esc_html($formatted_p75_text); ?>
-                                        <?php else : ?>
-                                            &mdash;
-                                        <?php endif; ?>
-                                    </td>
-                                    <td>
-                                        <?php if ($formatted_p95_text !== null) : ?>
-                                            <?php echo esc_html($formatted_p95_text); ?>
-                                        <?php else : ?>
-                                            &mdash;
-                                        <?php endif; ?>
-                                    </td>
-                                    <td>
-                                        <?php if ($formatted_avg_text !== null) : ?>
-                                            <?php echo esc_html($formatted_avg_text); ?>
-                                        <?php else : ?>
-                                            &mdash;
-                                        <?php endif; ?>
-                                    </td>
-                                    <td><?php echo esc_html(number_format_i18n(isset($ratings['good']) ? (int) $ratings['good'] : 0)); ?></td>
-                                    <td><?php echo esc_html(number_format_i18n($count)); ?></td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                    <p class="description">
-                        <?php
-                        printf(
-                            /* translators: 1: sample count, 2: page count. */
-                            esc_html(_n('%1$s mesure sur %2$s page.', '%1$s mesures sur %2$s pages.', $rum_aggregates['page_count'], 'sitepulse')),
-                            esc_html(number_format_i18n($rum_sample_count)),
-                            esc_html(number_format_i18n((int) $rum_aggregates['page_count']))
-                        );
-                        ?>
-                    </p>
-                    <?php if (!empty($rum_page_breakdown)) : ?>
-                        <h4><?php esc_html_e('Pages principales', 'sitepulse'); ?></h4>
-                        <ul class="speed-rum-pages">
-                            <?php foreach (array_slice($rum_page_breakdown, 0, 5) as $page_entry) :
-                                $page_label = isset($page_entry['path']) ? (string) $page_entry['path'] : '/';
-                                $page_samples = isset($page_entry['samples']) ? (int) $page_entry['samples'] : 0;
-                                $device_label = isset($page_entry['device']) ? (string) $page_entry['device'] : 'unknown';
-                                ?>
-                                <li>
-                                    <strong><?php echo esc_html($page_label); ?></strong>
-                                    <span class="description">
-                                        <?php
-                                        printf(
-                                            /* translators: 1: device label, 2: sample count. */
-                                            esc_html__('%1$s · %2$s mesures', 'sitepulse'),
-                                            esc_html($device_label),
-                                            esc_html(number_format_i18n($page_samples))
-                                        );
-                                        ?>
-                                    </span>
-                                </li>
-                            <?php endforeach; ?>
-                        </ul>
-                    <?php endif; ?>
-                <?php else : ?>
-                    <p><?php esc_html_e('Aucune mesure RUM n’a encore été collectée. Activez la collecte puis laissez quelques visiteurs parcourir le site.', 'sitepulse'); ?></p>
-                <?php endif; ?>
-            </div>
         </div>
 
         <div class="speed-automation" id="sitepulse-speed-automation">

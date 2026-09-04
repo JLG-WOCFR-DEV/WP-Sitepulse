@@ -21,6 +21,7 @@ function sitepulse_rum_init() {
     add_action('rest_api_init', 'sitepulse_rum_register_rest_routes');
     add_action('wp_enqueue_scripts', 'sitepulse_rum_enqueue_assets');
     add_action('admin_post_sitepulse_rum_settings', 'sitepulse_rum_handle_settings_post');
+    add_action('admin_post_sitepulse_save_rum_settings', 'sitepulse_rum_handle_settings_post');
 }
 
 /**
@@ -53,6 +54,8 @@ function sitepulse_rum_get_settings() {
         'enabled'          => false,
         'token'            => '',
         'consent_required' => false,
+        'sample_rate'      => 1.0,
+        'range_days'       => 7,
     ];
 
     if (!defined('SITEPULSE_OPTION_RUM_SETTINGS')) {
@@ -65,7 +68,22 @@ function sitepulse_rum_get_settings() {
         $stored = [];
     }
 
+    if (!isset($stored['consent_required']) && !empty($stored['require_consent'])) {
+        $stored['consent_required'] = true;
+    }
+
     $settings = array_merge($defaults, array_intersect_key($stored, $defaults));
+    $settings['enabled'] = !empty($settings['enabled']);
+    $settings['consent_required'] = !empty($settings['consent_required']);
+    $settings['token'] = is_string($settings['token']) ? $settings['token'] : '';
+    $settings['sample_rate'] = is_numeric($settings['sample_rate']) ? (float) $settings['sample_rate'] : 1.0;
+
+    if ($settings['sample_rate'] > 1) {
+        $settings['sample_rate'] = $settings['sample_rate'] / 100;
+    }
+
+    $settings['sample_rate'] = max(0.0, min(1.0, $settings['sample_rate']));
+    $settings['range_days'] = max(1, min(90, (int) $settings['range_days']));
 
     if ($settings['enabled'] && $settings['token'] === '') {
         $settings['token'] = sitepulse_rum_generate_token();
@@ -129,6 +147,16 @@ function sitepulse_rum_get_token($create_when_missing = false) {
 }
 
 /**
+ * Alias of {@see sitepulse_rum_get_token()} used by the Speed Analyzer UI and tests.
+ *
+ * @param bool $create_when_missing Whether a token should be generated when absent.
+ * @return string
+ */
+function sitepulse_rum_get_ingest_token($create_when_missing = false) {
+    return sitepulse_rum_get_token($create_when_missing);
+}
+
+/**
  * Determines whether the current visitor has granted consent for RUM collection.
  *
  * @return bool
@@ -169,7 +197,7 @@ function sitepulse_rum_register_rest_routes() {
         [
             'methods'             => \WP_REST_Server::CREATABLE,
             'callback'            => 'sitepulse_rum_rest_ingest_metrics',
-            'permission_callback' => '__return_true',
+            'permission_callback' => 'sitepulse_rum_rest_ingest_permission',
             'args'                => [
                 'token'   => [
                     'type'     => 'string',
@@ -214,6 +242,19 @@ function sitepulse_rum_rest_require_capability() {
     }
 
     return current_user_can(sitepulse_get_capability());
+}
+
+/**
+ * Public ingest permission: the endpoint stays unauthenticated, but disabled
+ * collection is rejected before the callback runs.
+ *
+ * Token validation stays in the ingest callback so callers receive the
+ * dedicated `sitepulse_rum_invalid_token` error instead of a generic 401.
+ *
+ * @return bool
+ */
+function sitepulse_rum_rest_ingest_permission() {
+    return sitepulse_rum_is_enabled();
 }
 
 /**
@@ -304,7 +345,17 @@ function sitepulse_rum_rest_ingest_metrics($request) {
         $params = $request->get_body_params();
     }
 
-    $token = isset($params['token']) ? sanitize_text_field($params['token']) : '';
+    if (!is_array($params)) {
+        $params = [];
+    }
+
+    $token = $request->get_param('token');
+
+    if (!is_string($token) || $token === '') {
+        $token = isset($params['token']) ? $params['token'] : '';
+    }
+
+    $token = sanitize_text_field((string) $token);
     $expected_token = sitepulse_rum_get_token(false);
 
     if ($expected_token === '' || $token === '' || !hash_equals($expected_token, $token)) {
@@ -319,7 +370,25 @@ function sitepulse_rum_rest_ingest_metrics($request) {
         ]);
     }
 
-    $metrics = isset($params['metrics']) ? $params['metrics'] : [];
+    $metrics = $request->get_param('metrics');
+
+    if ($metrics === null) {
+        $metrics = $request->get_param('samples');
+    }
+
+    if ($metrics === null && isset($params['metrics'])) {
+        $metrics = $params['metrics'];
+    }
+
+    if ($metrics === null && isset($params['samples'])) {
+        $metrics = $params['samples'];
+    }
+
+    if ($metrics !== null && !is_array($metrics)) {
+        return new \WP_Error('sitepulse_rum_invalid_payload', __('Aucune mesure valide fournie.', 'sitepulse'), [
+            'status' => 400,
+        ]);
+    }
 
     if (!is_array($metrics) || empty($metrics)) {
         return new \WP_Error('sitepulse_rum_invalid_payload', __('Aucune mesure valide fournie.', 'sitepulse'), [
@@ -342,6 +411,7 @@ function sitepulse_rum_rest_ingest_metrics($request) {
 
     $stored = 0;
     $processed = 0;
+    $received = count($metrics);
 
     foreach ($metrics as $metric) {
         if ($processed >= $max_batch) {
@@ -360,7 +430,7 @@ function sitepulse_rum_rest_ingest_metrics($request) {
     }
 
     if ($stored === 0) {
-        return new \WP_Error('sitepulse_rum_store_failed', __('Impossible d’enregistrer les mesures.', 'sitepulse'), [
+        return new \WP_Error('sitepulse_rum_empty_batch', __('Impossible d’enregistrer les mesures.', 'sitepulse'), [
             'status' => 400,
         ]);
     }
@@ -369,9 +439,21 @@ function sitepulse_rum_rest_ingest_metrics($request) {
     sitepulse_rum_clear_cache();
 
     return rest_ensure_response([
-        'stored'    => $stored,
-        'processed' => $processed,
+        'stored'        => $stored,
+        'processed'     => $processed,
+        'received'      => $received,
+        'retentionDays' => sitepulse_rum_get_retention_days(),
     ]);
+}
+
+/**
+ * Alias of {@see sitepulse_rum_rest_ingest_metrics()} used by tests and older callers.
+ *
+ * @param \WP_REST_Request $request Incoming request.
+ * @return \WP_REST_Response|\WP_Error
+ */
+function sitepulse_rum_rest_ingest($request) {
+    return sitepulse_rum_rest_ingest_metrics($request);
 }
 
 /**
@@ -409,12 +491,22 @@ function sitepulse_rum_handle_settings_post() {
     check_admin_referer($nonce_action);
 
     $enabled = isset($_POST['sitepulse_rum_enabled']);
-    $consent_required = isset($_POST['sitepulse_rum_consent_required']);
-    $regenerate = isset($_POST['sitepulse_rum_regenerate']);
+    $consent_required = isset($_POST['sitepulse_rum_consent_required']) || isset($_POST['sitepulse_rum_require_consent']);
+    $regenerate = isset($_POST['sitepulse_rum_regenerate']) || isset($_POST['sitepulse_rum_regenerate_token']);
 
     $settings = sitepulse_rum_get_settings();
     $settings['enabled'] = (bool) $enabled;
     $settings['consent_required'] = (bool) $consent_required;
+
+    if (isset($_POST['sitepulse_rum_sample_rate'])) {
+        $sample_percent = (float) wp_unslash($_POST['sitepulse_rum_sample_rate']);
+        $sample_percent = max(0.0, min(100.0, $sample_percent));
+        $settings['sample_rate'] = $sample_percent / 100;
+    }
+
+    if (isset($_POST['sitepulse_rum_range_days'])) {
+        $settings['range_days'] = max(1, min(90, absint($_POST['sitepulse_rum_range_days'])));
+    }
 
     if ($regenerate || ($settings['enabled'] && $settings['token'] === '')) {
         $settings['token'] = sitepulse_rum_generate_token();
@@ -423,8 +515,24 @@ function sitepulse_rum_handle_settings_post() {
     sitepulse_rum_update_settings($settings);
     sitepulse_rum_clear_cache();
 
-    $redirect_url = admin_url('admin.php?page=sitepulse-speed');
-    $redirect_url = add_query_arg('sitepulse-rum-updated', $settings['enabled'] ? '1' : '0', $redirect_url);
+    if (isset($_POST['sitepulse_rum_retention_days'])) {
+        $retention_days = absint($_POST['sitepulse_rum_retention_days']);
+
+        if ($retention_days >= 1) {
+            $retention_option = defined('SITEPULSE_OPTION_RUM_RETENTION_DAYS')
+                ? SITEPULSE_OPTION_RUM_RETENTION_DAYS
+                : 'sitepulse_rum_retention_days';
+            update_option($retention_option, $retention_days, false);
+        }
+    }
+
+    $redirect_url = add_query_arg(
+        [
+            'page'                  => 'sitepulse-speed',
+            'sitepulse-rum-updated' => $settings['enabled'] ? '1' : '0',
+        ],
+        admin_url('admin.php')
+    );
 
     if ($regenerate) {
         $redirect_url = add_query_arg('sitepulse-rum-token', 'regenerated', $redirect_url);
@@ -498,6 +606,7 @@ function sitepulse_rum_get_frontend_config(array $settings) {
         'consentGranted'  => $consent_granted,
         'flushDelay'      => 4000,
         'batchSize'       => 6,
+        'sampleRate'      => isset($settings['sample_rate']) ? (float) $settings['sample_rate'] : 1.0,
         'debug'           => defined('SITEPULSE_DEBUG') ? (bool) SITEPULSE_DEBUG : false,
         'locale'          => get_locale(),
     ];
@@ -530,6 +639,10 @@ function sitepulse_rum_store_metric(array $metric) {
 
     $name = isset($metric['name']) ? strtoupper((string) $metric['name']) : '';
 
+    if ($name === '' && isset($metric['metric'])) {
+        $name = strtoupper((string) $metric['metric']);
+    }
+
     if (!in_array($name, ['LCP', 'FID', 'CLS'], true)) {
         return false;
     }
@@ -541,6 +654,10 @@ function sitepulse_rum_store_metric(array $metric) {
     }
 
     $timestamp = isset($metric['timestamp']) ? (int) $metric['timestamp'] : 0;
+
+    if ($timestamp <= 0 && isset($metric['recorded_at'])) {
+        $timestamp = (int) $metric['recorded_at'];
+    }
 
     if ($timestamp > 0 && $timestamp > 2000000000) {
         $timestamp = (int) floor($timestamp / 1000);
@@ -577,6 +694,10 @@ function sitepulse_rum_store_metric(array $metric) {
     $connection = isset($metric['connection']) ? strtolower((string) $metric['connection']) : '';
     $navigation = isset($metric['navigationType']) ? strtolower((string) $metric['navigationType']) : '';
 
+    if ($navigation === '' && isset($metric['navigation_type'])) {
+        $navigation = strtolower((string) $metric['navigation_type']);
+    }
+
     $samples = isset($metric['samples']) ? (int) $metric['samples'] : 0;
 
     if ($samples < 0) {
@@ -608,6 +729,32 @@ function sitepulse_rum_store_metric(array $metric) {
     $result = $wpdb->insert($table, $data, $format);
 
     return $result !== false;
+}
+
+/**
+ * Stores a batch of RUM samples.
+ *
+ * @param array<int,array<string,mixed>> $samples Raw samples.
+ * @return int Number of rows stored.
+ */
+function sitepulse_rum_store_samples(array $samples) {
+    $stored = 0;
+
+    foreach ($samples as $sample) {
+        if (!is_array($sample)) {
+            continue;
+        }
+
+        if (sitepulse_rum_store_metric($sample)) {
+            $stored++;
+        }
+    }
+
+    if ($stored > 0) {
+        sitepulse_rum_clear_cache();
+    }
+
+    return $stored;
 }
 
 /**
@@ -991,6 +1138,30 @@ function sitepulse_rum_get_aggregates(array $args = []) {
 }
 
 /**
+ * Returns RUM aggregates in the shape expected by the Speed Analyzer UI and tests.
+ *
+ * @param array<string,mixed> $args Aggregation arguments (`days` or `range_days`).
+ * @return array<string,mixed>
+ */
+function sitepulse_rum_calculate_aggregates(array $args = []) {
+    $days = isset($args['range_days']) ? (int) $args['range_days'] : (isset($args['days']) ? (int) $args['days'] : 7);
+    $raw = sitepulse_rum_get_aggregates(['days' => max(1, $days)]);
+    $summary = isset($raw['metrics']) && is_array($raw['metrics']) ? $raw['metrics'] : [];
+    $pages = isset($raw['pages']) && is_array($raw['pages']) ? array_values($raw['pages']) : [];
+    $sample_count = isset($raw['window']['samples']) ? (int) $raw['window']['samples'] : 0;
+
+    return [
+        'sample_count'   => $sample_count,
+        'page_count'     => count($pages),
+        'last_sample_at' => null,
+        'summary'        => $summary,
+        'pages'          => $pages,
+        'window'         => isset($raw['window']) && is_array($raw['window']) ? $raw['window'] : [],
+        'metrics'        => $summary,
+    ];
+}
+
+/**
  * Summarizes a list of metric values into descriptive statistics.
  *
  * @param array<int,float>      $values  Recorded values.
@@ -1083,82 +1254,35 @@ function sitepulse_rum_clear_cache() {
 }
 
 /**
+ * Alias of {@see sitepulse_rum_clear_cache()}.
+ *
+ * @return void
+ */
+function sitepulse_rum_flush_cache() {
+    sitepulse_rum_clear_cache();
+}
+
+/**
  * Retrieves the latest aggregated metrics for display inside the admin UI.
  *
  * @return array<string,mixed>
  */
 function sitepulse_rum_get_admin_summary() {
+    $settings = sitepulse_rum_get_settings();
+    $days = isset($settings['range_days']) ? (int) $settings['range_days'] : 7;
+
     $summary = sitepulse_rum_get_aggregates([
-        'days' => 7,
+        'days' => max(1, $days),
     ]);
 
     return is_array($summary) ? $summary : [];
 }
 
 /**
- * Handles updates to the RUM collection settings.
+ * Legacy admin-post callback for the Speed Analyzer RUM form.
  *
  * @return void
  */
 function sitepulse_speed_analyzer_handle_rum_settings() {
-    if (!current_user_can(sitepulse_get_capability())) {
-        wp_die(esc_html__("Vous n'avez pas les permissions nécessaires pour modifier cette configuration.", 'sitepulse'));
-    }
-
-    $nonce_action = defined('SITEPULSE_NONCE_ACTION_RUM_SETTINGS') ? SITEPULSE_NONCE_ACTION_RUM_SETTINGS : 'sitepulse_rum_settings';
-    check_admin_referer($nonce_action);
-
-    $enabled = isset($_POST['sitepulse_rum_enabled']); // phpcs:ignore WordPress.Security.NonceVerification.Missing
-    $require_consent = isset($_POST['sitepulse_rum_require_consent']); // phpcs:ignore WordPress.Security.NonceVerification.Missing
-
-    $sample_rate_input = isset($_POST['sitepulse_rum_sample_rate']) // phpcs:ignore WordPress.Security.NonceVerification.Missing
-        ? floatval(wp_unslash($_POST['sitepulse_rum_sample_rate']))
-        : 100.0;
-    $sample_rate_input = max(0.0, min(100.0, $sample_rate_input));
-    $sample_rate = $sample_rate_input / 100.0;
-
-    $range_days = isset($_POST['sitepulse_rum_range_days']) // phpcs:ignore WordPress.Security.NonceVerification.Missing
-        ? absint($_POST['sitepulse_rum_range_days'])
-        : 7;
-
-    if ($range_days < 1) {
-        $range_days = 7;
-    }
-
-    $settings_option = defined('SITEPULSE_OPTION_RUM_SETTINGS') ? SITEPULSE_OPTION_RUM_SETTINGS : 'sitepulse_rum_settings';
-
-    $settings = [
-        'enabled'         => $enabled,
-        'require_consent' => $require_consent,
-        'sample_rate'     => $sample_rate,
-        'range_days'      => $range_days,
-    ];
-
-    update_option($settings_option, $settings, false);
-
-    if (isset($_POST['sitepulse_rum_retention_days'])) { // phpcs:ignore WordPress.Security.NonceVerification.Missing
-        $retention_days = absint($_POST['sitepulse_rum_retention_days']);
-        if ($retention_days >= 1) {
-            $retention_option = defined('SITEPULSE_OPTION_RUM_RETENTION_DAYS') ? SITEPULSE_OPTION_RUM_RETENTION_DAYS : 'sitepulse_rum_retention_days';
-            update_option($retention_option, $retention_days, false);
-        }
-    }
-
-    $regenerate_token = isset($_POST['sitepulse_rum_regenerate_token']); // phpcs:ignore WordPress.Security.NonceVerification.Missing
-
-    if ($regenerate_token) {
-        sitepulse_rum_get_ingest_token(true);
-    }
-
-    $redirect_url = add_query_arg(
-        [
-            'page'                  => 'sitepulse-speed',
-            'sitepulse_rum_updated' => '1',
-            'rum_token_refreshed'   => $regenerate_token ? '1' : '0',
-        ],
-        admin_url('admin.php')
-    );
-
-    wp_safe_redirect($redirect_url);
-    exit;
+    sitepulse_rum_handle_settings_post();
 }
