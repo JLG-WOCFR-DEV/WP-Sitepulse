@@ -1993,3 +1993,146 @@ function sitepulse_uptime_redirect_with_notice($code, $month = '') {
     wp_safe_redirect(add_query_arg($args, admin_url('admin.php')));
     exit;
 }
+
+/**
+ * Aggregates uptime metrics per region based on agent configuration.
+ *
+ * @param array<string,array<string,mixed>> $agent_metrics Metrics per agent.
+ * @param array<string,array<string,mixed>> $agents        Agent definitions.
+ * @return array<string,array<string,mixed>>
+ */
+function sitepulse_calculate_region_uptime_metrics($agent_metrics, $agents) {
+    $regions = [];
+
+    foreach ($agent_metrics as $agent_id => $metrics) {
+        $agent = isset($agents[$agent_id]) ? $agents[$agent_id] : ['region' => 'global'];
+
+        if (!sitepulse_uptime_agent_is_active($agent_id, $agent)) {
+            continue;
+        }
+
+        $region = isset($agent['region']) && is_string($agent['region']) ? sanitize_key($agent['region']) : 'global';
+        $weight = sitepulse_uptime_get_agent_weight($agent_id, $agent);
+
+        if (!isset($regions[$region])) {
+            $regions[$region] = [
+                'up'              => 0,
+                'down'            => 0,
+                'unknown'         => 0,
+                'maintenance'     => 0,
+                'effective_total' => 0,
+                'latency_sum'     => 0.0,
+                'latency_count'   => 0,
+                'ttfb_sum'        => 0.0,
+                'ttfb_count'      => 0,
+                'violations'      => 0,
+                'violation_types' => [],
+                'agents'          => [],
+                'weighted'        => [
+                    'effective_total' => 0.0,
+                    'up'              => 0.0,
+                    'down'            => 0.0,
+                    'unknown'         => 0.0,
+                    'latency_sum'     => 0.0,
+                    'latency_count'   => 0.0,
+                    'ttfb_sum'        => 0.0,
+                    'ttfb_count'      => 0.0,
+                ],
+            ];
+        }
+
+        $regions[$region]['up'] += isset($metrics['up']) ? (int) $metrics['up'] : 0;
+        $regions[$region]['down'] += isset($metrics['down']) ? (int) $metrics['down'] : 0;
+        $regions[$region]['unknown'] += isset($metrics['unknown']) ? (int) $metrics['unknown'] : 0;
+        $regions[$region]['maintenance'] += isset($metrics['maintenance']) ? (int) $metrics['maintenance'] : 0;
+        $regions[$region]['effective_total'] += isset($metrics['effective_total']) ? (int) $metrics['effective_total'] : 0;
+        $regions[$region]['latency_sum'] += isset($metrics['latency_sum']) ? (float) $metrics['latency_sum'] : 0.0;
+        $regions[$region]['latency_count'] += isset($metrics['latency_count']) ? (int) $metrics['latency_count'] : 0;
+        $regions[$region]['ttfb_sum'] += isset($metrics['ttfb_sum']) ? (float) $metrics['ttfb_sum'] : 0.0;
+        $regions[$region]['ttfb_count'] += isset($metrics['ttfb_count']) ? (int) $metrics['ttfb_count'] : 0;
+        $regions[$region]['violations'] += isset($metrics['violations']) ? (int) $metrics['violations'] : 0;
+
+        $regions[$region]['agents'][] = $agent_id;
+
+        if ($weight > 0) {
+            $regions[$region]['weighted']['effective_total'] += (isset($metrics['effective_total']) ? (int) $metrics['effective_total'] : 0) * $weight;
+            $regions[$region]['weighted']['up'] += (isset($metrics['up']) ? (int) $metrics['up'] : 0) * $weight;
+            $regions[$region]['weighted']['down'] += (isset($metrics['down']) ? (int) $metrics['down'] : 0) * $weight;
+            $regions[$region]['weighted']['unknown'] += (isset($metrics['unknown']) ? (int) $metrics['unknown'] : 0) * $weight;
+            $regions[$region]['weighted']['latency_sum'] += (isset($metrics['latency_sum']) ? (float) $metrics['latency_sum'] : 0.0) * $weight;
+            $regions[$region]['weighted']['latency_count'] += (isset($metrics['latency_count']) ? (int) $metrics['latency_count'] : 0) * $weight;
+            $regions[$region]['weighted']['ttfb_sum'] += (isset($metrics['ttfb_sum']) ? (float) $metrics['ttfb_sum'] : 0.0) * $weight;
+            $regions[$region]['weighted']['ttfb_count'] += (isset($metrics['ttfb_count']) ? (int) $metrics['ttfb_count'] : 0) * $weight;
+        }
+
+        if (isset($metrics['violation_types']) && is_array($metrics['violation_types'])) {
+            foreach ($metrics['violation_types'] as $type => $count) {
+                $type_key = sanitize_key($type);
+
+                if ($type_key === '') {
+                    continue;
+                }
+
+                if (!isset($regions[$region]['violation_types'][$type_key])) {
+                    $regions[$region]['violation_types'][$type_key] = 0;
+                }
+
+                $regions[$region]['violation_types'][$type_key] += (int) $count;
+            }
+        }
+    }
+
+    foreach ($regions as $region => $region_metrics) {
+        $effective_total = max(0, (int) $region_metrics['effective_total']);
+        $weighted_effective_total = isset($region_metrics['weighted']['effective_total'])
+            ? (float) $region_metrics['weighted']['effective_total']
+            : 0.0;
+        $weighted_up = isset($region_metrics['weighted']['up']) ? (float) $region_metrics['weighted']['up'] : 0.0;
+
+        if ($weighted_effective_total > 0) {
+            $uptime = ($weighted_up / $weighted_effective_total) * 100;
+        } else {
+            $uptime = $effective_total > 0 ? ($region_metrics['up'] / $effective_total) * 100 : 100;
+        }
+
+        $regions[$region]['uptime'] = max(0, min(100, $uptime));
+
+        $latency_count = isset($region_metrics['latency_count']) ? (int) $region_metrics['latency_count'] : 0;
+        $latency_sum = isset($region_metrics['latency_sum']) ? (float) $region_metrics['latency_sum'] : 0.0;
+        $ttfb_count = isset($region_metrics['ttfb_count']) ? (int) $region_metrics['ttfb_count'] : 0;
+        $ttfb_sum = isset($region_metrics['ttfb_sum']) ? (float) $region_metrics['ttfb_sum'] : 0.0;
+
+        $weighted_latency_count = isset($region_metrics['weighted']['latency_count'])
+            ? (float) $region_metrics['weighted']['latency_count']
+            : 0.0;
+        $weighted_latency_sum = isset($region_metrics['weighted']['latency_sum'])
+            ? (float) $region_metrics['weighted']['latency_sum']
+            : 0.0;
+        $weighted_ttfb_count = isset($region_metrics['weighted']['ttfb_count'])
+            ? (float) $region_metrics['weighted']['ttfb_count']
+            : 0.0;
+        $weighted_ttfb_sum = isset($region_metrics['weighted']['ttfb_sum'])
+            ? (float) $region_metrics['weighted']['ttfb_sum']
+            : 0.0;
+
+        if ($weighted_latency_count > 0) {
+            $regions[$region]['latency_avg'] = $weighted_latency_sum / $weighted_latency_count;
+        } elseif ($latency_count > 0) {
+            $regions[$region]['latency_avg'] = $latency_sum / $latency_count;
+        } else {
+            $regions[$region]['latency_avg'] = null;
+        }
+
+        if ($weighted_ttfb_count > 0) {
+            $regions[$region]['ttfb_avg'] = $weighted_ttfb_sum / $weighted_ttfb_count;
+        } elseif ($ttfb_count > 0) {
+            $regions[$region]['ttfb_avg'] = $ttfb_sum / $ttfb_count;
+        } else {
+            $regions[$region]['ttfb_avg'] = null;
+        }
+
+        unset($regions[$region]['weighted']);
+    }
+
+    return $regions;
+}
