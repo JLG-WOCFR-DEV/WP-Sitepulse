@@ -37,6 +37,15 @@ function sitepulse_request_profiler_can_profile() {
 }
 
 /**
+ * Alias of {@see sitepulse_request_profiler_can_profile()}.
+ *
+ * @return bool
+ */
+function sitepulse_request_profiler_is_available() {
+    return sitepulse_request_profiler_can_profile();
+}
+
+/**
  * Checks the current request and activates the profiler when required.
  *
  * @return void
@@ -478,6 +487,34 @@ function sitepulse_request_profiler_normalize_trace($trace) {
     }
 
     return $normalized;
+}
+
+/**
+ * Builds a history row for the Speed Analyzer profiler UI.
+ *
+ * @param array<string,mixed> $trace Raw or normalized trace.
+ * @return array<string,mixed>
+ */
+function sitepulse_request_profiler_build_history_entry(array $trace) {
+    $entry = sitepulse_request_profiler_normalize_trace($trace);
+
+    if (!isset($entry['id'])) {
+        $entry['id'] = isset($trace['id']) && is_numeric($trace['id']) ? (int) $trace['id'] : 0;
+    }
+
+    $timestamp = isset($entry['timestamp']) ? (int) $entry['timestamp'] : 0;
+    $date_format = function_exists('get_option') ? (string) get_option('date_format') : 'Y-m-d';
+    $time_format = function_exists('get_option') ? (string) get_option('time_format') : 'H:i';
+
+    if (function_exists('wp_date') && $timestamp > 0) {
+        $entry['display_date'] = wp_date($date_format . ' ' . $time_format, $timestamp);
+    } elseif ($timestamp > 0) {
+        $entry['display_date'] = gmdate('Y-m-d H:i', $timestamp);
+    } else {
+        $entry['display_date'] = '';
+    }
+
+    return $entry;
 }
 
 /**

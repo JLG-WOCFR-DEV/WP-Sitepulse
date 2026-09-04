@@ -682,7 +682,7 @@ function sitepulse_rum_store_metric(array $metric) {
     $rating = isset($metric['rating']) ? strtolower((string) $metric['rating']) : '';
 
     if (!in_array($rating, ['good', 'needs_improvement', 'poor'], true)) {
-        $rating = '';
+        $rating = sitepulse_rum_grade_metric($name, $value);
     }
 
     $device = isset($metric['device']) ? strtolower((string) $metric['device']) : '';
@@ -1048,6 +1048,7 @@ function sitepulse_rum_get_aggregates(array $args = []) {
 
     if (empty($rows)) {
         set_transient($cache_key, $totals, HOUR_IN_SECONDS);
+        sitepulse_rum_register_cache_key($cache_key);
 
         return $totals;
     }
@@ -1133,6 +1134,7 @@ function sitepulse_rum_get_aggregates(array $args = []) {
     $totals['pages'] = $page_summaries;
 
     set_transient($cache_key, $totals, HOUR_IN_SECONDS);
+    sitepulse_rum_register_cache_key($cache_key);
 
     return $totals;
 }
@@ -1244,6 +1246,41 @@ function sitepulse_rum_calculate_percentile(array $values, $percent) {
  *
  * @return void
  */
+function sitepulse_rum_get_cache_registry_option_key() {
+    return 'sitepulse_rum_cache_keys';
+}
+
+/**
+ * Remembers a RUM aggregate cache key so it can be flushed later.
+ *
+ * @param string $key Transient key.
+ * @return void
+ */
+function sitepulse_rum_register_cache_key($key) {
+    $key = is_string($key) ? $key : '';
+
+    if ($key === '') {
+        return;
+    }
+
+    $option = sitepulse_rum_get_cache_registry_option_key();
+    $registry = get_option($option, []);
+
+    if (!is_array($registry)) {
+        $registry = [];
+    }
+
+    if (!in_array($key, $registry, true)) {
+        $registry[] = $key;
+        update_option($option, $registry, false);
+    }
+}
+
+/**
+ * Clears cached aggregate data.
+ *
+ * @return void
+ */
 function sitepulse_rum_clear_cache() {
     $base = defined('SITEPULSE_TRANSIENT_RUM_AGGREGATES')
         ? SITEPULSE_TRANSIENT_RUM_AGGREGATES
@@ -1251,6 +1288,52 @@ function sitepulse_rum_clear_cache() {
 
     delete_transient($base . '_7');
     delete_transient($base . '_30');
+
+    $option = sitepulse_rum_get_cache_registry_option_key();
+    $registry = get_option($option, []);
+
+    if (is_array($registry)) {
+        foreach ($registry as $key) {
+            if (is_string($key) && $key !== '') {
+                delete_transient($key);
+            }
+        }
+    }
+
+    delete_option($option);
+}
+
+/**
+ * Grades a Web Vital sample against the standard Core Web Vitals thresholds.
+ *
+ * @param string     $metric Metric name (LCP, FID, CLS, INP).
+ * @param int|float  $value  Measured value.
+ * @return string good|needs_improvement|poor
+ */
+function sitepulse_rum_grade_metric($metric, $value) {
+    $metric = strtoupper((string) $metric);
+    $value = is_numeric($value) ? (float) $value : 0.0;
+
+    $thresholds = [
+        'LCP' => [2500.0, 4000.0],
+        'FID' => [100.0, 300.0],
+        'INP' => [200.0, 500.0],
+        'CLS' => [0.1, 0.25],
+    ];
+
+    if (!isset($thresholds[$metric])) {
+        return 'needs_improvement';
+    }
+
+    if ($value <= $thresholds[$metric][0]) {
+        return 'good';
+    }
+
+    if ($value <= $thresholds[$metric][1]) {
+        return 'needs_improvement';
+    }
+
+    return 'poor';
 }
 
 /**

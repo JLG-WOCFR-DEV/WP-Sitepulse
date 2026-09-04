@@ -1469,3 +1469,100 @@ function sitepulse_http_monitor_get_stats(array $args = []) {
         'top_hosts'  => isset($summary_data['top_hosts']) ? $summary_data['top_hosts'] : [],
     ];
 }
+
+/**
+ * Compares recent outbound HTTP traffic against configured latency and error thresholds.
+ *
+ * @return void
+ */
+function sitepulse_http_monitor_check_thresholds() {
+    if (!sitepulse_http_monitor_is_enabled()) {
+        return;
+    }
+
+    $settings = sitepulse_http_monitor_get_settings();
+    $latency_threshold = isset($settings['latency_threshold_ms']) ? (float) $settings['latency_threshold_ms'] : 0.0;
+    $error_threshold = isset($settings['error_rate_percent']) ? (float) $settings['error_rate_percent'] : 0.0;
+
+    if ($latency_threshold <= 0 && $error_threshold <= 0) {
+        return;
+    }
+
+    $window = defined('HOUR_IN_SECONDS') ? HOUR_IN_SECONDS : 3600;
+    $stats = sitepulse_http_monitor_get_stats([
+        'since' => time() - $window,
+        'limit' => 25,
+    ]);
+
+    $summary = isset($stats['summary']) && is_array($stats['summary']) ? $stats['summary'] : [];
+    $total = isset($summary['total']) ? (int) $summary['total'] : 0;
+
+    if ($total <= 0) {
+        return;
+    }
+
+    $p95 = isset($summary['p95Duration']) && is_numeric($summary['p95Duration'])
+        ? (float) $summary['p95Duration']
+        : null;
+    $error_rate = isset($summary['errorRate']) && is_numeric($summary['errorRate'])
+        ? (float) $summary['errorRate']
+        : 0.0;
+
+    $site_name = function_exists('get_bloginfo') ? trim(wp_strip_all_tags((string) get_bloginfo('name'))) : '';
+
+    if ($site_name === '') {
+        $site_name = function_exists('home_url') ? home_url('/') : 'SitePulse';
+    }
+
+    if ($latency_threshold > 0 && $p95 !== null && $p95 >= $latency_threshold) {
+        $subject = sprintf(
+            __('SitePulse : latence HTTP au-delà du seuil sur %s', 'sitepulse'),
+            $site_name
+        );
+        $message = sprintf(
+            /* translators: 1: p95 latency in ms, 2: threshold in ms, 3: request count. */
+            __('Le p95 des appels sortants est de %1$s ms (seuil %2$s ms) sur %3$s requêtes de la dernière heure.', 'sitepulse'),
+            number_format_i18n($p95, 0),
+            number_format_i18n($latency_threshold, 0),
+            number_format_i18n($total)
+        );
+
+        if (function_exists('sitepulse_error_alert_send')) {
+            sitepulse_error_alert_send('http_monitor_latency', $subject, $message, 'warning', [
+                'p95'       => $p95,
+                'threshold' => $latency_threshold,
+                'total'     => $total,
+            ]);
+        }
+
+        if (function_exists('do_action')) {
+            do_action('sitepulse_http_monitor_threshold_exceeded', 'latency', $latency_threshold, $p95, $stats);
+        }
+    }
+
+    if ($error_threshold > 0 && $error_rate >= $error_threshold) {
+        $subject = sprintf(
+            __('SitePulse : taux d’erreurs HTTP au-delà du seuil sur %s', 'sitepulse'),
+            $site_name
+        );
+        $message = sprintf(
+            /* translators: 1: error rate percent, 2: threshold percent, 3: request count. */
+            __('Le taux d’erreurs des appels sortants est de %1$s %% (seuil %2$s %%) sur %3$s requêtes de la dernière heure.', 'sitepulse'),
+            number_format_i18n($error_rate, 1),
+            number_format_i18n($error_threshold, 1),
+            number_format_i18n($total)
+        );
+
+        if (function_exists('sitepulse_error_alert_send')) {
+            sitepulse_error_alert_send('http_monitor_errors', $subject, $message, 'warning', [
+                'error_rate' => $error_rate,
+                'threshold'  => $error_threshold,
+                'total'      => $total,
+            ]);
+        }
+
+        if (function_exists('do_action')) {
+            do_action('sitepulse_http_monitor_threshold_exceeded', 'errors', $error_threshold, $error_rate, $stats);
+        }
+    }
+}
