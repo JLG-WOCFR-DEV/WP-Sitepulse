@@ -59,9 +59,6 @@
     --sitepulse-status-info-background: #dbeafe;
     --sitepulse-status-info-border: #60a5fa;
     --sitepulse-status-info-text: #1d4ed8;
-    --wp-admin-theme-color: #2563eb;
-    --wp-admin-theme-color-darker-10: #1d4ed8;
-    --wp-admin-theme-color-darker-20: #1e3a8a;
 }
 
 /* Midnight */
@@ -109,9 +106,6 @@
     --sitepulse-status-info-background: rgba(59, 130, 246, 0.24);
     --sitepulse-status-info-border: rgba(59, 130, 246, 0.7);
     --sitepulse-status-info-text: #bfdbfe;
-    --wp-admin-theme-color: #8b5cf6;
-    --wp-admin-theme-color-darker-10: #7c3aed;
-    --wp-admin-theme-color-darker-20: #5b21b6;
     color-scheme: dark;
 }
 
@@ -160,9 +154,6 @@
     --sitepulse-status-info-background: #ffffff;
     --sitepulse-status-info-border: #0369a1;
     --sitepulse-status-info-text: #0c4a6e;
-    --wp-admin-theme-color: #111827;
-    --wp-admin-theme-color-darker-10: #0f172a;
-    --wp-admin-theme-color-darker-20: #000000;
 }
 
 :is(body.sitepulse-appearance--soft-mint, .sitepulse-appearance--soft-mint,
@@ -351,29 +342,6 @@ body.sitepulse-appearance--contrast, .sitepulse-appearance--contrast) .wp-block-
 
 :is(body.sitepulse-appearance--midnight, .sitepulse-appearance--midnight) .wp-block-sitepulse-dashboard-preview .sitepulse-chart-placeholder {
     background: rgba(17, 24, 39, 0.85);
-}
-
-/* Buttons inside cards */
-:is(body.sitepulse-appearance--soft-mint, .sitepulse-appearance--soft-mint,
-body.sitepulse-appearance--midnight, .sitepulse-appearance--midnight,
-body.sitepulse-appearance--contrast, .sitepulse-appearance--contrast) .sitepulse-card .button-primary {
-    background: var(--sitepulse-accent);
-    border-color: var(--sitepulse-accent);
-    color: #ffffff;
-}
-
-body.sitepulse-appearance--midnight .sitepulse-card .button-primary,
-.sitepulse-appearance--midnight .sitepulse-card .button-primary {
-    color: #f9fafb;
-}
-
-:is(body.sitepulse-appearance--soft-mint, .sitepulse-appearance--soft-mint,
-body.sitepulse-appearance--midnight, .sitepulse-appearance--midnight,
-body.sitepulse-appearance--contrast, .sitepulse-appearance--contrast) .sitepulse-card .button-primary:hover,
-:is(body.sitepulse-appearance--soft-mint, .sitepulse-appearance--soft-mint,
-body.sitepulse-appearance--midnight, .sitepulse-appearance--midnight,
-body.sitepulse-appearance--contrast, .sitepulse-appearance--contrast) .sitepulse-card .button-primary:focus {
-    filter: brightness(0.95);
 }
 
 /* Tables rendered inside cards */

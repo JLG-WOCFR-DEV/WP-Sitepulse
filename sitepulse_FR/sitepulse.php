@@ -3,8 +3,10 @@
  * Plugin Name: Sitepulse - JLG
  * Plugin URI: https://your-site.com/sitepulse
  * Description: Monitors website pulse: speed, database, maintenance, server, errors.
- * Version: 1.0
+ * Version: 1.0.1
  * Author: Jérôme Le Gousse
+ * Requires at least: 5.0
+ * Tested up to: 7.1
  * Requires PHP: 7.1
  * License: GPL-2.0+
  * Uninstall: uninstall.php
@@ -1299,6 +1301,7 @@ sitepulse_log('SitePulse loaded. Version: ' . SITEPULSE_VERSION);
 
 // Include core files
 require_once SITEPULSE_PATH . 'includes/functions.php';
+require_once SITEPULSE_PATH . 'includes/editor-canvas.php';
 require_once SITEPULSE_PATH . 'includes/module-selector.php';
 require_once SITEPULSE_PATH . 'includes/admin-settings.php';
 require_once SITEPULSE_PATH . 'includes/integrations.php';
@@ -2246,7 +2249,11 @@ function sitepulse_get_article_slideshow_selectors() {
  * @return void
  */
 function sitepulse_enqueue_article_slideshow_assets() {
-    if (is_admin()) {
+    if (function_exists('sitepulse_should_enqueue_frontend_script')) {
+        if (!sitepulse_should_enqueue_frontend_script()) {
+            return;
+        }
+    } elseif (function_exists('is_admin') && is_admin()) {
         return;
     }
 

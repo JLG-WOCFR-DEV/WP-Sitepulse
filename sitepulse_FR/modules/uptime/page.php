@@ -394,11 +394,6 @@ function sitepulse_uptime_tracker_page() {
         : ['formatted' => null, 'relative' => null];
 
     ?>
-    <?php
-    if (function_exists('sitepulse_render_module_selector')) {
-        sitepulse_render_module_selector('sitepulse-uptime');
-    }
-    ?>
     <div class="wrap">
         <?php if ('success' === $sla_report_status && $latest_generated_report) :
             $csv_url = isset($latest_generated_report['files']['csv']['url']) ? $latest_generated_report['files']['csv']['url'] : '';
@@ -435,6 +430,11 @@ function sitepulse_uptime_tracker_page() {
             </div>
         <?php endif; ?>
         <h1><span class="dashicons-before dashicons-chart-bar"></span> <?php esc_html_e('Suivi de Disponibilité', 'sitepulse'); ?></h1>
+        <?php
+        if (function_exists('sitepulse_render_module_selector')) {
+            sitepulse_render_module_selector('sitepulse-uptime');
+        }
+        ?>
         <p>
             <?php
             printf(

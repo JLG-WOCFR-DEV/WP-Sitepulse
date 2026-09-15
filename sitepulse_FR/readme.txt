@@ -3,8 +3,8 @@ Contributors: jeromelegousse
 Tags: performance, monitoring, speed, database, server
 Requires at least: 5.0
 Requires PHP: 7.1
-Tested up to: 6.6
-Stable tag: 1.0
+Tested up to: 7.1
+Stable tag: 1.0.1
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -43,11 +43,20 @@ These checks surface potential cron failures or missing credentials directly ins
 
 == Changelog ==
 
+= 1.0.1 =
+* Declared WordPress 7.1 compatibility (`Tested up to: 7.1`).
+* Prevented front scripts (slideshow, RUM) from running in the iframed block editor.
+* Aligned wp-admin screens with core patterns: wrap, h1, nav-tab, Settings API, form-table, button-primary, notice-*.
+* Stopped restyling WordPress admin chrome (`#wpbody-content`, core buttons, `--wp-admin-theme-color`).
+
 = 1.0 =
 * Initial release with all core modules.
 * Removed the call to `flush_rewrite_rules()` on activation to avoid an unnecessary and costly permalink flush.
 
 == Upgrade Notice ==
+
+= 1.0.1 =
+* WordPress 7.1 compatibility and native wp-admin chrome.
 
 = 1.0 =
 * First version—full pulse-monitoring suite!

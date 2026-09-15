@@ -245,13 +245,13 @@ function sitepulse_plugin_impact_scanner_page() {
         sitepulse_plugin_impact_format_interval($interval)
     );
     ?>
-    <?php
-    if (function_exists('sitepulse_render_module_selector')) {
-        sitepulse_render_module_selector('sitepulse-plugins');
-    }
-    ?>
     <div class="wrap">
         <h1><span class="dashicons-before dashicons-filter"></span> <?php esc_html_e("Analyseur d'Impact des Plugins", 'sitepulse'); ?></h1>
+        <?php
+        if (function_exists('sitepulse_render_module_selector')) {
+            sitepulse_render_module_selector('sitepulse-plugins');
+        }
+        ?>
 
         <?php settings_errors('sitepulse_plugin_impact'); ?>
 

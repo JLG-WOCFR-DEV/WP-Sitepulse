@@ -1,6 +1,45 @@
 (function (window, document) {
     'use strict';
 
+    function sitepulseIsEditorCanvas() {
+        if (typeof window === 'undefined') {
+            return false;
+        }
+
+        if (window.SITEPULSE_IS_EDITOR) {
+            return true;
+        }
+
+        try {
+            if (window.parent && window.parent !== window && window.parent.SITEPULSE_IS_EDITOR) {
+                return true;
+            }
+        } catch (error) {}
+
+        var body = typeof document !== 'undefined' ? document.body : null;
+
+        if (body && body.classList && body.classList.contains('block-editor-iframe__body')) {
+            return true;
+        }
+
+        var frame = window.frameElement;
+
+        if (frame) {
+            var frameName = frame.getAttribute('name') || '';
+            var frameClass = frame.className || '';
+
+            if (frameName === 'editor-canvas' || (typeof frameClass === 'string' && frameClass.indexOf('editor-canvas__iframe') !== -1)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    if (sitepulseIsEditorCanvas()) {
+        return;
+    }
+
     var config = window.SitePulseRUMConfig || {};
 
     if (!config || !config.enabled || !config.restUrl || !config.token) {

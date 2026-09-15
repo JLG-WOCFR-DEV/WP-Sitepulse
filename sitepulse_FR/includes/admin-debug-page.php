@@ -20,7 +20,7 @@ function sitepulse_debug_page() {
 
     ?>
     <div class="wrap">
-        <h1><span class="dashicons-before dashicons-bug"></span> <?php esc_html_e('Debug Dashboard', 'sitepulse'); ?></h1>
+        <h1><span class="dashicons-before dashicons-bug"></span> <?php esc_html_e('Débogage SitePulse', 'sitepulse'); ?></h1>
         <div class="notice notice-info"><p><strong><?php esc_html_e('À quoi sert cette page ?', 'sitepulse'); ?></strong> <?php esc_html_e('Le mode Debug active une journalisation détaillée des actions du plugin. Cette page affiche ce journal et d\'autres informations techniques pour vous aider, ou aider un développeur, à résoudre des problèmes. Ce menu n\'apparaît que si le "Mode Debug" est activé dans les réglages de SitePulse.', 'sitepulse'); ?></p></div>
         <div id="dashboard-widgets-wrap">
             <div id="dashboard-widgets" class="metabox-holder">

@@ -59,7 +59,7 @@ function sitepulse_render_dashboard_page() {
     }
 
     echo '<div class="wrap">';
-    echo '<h1>' . esc_html__('SitePulse Dashboard', 'sitepulse') . '</h1>';
+    echo '<h1>' . esc_html__('Tableau de bord SitePulse', 'sitepulse') . '</h1>';
     echo '<div class="notice notice-warning"><p>' . wp_kses_post($notice) . '</p></div>';
     echo '</div>';
 }
@@ -69,7 +69,7 @@ function sitepulse_render_dashboard_page() {
  */
 function sitepulse_admin_menu() {
     add_menu_page(
-        __('SitePulse Dashboard', 'sitepulse'),
+        __('Tableau de bord SitePulse', 'sitepulse'),
         __('Sitepulse - JLG', 'sitepulse'),
         sitepulse_get_capability(),
         'sitepulse-dashboard',
@@ -80,8 +80,8 @@ function sitepulse_admin_menu() {
 
     add_submenu_page(
         'sitepulse-dashboard',
-        __('SitePulse Settings', 'sitepulse'),
-        __('Settings', 'sitepulse'),
+        __('Réglages SitePulse', 'sitepulse'),
+        __('Réglages', 'sitepulse'),
         sitepulse_get_capability(),
         'sitepulse-settings',
         'sitepulse_settings_page'
@@ -90,8 +90,8 @@ function sitepulse_admin_menu() {
     if (defined('SITEPULSE_DEBUG') && SITEPULSE_DEBUG) {
         add_submenu_page(
             'sitepulse-dashboard',
-            __('SitePulse Debug', 'sitepulse'),
-            __('Debug', 'sitepulse'),
+            __('Débogage SitePulse', 'sitepulse'),
+            __('Débogage', 'sitepulse'),
             sitepulse_get_capability(),
             'sitepulse-debug',
             'sitepulse_debug_page'

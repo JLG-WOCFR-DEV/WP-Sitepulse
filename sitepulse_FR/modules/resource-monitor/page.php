@@ -381,13 +381,13 @@ function sitepulse_resource_monitor_page() {
         ];
     }
     ?>
-    <?php
-    if (function_exists('sitepulse_render_module_selector')) {
-        sitepulse_render_module_selector('sitepulse-resources');
-    }
-    ?>
     <div class="wrap sitepulse-resource-monitor">
         <h1><span class="dashicons-before dashicons-performance"></span> <?php esc_html_e('Moniteur de Ressources', 'sitepulse'); ?></h1>
+        <?php
+        if (function_exists('sitepulse_render_module_selector')) {
+            sitepulse_render_module_selector('sitepulse-resources');
+        }
+        ?>
         <?php if (!empty($resource_monitor_notices)) : ?>
             <div class="sitepulse-notices">
                 <?php foreach ($resource_monitor_notices as $notice) : ?>

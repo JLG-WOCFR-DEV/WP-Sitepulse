@@ -4,7 +4,7 @@ if (!defined('ABSPATH')) {
 }
 
 return [
-    'SITEPULSE_VERSION' => '1.0',
+    'SITEPULSE_VERSION' => '1.0.1',
     'SITEPULSE_OPTION_ACTIVE_MODULES' => 'sitepulse_active_modules',
     'SITEPULSE_OPTION_DEBUG_MODE' => 'sitepulse_debug_mode',
     'SITEPULSE_OPTION_GEMINI_API_KEY' => 'sitepulse_gemini_api_key',

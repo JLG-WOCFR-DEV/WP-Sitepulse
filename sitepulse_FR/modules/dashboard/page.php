@@ -1664,8 +1664,8 @@ function sitepulse_custom_dashboards_page() {
 
     ?>
     <div class="wrap">
-        <h1><span class="dashicons-before dashicons-dashboard"></span> <?php esc_html_e('SitePulse Dashboard', 'sitepulse'); ?></h1>
-        <p><?php esc_html_e("A real-time overview of your site's performance and health.", 'sitepulse'); ?></p>
+        <h1><span class="dashicons-before dashicons-dashboard"></span> <?php esc_html_e('Tableau de bord SitePulse', 'sitepulse'); ?></h1>
+        <p><?php esc_html_e('Vue d’ensemble en temps réel des performances et de l’état de santé de votre site.', 'sitepulse'); ?></p>
 
         <?php if (!empty($module_navigation)) : ?>
             <?php sitepulse_render_module_navigation($current_page, $module_navigation); ?>

@@ -171,13 +171,13 @@ function sitepulse_database_optimizer_page() {
     }
     $index_suggestions = sitepulse_get_missing_index_suggestions($wpdb);
     ?>
-    <?php
-    if (function_exists('sitepulse_render_module_selector')) {
-        sitepulse_render_module_selector('sitepulse-db');
-    }
-    ?>
       <div class="wrap">
-        <h1><span class="dashicons-before dashicons-database"></span> <?php esc_html_e('Database Optimizer', 'sitepulse'); ?></h1>
+        <h1><span class="dashicons-before dashicons-database"></span> <?php esc_html_e('Optimiseur de base de données', 'sitepulse'); ?></h1>
+        <?php
+        if (function_exists('sitepulse_render_module_selector')) {
+            sitepulse_render_module_selector('sitepulse-db');
+        }
+        ?>
         <p><?php esc_html_e('Over time, your database can accumulate data that is no longer necessary. This tool helps you clean it up safely.', 'sitepulse'); ?></p>
         <form method="post">
             <?php wp_nonce_field('db_cleanup', 'db_cleanup_nonce'); ?>
