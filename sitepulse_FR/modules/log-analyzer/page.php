@@ -40,13 +40,13 @@ function sitepulse_log_analyzer_page() {
         }
     }
     ?>
-    <?php
-    if (function_exists('sitepulse_render_module_selector')) {
-        sitepulse_render_module_selector('sitepulse-logs');
-    }
-    ?>
     <div class="wrap">
-        <h1><span class="dashicons-before dashicons-hammer" aria-hidden="true" role="presentation"></span> <?php echo esc_html__('Log Analyzer', 'sitepulse'); ?></h1>
+        <h1><span class="dashicons-before dashicons-hammer" aria-hidden="true" role="presentation"></span> <?php echo esc_html__('Analyseur de journaux', 'sitepulse'); ?></h1>
+        <?php
+        if (function_exists('sitepulse_render_module_selector')) {
+            sitepulse_render_module_selector('sitepulse-logs');
+        }
+        ?>
         <p><?php printf(esc_html__('Cet outil scanne le fichier %s de WordPress pour vous aider à trouver et corriger les problèmes sur votre site.', 'sitepulse'), $log_file_display); ?></p>
 
         <?php

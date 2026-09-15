@@ -50,19 +50,6 @@
     --sitepulse-overlay: rgba(15, 23, 42, 0.08);
 }
 
-body.sitepulse-theme #wpbody-content {
-    font-family: var(--sitepulse-font-family);
-    color: var(--sitepulse-color-text);
-}
-
-body.sitepulse-theme #wpbody-content .wrap {
-    color: inherit;
-}
-
-body.sitepulse-theme #wpbody-content .wrap a {
-    color: var(--sitepulse-color-accent);
-}
-
 body.sitepulse-theme--light {
     --sitepulse-color-surface: #ffffff;
     --sitepulse-color-surface-subtle: #f6f7f7;
@@ -235,19 +222,6 @@ body.sitepulse-theme--auto {
 
 .sitepulse-theme ::selection {
     background-color: var(--sitepulse-color-accent-soft);
-}
-
-.sitepulse-theme .button-primary {
-    background-color: var(--sitepulse-color-accent);
-    border-color: var(--sitepulse-color-accent);
-    transition: background-color var(--sitepulse-duration-fast) var(--sitepulse-easing-standard),
-        border-color var(--sitepulse-duration-fast) var(--sitepulse-easing-standard);
-}
-
-.sitepulse-theme .button-primary:hover,
-.sitepulse-theme .button-primary:focus {
-    background-color: var(--sitepulse-color-accent-strong);
-    border-color: var(--sitepulse-color-accent-strong);
 }
 
 .status-badge {

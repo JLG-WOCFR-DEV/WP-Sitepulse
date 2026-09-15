@@ -174,6 +174,18 @@
             return nav.querySelectorAll('[data-sitepulse-nav-item]');
         };
 
+        var getItemLink = function (item) {
+            if (!item) {
+                return null;
+            }
+
+            if (item.tagName === 'A') {
+                return item;
+            }
+
+            return item.querySelector('a');
+        };
+
         var toggleClearButton = function (query) {
             if (!clearButton) {
                 return;
@@ -206,11 +218,14 @@
             resultsDisplay.textContent = text;
         };
 
-        if (!viewport || !prevButton || !nextButton) {
-            return;
-        }
-
         var getScrollMetrics = function () {
+            if (!viewport) {
+                return {
+                    maxScroll: 0,
+                    position: 0
+                };
+            }
+
             var maxScroll = Math.max(viewport.scrollWidth - viewport.clientWidth, 0);
 
             return {
@@ -220,6 +235,10 @@
         };
 
         var updateButtons = function () {
+            if (!prevButton || !nextButton) {
+                return;
+            }
+
             var items = getItems();
             var visibleCount = 0;
 
@@ -246,6 +265,10 @@
         };
 
         var scrollByAmount = function (direction) {
+            if (!viewport) {
+                return;
+            }
+
             var amount = viewport.clientWidth * 0.8 * direction;
 
             viewport.scrollBy({
@@ -266,7 +289,7 @@
                 var matchesCategory = !normalizedCategory || itemCategory === normalizedCategory;
                 var matchesQuery = value === '' || filterText.indexOf(value) !== -1;
                 var isMatch = matchesCategory && matchesQuery;
-                var link = item.querySelector('a');
+                var link = getItemLink(item);
 
                 if (isMatch) {
                     item.hidden = false;
@@ -316,10 +339,10 @@
             updateResultsDisplay(matches);
             toggleClearButton(value);
 
-            if (matches > 0) {
+            if (matches > 0 && viewport) {
                 if (prefersReducedMotion) {
                     viewport.scrollLeft = 0;
-                } else {
+                } else if (typeof viewport.scrollTo === 'function') {
                     viewport.scrollTo({
                         left: 0,
                         behavior: 'smooth'
@@ -398,15 +421,22 @@
 
         initializeCategory();
 
-        prevButton.addEventListener('click', function () {
-            scrollByAmount(-1);
-        });
+        if (prevButton) {
+            prevButton.addEventListener('click', function () {
+                scrollByAmount(-1);
+            });
+        }
 
-        nextButton.addEventListener('click', function () {
-            scrollByAmount(1);
-        });
+        if (nextButton) {
+            nextButton.addEventListener('click', function () {
+                scrollByAmount(1);
+            });
+        }
 
-        viewport.addEventListener('scroll', updateButtons, { passive: true });
+        if (viewport) {
+            viewport.addEventListener('scroll', updateButtons, { passive: true });
+        }
+
         window.addEventListener('resize', updateButtons);
 
         if (searchInput) {

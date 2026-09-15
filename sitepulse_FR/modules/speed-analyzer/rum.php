@@ -548,7 +548,15 @@ function sitepulse_rum_handle_settings_post() {
  * @return void
  */
 function sitepulse_rum_enqueue_assets() {
-    if (is_admin() || !sitepulse_rum_is_enabled()) {
+    if (function_exists('sitepulse_should_enqueue_frontend_script')) {
+        if (!sitepulse_should_enqueue_frontend_script()) {
+            return;
+        }
+    } elseif (function_exists('is_admin') && is_admin()) {
+        return;
+    }
+
+    if (!sitepulse_rum_is_enabled()) {
         return;
     }
 

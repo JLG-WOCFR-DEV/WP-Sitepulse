@@ -12,50 +12,58 @@ function sitepulse_get_module_selector_definitions() {
     $definitions = [
         'custom_dashboards' => [
             'page'             => 'sitepulse-dashboard',
-            'label'            => __('Dashboard', 'sitepulse'),
+            'label'            => __('Tableau de bord', 'sitepulse'),
             'icon'             => 'dashicons-dashboard',
             'tags'             => ['overview', 'summary', 'executive'],
             'category'         => 'overview',
             'always_available' => true,
         ],
+        'settings' => [
+            'page'             => 'sitepulse-settings',
+            'label'            => __('Réglages', 'sitepulse'),
+            'icon'             => 'dashicons-admin-generic',
+            'tags'             => ['settings', 'configuration'],
+            'category'         => 'overview',
+            'always_available' => true,
+        ],
         'speed_analyzer' => [
             'page'  => 'sitepulse-speed',
-            'label' => __('Speed', 'sitepulse'),
+            'label' => __('Vitesse', 'sitepulse'),
             'icon'  => 'dashicons-performance',
             'tags'  => ['performance', 'web vitals', 'ttfb', 'lcp'],
             'category' => 'performance',
         ],
         'uptime_tracker' => [
             'page'  => 'sitepulse-uptime',
-            'label' => __('Uptime', 'sitepulse'),
+            'label' => __('Disponibilité', 'sitepulse'),
             'icon'  => 'dashicons-chart-bar',
             'tags'  => ['availability', 'incidents', 'sla'],
             'category' => 'observability',
         ],
         'database_optimizer' => [
             'page'  => 'sitepulse-db',
-            'label' => __('Database', 'sitepulse'),
+            'label' => __('Base de données', 'sitepulse'),
             'icon'  => 'dashicons-database',
             'tags'  => ['sql', 'cleanup', 'optimization'],
             'category' => 'maintenance',
         ],
         'log_analyzer' => [
             'page'  => 'sitepulse-logs',
-            'label' => __('Logs', 'sitepulse'),
+            'label' => __('Journaux', 'sitepulse'),
             'icon'  => 'dashicons-hammer',
             'tags'  => ['errors', 'debug', 'php'],
             'category' => 'observability',
         ],
         'resource_monitor' => [
             'page'  => 'sitepulse-resources',
-            'label' => __('Resources', 'sitepulse'),
+            'label' => __('Ressources', 'sitepulse'),
             'icon'  => 'dashicons-chart-area',
             'tags'  => ['infrastructure', 'cpu', 'memory'],
             'category' => 'observability',
         ],
         'plugin_impact_scanner' => [
             'page'  => 'sitepulse-plugins',
-            'label' => __('Plugins', 'sitepulse'),
+            'label' => __('Extensions', 'sitepulse'),
             'icon'  => 'dashicons-admin-plugins',
             'tags'  => ['extensions', 'weight', 'load'],
             'category' => 'performance',
@@ -69,7 +77,7 @@ function sitepulse_get_module_selector_definitions() {
         ],
         'ai_insights' => [
             'page'  => 'sitepulse-ai',
-            'label' => __('AI Insights', 'sitepulse'),
+            'label' => __('Analyses IA', 'sitepulse'),
             'icon'  => 'dashicons-lightbulb',
             'tags'  => ['automation', 'recommendations', 'content'],
             'category' => 'automation',
@@ -552,18 +560,18 @@ function sitepulse_render_module_navigation($current_page = '', $items = null) {
     ?>
     <nav
         class="sitepulse-module-nav"
-        aria-label="<?php esc_attr_e('SitePulse sections', 'sitepulse'); ?>"
+        aria-label="<?php esc_attr_e('Sections SitePulse', 'sitepulse'); ?>"
         data-sitepulse-nav-default-category="<?php echo esc_attr($nav_default_category); ?>"
     >
         <?php if (!empty($ordered_categories)) : ?>
-            <div class="sitepulse-module-nav__categories" role="toolbar" aria-label="<?php esc_attr_e('Filter modules by category', 'sitepulse'); ?>">
+            <div class="sitepulse-module-nav__categories" role="toolbar" aria-label="<?php esc_attr_e('Filtrer les modules par catégorie', 'sitepulse'); ?>">
                 <button
                     type="button"
-                    class="sitepulse-module-nav__category-button<?php echo $nav_default_category === 'all' ? ' is-active' : ''; ?>"
+                    class="button sitepulse-module-nav__category-button<?php echo $nav_default_category === 'all' ? ' is-active' : ''; ?>"
                     data-sitepulse-nav-category="all"
                     aria-pressed="<?php echo $nav_default_category === 'all' ? 'true' : 'false'; ?>"
                 >
-                    <span class="sitepulse-module-nav__category-label"><?php esc_html_e('All modules', 'sitepulse'); ?></span>
+                    <span class="sitepulse-module-nav__category-label"><?php esc_html_e('Tous les modules', 'sitepulse'); ?></span>
                     <span class="sitepulse-module-nav__category-count"><?php echo (int) $total_items; ?></span>
                 </button>
                 <?php foreach ($ordered_categories as $category_slug) :
@@ -576,7 +584,7 @@ function sitepulse_render_module_navigation($current_page = '', $items = null) {
                     ?>
                     <button
                         type="button"
-                        class="sitepulse-module-nav__category-button<?php echo $nav_default_category === $category_slug ? ' is-active' : ''; ?>"
+                        class="button sitepulse-module-nav__category-button<?php echo $nav_default_category === $category_slug ? ' is-active' : ''; ?>"
                         data-sitepulse-nav-category="<?php echo esc_attr($category_slug); ?>"
                         aria-pressed="<?php echo $nav_default_category === $category_slug ? 'true' : 'false'; ?>"
                     >
@@ -587,15 +595,15 @@ function sitepulse_render_module_navigation($current_page = '', $items = null) {
             </div>
         <?php endif; ?>
         <div class="sitepulse-module-nav__search" role="search">
-            <label class="sitepulse-module-nav__search-label" for="<?php echo esc_attr($nav_search_id); ?>"><?php esc_html_e('Search modules', 'sitepulse'); ?></label>
+            <label class="sitepulse-module-nav__search-label" for="<?php echo esc_attr($nav_search_id); ?>"><?php esc_html_e('Rechercher un module', 'sitepulse'); ?></label>
             <div class="sitepulse-module-nav__search-field">
                 <span class="dashicons dashicons-search" aria-hidden="true"></span>
                 <input
                     type="search"
-                    class="sitepulse-module-nav__search-input"
+                    class="regular-text sitepulse-module-nav__search-input"
                     id="<?php echo esc_attr($nav_search_id); ?>"
                     name="sitepulse-nav-search"
-                    placeholder="<?php esc_attr_e('Filter by name, capability or focus…', 'sitepulse'); ?>"
+                    placeholder="<?php esc_attr_e('Filtrer par nom ou fonction…', 'sitepulse'); ?>"
                     autocomplete="off"
                     spellcheck="false"
                     data-sitepulse-nav-search
@@ -607,12 +615,12 @@ function sitepulse_render_module_navigation($current_page = '', $items = null) {
                     data-sitepulse-nav-clear
                     hidden
                 >
-                    <span class="screen-reader-text"><?php esc_html_e('Clear search', 'sitepulse'); ?></span>
+                    <span class="screen-reader-text"><?php esc_html_e('Effacer la recherche', 'sitepulse'); ?></span>
                     <span aria-hidden="true">&times;</span>
                 </button>
             </div>
-            <p class="sitepulse-module-nav__search-help" id="<?php echo esc_attr($nav_search_id); ?>-help">
-                <?php esc_html_e('Start typing to narrow down the available SitePulse modules.', 'sitepulse'); ?>
+            <p class="description sitepulse-module-nav__search-help" id="<?php echo esc_attr($nav_search_id); ?>-help">
+                <?php esc_html_e('Saisissez un mot-clé pour réduire la liste des modules SitePulse.', 'sitepulse'); ?>
             </p>
         </div>
         <div class="sitepulse-module-nav__search-meta">
@@ -622,18 +630,18 @@ function sitepulse_render_module_navigation($current_page = '', $items = null) {
                 aria-live="polite"
                 data-sitepulse-nav-results
                 data-total="<?php echo (int) $total_items; ?>"
-                data-empty="<?php esc_attr_e('No modules match your filters.', 'sitepulse'); ?>"
-                data-singular="<?php esc_attr_e('1 module displayed', 'sitepulse'); ?>"
-                data-plural="<?php esc_attr_e('%d modules displayed', 'sitepulse'); ?>"
+                data-empty="<?php esc_attr_e('Aucun module ne correspond à vos filtres.', 'sitepulse'); ?>"
+                data-singular="<?php esc_attr_e('1 module affiché', 'sitepulse'); ?>"
+                data-plural="<?php esc_attr_e('%d modules affichés', 'sitepulse'); ?>"
             >
-                <?php printf(esc_html__('%d modules displayed', 'sitepulse'), (int) $total_items); ?>
+                <?php printf(esc_html__('%d modules affichés', 'sitepulse'), (int) $total_items); ?>
             </span>
             <p class="sitepulse-module-nav__empty" data-sitepulse-nav-empty hidden>
-                <?php esc_html_e('Try adjusting your search or enable additional modules from the settings screen.', 'sitepulse'); ?>
+                <?php esc_html_e('Ajustez la recherche ou activez d’autres modules depuis l’écran des réglages.', 'sitepulse'); ?>
             </p>
         </div>
         <form class="sitepulse-module-nav__mobile-form" method="get" action="<?php echo esc_url(admin_url('admin.php')); ?>">
-            <label class="sitepulse-module-nav__mobile-label" for="<?php echo esc_attr($nav_select_id); ?>"><?php esc_html_e('Go to section', 'sitepulse'); ?></label>
+            <label class="sitepulse-module-nav__mobile-label" for="<?php echo esc_attr($nav_select_id); ?>"><?php esc_html_e('Aller à la section', 'sitepulse'); ?></label>
             <div class="sitepulse-module-nav__mobile-controls">
                 <select
                     class="sitepulse-module-nav__select"
@@ -655,98 +663,67 @@ function sitepulse_render_module_navigation($current_page = '', $items = null) {
                         </optgroup>
                     <?php endforeach; ?>
                 </select>
-                <button type="submit" class="button sitepulse-module-nav__select-submit"><?php esc_html_e('View', 'sitepulse'); ?></button>
+                <button type="submit" class="button"><?php esc_html_e('Afficher', 'sitepulse'); ?></button>
             </div>
         </form>
-        <div class="sitepulse-module-nav__scroll">
-            <button
-                type="button"
-                class="sitepulse-module-nav__scroll-button sitepulse-module-nav__scroll-button--prev"
-                data-sitepulse-nav-scroll="prev"
-                aria-controls="<?php echo esc_attr($nav_list_id); ?>"
-                aria-label="<?php esc_attr_e('Scroll navigation left', 'sitepulse'); ?>"
-                disabled
-            >
-                <span class="dashicons dashicons-arrow-left-alt2" aria-hidden="true"></span>
-            </button>
-            <div class="sitepulse-module-nav__scroll-viewport" data-sitepulse-nav-viewport>
-                <ul class="sitepulse-module-nav__list" id="<?php echo esc_attr($nav_list_id); ?>">
-                    <?php foreach ($items as $group) :
-                        if (empty($group['items']) || !is_array($group['items'])) {
-                            continue;
+        <h2 class="nav-tab-wrapper sitepulse-module-nav__tabs" id="<?php echo esc_attr($nav_list_id); ?>" data-sitepulse-nav-viewport>
+            <?php foreach ($items as $group) :
+                if (empty($group['items']) || !is_array($group['items'])) {
+                    continue;
+                }
+
+                foreach ($group['items'] as $item) :
+                    $link_classes = ['nav-tab'];
+
+                    if (!empty($item['current'])) {
+                        $link_classes[] = 'nav-tab-active';
+                    }
+
+                    $filter_terms = [];
+
+                    if (!empty($item['label'])) {
+                        $filter_terms[] = $item['label'];
+                    }
+
+                    if (!empty($item['category_label'])) {
+                        $filter_terms[] = $item['category_label'];
+                    }
+
+                    if (!empty($item['tags']) && is_array($item['tags'])) {
+                        foreach ($item['tags'] as $tag) {
+                            if (!is_scalar($tag)) {
+                                continue;
+                            }
+
+                            $filter_terms[] = (string) $tag;
                         }
+                    }
 
-                        $group_label = isset($group['label']) ? (string) $group['label'] : '';
-                        $group_slug  = isset($group['slug']) ? (string) $group['slug'] : '';
+                    $filter_text = trim(implode(' ', array_filter($filter_terms)));
+
+                    if (function_exists('remove_accents')) {
+                        $filter_text = remove_accents($filter_text);
+                    }
+
+                    $filter_text = strtolower($filter_text);
+                    $group_slug = isset($group['slug']) ? (string) $group['slug'] : '';
                     ?>
-                        <li class="sitepulse-module-nav__group" role="presentation" data-sitepulse-nav-group="<?php echo esc_attr($group_slug); ?>">
-                            <span class="sitepulse-module-nav__group-label"><?php echo esc_html($group_label); ?></span>
-                            <ul class="sitepulse-module-nav__group-list">
-                                <?php foreach ($group['items'] as $item) :
-                                    $link_classes = ['sitepulse-module-nav__link'];
-
-                                    if (!empty($item['current'])) {
-                                        $link_classes[] = 'is-current';
-                                    }
-
-                                    $filter_terms = [];
-
-                                    if (!empty($item['label'])) {
-                                        $filter_terms[] = $item['label'];
-                                    }
-
-                                    if (!empty($item['category_label'])) {
-                                        $filter_terms[] = $item['category_label'];
-                                    }
-
-                                    if (!empty($item['tags']) && is_array($item['tags'])) {
-                                        foreach ($item['tags'] as $tag) {
-                                            if (!is_scalar($tag)) {
-                                                continue;
-                                            }
-
-                                            $filter_terms[] = (string) $tag;
-                                        }
-                                    }
-
-                                    $filter_text = trim(implode(' ', array_filter($filter_terms)));
-
-                                    if (function_exists('remove_accents')) {
-                                        $filter_text = remove_accents($filter_text);
-                                    }
-
-                                    $filter_text = strtolower($filter_text);
-                                ?>
-                                    <li
-                                        class="sitepulse-module-nav__item"
-                                        data-sitepulse-nav-item
-                                        data-category="<?php echo esc_attr($group['slug']); ?>"
-                                        data-filter-text="<?php echo esc_attr($filter_text); ?>"
-                                    >
-                                        <a class="<?php echo esc_attr(implode(' ', $link_classes)); ?>" href="<?php echo esc_url($item['url']); ?>"<?php echo !empty($item['current']) ? ' aria-current="page"' : ''; ?>>
-                                            <?php if (!empty($item['icon'])) : ?>
-                                                <span class="sitepulse-module-nav__icon dashicons <?php echo esc_attr($item['icon']); ?>" aria-hidden="true"></span>
-                                            <?php endif; ?>
-                                            <span class="sitepulse-module-nav__label"><?php echo esc_html($item['label']); ?></span>
-                                        </a>
-                                    </li>
-                                <?php endforeach; ?>
-                            </ul>
-                        </li>
-                    <?php endforeach; ?>
-                </ul>
-            </div>
-            <button
-                type="button"
-                class="sitepulse-module-nav__scroll-button sitepulse-module-nav__scroll-button--next"
-                data-sitepulse-nav-scroll="next"
-                aria-controls="<?php echo esc_attr($nav_list_id); ?>"
-                aria-label="<?php esc_attr_e('Scroll navigation right', 'sitepulse'); ?>"
-                disabled
-            >
-                <span class="dashicons dashicons-arrow-right-alt2" aria-hidden="true"></span>
-            </button>
-        </div>
+                    <a
+                        class="<?php echo esc_attr(implode(' ', $link_classes)); ?>"
+                        href="<?php echo esc_url($item['url']); ?>"
+                        data-sitepulse-nav-item
+                        data-category="<?php echo esc_attr($group_slug); ?>"
+                        data-filter-text="<?php echo esc_attr($filter_text); ?>"
+                        <?php echo !empty($item['current']) ? ' aria-current="page"' : ''; ?>
+                    >
+                        <?php if (!empty($item['icon'])) : ?>
+                            <span class="dashicons <?php echo esc_attr($item['icon']); ?>" aria-hidden="true"></span>
+                        <?php endif; ?>
+                        <?php echo esc_html($item['label']); ?>
+                    </a>
+                <?php endforeach;
+            endforeach; ?>
+        </h2>
     </nav>
     <?php
 }

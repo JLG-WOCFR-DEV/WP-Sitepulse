@@ -258,17 +258,6 @@
     flex-wrap: wrap;
 }
 
-.sitepulse-guided-checklist__action.button-primary {
-    background: var(--sitepulse-accent);
-    border-color: var(--sitepulse-accent);
-}
-
-.sitepulse-guided-checklist__action.button-primary:hover,
-.sitepulse-guided-checklist__action.button-primary:focus {
-    background: var(--sitepulse-accent-strong);
-    border-color: var(--sitepulse-accent-strong);
-}
-
 .sitepulse-card-description--compact {
     margin-bottom: 16px;
     color: var(--sitepulse-text-subtle);
@@ -911,10 +900,6 @@
     margin: 12px 0 0;
     font-size: 13px;
     color: var(--sitepulse-critical-text, #b91c1c);
-}
-
-.sitepulse-settings-actions__buttons .button.button-primary {
-    padding: 6px 22px;
 }
 
 .sitepulse-settings-actions__buttons .button.button-secondary {

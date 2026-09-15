@@ -14,7 +14,8 @@
         "lint:php": "@php vendor/bin/phpcs",
         "lint:php:report": "@php vendor/bin/phpcs --report=full",
         "analyse:php": "@php vendor/bin/phpstan analyse",
-        "test:phpunit": "@php vendor/bin/phpunit -c phpunit.xml.dist"
+        "test:phpunit": "@php vendor/bin/phpunit -c phpunit.xml.dist",
+        "test:phase2": "@php vendor/bin/phpunit -c phpunit.phase2.xml"
     },
     "config": {
         "allow-plugins": {

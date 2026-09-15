@@ -169,8 +169,8 @@ Dans les deux cas, aucune donnée sensible n’est conservée dans la base WordP
 ## WordPress Compatibility
 
 - Requires at least: 5.0
-- Tested up to: 6.6
-- Stable tag: 1.0
+- Tested up to: 7.1
+- Stable tag: 1.0.1
 
 ## License
 
@@ -179,11 +179,21 @@ GPLv2 or later
 
 ## Changelog
 
+### 1.0.1
+
+- Compatibility WordPress 7.1 (`Tested up to: 7.1`).
+- Les scripts front (diaporama, RUM) ne s’exécutent plus dans l’éditeur de blocs iframé.
+- Écrans wp-admin alignés sur la charte native (wrap, h1, nav-tab, Settings API, form-table).
+
 ### 1.0
 
 - Initial release with all core modules.
 
 ## Upgrade Notice
+
+### 1.0.1
+
+- Compatibilité WordPress 7.1 et chrome wp-admin natif.
 
 ### 1.0
 

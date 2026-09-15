@@ -65,10 +65,6 @@ function sitepulse_should_apply_css_preset($screen) {
         return false;
     }
 
-    if ($screen_id === 'dashboard') {
-        return true;
-    }
-
     if ($screen_id === 'toplevel_page_sitepulse-dashboard') {
         return true;
     }
