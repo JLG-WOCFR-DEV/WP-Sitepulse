@@ -104,12 +104,18 @@ add_action('admin_menu', 'sitepulse_admin_menu');
  * Hides module submenu items from the admin sidebar while keeping the pages registered.
  *
  * Dashboard, Settings, and Debug remain visible. Module screens stay reachable via
- * admin.php?page=sitepulse-* and the in-page module selector.
+ * admin.php?page=sitepulse-* and the in-page nav-tab selector.
+ *
+ * Do not unregister hidden module slugs with remove_submenu_page.
+ * WordPress 6.3+/7.1 then returns 403 for admin.php?page=sitepulse-speed and siblings.
+ * Empty the sidebar label and add the core `hidden` class instead.
  *
  * @return void
  */
 function sitepulse_hide_module_admin_submenus() {
-    if (!function_exists('remove_submenu_page')) {
+    global $submenu;
+
+    if (!isset($submenu['sitepulse-dashboard']) || !is_array($submenu['sitepulse-dashboard'])) {
         return;
     }
 
@@ -137,6 +143,16 @@ function sitepulse_hide_module_admin_submenus() {
         return;
     }
 
+    $hidden_lookup = [];
+
+    foreach ($hidden_slugs as $slug) {
+        $slug = is_string($slug) ? (function_exists('sanitize_key') ? sanitize_key($slug) : $slug) : '';
+
+        if ($slug !== '') {
+            $hidden_lookup[$slug] = true;
+        }
+    }
+
     $visible_slugs = [
         'sitepulse-dashboard' => true,
         'sitepulse-settings'  => true,
@@ -146,14 +162,30 @@ function sitepulse_hide_module_admin_submenus() {
         $visible_slugs['sitepulse-debug'] = true;
     }
 
-    foreach ($hidden_slugs as $slug) {
-        $slug = is_string($slug) ? sanitize_key($slug) : '';
-
-        if ($slug === '' || isset($visible_slugs[$slug])) {
+    foreach ($submenu['sitepulse-dashboard'] as $index => $item) {
+        if (!is_array($item)) {
             continue;
         }
 
-        remove_submenu_page('sitepulse-dashboard', $slug);
+        $item_slug = isset($item[2]) && is_string($item[2]) ? $item[2] : '';
+
+        if ($item_slug === '' || isset($visible_slugs[$item_slug]) || !isset($hidden_lookup[$item_slug])) {
+            continue;
+        }
+
+        $submenu['sitepulse-dashboard'][$index][0] = '';
+        $classes = isset($item[4]) && is_string($item[4]) ? $item[4] : '';
+        $tokens  = preg_split('/\s+/', trim($classes), -1, PREG_SPLIT_NO_EMPTY);
+
+        if (!is_array($tokens)) {
+            $tokens = [];
+        }
+
+        if (!in_array('hidden', $tokens, true)) {
+            $tokens[] = 'hidden';
+        }
+
+        $submenu['sitepulse-dashboard'][$index][4] = implode(' ', $tokens);
     }
 }
 add_action('admin_menu', 'sitepulse_hide_module_admin_submenus', 999);
