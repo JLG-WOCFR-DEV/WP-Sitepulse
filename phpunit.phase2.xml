@@ -6,6 +6,7 @@
         <testsuite name="SitePulse Phase 2 Static">
             <file>tests/phpunit/test-phase2-wp71-charter.php</file>
             <file>tests/phpunit/test-phase2-editor-iframe.php</file>
+            <file>tests/phpunit/test-phase2-admin-menu-access.php</file>
         </testsuite>
     </testsuites>
 </phpunit>

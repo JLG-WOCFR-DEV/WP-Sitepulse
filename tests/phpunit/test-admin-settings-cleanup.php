@@ -298,14 +298,32 @@ class Sitepulse_Admin_Settings_Cleanup_Test extends WP_UnitTestCase {
         $this->assertContains('sitepulse-dashboard', $slugs);
         $this->assertContains('sitepulse-settings', $slugs);
         $this->assertContains('sitepulse-debug', $slugs);
-        $this->assertNotContains('sitepulse-uptime', $slugs);
-        $this->assertNotContains('sitepulse-speed', $slugs);
-        $this->assertNotContains('sitepulse-resources', $slugs);
-        $this->assertNotContains('sitepulse-plugins', $slugs);
-        $this->assertNotContains('sitepulse-maintenance', $slugs);
-        $this->assertNotContains('sitepulse-logs', $slugs);
-        $this->assertNotContains('sitepulse-db', $slugs);
-        $this->assertNotContains('sitepulse-ai', $slugs);
+        $this->assertContains('sitepulse-speed', $slugs, 'Hidden modules must stay registered to avoid a 403.');
+
+        $visible_slugs = [];
+
+        foreach ($submenu['sitepulse-dashboard'] as $item) {
+            $title = isset($item[0]) ? trim(wp_strip_all_tags((string) $item[0])) : '';
+            $class = isset($item[4]) ? (string) $item[4] : '';
+
+            if ($title === '' || preg_match('/(?:^|\s)hidden(?:\s|$)/', $class)) {
+                continue;
+            }
+
+            $visible_slugs[] = $item[2];
+        }
+
+        $this->assertContains('sitepulse-dashboard', $visible_slugs);
+        $this->assertContains('sitepulse-settings', $visible_slugs);
+        $this->assertContains('sitepulse-debug', $visible_slugs);
+        $this->assertNotContains('sitepulse-uptime', $visible_slugs);
+        $this->assertNotContains('sitepulse-speed', $visible_slugs);
+        $this->assertNotContains('sitepulse-resources', $visible_slugs);
+        $this->assertNotContains('sitepulse-plugins', $visible_slugs);
+        $this->assertNotContains('sitepulse-maintenance', $visible_slugs);
+        $this->assertNotContains('sitepulse-logs', $visible_slugs);
+        $this->assertNotContains('sitepulse-db', $visible_slugs);
+        $this->assertNotContains('sitepulse-ai', $visible_slugs);
 
         $submenu = $previous;
     }
